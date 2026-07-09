@@ -62,6 +62,28 @@ pub export fn free_f64(ptr: [*]f64, n: usize) void {
     allocator.free(ptr[0..n]);
 }
 
+// Scratch RGB LUT (r,g,b per entry); JS must read it before the next colormap_lut call overwrites it.
+var lut_buf: [256 * 3]u8 = undefined;
+
+/// Fill lut_buf with colormap `id`: 0 jet, 1 heat, 2 turbo, 3 viridis, 4 inferno (else viridis).
+pub export fn colormap_lut(id: u32) [*]const u8 {
+    const cm = zignal.colormaps;
+    for (0..256) |i| {
+        const v: f64 = @floatFromInt(i);
+        const rgb = switch (id) {
+            0 => cm.jet(v, 0, 255),
+            1 => cm.heat(v, 0, 255),
+            2 => cm.turbo(v, 0, 255),
+            4 => cm.inferno(v, 0, 255),
+            else => cm.viridis(v, 0, 255),
+        };
+        lut_buf[i * 3 + 0] = rgb.r;
+        lut_buf[i * 3 + 1] = rgb.g;
+        lut_buf[i * 3 + 2] = rgb.b;
+    }
+    return &lut_buf;
+}
+
 /// Create (or recreate) the optimizer over `n` variables.
 ///
 /// `bounds_ptr` points at `2 * n` f64s laid out as `[lo0, hi0, lo1, hi1, ...]`; bit `i` of

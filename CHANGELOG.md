@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Features
+- **Inferno Colormap**: Added the perceptually-uniform `inferno` colormap (black→purple→orange→yellow) to `image/colormaps.zig`, wired into `Image.applyColormap`, the Python `Colormap.inferno()` factory, and the `colormaps_demo` / global-optimization web examples.
 - **Global Optimization**: Added a derivative-free, bound-constrained global optimizer (MaxLIPO + Trust Region) — `GlobalOptimizer` and `findGlobalOptimum` in `src/optimization/`, supporting mixed integer/continuous search spaces and optional parallel objective evaluation through `Io`.
 - **Symmetric Eigendecomposition**: Added `Matrix.eigh`, a cyclic-Jacobi eigendecomposition of symmetric matrices that recovers *signed* eigenvalues (handles indefinite matrices, unlike SVD), plus a `Matrix.diagonal` constructor that builds a diagonal matrix from a vector (dlib's `diagm`).
 - **BMP Codec** (#348): Native Zig BMP reader and writer with no third-party dependencies.
