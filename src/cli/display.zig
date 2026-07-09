@@ -100,6 +100,38 @@ pub fn displayCanvas(
     try writer.flush();
 }
 
+/// Resolve the terminal display format for a command that supports it, or null
+/// when the result should only be saved. Display happens when `--display` is set
+/// or no output target was given. `options` is any display-capable command's
+/// `Args` (it must expose `display`/`protocol`/`width`/`height`).
+pub fn displayFormatFor(options: anytype, target: ?common.OutputTarget) ?zignal.DisplayFormat {
+    if (!options.display and target != null) return null;
+    return resolveDisplayFormat(options.protocol, options.width, options.height);
+}
+
+/// Terminal step for a processed image: save it to `target` (when given) and
+/// show it in the terminal when `display_format` is non-null.
+pub fn emit(
+    io: Io,
+    writer: *Io.Writer,
+    gpa: Allocator,
+    img: anytype,
+    input_path: []const u8,
+    target: ?common.OutputTarget,
+    display_format: ?zignal.DisplayFormat,
+) !void {
+    if (target) |tgt| {
+        const resolved = try tgt.resolveOutputPath(gpa, input_path);
+        defer resolved.deinit(gpa);
+        std.log.info("saving to {s}...", .{resolved.path});
+        try img.save(io, gpa, resolved.path);
+    }
+
+    if (display_format) |fmt| {
+        try displayCanvas(io, writer, img, fmt);
+    }
+}
+
 pub fn createHorizontalComposite(
     comptime T: type,
     allocator: Allocator,
