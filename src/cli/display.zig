@@ -55,6 +55,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         parsed.options.height,
     );
 
+    var failed = false;
     for (parsed.positionals) |path| {
         if (parsed.positionals.len > 1) {
             std.log.debug("file: {s}", .{path});
@@ -62,12 +63,14 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         std.log.debug("loading image: {s}", .{path});
         var image: zignal.Image(zignal.Rgba(u8)) = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| {
             std.log.err("failed to load image '{s}': {}", .{ path, err });
+            failed = true;
             continue;
         };
         defer image.deinit(gpa);
 
         try displayCanvas(io, writer, image, display_fmt);
     }
+    if (failed) return error.BatchIncomplete;
 }
 
 pub fn resolveDisplayFormat(
