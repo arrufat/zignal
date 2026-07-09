@@ -19,11 +19,11 @@ const Args = struct {
     protocol: ?[]const u8 = null,
 
     pub const meta = .{
-        .output = .{ .help = "Path to save the difference image", .metavar = "path" },
+        .output = .{ .help = "Path to save the difference image", .metavar = "path", .short = 'o' },
         .scale = .{ .help = "Scale factor for difference visibility (default: 1.0)", .metavar = "float" },
         .threshold = .{ .help = "Ignore differences smaller than this value (0-255)", .metavar = "int" },
         .binary = .{ .help = "Produce a binary output (white for difference, black for match)" },
-        .display = .{ .help = "Display the result in the terminal (default if no output file)" },
+        .display = .{ .help = "Display the result in the terminal (default if no output file)", .short = 'd' },
         .width = .{ .help = "Width of each sub-image for display", .metavar = "N" },
         .height = .{ .help = "Height of each sub-image for display", .metavar = "N" },
         .protocol = .{ .help = display.protocol_help, .metavar = "p" },

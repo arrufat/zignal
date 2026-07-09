@@ -16,6 +16,9 @@ pub const OptionConfig = struct {
     help: []const u8,
     /// The name used for the value placeholder in the help message (e.g., "N" in "--width <N>").
     metavar: ?[]const u8 = null,
+    /// Optional single-character alias, e.g. `.short = 'o'` for `--output`.
+    /// `'h'` is reserved for `--help` and is ignored here.
+    short: ?u8 = null,
 };
 
 /// The result of parsing command-line arguments.
@@ -39,6 +42,61 @@ pub fn ParseResult(comptime T: type) type {
 fn PayloadType(comptime T: type) type {
     const info = @typeInfo(T);
     return if (info == .optional) info.optional.child else T;
+}
+
+/// Returns the single-character alias declared for `field_name` in `T.meta`,
+/// or null if the field has no `meta` entry or no `.short`.
+fn fieldShort(comptime T: type, comptime field_name: []const u8) ?u8 {
+    if (!@hasDecl(T, "meta")) return null;
+    if (!@hasField(@TypeOf(T.meta), field_name)) return null;
+    const info = @field(T.meta, field_name);
+    if (!@hasField(@TypeOf(info), "short")) return null;
+    return info.short;
+}
+
+/// The 4-character help column prefix for a flag: `"-o, "` when a short alias
+/// exists, or four spaces so long-only flags stay aligned under it.
+fn shortPrefix(comptime T: type, comptime field_name: []const u8) [4]u8 {
+    return if (fieldShort(T, field_name)) |s|
+        [4]u8{ '-', s, ',', ' ' }
+    else
+        [4]u8{ ' ', ' ', ' ', ' ' };
+}
+
+/// Assigns the value for a matched option field, consuming a value from `args`
+/// for non-boolean fields. Shared by the long (`--flag`) and short (`-f`) paths.
+fn setOption(comptime T: type, comptime field: anytype, options: *T, args: *std.process.Args.Iterator) !void {
+    const ChildType = PayloadType(field.type);
+
+    if (ChildType == bool) {
+        @field(options.*, field.name) = true;
+        std.log.debug("option --{s} set to true", .{field.name});
+        return;
+    }
+
+    const val_str = args.next() orelse {
+        std.log.err("missing value for --{s}", .{field.name});
+        return error.InvalidArguments;
+    };
+
+    if (ChildType == []const u8) {
+        @field(options.*, field.name) = val_str;
+        std.log.debug("option --{s} set to '{s}'", .{ field.name, val_str });
+    } else if (@typeInfo(ChildType) == .int) {
+        @field(options.*, field.name) = std.fmt.parseInt(ChildType, val_str, 10) catch {
+            std.log.err("invalid value for --{s}: {s}", .{ field.name, val_str });
+            return error.InvalidArguments;
+        };
+        std.log.debug("option --{s} set to {s}", .{ field.name, val_str });
+    } else if (@typeInfo(ChildType) == .float) {
+        @field(options.*, field.name) = std.fmt.parseFloat(ChildType, val_str) catch {
+            std.log.err("invalid value for --{s}: {s}", .{ field.name, val_str });
+            return error.InvalidArguments;
+        };
+        std.log.debug("option --{s} set to {s}", .{ field.name, val_str });
+    } else {
+        @compileError("Unsupported type for arg parsing: " ++ @typeName(ChildType));
+    }
 }
 
 /// Checks if the argument is a log level flag and parses it.
@@ -98,36 +156,7 @@ pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Ite
 
                 if (matches) {
                     found = true;
-                    const ChildType = PayloadType(field.type);
-
-                    if (ChildType == bool) {
-                        @field(options, field.name) = true;
-                        std.log.debug("option --{s} set to true", .{field.name});
-                    } else {
-                        const val_str = args.next() orelse {
-                            std.log.err("missing value for --{s}", .{field.name});
-                            return error.InvalidArguments;
-                        };
-
-                        if (ChildType == []const u8) {
-                            @field(options, field.name) = val_str;
-                            std.log.debug("option --{s} set to '{s}'", .{ field.name, val_str });
-                        } else if (@typeInfo(ChildType) == .int) {
-                            @field(options, field.name) = std.fmt.parseInt(ChildType, val_str, 10) catch {
-                                std.log.err("invalid value for --{s}: {s}", .{ field.name, val_str });
-                                return error.InvalidArguments;
-                            };
-                            std.log.debug("option --{s} set to {s}", .{ field.name, val_str });
-                        } else if (@typeInfo(ChildType) == .float) {
-                            @field(options, field.name) = std.fmt.parseFloat(ChildType, val_str) catch {
-                                std.log.err("invalid value for --{s}: {s}", .{ field.name, val_str });
-                                return error.InvalidArguments;
-                            };
-                            std.log.debug("option --{s} set to {s}", .{ field.name, val_str });
-                        } else {
-                            @compileError("Unsupported type for arg parsing: " ++ @typeName(ChildType));
-                        }
-                    }
+                    try setOption(T, field, &options, args);
                 }
             }
             if (!found) {
@@ -135,8 +164,26 @@ pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Ite
                 return error.InvalidArguments;
             }
         } else if (std.mem.startsWith(u8, arg, "-")) {
-            std.log.err("unknown option: {s}", .{arg});
-            return error.InvalidArguments;
+            // Short alias, e.g. `-o`. Only single-character shorts are supported.
+            if (arg.len != 2) {
+                std.log.err("unknown option: {s}", .{arg});
+                return error.InvalidArguments;
+            }
+            const short = arg[1];
+            var found = false;
+
+            inline for (comptime meta.structFields(T)) |field| {
+                if (comptime fieldShort(T, field.name)) |s| {
+                    if (s == short) {
+                        found = true;
+                        try setOption(T, field, &options, args);
+                    }
+                }
+            }
+            if (!found) {
+                std.log.err("unknown option: {s}", .{arg});
+                return error.InvalidArguments;
+            }
         } else {
             try positionals.append(allocator, arg);
         }
@@ -182,10 +229,12 @@ pub fn generateHelp(comptime T: type, comptime usage_line: []const u8, comptime 
             break :blk res;
         };
 
+        const short_arr = comptime shortPrefix(T, field.name);
+
         const flag_len = if (is_bool)
-            ("  --" ++ flag_name_fmt).len
+            ("  " ++ short_arr ++ "--" ++ flag_name_fmt).len
         else
-            ("  --" ++ flag_name_fmt ++ " <" ++ metavar ++ ">").len;
+            ("  " ++ short_arr ++ "--" ++ flag_name_fmt ++ " <" ++ metavar ++ ">").len;
 
         if (flag_len > max_len) max_len = flag_len;
     }
@@ -213,10 +262,12 @@ pub fn generateHelp(comptime T: type, comptime usage_line: []const u8, comptime 
             break :blk res;
         };
 
+        const short_arr = comptime shortPrefix(T, field.name);
+
         const flag_str = if (is_bool)
-            "  --" ++ flag_name_fmt
+            "  " ++ short_arr ++ "--" ++ flag_name_fmt
         else
-            "  --" ++ flag_name_fmt ++ " <" ++ metavar ++ ">";
+            "  " ++ short_arr ++ "--" ++ flag_name_fmt ++ " <" ++ metavar ++ ">";
 
         const padding_len = padding_target - flag_str.len;
         const padding: [padding_len]u8 = @splat(' ');

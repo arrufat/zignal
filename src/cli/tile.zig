@@ -32,8 +32,8 @@ const Args = struct {
         .cols = .{ .help = "Number of columns (for grid mode)", .metavar = "N" },
         .width = .{ .help = "Force cell width (default: first image width)", .metavar = "N" },
         .height = .{ .help = "Force cell height (default: first image height)", .metavar = "N" },
-        .output = .{ .help = "Output file path", .metavar = "file" },
-        .display = .{ .help = "Display the result in the terminal" },
+        .output = .{ .help = "Output file path", .metavar = "file", .short = 'o' },
+        .display = .{ .help = "Display the result in the terminal", .short = 'd' },
         .protocol = .{ .help = display.protocol_help, .metavar = "p" },
     };
 };

@@ -15,7 +15,7 @@ const Args = struct {
     protocol: ?[]const u8 = null,
 
     pub const meta = .{
-        .display = .{ .help = "Display the result in the terminal" },
+        .display = .{ .help = "Display the result in the terminal", .short = 'd' },
         .width = .{ .help = "Width of each sub-image", .metavar = "N" },
         .height = .{ .help = "Height of each sub-image", .metavar = "N" },
         .protocol = .{ .help = display.protocol_help, .metavar = "p" },

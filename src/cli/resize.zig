@@ -7,7 +7,7 @@ const zignal = @import("zignal");
 const args = @import("args.zig");
 const common = @import("common.zig");
 
-const Args = struct {
+pub const Args = struct {
     scale: ?f32 = null,
     width: ?u32 = null,
     height: ?u32 = null,
@@ -19,7 +19,7 @@ const Args = struct {
         .width = .{ .help = "Target width in pixels", .metavar = "pixels" },
         .height = .{ .help = "Target height in pixels", .metavar = "pixels" },
         .filter = .{ .help = "Interpolation filter (" ++ common.joinFieldNames(zignal.Interpolation) ++ ")", .metavar = "name" },
-        .output = .{ .help = "Output file or directory path (mandatory)", .metavar = "path" },
+        .output = .{ .help = "Output file or directory path (mandatory)", .metavar = "path", .short = 'o' },
     };
 };
 
@@ -45,27 +45,47 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         return error.InvalidArguments;
     };
 
-    if (parsed.options.scale != null and (parsed.options.width != null or parsed.options.height != null)) {
-        std.log.err("cannot specify both --scale and --width/--height", .{});
-        return error.InvalidArguments;
-    }
-
-    if (parsed.options.scale == null and parsed.options.width == null and parsed.options.height == null) {
-        std.log.err("must specify at least one of --scale, --width, or --height", .{});
-        return error.InvalidArguments;
-    }
-
-    const filter = try common.resolveFilter(parsed.options.filter);
-
     const is_batch = parsed.positionals.len > 1;
     const target = try common.resolveOutputTarget(io, output_arg, is_batch);
 
     for (parsed.positionals) |input_path| {
-        processImage(io, gpa, input_path, target, is_batch, filter, parsed.options) catch |err| {
+        processImage(io, gpa, input_path, target, is_batch, parsed.options) catch |err| {
             std.log.err("failed to resize '{s}': {t}", .{ input_path, err });
             if (!is_batch) return err;
         };
     }
+}
+
+/// Resize `img` according to `options`, returning a freshly allocated image the
+/// caller owns. Shared by the standalone command and the `pipeline` command.
+pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options: Args) !zignal.Image(zignal.Rgba(u8)) {
+    if (img.rows == 0 or img.cols == 0) {
+        std.log.err("input image has zero dimensions ({d}x{d})", .{ img.cols, img.rows });
+        return error.InvalidDimensions;
+    }
+
+    if (options.scale != null and (options.width != null or options.height != null)) {
+        std.log.err("cannot specify both scale and width/height", .{});
+        return error.InvalidArguments;
+    }
+    if (options.scale == null and options.width == null and options.height == null) {
+        std.log.err("must specify at least one of scale, width, or height", .{});
+        return error.InvalidArguments;
+    }
+
+    const filter = try common.resolveFilter(options.filter);
+    const dims = try computeTargetDimensions(img, options);
+
+    std.log.info("resizing from {d}x{d} to {d}x{d} using {s}...", .{ img.cols, img.rows, dims.width, dims.height, @tagName(filter) });
+
+    var out: zignal.Image(zignal.Rgba(u8)) = try .init(gpa, dims.height, dims.width);
+    errdefer out.deinit(gpa);
+
+    const timer = common.Timer.begin(io);
+    img.resize(out, gpa, filter);
+    timer.logElapsed("resize");
+
+    return out;
 }
 
 fn processImage(
@@ -74,7 +94,6 @@ fn processImage(
     input_path: []const u8,
     target: common.OutputTarget,
     is_batch: bool,
-    filter: zignal.Interpolation,
     options: Args,
 ) !void {
     std.log.debug("{s} {s}...", .{ if (is_batch) "processing" else "loading", input_path });
@@ -85,24 +104,10 @@ fn processImage(
     var img: zignal.Image(zignal.Rgba(u8)) = try .load(io, gpa, input_path);
     defer img.deinit(gpa);
 
-    if (img.rows == 0 or img.cols == 0) {
-        std.log.err("input image has zero dimensions ({d}x{d})", .{ img.cols, img.rows });
-        return error.InvalidDimensions;
-    }
-
-    const dims = try computeTargetDimensions(img, options);
-
-    const indent: []const u8 = if (is_batch) "  " else "";
-    std.log.info("{s}resizing from {d}x{d} to {d}x{d} using {s}...", .{ indent, img.cols, img.rows, dims.width, dims.height, @tagName(filter) });
-
-    var out: zignal.Image(zignal.Rgba(u8)) = try .init(gpa, dims.height, dims.width);
+    var out = try apply(io, gpa, img, options);
     defer out.deinit(gpa);
 
-    const timer = common.Timer.begin(io);
-    img.resize(out, gpa, filter);
-    timer.logElapsed("resize");
-
-    std.log.info("{s}saving to {s}...", .{ indent, resolved.path });
+    std.log.info("saving to {s}...", .{resolved.path});
     try out.save(io, gpa, resolved.path);
 }
 
