@@ -37,7 +37,7 @@ const Args = struct {
     display: bool = false,
     width: ?u32 = null,
     height: ?u32 = null,
-    protocol: ?[]const u8 = null,
+    protocol: ?display.ProtocolTag = null,
 
     pub const meta = .{
         .output = .{ .help = "Output file or directory (overrides recipe .output)", .metavar = "path", .short = 'o' },
@@ -52,17 +52,17 @@ pub const description =
     \\Apply a sequence of operations described by a .zon recipe file.
     \\
     \\A recipe lists ordered steps; each step's fields mirror the matching CLI
-    \\command's options (enum values are plain strings, e.g. "gaussian"). The
-    \\recipe may set .input/.output, which a CLI positional/--output override.
+    \\command's options (enum-valued options are enum literals, e.g. .gaussian).
+    \\The recipe may set .input/.output, which a CLI positional/--output override.
     \\
     \\Example recipe (recipe.zon):
     \\  .{
     \\      .input = "assets/liza.jpg",
     \\      .output = "out.png",
     \\      .steps = .{
-    \\          .{ .resize = .{ .width = 800, .filter = "lanczos" } },
-    \\          .{ .blur = .{ .type = "gaussian", .sigma = 2.0 } },
-    \\          .{ .edges = .{ .filter = "sobel" } },
+    \\          .{ .resize = .{ .width = 800, .filter = .lanczos } },
+    \\          .{ .blur = .{ .type = .gaussian, .sigma = 2.0 } },
+    \\          .{ .edges = .{ .filter = .sobel } },
     \\      },
     \\  }
 ;
@@ -174,7 +174,7 @@ fn processImage(
     }
 
     if (should_display) {
-        const format = try display.resolveDisplayFormat(options.protocol, options.width, options.height);
+        const format = display.resolveDisplayFormat(options.protocol, options.width, options.height);
         try display.displayCanvas(io, writer, current, format);
     }
 }

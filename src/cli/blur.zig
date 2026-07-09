@@ -11,7 +11,7 @@ const displayCanvas = display.displayCanvas;
 const resolveDisplayFormat = display.resolveDisplayFormat;
 
 pub const Args = struct {
-    type: ?[]const u8 = null,
+    type: ?BlurType = null,
     output: ?[]const u8 = null,
     display: bool = false,
 
@@ -29,7 +29,7 @@ pub const Args = struct {
     // Display options
     width: ?u32 = null,
     height: ?u32 = null,
-    protocol: ?[]const u8 = null,
+    protocol: ?display.ProtocolTag = null,
 
     pub const meta = .{
         .type = .{ .help = "Blur type: " ++ common.joinFieldNames(BlurType) ++ " (default: gaussian)", .metavar = "name" },
@@ -93,13 +93,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 /// Blur `img` according to `options`, returning a freshly allocated image the
 /// caller owns. Shared by the standalone command and the `pipeline` command.
 pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options: Args) !zignal.Image(zignal.Rgba(u8)) {
-    var blur_type: BlurType = .gaussian;
-    if (options.type) |t| {
-        blur_type = common.parseEnum(BlurType, t) orelse {
-            std.log.err("unknown blur type: {s}", .{t});
-            return error.InvalidArguments;
-        };
-    }
+    const blur_type = options.type orelse .gaussian;
 
     var out: zignal.Image(zignal.Rgba(u8)) = try .init(gpa, img.rows, img.cols);
     errdefer out.deinit(gpa);
@@ -210,7 +204,7 @@ fn processImage(
     }
 
     if (should_display) {
-        const format = try resolveDisplayFormat(options.protocol, options.width, options.height);
+        const format = resolveDisplayFormat(options.protocol, options.width, options.height);
         try displayCanvas(io, writer, out, format);
     }
 }

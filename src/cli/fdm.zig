@@ -12,7 +12,7 @@ const Args = struct {
     display: bool = false,
     width: ?u32 = null,
     height: ?u32 = null,
-    protocol: ?[]const u8 = null,
+    protocol: ?display.ProtocolTag = null,
 
     pub const meta = .{
         .display = .{ .help = "Display the result in the terminal", .short = 'd' },
@@ -88,7 +88,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         );
         defer canvas.deinit(gpa);
 
-        const format = try display.resolveDisplayFormat(parsed.options.protocol, null, null);
+        const format = display.resolveDisplayFormat(parsed.options.protocol, null, null);
         try display.displayCanvas(io, writer, &canvas, format);
     }
 }

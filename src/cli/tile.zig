@@ -17,14 +17,14 @@ const LayoutMode = enum {
 };
 
 const Args = struct {
-    mode: ?[]const u8 = null,
+    mode: ?LayoutMode = null,
     rows: ?u32 = null,
     cols: ?u32 = null,
     width: ?u32 = null,
     height: ?u32 = null,
     output: ?[]const u8 = null,
     display: bool = false,
-    protocol: ?[]const u8 = null,
+    protocol: ?display.ProtocolTag = null,
 
     pub const meta = .{
         .mode = .{ .help = "Layout mode: " ++ common.joinFieldNames(LayoutMode), .metavar = "mode" },
@@ -61,13 +61,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
     const should_display = parsed.options.display or output_path == null;
 
-    var mode: LayoutMode = .square;
-    if (parsed.options.mode) |m| {
-        mode = common.parseEnum(LayoutMode, m) orelse {
-            std.log.err("unknown layout mode: {s}", .{m});
-            return error.InvalidArguments;
-        };
-    }
+    const mode = parsed.options.mode orelse .square;
 
     var rows: u32 = 0;
     var cols: u32 = 0;
@@ -204,7 +198,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     }
 
     if (should_display) {
-        const format = try display.resolveDisplayFormat(parsed.options.protocol, null, null);
+        const format = display.resolveDisplayFormat(parsed.options.protocol, null, null);
         try display.displayCanvas(io, writer, &canvas, format);
     }
 }

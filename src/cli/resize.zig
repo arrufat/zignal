@@ -11,7 +11,7 @@ pub const Args = struct {
     scale: ?f32 = null,
     width: ?u32 = null,
     height: ?u32 = null,
-    filter: ?[]const u8 = null,
+    filter: ?common.InterpolationTag = null,
     output: ?[]const u8 = null,
 
     pub const meta = .{
@@ -73,7 +73,7 @@ pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options
         return error.InvalidArguments;
     }
 
-    const filter = try common.resolveFilter(options.filter);
+    const filter = common.resolveFilter(options.filter);
     const dims = try computeTargetDimensions(img, options);
 
     std.log.info("resizing from {d}x{d} to {d}x{d} using {s}...", .{ img.cols, img.rows, dims.width, dims.height, @tagName(filter) });

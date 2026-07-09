@@ -3,6 +3,7 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 const meta = @import("zignal").meta;
+const common = @import("common.zig");
 
 pub var runtime_log_level: std.log.Level = if (builtin.mode == .Debug) .debug else .err;
 
@@ -90,6 +91,13 @@ fn setOption(comptime T: type, comptime field: anytype, options: *T, args: *std.
         std.log.debug("option --{s} set to {s}", .{ field.name, val_str });
     } else if (@typeInfo(ChildType) == .float) {
         @field(options.*, field.name) = std.fmt.parseFloat(ChildType, val_str) catch {
+            std.log.err("invalid value for --{s}: {s}", .{ field.name, val_str });
+            return error.InvalidArguments;
+        };
+        std.log.debug("option --{s} set to {s}", .{ field.name, val_str });
+    } else if (@typeInfo(ChildType) == .@"enum") {
+        // Accept either kebab- or snake-case, matching the ZON enum-literal names.
+        @field(options.*, field.name) = common.parseEnum(ChildType, val_str) orelse {
             std.log.err("invalid value for --{s}: {s}", .{ field.name, val_str });
             return error.InvalidArguments;
         };

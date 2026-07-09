@@ -9,7 +9,7 @@ const common = @import("common.zig");
 const display = @import("display.zig");
 
 pub const Args = struct {
-    filter: ?[]const u8 = null,
+    filter: ?Algo = null,
     output: ?[]const u8 = null,
     display: bool = false,
 
@@ -23,7 +23,7 @@ pub const Args = struct {
     // Display options
     width: ?u32 = null,
     height: ?u32 = null,
-    protocol: ?[]const u8 = null,
+    protocol: ?display.ProtocolTag = null,
 
     pub const meta = .{
         .filter = .{ .help = "Filter: " ++ common.joinFieldNames(Algo) ++ " (default: sobel)", .metavar = "name" },
@@ -84,13 +84,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 /// `out`. Shared by the standalone command (which stays on the u8 fast path) and
 /// the `apply` wrapper used by the `pipeline` command.
 pub fn applyGray(io: Io, gpa: Allocator, img: zignal.Image(u8), out: zignal.Image(u8), options: Args) !void {
-    var algo: Algo = .sobel;
-    if (options.filter) |f| {
-        algo = common.parseEnum(Algo, f) orelse {
-            std.log.err("unknown filter: {s}", .{f});
-            return error.InvalidArguments;
-        };
-    }
+    const algo = options.filter orelse .sobel;
 
     std.log.debug("applying {s} edge detection...", .{@tagName(algo)});
     const timer = common.Timer.begin(io);
@@ -165,7 +159,7 @@ fn processImage(
     }
 
     if (should_display) {
-        const format = try display.resolveDisplayFormat(options.protocol, options.width, options.height);
+        const format = display.resolveDisplayFormat(options.protocol, options.width, options.height);
         try display.displayCanvas(io, writer, out_img, format);
     }
 }
