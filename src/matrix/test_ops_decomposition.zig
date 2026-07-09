@@ -557,3 +557,73 @@ test "Matrix Cholesky decomposition" {
 
     try std.testing.expectError(MatrixError.NotPositiveDefinite, non_spd.chol());
 }
+
+test "Matrix solve single right-hand side" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const eps = 1e-12;
+
+    // Solution is x = [1, 2, 3].
+    const a: Matrix(f64) = try .fromSlice(alloc, 3, 3, &[_]f64{
+        2, 1, 1,
+        4, 3, 3,
+        8, 7, 9,
+    });
+    const b: Matrix(f64) = try .fromSlice(alloc, 3, 1, &[_]f64{ 7, 19, 49 });
+
+    const x = try a.solve(b);
+    try std.testing.expectApproxEqAbs(@as(f64, 1), x.at(0, 0).*, eps);
+    try std.testing.expectApproxEqAbs(@as(f64, 2), x.at(1, 0).*, eps);
+    try std.testing.expectApproxEqAbs(@as(f64, 3), x.at(2, 0).*, eps);
+
+    const recon = try a.dot(x);
+    for (0..3) |i| try std.testing.expectApproxEqAbs(b.at(i, 0).*, recon.at(i, 0).*, eps);
+}
+
+test "Matrix solve multiple right-hand sides via reused factorization" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const eps = 1e-12;
+
+    const a: Matrix(f64) = try .fromSlice(alloc, 2, 2, &[_]f64{
+        3, 2,
+        1, 4,
+    });
+    // RHS = I, so the solution is A^-1 and A*x == I.
+    const b: Matrix(f64) = try .fromSlice(alloc, 2, 2, &[_]f64{
+        1, 0,
+        0, 1,
+    });
+
+    var lu_result = try a.lu();
+    defer lu_result.deinit();
+    const x = try lu_result.solve(b);
+
+    const recon = try a.dot(x);
+    for (0..2) |i| {
+        for (0..2) |j| {
+            const expected: f64 = if (i == j) 1 else 0;
+            try std.testing.expectApproxEqAbs(expected, recon.at(i, j).*, eps);
+        }
+    }
+}
+
+test "Matrix solve reports singular systems" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const MatrixError = @import("Matrix.zig").MatrixError;
+
+    // Second row is twice the first: singular.
+    const a: Matrix(f64) = try .fromSlice(alloc, 2, 2, &[_]f64{
+        1, 2,
+        2, 4,
+    });
+    const b: Matrix(f64) = try .fromSlice(alloc, 2, 1, &[_]f64{ 1, 2 });
+    try std.testing.expectError(MatrixError.Singular, a.solve(b));
+
+    const b_bad: Matrix(f64) = try .fromSlice(alloc, 3, 1, &[_]f64{ 1, 2, 3 });
+    try std.testing.expectError(MatrixError.DimensionMismatch, a.solve(b_bad));
+}
