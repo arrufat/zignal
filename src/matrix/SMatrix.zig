@@ -723,20 +723,23 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
         }
 
         /// Solves the linear system self * x = b by Gauss-Jordan elimination
-        /// with partial pivoting. Returns null when the system is singular
-        /// relative to its scale.
-        pub fn solve(self: Self, b: SMatrix(T, rows, 1)) ?SMatrix(T, rows, 1) {
+        /// with partial pivoting. `b` may carry several columns, each solved
+        /// independently. Returns null when the system is singular relative to
+        /// its scale.
+        pub fn solve(self: Self, b: anytype) ?@TypeOf(b) {
             comptime assert(@typeInfo(T) == .float);
             comptime assert(rows == cols);
+            const k = b.cols;
+            comptime assert(b.rows == rows);
             // Augmented [A | b].
-            var a: [rows][cols + 1]T = undefined;
+            var a: [rows][cols + k]T = undefined;
             var max_entry: T = 0;
             for (0..rows) |r| {
                 for (0..cols) |c| {
                     a[r][c] = self.items[r][c];
                     max_entry = @max(max_entry, @abs(a[r][c]));
                 }
-                a[r][cols] = b.items[r][0];
+                for (0..k) |j| a[r][cols + j] = b.items[r][j];
             }
             if (max_entry == 0) return null;
             // Degeneracy threshold relative to the system's scale.
@@ -747,16 +750,18 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
                     if (@abs(a[r][c]) > @abs(a[pivot][c])) pivot = r;
                 }
                 if (@abs(a[pivot][c]) < tolerance) return null;
-                std.mem.swap([cols + 1]T, &a[c], &a[pivot]);
+                std.mem.swap([cols + k]T, &a[c], &a[pivot]);
                 for (0..rows) |r| {
                     if (r == c) continue;
                     const factor = a[r][c] / a[c][c];
                     if (factor == 0) continue;
-                    for (c..cols + 1) |k| a[r][k] -= factor * a[c][k];
+                    for (c..cols + k) |idx| a[r][idx] -= factor * a[c][idx];
                 }
             }
-            var x: SMatrix(T, rows, 1) = undefined;
-            for (0..rows) |i| x.items[i][0] = a[i][cols] / a[i][i];
+            var x: @TypeOf(b) = undefined;
+            for (0..rows) |i| {
+                for (0..k) |j| x.items[i][j] = a[i][cols + j] / a[i][i];
+            }
             return x;
         }
 
@@ -987,6 +992,16 @@ test "SMatrix solve" {
     const x = a.solve(b) orelse return error.TestUnexpectedResult;
     for (0..4) |i| {
         try expectApproxEqAbs(expected.items[i][0], x.items[i][0], 1e-12);
+    }
+
+    // Multiple right-hand sides solved at once: RHS = I recovers A^-1.
+    const eye: SMatrix(f64, 4, 4) = .identity();
+    const inv = a.solve(eye) orelse return error.TestUnexpectedResult;
+    const recon = a.dot(inv);
+    for (0..4) |i| {
+        for (0..4) |j| {
+            try expectApproxEqAbs(@as(f64, if (i == j) 1 else 0), recon.items[i][j], 1e-12);
+        }
     }
 
     // Singular systems (dependent rows, all zeros) return null.
