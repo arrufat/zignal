@@ -125,7 +125,11 @@ pub const Cli = struct {
         if (arg) |cmd_name| {
             if (self.getCommand(cmd_name)) |cmd| {
                 cmd.run(io, stdout, allocator, args) catch |err| {
-                    std.log.err("{s} command failed: {t}", .{ cmd_name, err });
+                    // BatchIncomplete means individual items already reported their
+                    // own errors; just propagate a non-zero exit without a summary.
+                    if (err != error.BatchIncomplete) {
+                        std.log.err("{s} command failed: {t}", .{ cmd_name, err });
+                    }
                     std.process.exit(1);
                 };
                 return;

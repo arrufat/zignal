@@ -146,6 +146,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     defer canvas.deinit(gpa);
     canvas.fill(.{ .r = 0, .g = 0, .b = 0, .a = 255 });
 
+    var failed = false;
     const timer = common.Timer.begin(io);
     for (input_paths, 0..) |path, idx| {
         if (idx >= rows * cols) break;
@@ -162,6 +163,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         } else {
             img = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| {
                 std.log.warn("failed to load {s}: {s}. skipping slot.", .{ path, @errorName(err) });
+                failed = true;
                 continue;
             };
             loaded_new = true;
@@ -201,4 +203,6 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         const format = display.resolveDisplayFormat(parsed.options.protocol, null, null);
         try display.displayCanvas(io, writer, &canvas, format);
     }
+
+    if (failed) return error.BatchIncomplete;
 }

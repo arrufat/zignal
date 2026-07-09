@@ -72,12 +72,15 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
     const should_display = parsed.options.display or target == null;
 
+    var failed = false;
     for (parsed.positionals) |input_path| {
         processImage(io, writer, gpa, input_path, target, should_display, parsed.options) catch |err| {
             std.log.err("failed to process image '{s}': {t}", .{ input_path, err });
             if (!is_batch) return err;
+            failed = true;
         };
     }
+    if (failed) return error.BatchIncomplete;
 }
 
 /// Run the selected edge detector on a grayscale image into a caller-allocated
