@@ -475,6 +475,38 @@ canvas:hover {
   min-height: 0;
 }
 
+/* White balance: a canvas-width column. The reference color is a tall swatch that
+   doubles as a drape, with the two toggles stacked below it. */
+#wb-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 640px;
+  max-width: 100%;
+  margin: 0 auto;
+  text-align: left;
+}
+#colorPicker {
+  width: 100%;
+  height: 72px;
+  padding: 0;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  cursor: pointer;
+}
+#colorPicker:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* White balance on the left, gray-world pushed to the right end. */
+#wb-toggles {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
 /* Button styles - unified across all examples (excluding copy buttons) */
 button:not(.copy-button), #toggle-button, #align-button, #remove-button, #webcamToggleButton, #toggleButton {
   padding: 12px 24px;
