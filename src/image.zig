@@ -448,7 +448,8 @@ pub fn Image(comptime T: type) type {
         /// - `.braille`: Uses Braille patterns for 2x4 resolution (requires Unicode Braille support U+2800-U+28FF; dots binarized by `threshold`, optionally tinted with truecolor or a quantized palette)
         /// - `.sixel`: Uses the sixel graphics protocol if supported
         /// - `.kitty`: Uses the kitty graphics protocol if supported
-        /// - `.auto`: Automatically selects best available format: kitty -> sixel -> sgr
+        /// - `.iterm2`: Uses the iTerm2 inline image protocol if supported
+        /// - `.auto`: Automatically selects best available format: kitty -> iterm2 -> sixel -> sgr
         ///
         /// Example:
         /// ```zig
