@@ -78,10 +78,6 @@
 
     return {
       element: group,
-      value: function () {
-        for (const v in inputs) if (inputs[v].checked) return v;
-        return undefined;
-      },
       select: function (v) {
         if (inputs[v]) inputs[v].checked = true;
       },
@@ -93,8 +89,8 @@
   }
 
   // "Image / Camera" source selector, built on createRadioGroup. onImage/onCamera
-  // fire only on user selection; selectImage/selectCamera flip state silently,
-  // for when the demo switches modes itself (e.g. an image was dropped).
+  // fire only on user selection; selectImage flips state silently, for when the
+  // demo switches modes itself (e.g. an image was dropped).
   function createModeSelector({ onImage, onCamera, name = "input-mode", label = "Mode" }) {
     const group = createRadioGroup({
       label: label,
@@ -116,12 +112,6 @@
       element: group.element,
       selectImage: function () {
         group.select("image");
-      },
-      selectCamera: function () {
-        group.select("camera");
-      },
-      isCamera: function () {
-        return group.value() === "camera";
       },
       setDisabled: function (d) {
         group.setDisabled(d);
