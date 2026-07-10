@@ -1,12 +1,6 @@
 (function() {
-  let wasm_promise = fetch("hough_animation.wasm");
+  const { loadWasm } = window.ZignalUtils;
   var wasm_exports = null;
-  const text_decoder = new TextDecoder();
-
-  function decodeString(ptr, len) {
-    if (len === 0) return "";
-    return text_decoder.decode(new Uint8Array(wasm_exports.memory.buffer, ptr, len));
-  }
 
   const canvasImg = document.getElementById("canvas-image");
   const ctxImg = canvasImg.getContext("2d", { alpha: false });
@@ -28,19 +22,8 @@
     toggleButton.innerText = isPaused ? "Resume" : "Pause";
   };
 
-  WebAssembly.instantiateStreaming(wasm_promise, {
-    js: {
-      log: function(ptr, len) {
-        const msg = decodeString(ptr, len);
-        console.log(msg);
-      },
-      now: function() {
-        return performance.now();
-      },
-    },
-  }).then(function(obj) {
-    wasm_exports = obj.instance.exports;
-    window.wasm = obj;
+  loadWasm("hough_animation.wasm").then(function(api) {
+    wasm_exports = api.exports;
     console.log("wasm loaded");
     
     wasm_exports.init();
@@ -71,7 +54,6 @@
         ctxAcc.putImageData(accImageData, 0, 0);
       }
 
-      // FPS calculation
       frameCount++;
       if (now - lastTime >= 1000) {
         const avgCompute = totalComputeTime / frameCount;

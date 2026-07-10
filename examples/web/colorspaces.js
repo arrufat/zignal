@@ -1,12 +1,6 @@
 (function () {
-  let wasmPromise = fetch("colorspaces.wasm");
+  const { loadWasm } = window.ZignalUtils;
   var wasmExports = null;
-  const textDecoder = new TextDecoder();
-
-  function decodeString(ptr, len) {
-    if (len === 0) return "";
-    return textDecoder.decode(new Uint8Array(wasmExports.memory.buffer, ptr, len));
-  }
 
   function hex2rgb(hex) {
     const m = hex.match(/^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i);
@@ -28,19 +22,8 @@
     return "#" + toHex(r) + toHex(g) + toHex(b);
   }
 
-  WebAssembly.instantiateStreaming(wasmPromise, {
-    js: {
-      log: function (ptr, len) {
-        const msg = decodeString(ptr, len);
-        console.log(msg);
-      },
-      now: function () {
-        return performance.now();
-      },
-    },
-  }).then(function (obj) {
-    wasmExports = obj.instance.exports;
-    window.wasm = obj;
+  loadWasm("colorspaces.wasm").then(function (api) {
+    wasmExports = api.exports;
     // Event listeners for HEX
     document.getElementById("hex-#").addEventListener("input", updateFromHex);
     document.getElementById("color").addEventListener("input", updateFromColor);

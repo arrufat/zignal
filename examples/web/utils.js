@@ -26,6 +26,33 @@
     });
   }
 
+  // Instantiate a demo's wasm module with the standard { log, now } imports (plus
+  // any extra `imports` merged into the js namespace). Resolves to { exports,
+  // decodeString } bound to the module — decodeString reads a (ptr, len) UTF-8
+  // string out of wasm memory (used by log and by demos).
+  function loadWasm(url, imports) {
+    const decoder = new TextDecoder();
+    const api = { exports: null };
+    api.decodeString = function (ptr, len) {
+      if (len === 0) return "";
+      return decoder.decode(new Uint8Array(api.exports.memory.buffer, ptr, len));
+    };
+    const js = {
+      log: function (ptr, len) {
+        console.log(api.decodeString(ptr, len));
+      },
+      now: function () {
+        return performance.now();
+      },
+    };
+    if (imports) Object.assign(js, imports);
+    return WebAssembly.instantiateStreaming(fetch(url), { js: js }).then(function (obj) {
+      api.exports = obj.instance.exports;
+      window.wasm = obj; // expose the module on window for console debugging
+      return api;
+    });
+  }
+
   function createImageLoadHandler({ load, setLoaded, onError }) {
     return function (file) {
       setLoaded(false);
@@ -125,5 +152,6 @@
     createImageLoadHandler,
     createRadioGroup,
     createModeSelector,
+    loadWasm,
   };
 })();

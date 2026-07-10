@@ -1,5 +1,5 @@
 (function () {
-  const { createFileInput, enableDrop, createImageLoadHandler } = window.ZignalUtils;
+  const { createFileInput, enableDrop, createImageLoadHandler, loadWasm } = window.ZignalUtils;
 
   const upload1 = document.getElementById("upload1");
   const upload2 = document.getElementById("upload2");
@@ -26,13 +26,6 @@
   let wasm_exports = null;
   let image1Ready = false;
   let image2Ready = false;
-
-  const text_decoder = new TextDecoder();
-
-  function decodeString(ptr, len) {
-    if (len === 0) return "";
-    return text_decoder.decode(new Uint8Array(wasm_exports.memory.buffer, ptr, len));
-  }
 
   function updateMatchButton() {
     matchButton.disabled = !(image1Ready && image2Ready && wasm_exports);
@@ -282,22 +275,9 @@
     wasm_exports.free(statsPtr, 6 * 4);
   });
 
-  fetch("feature_matching.wasm")
-    .then((response) =>
-      WebAssembly.instantiateStreaming(response, {
-        js: {
-          log: function (ptr, len) {
-            const msg = decodeString(ptr, len);
-            console.log(msg);
-          },
-          now: function () {
-            return performance.now();
-          },
-        },
-      }),
-    )
-    .then((obj) => {
-      wasm_exports = obj.instance.exports;
+  loadWasm("feature_matching.wasm")
+    .then((api) => {
+      wasm_exports = api.exports;
       console.log("WASM module loaded successfully");
       updateMatchButton();
     })

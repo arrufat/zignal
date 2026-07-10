@@ -1,8 +1,7 @@
 (function () {
-  const wasm_promise = fetch("metrics.wasm");
   let wasm_exports = null;
 
-  const { createFileInput, enableDrop, createImageLoadHandler } = window.ZignalUtils;
+  const { createFileInput, enableDrop, createImageLoadHandler, loadWasm } = window.ZignalUtils;
 
   const canvasRef = document.getElementById("reference-canvas");
   const canvasDist = document.getElementById("distorted-canvas");
@@ -97,20 +96,8 @@
     onDrop: handleDistFile,
   });
 
-  WebAssembly.instantiateStreaming(wasm_promise, {
-    js: {
-      log: function (ptr, len) {
-        const view = new Uint8Array(wasm_exports.memory.buffer, ptr, len);
-        const text = new TextDecoder().decode(view);
-        console.log(text);
-      },
-      now: function () {
-        return performance.now();
-      },
-    },
-  }).then(function (obj) {
-    wasm_exports = obj.instance.exports;
-    window.wasm = obj;
+  loadWasm("metrics.wasm").then(function (api) {
+    wasm_exports = api.exports;
     console.log("metrics wasm loaded");
   });
 

@@ -1,12 +1,7 @@
 (function () {
-  let wasm_promise = fetch("global_optimization.wasm");
+  const { loadWasm } = window.ZignalUtils;
   let wasm = null;
-  const text_decoder = new TextDecoder();
-
-  function decodeString(ptr, len) {
-    if (len === 0) return "";
-    return text_decoder.decode(new Uint8Array(wasm.memory.buffer, ptr, len));
-  }
+  let decodeString;
 
   // ---- DOM ----
   const presetSel = document.getElementById("preset");
@@ -945,19 +940,9 @@ return s;
     stepBtn.addEventListener("click", onStep);
   }
 
-  WebAssembly.instantiateStreaming(wasm_promise, {
-    js: {
-      log: function (ptr, len) {
-        console.log(decodeString(ptr, len));
-      },
-      now: function () {
-        return performance.now();
-      },
-      evaluate: evaluate,
-    },
-  }).then(function (obj) {
-    wasm = obj.instance.exports;
-    window.wasm = obj;
+  loadWasm("global_optimization.wasm", { evaluate: evaluate }).then(function (api) {
+    wasm = api.exports;
+    decodeString = api.decodeString;
     console.log("wasm loaded");
     loadColormapLut();
     // Recolor the init() preview (built with the grayscale fallback) now that the real LUT is loaded.

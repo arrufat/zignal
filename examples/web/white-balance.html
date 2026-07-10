@@ -15,8 +15,10 @@
       Real-time white balance on your webcam. Pick a reference color for custom correction, or turn on gray-world for automatic estimation.
     </div>
     <div id="image-container">
-      <video id="video" style="display:none;"></video>
-      <canvas id="canvas-webcam"></canvas>
+      <div class="scan-stage">
+        <video id="video" style="display:none;"></video>
+        <canvas id="canvas-webcam"></canvas>
+      </div>
     </div>
     <div class="controls">
       <div id="wb-controls">
@@ -32,13 +34,12 @@
       const video = document.getElementById('video');
     const canvas = document.getElementById('canvas-webcam');
     const ctx = canvas.getContext('2d');
-    const { createRadioGroup } = window.ZignalUtils;
+    const { createRadioGroup, loadWasm } = window.ZignalUtils;
     const colorPicker = document.getElementById('colorPicker');
     let isBalanced = true;
     let isGrayWorld = false;
     let refColor = 0xffffff;
     let wasmExports = undefined;
-    const textDecoder = new TextDecoder();
     let rgbaPtr = null;
     let rgbaSize = 0;
 
@@ -69,26 +70,11 @@
     video.addEventListener('loadedmetadata', () => {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
+      canvas.classList.add('live');
     });
 
-    function decodeString(ptr, len) {
-      if (len === 0) return "";
-      return textDecoder.decode(new Uint8Array(wasmExports.memory.buffer, ptr, len));
-    }
-
-    WebAssembly.instantiateStreaming(fetch("whitebalance.wasm"), {
-      js: {
-        log: function (ptr, len) {
-          const msg = decodeString(ptr, len);
-          console.log(msg);
-        },
-        now: function () {
-          return performance.now();
-        },
-      },
-    }).then(function (obj) {
-      wasmExports = obj.instance.exports;
-      window.wasm = obj;
+    loadWasm("whitebalance.wasm").then(function (api) {
+      wasmExports = api.exports;
 
       function process() {
         if (video.readyState === video.HAVE_ENOUGH_DATA) {
