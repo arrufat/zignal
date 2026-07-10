@@ -508,7 +508,7 @@ canvas:hover {
 }
 
 /* Button styles - unified across all examples (excluding copy buttons) */
-button:not(.copy-button), #toggle-button, #align-button, #remove-button, #webcamToggleButton, #toggleButton {
+button:not(.copy-button), #align-button, #remove-button, #toggleButton {
   padding: 12px 24px;
   font-size: clamp(1rem, 3vw, 1.1rem);
   background-color: #007bff;
@@ -521,17 +521,13 @@ button:not(.copy-button), #toggle-button, #align-button, #remove-button, #webcam
   margin: 5px;
 }
 
-button:not(.copy-button):hover, #toggle-button:hover, #align-button:hover, #remove-button:hover, #webcamToggleButton:hover, #toggleButton:hover {
+button:not(.copy-button):hover, #align-button:hover, #remove-button:hover, #toggleButton:hover {
   background-color: #0056b3;
 }
 
-button:not(.copy-button):disabled, #toggle-button:disabled, #align-button:disabled, #remove-button:disabled, #webcamToggleButton:disabled, #toggleButton:disabled {
+button:not(.copy-button):disabled, #align-button:disabled, #remove-button:disabled, #toggleButton:disabled {
   background-color: #ccc;
   cursor: not-allowed;
-}
-
-#toggle-button {
-  margin: 20px;
 }
 
 input {

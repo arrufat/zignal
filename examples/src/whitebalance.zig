@@ -144,11 +144,11 @@ fn whitebalanceSimd(pixels: []Rgba, w: RgbGains) void {
     }
 }
 
-pub export fn whitebalance(rgba_ptr: [*]Rgba, rows: u32, cols: u32, r: u8, g: u8, b: u8, gray_world: bool) void {
+pub export fn whitebalance(rgba_ptr: [*]Rgba, rows: u32, cols: u32, color: u32, gray_world: bool) void {
     const pixels = rgba_ptr[0 .. @as(usize, rows) * cols];
     const w = if (gray_world)
         illuminantFromScene(pixels)
     else
-        illuminantFromReference(.{ .r = r, .g = g, .b = b });
+        illuminantFromReference(Rgb.initHex(@truncate(color)));
     whitebalanceSimd(pixels, w);
 }

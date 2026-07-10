@@ -36,9 +36,7 @@
     const colorPicker = document.getElementById('colorPicker');
     let isBalanced = true;
     let isGrayWorld = false;
-    let currentR = 255;
-    let currentG = 255;
-    let currentB = 255;
+    let refColor = 0xffffff;
     let wasmExports = undefined;
     const textDecoder = new TextDecoder();
     let rgbaPtr = null;
@@ -113,7 +111,7 @@
             if (isBalanced) {
               let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
               rgba.set(imageData.data);
-              wasmExports.whitebalance(rgbaPtr, canvas.height, canvas.width, currentR, currentG, currentB, isGrayWorld ? 1 : 0);
+              wasmExports.whitebalance(rgbaPtr, canvas.height, canvas.width, refColor, isGrayWorld ? 1 : 0);
               imageData.data.set(rgba);
               ctx.putImageData(imageData, 0, 0);
             }
@@ -126,10 +124,7 @@
     });
 
     colorPicker.addEventListener('input', () => {
-      const color = colorPicker.value;
-      currentR = parseInt(color.substr(1, 2), 16);
-      currentG = parseInt(color.substr(3, 2), 16);
-      currentB = parseInt(color.substr(5, 2), 16);
+      refColor = parseInt(colorPicker.value.slice(1), 16);
     });
 
     function updateUI() {
