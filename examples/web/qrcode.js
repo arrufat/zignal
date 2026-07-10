@@ -7,7 +7,6 @@
   const ctx1 = canvasWebcam.getContext("2d", { willReadFrequently: true });
   const ctx2 = canvasQr.getContext("2d");
   const toggleButton = document.getElementById("camera-button");
-  const encodeButton = document.getElementById("encode-button");
   const downloadButton = document.getElementById("download-button");
   const copyButton = document.getElementById("copy-button");
   const openLink = document.getElementById("open-link");
@@ -226,7 +225,6 @@
   }
 
   toggleButton.disabled = true;
-  encodeButton.disabled = true;
   downloadButton.disabled = true;
   toggleButton.addEventListener("click", () => {
     if (mediaStream) {
@@ -236,7 +234,6 @@
     }
   });
 
-  encodeButton.addEventListener("click", encode);
   encodeText.addEventListener("input", () => {
     if (wasm_exports) encode();
   });
@@ -279,7 +276,6 @@
     cornersPtr = wasm_exports.alloc(8 * 4) >>> 0;
     qrPtr = wasm_exports.alloc(maxQrSide * maxQrSide * 4) >>> 0;
     toggleButton.disabled = false;
-    encodeButton.disabled = false;
     encode();
   });
 })();
