@@ -27,6 +27,13 @@
         flex-direction: column;
         gap: 14px;
       }
+      .qr-card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 26px;
+      }
       .qr-card h3 {
         margin: 0;
         color: #333;
@@ -63,12 +70,6 @@
       }
       #scan-placeholder .icon {
         opacity: 0.7;
-      }
-      .qr-actions {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        flex-wrap: wrap;
       }
       /* Scoped as .qr-card .qr-button to outrank the shared stylesheet's
          button:not(.copy-button) rule, so <button> and <a> render alike. */
@@ -108,6 +109,11 @@
       .qr-status {
         color: #666;
         font-size: 0.85rem;
+      }
+      /* Collapse the scan status when empty so the decoded output sits flush at
+         the card bottom, matching the Generate input. */
+      #scan-status:empty {
+        display: none;
       }
       .result-row {
         display: flex;
@@ -156,12 +162,23 @@
       .qr-stage {
         display: flex;
         justify-content: center;
-      }
-      .qr-stage canvas {
-        width: 100%;
-        max-width: 296px;
+        align-items: center;
+        /* Same 4:3 footprint as the camera stage, so both preview boxes are the
+           same size and the cards' bottom rows line up. The border lives here
+           (not on the canvas) so the visible box matches the camera's. */
+        aspect-ratio: 640 / 480;
+        box-sizing: border-box;
         border: 1px solid #dee2e6;
         border-radius: 6px;
+        background: white;
+      }
+      .qr-stage canvas {
+        /* Square QR fills the box height and centers, leaving even side margins.
+           max-width:none overrides the shared canvas cap in styles.css. */
+        height: 100%;
+        width: auto;
+        max-width: none;
+        border: none;
         cursor: default;
         image-rendering: pixelated;
       }
@@ -191,7 +208,9 @@
 
     <div class="qr-layout">
       <section class="qr-card">
-        <h3>Scan</h3>
+        <div class="qr-card-header" id="scan-header">
+          <h3>Scan</h3>
+        </div>
         <div class="scan-stage">
           <video id="video" width="1" height="1" style="display:none"></video>
           <canvas id="scan-canvas" width="640" height="480"></canvas>
@@ -200,22 +219,25 @@
               <path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
               <circle cx="12" cy="13" r="3.5"/>
             </svg>
-            <span>Start the camera,<br>or click / drop an image here</span>
+            <span>Switch to Camera,<br>or click / drop an image here</span>
           </div>
-        </div>
-        <div class="qr-actions">
-          <button id="camera-button" class="qr-button">Start camera</button>
-          <span id="scan-status" class="qr-status"></span>
         </div>
         <div class="result-row">
           <output id="decoded" class="empty">nothing decoded yet</output>
           <button id="copy-button" class="qr-button secondary" style="display:none">Copy</button>
           <a id="open-link" class="qr-button secondary" target="_blank" rel="noopener" style="display:none">Open</a>
         </div>
+        <span id="scan-status" class="qr-status"></span>
       </section>
 
       <section class="qr-card">
-        <h3>Generate</h3>
+        <div class="qr-card-header">
+          <h3>Generate</h3>
+          <span id="encode-status" class="qr-status"></span>
+        </div>
+        <div class="qr-stage">
+          <canvas id="canvas-qr" width="296" height="296"></canvas>
+        </div>
         <div class="encode-row">
           <input type="text" id="encode-text" placeholder="Text to encode" value="https://github.com/arrufat/zignal">
           <select id="ec-level" title="Error correction level">
@@ -224,13 +246,6 @@
             <option value="2">Q (25%)</option>
             <option value="3">H (30%)</option>
           </select>
-        </div>
-        <div class="qr-stage">
-          <canvas id="canvas-qr" width="296" height="296"></canvas>
-        </div>
-        <div class="qr-actions">
-          <button id="download-button" class="qr-button" disabled>Download PNG</button>
-          <span id="encode-status" class="qr-status"></span>
         </div>
       </section>
     </div>

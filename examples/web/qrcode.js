@@ -1,13 +1,12 @@
 (function () {
-  const { createFileInput, enableDrop } = window.ZignalUtils;
+  const { createFileInput, enableDrop, createModeSelector } = window.ZignalUtils;
 
   const video = document.getElementById("video");
   const canvasWebcam = document.getElementById("scan-canvas");
   const canvasQr = document.getElementById("canvas-qr");
   const ctx1 = canvasWebcam.getContext("2d", { willReadFrequently: true });
   const ctx2 = canvasQr.getContext("2d");
-  const toggleButton = document.getElementById("camera-button");
-  const downloadButton = document.getElementById("download-button");
+  const scanHeader = document.getElementById("scan-header");
   const copyButton = document.getElementById("copy-button");
   const openLink = document.getElementById("open-link");
   const encodeText = document.getElementById("encode-text");
@@ -121,7 +120,6 @@
     ctx2.fillRect(0, 0, canvasQr.width, canvasQr.height);
     if (bytes.length === 0) {
       encodeStatus.textContent = "";
-      downloadButton.disabled = true;
       return;
     }
     const inputPtr = wasm_exports.alloc(bytes.length) >>> 0;
@@ -133,7 +131,6 @@
 
     if (side <= 0) {
       encodeStatus.textContent = side === 0 ? "text is too long for a QR code" : "encoding failed";
-      downloadButton.disabled = true;
       return;
     }
     // Blit the 1-pixel-per-module image and scale it up without smoothing.
@@ -148,7 +145,6 @@
     const dim = side - 8; // strip the quiet zone
     const version = (dim - 17) / 4;
     encodeStatus.textContent = "version " + version + ", " + dim + "×" + dim + " modules, " + timeMs.toFixed(1) + " ms";
-    downloadButton.disabled = false;
   }
 
   function displayImage(file) {
@@ -190,7 +186,6 @@
       requestAnimationFrame(loop);
     }
 
-    toggleButton.textContent = "Stop camera";
     navigator.mediaDevices
       // Prefer the rear camera on phones; desktops fall back gracefully.
       .getUserMedia({ video: { facingMode: { ideal: "environment" } } })
@@ -206,14 +201,13 @@
         };
       })
       .catch((error) => {
-        toggleButton.textContent = "Start camera";
+        mode.selectImage();
         timeElement.textContent = "could not access the camera";
         console.error("Error accessing webcam:", error);
       });
   }
 
   function stopMediaStream() {
-    toggleButton.textContent = "Start camera";
     if (mediaStream) {
       mediaStream.getTracks().forEach((track) => track.stop());
       mediaStream = null;
@@ -221,18 +215,12 @@
       ctx1.clearRect(0, 0, canvasWebcam.width, canvasWebcam.height);
       setStageActive(false);
       timeElement.textContent = "";
+      mode.selectImage();
     }
   }
 
-  toggleButton.disabled = true;
-  downloadButton.disabled = true;
-  toggleButton.addEventListener("click", () => {
-    if (mediaStream) {
-      stopMediaStream();
-    } else {
-      startMediaStream();
-    }
-  });
+  const mode = createModeSelector({ onImage: stopMediaStream, onCamera: startMediaStream });
+  scanHeader.appendChild(mode.element);
 
   encodeText.addEventListener("input", () => {
     if (wasm_exports) encode();
@@ -247,16 +235,6 @@
       setTimeout(() => {
         copyButton.textContent = "Copy";
       }, 1200);
-    });
-  });
-
-  downloadButton.addEventListener("click", () => {
-    canvasQr.toBlob((blob) => {
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = "qrcode.png";
-      link.click();
-      URL.revokeObjectURL(link.href);
     });
   });
 
@@ -275,7 +253,7 @@
     textPtr = wasm_exports.alloc(maxTextLen) >>> 0;
     cornersPtr = wasm_exports.alloc(8 * 4) >>> 0;
     qrPtr = wasm_exports.alloc(maxQrSide * maxQrSide * 4) >>> 0;
-    toggleButton.disabled = false;
+    mode.setDisabled(false);
     encode();
   });
 })();
