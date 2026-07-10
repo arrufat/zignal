@@ -432,6 +432,49 @@ canvas:hover {
   z-index: 10;
 }
 
+/* Image/Camera source selector shared by camera demos (see createModeSelector). */
+.mode-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.9rem;
+  color: #555;
+  user-select: none;
+}
+.mode-select .mode-label {
+  color: #333;
+}
+.mode-select label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.mode-select input {
+  accent-color: #007bff;
+  margin: 0;
+  cursor: pointer;
+}
+.mode-select.disabled {
+  opacity: 0.6;
+}
+.mode-select.disabled label {
+  cursor: not-allowed;
+}
+/* Face alignment: mode selector and the Align button share one row above the crop. */
+#mode-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+#mode-row #align-button {
+  margin: 0;
+  padding: 8px 18px;
+  min-height: 0;
+}
+
 /* Button styles - unified across all examples (excluding copy buttons) */
 button:not(.copy-button), #toggle-button, #align-button, #remove-button, #webcamToggleButton, #toggleButton {
   padding: 12px 24px;

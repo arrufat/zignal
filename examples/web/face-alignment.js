@@ -1,5 +1,5 @@
 (function () {
-  const { createFileInput, enableDrop } = window.ZignalUtils;
+  const { createFileInput, enableDrop, createModeSelector } = window.ZignalUtils;
 
   async function setupMediaPipeLandmarks(mode, delegate) {
     const mediapipeVersion = "0.10.15";
@@ -21,7 +21,7 @@
   const canvasFace = document.getElementById("canvas-face");
   const ctx1 = canvasWebcam.getContext("2d", { willReadFrequently: true });
   const ctx2 = canvasFace.getContext("2d", { willReadFrequently: true });
-  const toggleButton = document.getElementById("toggle-button");
+  const modeSlot = document.getElementById("mode-select-slot");
   const alignButton = document.getElementById("align-button");
   let mediaStream = undefined;
   let faceLandmarker = undefined;
@@ -47,14 +47,8 @@
     sizeElement.textContent = "size: " + canvasWebcam.width + "×" + canvasWebcam.height + " px.";
   }
 
-  toggleButton.disabled = true;
-  toggleButton.addEventListener("click", () => {
-    if (mediaStream) {
-      stopMediaStream();
-    } else {
-      startMediaStream();
-    }
-  });
+  const modeSelect = createModeSelector({ onImage: stopMediaStream, onCamera: startMediaStream });
+  modeSlot.appendChild(modeSelect.element);
 
   alignButton.disabled = true;
   alignButton.addEventListener("click", () => {
@@ -81,15 +75,17 @@
   }
 
   const fileInput = createFileInput(function (file) {
+    stopMediaStream();
     displayImage(file);
     alignButton.disabled = false;
   });
 
   enableDrop(canvasWebcam, {
     onClick: function () {
-      fileInput.click();
+      if (!mediaStream) fileInput.click();
     },
     onDrop: function (file) {
+      stopMediaStream();
       displayImage(file);
       alignButton.disabled = false;
     },
@@ -107,7 +103,6 @@
       requestAnimationFrame(loop);
     }
 
-    toggleButton.textContent = "Stop";
     navigator.mediaDevices
       .getUserMedia({ video: true })
       .then((stream) => {
@@ -122,18 +117,19 @@
         };
       })
       .catch((error) => {
+        modeSelect.selectImage();
         console.error("Error accessing webcam:", error);
       });
   }
 
   function stopMediaStream() {
-    toggleButton.textContent = "Start";
     if (mediaStream) {
       mediaStream.getTracks().forEach((track) => track.stop());
       mediaStream = null;
       video.srcObject = null;
       ctx1.clearRect(0, 0, canvasWebcam.width, canvasWebcam.height);
       ctx2.clearRect(0, 0, canvasFace.width, canvasFace.height);
+      modeSelect.selectImage();
     }
   }
 
@@ -168,7 +164,7 @@
     window.wasm = obj;
     setupMediaPipeLandmarks("IMAGE", "GPU").then(function (landmarker) {
       faceLandmarker = landmarker;
-      toggleButton.disabled = false;
+      modeSelect.setDisabled(false);
 
       let rgbaPtr = null;
       let outPtr = null;
