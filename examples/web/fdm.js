@@ -1,5 +1,5 @@
 (function () {
-  const { createFileInput, enableDrop, createImageLoadHandler } = window.ZignalUtils;
+  const { createFileInput, enableDrop, createImageLoadHandler, loadWasm } = window.ZignalUtils;
 
   const canvasSrc = document.getElementById("canvas-src");
   const canvasRef = document.getElementById("canvas-ref");
@@ -16,15 +16,6 @@
   let srcReady = false;
   let refReady = false;
   let wasm_exports = null;
-
-  const text_decoder = new TextDecoder();
-
-  function decodeString(ptr, len) {
-    if (len === 0) return "";
-    return text_decoder.decode(new Uint8Array(wasm_exports.memory.buffer, ptr, len));
-  }
-
-  // Removed resizeCanvases function - using CSS scaling instead
 
   function displayImage(canvas, ctx, file, isSource) {
     return new Promise((resolve, reject) => {
@@ -179,24 +170,8 @@
     wasm_exports.free(extraPtr, extraSize);
   });
 
-  // Load WASM module
-  fetch("fdm.wasm")
-    .then((response) =>
-      WebAssembly.instantiateStreaming(response, {
-        js: {
-          log: function (ptr, len) {
-            const msg = decodeString(ptr, len);
-            console.log(msg);
-          },
-          now: function () {
-            return performance.now();
-          },
-        },
-      }),
-    )
-    .then(function (obj) {
-      window.wasm = obj;
-      wasm_exports = obj.instance.exports;
-      matchButton.disabled = false;
-    });
+  loadWasm("fdm.wasm").then(function (api) {
+    wasm_exports = api.exports;
+    matchButton.disabled = false;
+  });
 })();

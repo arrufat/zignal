@@ -1,5 +1,5 @@
 (function () {
-  const { createFileInput, enableDrop, createModeSelector } = window.ZignalUtils;
+  const { createFileInput, enableDrop, createModeSelector, loadWasm } = window.ZignalUtils;
 
   const video = document.getElementById("video");
   const canvasWebcam = document.getElementById("scan-canvas");
@@ -11,7 +11,6 @@
   const openLink = document.getElementById("open-link");
   const encodeText = document.getElementById("encode-text");
   const ecLevel = document.getElementById("ec-level");
-  const placeholder = document.getElementById("scan-placeholder");
   const decodedElement = document.getElementById("decoded");
   const timeElement = document.getElementById("scan-status");
   const encodeStatus = document.getElementById("encode-status");
@@ -22,8 +21,8 @@
   const maxQrSide = 185;
 
   let wasm_exports = null;
-  const text_decoder = new TextDecoder();
   const text_encoder = new TextEncoder();
+  let decodeString;
   // Scratch canvas for the 1-pixel-per-module blit in encode().
   const small = document.createElement("canvas");
 
@@ -33,13 +32,7 @@
   let cornersPtr = null;
   let qrPtr = null;
 
-  function decodeString(ptr, len) {
-    if (len === 0) return "";
-    return text_decoder.decode(new Uint8Array(wasm_exports.memory.buffer, ptr, len));
-  }
-
   function setStageActive(active) {
-    placeholder.style.display = active ? "none" : "";
     canvasWebcam.classList.toggle("live", active);
   }
 
@@ -238,18 +231,9 @@
     });
   });
 
-  WebAssembly.instantiateStreaming(fetch("qrcode.wasm"), {
-    js: {
-      log: function (ptr, len) {
-        console.log(decodeString(ptr, len));
-      },
-      now: function () {
-        return performance.now();
-      },
-    },
-  }).then(function (obj) {
-    wasm_exports = obj.instance.exports;
-    window.wasm = obj;
+  loadWasm("qrcode.wasm").then(function (api) {
+    wasm_exports = api.exports;
+    decodeString = api.decodeString;
     textPtr = wasm_exports.alloc(maxTextLen) >>> 0;
     cornersPtr = wasm_exports.alloc(8 * 4) >>> 0;
     qrPtr = wasm_exports.alloc(maxQrSide * maxQrSide * 4) >>> 0;

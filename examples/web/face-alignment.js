@@ -1,5 +1,5 @@
 (function () {
-  const { createFileInput, enableDrop, createModeSelector } = window.ZignalUtils;
+  const { createFileInput, enableDrop, createModeSelector, loadWasm } = window.ZignalUtils;
 
   async function setupMediaPipeLandmarks(mode, delegate) {
     const mediapipeVersion = "0.10.15";
@@ -47,6 +47,10 @@
     sizeElement.textContent = "size: " + canvasWebcam.width + "×" + canvasWebcam.height + " px.";
   }
 
+  function setStageActive(active) {
+    canvasWebcam.classList.toggle("live", active);
+  }
+
   const modeSelect = createModeSelector({ onImage: stopMediaStream, onCamera: startMediaStream });
   modeSlot.appendChild(modeSelect.element);
 
@@ -69,6 +73,7 @@
         original = new ImageData(image.width, image.height);
         original.data.set(image.data);
         displayImageSize();
+        setStageActive(true);
       };
     };
     reader.readAsDataURL(file);
@@ -113,6 +118,7 @@
         video.onloadedmetadata = () => {
           canvasWebcam.width = video.videoWidth;
           canvasWebcam.height = video.videoHeight;
+          setStageActive(true);
           loop(processFn);
         };
       })
@@ -130,18 +136,13 @@
       ctx1.clearRect(0, 0, canvasWebcam.width, canvasWebcam.height);
       ctx2.clearRect(0, 0, canvasFace.width, canvasFace.height);
       modeSelect.selectImage();
+      setStageActive(false);
     }
   }
 
-  let wasm_promise = fetch("face_alignment.wasm");
   var wasm_exports = null;
-  const text_decoder = new TextDecoder();
   const text_encoder = new TextEncoder();
-
-  function decodeString(ptr, len) {
-    if (len === 0) return "";
-    return text_decoder.decode(new Uint8Array(wasm_exports.memory.buffer, ptr, len));
-  }
+  let decodeString;
 
   function unwrapString(bigint) {
     const ptr = Number(bigint & 0xffffffffn);
@@ -149,19 +150,9 @@
     return decodeString(ptr, len);
   }
 
-  WebAssembly.instantiateStreaming(wasm_promise, {
-    js: {
-      log: function (ptr, len) {
-        const msg = decodeString(ptr, len);
-        console.log(msg);
-      },
-      now: function () {
-        return performance.now();
-      },
-    },
-  }).then(function (obj) {
-    wasm_exports = obj.instance.exports;
-    window.wasm = obj;
+  loadWasm("face_alignment.wasm").then(function (api) {
+    wasm_exports = api.exports;
+    decodeString = api.decodeString;
     setupMediaPipeLandmarks("IMAGE", "GPU").then(function (landmarker) {
       faceLandmarker = landmarker;
       modeSelect.setDisabled(false);
@@ -200,7 +191,6 @@
             lastOutCols = outCols;
         }
 
-        // Now we can proceed to map all the memory to JavaScript
         let rgba = new Uint8ClampedArray(wasm_exports.memory.buffer, rgbaPtr, rgbaSize);
         let landmarks = new Float32Array(wasm_exports.memory.buffer, landmarksPtr, landmarksCount * 2);
         image = ctx1.getImageData(0, 0, cols, rows);
@@ -212,7 +202,6 @@
           return;
         }
 
-        // fill the landmarks
         for (let i = 0; i < faceLandmarks[0].length; ++i) {
           landmarks[i * 2 + 0] = faceLandmarks[0][i].x;
           landmarks[i * 2 + 1] = faceLandmarks[0][i].y;

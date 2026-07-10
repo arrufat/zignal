@@ -39,38 +39,6 @@
         color: #333;
         font-size: 1.1rem;
       }
-      .scan-stage {
-        position: relative;
-      }
-      .scan-stage canvas {
-        display: block;
-        width: 100%;
-        max-width: none;
-        height: auto;
-        border: 2px dashed #bbb;
-        border-radius: 6px;
-        cursor: pointer;
-      }
-      .scan-stage canvas.live {
-        border: 2px solid #333;
-        cursor: default;
-      }
-      #scan-placeholder {
-        position: absolute;
-        inset: 0;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        color: #888;
-        text-align: center;
-        font-size: 0.95rem;
-        pointer-events: none;
-      }
-      #scan-placeholder .icon {
-        opacity: 0.7;
-      }
       /* Scoped as .qr-card .qr-button to outrank the shared stylesheet's
          button:not(.copy-button) rule, so <button> and <a> render alike. */
       .qr-card .qr-button {
@@ -214,7 +182,7 @@
         <div class="scan-stage">
           <video id="video" width="1" height="1" style="display:none"></video>
           <canvas id="scan-canvas" width="640" height="480"></canvas>
-          <div id="scan-placeholder">
+          <div class="scan-placeholder">
             <svg class="icon" viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
               <circle cx="12" cy="13" r="3.5"/>
