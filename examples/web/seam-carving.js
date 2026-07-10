@@ -1,9 +1,7 @@
 (function () {
-  const { createFileInput, enableDrop, createImageLoadHandler } = window.ZignalUtils;
+  const { createFileInput, enableDrop, createImageLoadHandler, loadWasm } = window.ZignalUtils;
 
-  let wasmPromise = fetch("seam_carving.wasm");
   var wasmExports = null;
-  const text_decoder = new TextDecoder();
   let image = null;
   let originalWidth = 0;
   let originalHeight = 0;
@@ -16,7 +14,6 @@
   const ctx = canvas.getContext("2d");
   const seamOverlay = document.getElementById("seam-overlay");
 
-  // Disable button initially
   removeButton.disabled = true;
 
   function displayImageSize() {
@@ -104,28 +101,11 @@
     onDrop: handleImageFile,
   });
 
-  function decodeString(ptr, len) {
-    if (len === 0) return "";
-    return text_decoder.decode(new Uint8Array(wasmExports.memory.buffer, ptr, len));
-  }
-
-  WebAssembly.instantiateStreaming(wasmPromise, {
-    js: {
-      log: function (ptr, len) {
-        const msg = decodeString(ptr, len);
-        console.log(msg);
-      },
-      now: function () {
-        return performance.now();
-      },
-    },
-  }).then(function (obj) {
-    wasmExports = obj.instance.exports;
-    window.wasm = obj;
+  loadWasm("seam_carving.wasm").then(function (api) {
+    wasmExports = api.exports;
     console.log("wasm loaded");
 
     function seamCarve() {
-      // Clear all previous seams at the start
       clearSeamOverlay();
 
       const rows = cleanImageData.height;
@@ -148,13 +128,11 @@
       rgba = new Uint8ClampedArray(wasmExports.memory.buffer, rgbaPtr, rgbaSize);
       seam = new Uint32Array(wasmExports.memory.buffer, seamPtr, cleanImageData.height);
 
-      // Create new clean image data after seam removal
       const newWidth = cols - 1;
       const newCleanImageData = new ImageData(newWidth, rows);
       const newRgba = new Uint8ClampedArray(wasmExports.memory.buffer, rgbaPtr, newWidth * rows * 4);
       newCleanImageData.data.set(newRgba);
 
-      // Clear canvas and center the new image
       ctx.clearRect(0, 0, originalWidth, originalHeight);
       const newOffsetX = Math.floor((originalWidth - newWidth) / 2);
       ctx.putImageData(newCleanImageData, newOffsetX, 0);
@@ -162,7 +140,6 @@
       // Draw seam overlay using SVG (doesn't modify canvas pixels)
       drawSeamOverlay(seam, currentImageX);
 
-      // Update tracking variables for next iteration
       currentImageX = newOffsetX;
       cleanImageData = newCleanImageData;
       image = newCleanImageData;

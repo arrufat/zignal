@@ -1,5 +1,5 @@
 (function () {
-  const { createFileInput, enableDrop, createImageLoadHandler } = window.ZignalUtils;
+  const { createFileInput, enableDrop, createImageLoadHandler, loadWasm } = window.ZignalUtils;
 
   const originalCanvas = document.getElementById("canvas-original");
   const processedCanvas = document.getElementById("canvas-processed");
@@ -19,7 +19,6 @@
   const statsProcessedEl = document.getElementById("stats-processed");
   const statusLine = document.getElementById("status");
 
-  const textDecoder = new TextDecoder();
   let wasmExports = null;
   let wasmMemory = null;
 
@@ -216,10 +215,7 @@
     });
   }
 
-  function decodeString(ptr, len) {
-    if (!wasmMemory || len === 0) return "";
-    return textDecoder.decode(new Uint8Array(wasmMemory.buffer, ptr, len));
-  }
+  let decodeString;
 
   function runWithWasm(transform, sourcePixels) {
     if (!wasmExports || !(sourcePixels || currentPixels)) {
@@ -331,32 +327,12 @@
   updateCutoffLabel();
   updateButtons();
 
-  function instantiateWasm() {
-    const imports = {
-      js: {
-        log: function (ptr, len) {
-          const message = decodeString(ptr, len);
-          if (message) console.log(message);
-        },
-        now: function () {
-          return performance.now();
-        },
-      },
-    };
-
-    return WebAssembly.instantiateStreaming(fetch("contrast_enhancement.wasm"), imports).catch(function (error) {
-      console.warn("Streaming instantiate failed, retrying with ArrayBuffer. Reason:", error);
-      return fetch("contrast_enhancement.wasm")
-        .then((response) => response.arrayBuffer())
-        .then((buffer) => WebAssembly.instantiate(buffer, imports));
-    });
-  }
-
-  instantiateWasm()
-    .then(function (obj) {
-      wasmExports = obj.instance.exports;
+  loadWasm("contrast_enhancement.wasm")
+    .then(function (api) {
+      wasmExports = api.exports;
+      decodeString = api.decodeString;
       wasmMemory = wasmExports.memory;
-      window.zignalContrast = obj;
+      window.zignalContrast = api.exports;
       updateStatus("WASM ready. Generate a sample or drop an image.");
       updateButtons();
     })

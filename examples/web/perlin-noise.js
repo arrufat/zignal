@@ -1,26 +1,9 @@
 (function() {
-  let wasm_promise = fetch("perlin_noise.wasm");
+  const { loadWasm } = window.ZignalUtils;
   var wasm_exports = null;
-  const text_decoder = new TextDecoder();
 
-  function decodeString(ptr, len) {
-    if (len === 0) return "";
-    return text_decoder.decode(new Uint8Array(wasm_exports.memory.buffer, ptr, len));
-  }
-
-  WebAssembly.instantiateStreaming(wasm_promise, {
-    js: {
-      log: function(ptr, len) {
-        const msg = decodeString(ptr, len);
-        console.log(msg);
-      },
-      now: function() {
-        return performance.now();
-      },
-    },
-  }).then(function(obj) {
-    wasm_exports = obj.instance.exports;
-    window.wasm = obj;
+  loadWasm("perlin_noise.wasm").then(function(api) {
+    wasm_exports = api.exports;
     console.log("wasm loaded");
     const canvas = document.getElementById("canvas-perlin");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });

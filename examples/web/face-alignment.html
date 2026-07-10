@@ -13,15 +13,19 @@
       <p>Detect faces in real-time and extract aligned face crops for further processing</p>
     </div>
 
-    <div class="instructions">
-      Choose Camera for live detection, or drop an image file to process it.
-    </div>
-
     <div id="image-container">
-      <video id="video" width="1" height="1"></video>
-      <canvas id="canvas-webcam" width="640" height="480"></canvas>
+      <div class="scan-stage">
+        <video id="video" width="1" height="1" style="display:none"></video>
+        <canvas id="canvas-webcam" width="640" height="480"></canvas>
+        <div class="scan-placeholder">
+          <svg class="icon" viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <circle cx="12" cy="13" r="3.5"/>
+          </svg>
+          <span>Switch to Camera,<br>or click / drop an image here</span>
+        </div>
+      </div>
       <fieldset class="settings-container">
-        <legend style="color:black;font-weight:bold;font-family:sans-serif;">Choose a source or drop an image</legend>
         <div id="form">
           <div id="mode-row">
             <div id="mode-select-slot"></div>
