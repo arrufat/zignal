@@ -12,29 +12,30 @@
       <p>Real-time white balance correction on webcam feed with customizable reference color</p>
     </div>
     <div class="instructions">
-      Use your webcam to see real-time white balance correction. Adjust the reference color and toggle the effect.
+      Real-time white balance on your webcam. Pick a reference color for custom correction, or turn on gray-world for automatic estimation.
     </div>
     <div id="image-container">
       <video id="video" style="display:none;"></video>
       <canvas id="canvas-webcam"></canvas>
     </div>
     <div class="controls">
-      <button id="webcamToggleButton">Turn Off Webcam</button>
-      <button id="toggleButton">Turn Off White Balance</button>
-      <div>
-        <label for="colorPicker">White Balance Color:</label>
-        <input type="color" id="colorPicker" value="#ffffff">
+      <div id="wb-controls">
+        <input type="color" id="colorPicker" value="#ffffff" title="Reference color" aria-label="Reference color">
+        <div id="wb-toggles">
+          <div id="wb-toggle-slot"></div>
+          <div id="grayworld-slot"></div>
+        </div>
       </div>
     </div>
+    <script src="utils.js"></script>
     <script>
       const video = document.getElementById('video');
     const canvas = document.getElementById('canvas-webcam');
     const ctx = canvas.getContext('2d');
-    const toggleButton = document.getElementById('toggleButton');
-    const webcamToggleButton = document.getElementById('webcamToggleButton');
+    const { createRadioGroup } = window.ZignalUtils;
     const colorPicker = document.getElementById('colorPicker');
     let isBalanced = true;
-    let isWebcamOn = true;
+    let isGrayWorld = false;
     let currentR = 255;
     let currentG = 255;
     let currentB = 255;
@@ -42,6 +43,23 @@
     const textDecoder = new TextDecoder();
     let rgbaPtr = null;
     let rgbaSize = 0;
+
+    const onOff = [
+      { value: 'on', label: 'On' },
+      { value: 'off', label: 'Off' },
+    ];
+
+    const wbToggle = createRadioGroup({
+      label: 'White balance', name: 'wb', options: onOff, value: 'on', disabled: false,
+      onChange: (v) => { isBalanced = v === 'on'; updateUI(); },
+    });
+    document.getElementById('wb-toggle-slot').appendChild(wbToggle.element);
+
+    const grayWorldToggle = createRadioGroup({
+      label: 'Gray-world', name: 'grayworld', options: onOff, value: 'off', disabled: false,
+      onChange: (v) => { isGrayWorld = v === 'on'; updateUI(); },
+    });
+    document.getElementById('grayworld-slot').appendChild(grayWorldToggle.element);
 
     navigator.mediaDevices.getUserMedia({ video: true })
       .then(stream => {
@@ -75,41 +93,31 @@
       window.wasm = obj;
 
       function process() {
-        if (isWebcamOn) {
-          if (video.readyState === video.HAVE_ENOUGH_DATA) {
-            if (rgbaPtr === null && canvas.width > 0 && canvas.height > 0) {
-              rgbaSize = canvas.width * canvas.height * 4;
-              rgbaPtr = wasmExports.alloc(rgbaSize);
-              if (rgbaPtr < 0) {
-                console.error('Failed to allocate memory:', rgbaPtr);
-              }
-            }
-            if (rgbaPtr !== null) {
-              let rgba = new Uint8ClampedArray(wasmExports.memory.buffer, rgbaPtr, rgbaSize);
-              
-              // Mirror the camera image horizontally
-              ctx.save();
-              ctx.scale(-1, 1);
-              ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
-              ctx.restore();
-              
-              if (isBalanced) {
-                let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                rgba.set(imageData.data);
-                wasmExports.whitebalance(rgbaPtr, canvas.height, canvas.width, currentR, currentG, currentB);
-                imageData.data.set(rgba);
-                ctx.putImageData(imageData, 0, 0);
-              }
+        if (video.readyState === video.HAVE_ENOUGH_DATA) {
+          if (rgbaPtr === null && canvas.width > 0 && canvas.height > 0) {
+            rgbaSize = canvas.width * canvas.height * 4;
+            rgbaPtr = wasmExports.alloc(rgbaSize);
+            if (rgbaPtr < 0) {
+              console.error('Failed to allocate memory:', rgbaPtr);
             }
           }
-        } else {
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.fillStyle = 'black';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.fillStyle = 'white';
-          ctx.font = '30px Arial';
-          ctx.textAlign = 'center';
-          ctx.fillText('Webcam is off', canvas.width / 2, canvas.height / 2);
+          if (rgbaPtr !== null) {
+            let rgba = new Uint8ClampedArray(wasmExports.memory.buffer, rgbaPtr, rgbaSize);
+
+            // Mirror the camera image horizontally
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            if (isBalanced) {
+              let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              rgba.set(imageData.data);
+              wasmExports.whitebalance(rgbaPtr, canvas.height, canvas.width, currentR, currentG, currentB, isGrayWorld ? 1 : 0);
+              imageData.data.set(rgba);
+              ctx.putImageData(imageData, 0, 0);
+            }
+          }
         }
         requestAnimationFrame(process);
       }
@@ -124,44 +132,11 @@
       currentB = parseInt(color.substr(5, 2), 16);
     });
 
-    toggleButton.addEventListener('click', () => {
-      isBalanced = !isBalanced;
-      toggleButton.textContent = isBalanced ? 'Turn Off White Balance' : 'Turn On White Balance';
-      updateUI();
-    });
-
-    webcamToggleButton.addEventListener('click', () => {
-      if (isWebcamOn) {
-        if (video.srcObject) {
-          video.srcObject.getTracks().forEach(track => track.stop());
-          video.srcObject = null;
-        }
-        isWebcamOn = false;
-        webcamToggleButton.textContent = 'Turn On Webcam';
-      } else {
-        navigator.mediaDevices.getUserMedia({ video: true })
-          .then(stream => {
-            video.srcObject = stream;
-            video.play();
-            isWebcamOn = true;
-            webcamToggleButton.textContent = 'Turn Off Webcam';
-            updateUI();
-          })
-          .catch(err => {
-            console.error('Error accessing webcam:', err);
-          });
-      }
-      updateUI();
-    });
-
     function updateUI() {
-      if (isWebcamOn) {
-        toggleButton.disabled = false;
-        colorPicker.disabled = !isBalanced;
-      } else {
-        toggleButton.disabled = true;
-        colorPicker.disabled = true;
-      }
+      // Gray-world is only meaningful when white balance is on; the reference
+      // color only matters in custom (non-gray-world) mode.
+      grayWorldToggle.setDisabled(!isBalanced);
+      colorPicker.disabled = !isBalanced || isGrayWorld;
     }
 
     updateUI();
