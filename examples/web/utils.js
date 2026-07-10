@@ -43,11 +43,10 @@
     };
   }
 
-  // A native "Image / Camera" radio group for demos that accept either an
-  // uploaded image or a live camera feed. onImage/onCamera fire only on user
-  // selection; selectImage/selectCamera flip the state silently (no callback),
-  // for when the demo switches modes itself (e.g. an image was dropped).
-  function createModeSelector({ onImage, onCamera, name = "input-mode", label = "Mode" }) {
+  // A native radio group styled via `.mode-select`. `options` is a list of
+  // { value, label }; onChange fires with the chosen value on user selection.
+  // `select` flips state silently (no callback). Starts disabled by default.
+  function createRadioGroup({ label, name, options, value, onChange, disabled = true }) {
     const group = document.createElement("div");
     group.className = "mode-select";
     group.setAttribute("role", "radiogroup");
@@ -58,46 +57,74 @@
     caption.textContent = label;
     group.appendChild(caption);
 
-    function makeOption(value, text, checked) {
+    const inputs = {};
+    options.forEach(function (opt) {
       const wrap = document.createElement("label");
       const input = document.createElement("input");
       input.type = "radio";
       input.name = name;
-      input.value = value;
-      input.checked = checked;
-      input.disabled = true;
+      input.value = opt.value;
+      input.checked = opt.value === value;
+      input.disabled = disabled;
+      input.addEventListener("change", function () {
+        if (input.checked && onChange) onChange(opt.value);
+      });
       wrap.appendChild(input);
-      wrap.appendChild(document.createTextNode(" " + text));
+      wrap.appendChild(document.createTextNode(" " + opt.label));
       group.appendChild(wrap);
-      return input;
-    }
-
-    const imageInput = makeOption("image", "Image", true);
-    const cameraInput = makeOption("camera", "Camera", false);
-    group.classList.add("disabled");
-
-    imageInput.addEventListener("change", function () {
-      if (imageInput.checked && onImage) onImage();
+      inputs[opt.value] = input;
     });
-    cameraInput.addEventListener("change", function () {
-      if (cameraInput.checked && onCamera) onCamera();
-    });
+    group.classList.toggle("disabled", disabled);
 
     return {
       element: group,
+      value: function () {
+        for (const v in inputs) if (inputs[v].checked) return v;
+        return undefined;
+      },
+      select: function (v) {
+        if (inputs[v]) inputs[v].checked = true;
+      },
+      setDisabled: function (d) {
+        for (const v in inputs) inputs[v].disabled = d;
+        group.classList.toggle("disabled", d);
+      },
+    };
+  }
+
+  // "Image / Camera" source selector, built on createRadioGroup. onImage/onCamera
+  // fire only on user selection; selectImage/selectCamera flip state silently,
+  // for when the demo switches modes itself (e.g. an image was dropped).
+  function createModeSelector({ onImage, onCamera, name = "input-mode", label = "Mode" }) {
+    const group = createRadioGroup({
+      label: label,
+      name: name,
+      value: "image",
+      options: [
+        { value: "image", label: "Image" },
+        { value: "camera", label: "Camera" },
+      ],
+      onChange: function (v) {
+        if (v === "camera") {
+          if (onCamera) onCamera();
+        } else if (onImage) {
+          onImage();
+        }
+      },
+    });
+    return {
+      element: group.element,
       selectImage: function () {
-        imageInput.checked = true;
+        group.select("image");
       },
       selectCamera: function () {
-        cameraInput.checked = true;
+        group.select("camera");
       },
       isCamera: function () {
-        return cameraInput.checked;
+        return group.value() === "camera";
       },
-      setDisabled: function (disabled) {
-        imageInput.disabled = disabled;
-        cameraInput.disabled = disabled;
-        group.classList.toggle("disabled", disabled);
+      setDisabled: function (d) {
+        group.setDisabled(d);
       },
     };
   }
@@ -106,6 +133,7 @@
     createFileInput,
     enableDrop,
     createImageLoadHandler,
+    createRadioGroup,
     createModeSelector,
   };
 })();

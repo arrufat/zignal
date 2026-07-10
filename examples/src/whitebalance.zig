@@ -1,7 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const Image = @import("zignal").Image;
 const Rgba = @import("zignal").Rgba(u8);
 const Rgb = @import("zignal").Rgb(u8);
 const Xyz = @import("zignal").Xyz(f64);
@@ -31,50 +30,36 @@ const RgbGains = struct {
     b: f64,
 };
 
-fn estimateIlluminant(image: Image(Rgba), color: Rgb, fraction: f64) RgbGains {
+fn illuminantFromReference(color: Rgb) RgbGains {
+    // Custom white balance: treat the picked color as the illuminant — the color
+    // a neutral surface takes under the current light. Normalizing it to unit
+    // average yields the per-channel gains that map it back to neutral, which the
+    // adaptation then applies to the whole frame. Clamp channels to one 8-bit step
+    // so a saturated pick can't divide by zero.
+    const c = color.as(f64);
+    const eps = 1.0 / 255.0;
+    const r = @max(c.r, eps);
+    const g = @max(c.g, eps);
+    const b = @max(c.b, eps);
+    const avg = (r + g + b) / 3.0;
+    return .{ .r = r / avg, .g = g / avg, .b = b / avg };
+}
+
+fn illuminantFromScene(pixels: []const Rgba) RgbGains {
+    // Auto white balance: gray-world assumes the scene averages to neutral, so the
+    // per-channel average is the illuminant. Normalizing to unit average gives the
+    // gains — no reference color needed.
     var sum_r: f64 = 0;
     var sum_g: f64 = 0;
     var sum_b: f64 = 0;
-    // Compute the average color per channel
-    const sep: usize = @trunc(@as(f32, @floatFromInt(image.rows)) * fraction);
-    const size: f64 = @floatFromInt(image.cols * image.rows);
-
-    // Process original pixels up to separation point
-    const sep_pixels = sep * image.cols;
-    var i: usize = 0;
-    while (i + 4 <= sep_pixels) : (i += 4) {
-        const p0 = image.data[i];
-        const p1 = image.data[i + 1];
-        const p2 = image.data[i + 2];
-        const p3 = image.data[i + 3];
-
-        sum_r += @as(f64, @floatFromInt(p0.r)) + @as(f64, @floatFromInt(p1.r)) + @as(f64, @floatFromInt(p2.r)) + @as(f64, @floatFromInt(p3.r));
-        sum_g += @as(f64, @floatFromInt(p0.g)) + @as(f64, @floatFromInt(p1.g)) + @as(f64, @floatFromInt(p2.g)) + @as(f64, @floatFromInt(p3.g));
-        sum_b += @as(f64, @floatFromInt(p0.b)) + @as(f64, @floatFromInt(p1.b)) + @as(f64, @floatFromInt(p2.b)) + @as(f64, @floatFromInt(p3.b));
+    for (pixels) |p| {
+        const c = p.as(f64);
+        sum_r += c.r;
+        sum_g += c.g;
+        sum_b += c.b;
     }
-    while (i < sep_pixels) : (i += 1) {
-        const p = image.data[i];
-        sum_r += @floatFromInt(p.r);
-        sum_g += @floatFromInt(p.g);
-        sum_b += @floatFromInt(p.b);
-    }
-
-    // Process remaining pixels with color replacement
-    for (sep..image.rows) |r| {
-        for (0..image.cols) |c| {
-            const p = image.at(r, c);
-            p.r = color.r;
-            p.g = color.g;
-            p.b = color.b;
-            sum_r += @floatFromInt(p.r);
-            sum_g += @floatFromInt(p.g);
-            sum_b += @floatFromInt(p.b);
-        }
-    }
-    sum_r /= size;
-    sum_g /= size;
-    sum_b /= size;
     const avg = (sum_r + sum_g + sum_b) / 3.0;
+    if (avg <= 0) return .{ .r = 1, .g = 1, .b = 1 };
     return .{ .r = sum_r / avg, .g = sum_g / avg, .b = sum_b / avg };
 }
 
@@ -159,10 +144,11 @@ fn whitebalanceSimd(pixels: []Rgba, w: RgbGains) void {
     }
 }
 
-pub export fn whitebalance(rgba_ptr: [*]Rgba, rows: u32, cols: u32, r: u8, g: u8, b: u8) void {
-    const color: Rgb = .{ .r = r, .g = g, .b = b };
-    std.log.info("color: {}, {}, {}\n", color);
-    const image: Image(Rgba) = .initFromSlice(rows, cols, rgba_ptr[0 .. @as(usize, rows) * cols]);
-    const w = estimateIlluminant(image, color, 0.7);
-    whitebalanceSimd(image.data, w);
+pub export fn whitebalance(rgba_ptr: [*]Rgba, rows: u32, cols: u32, r: u8, g: u8, b: u8, gray_world: bool) void {
+    const pixels = rgba_ptr[0 .. @as(usize, rows) * cols];
+    const w = if (gray_world)
+        illuminantFromScene(pixels)
+    else
+        illuminantFromReference(.{ .r = r, .g = g, .b = b });
+    whitebalanceSimd(pixels, w);
 }
