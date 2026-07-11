@@ -606,11 +606,12 @@ const image_format_doc =
     \\
     \\  **Formats:**
     \\  - `''` (empty): Text representation (e.g., 'Image(800x600)')
-    \\  - `'auto'`: Auto-detect best format (kitty → sixel → sgr)
+    \\  - `'auto'`: Auto-detect best format (kitty → iterm2 → sixel → sgr)
     \\  - `'sgr'`: Unicode half-blocks with 24-bit color
     \\  - `'braille'`: Braille patterns (monochrome, 2x4 resolution per character)
     \\  - `'sixel'`: Sixel graphics protocol (up to 256 colors)
     \\  - `'kitty'`: Kitty graphics protocol (full 24-bit color)
+    \\  - `'iterm2'`: iTerm2 inline image protocol (full 24-bit color)
     \\
     \\  **Size constraints (optional):**
     \\  All size parameters maintain the original aspect ratio:
@@ -628,6 +629,7 @@ const image_format_doc =
     \\print(f"{img:braille}")   # Display with braille patterns
     \\print(f"{img:sixel}")     # Display with sixel graphics
     \\print(f"{img:kitty}")     # Display with kitty graphics
+    \\print(f"{img:iterm2}")    # Display with iTerm2 inline images
     \\print(f"{img:auto}")      # Auto-detect best format
     \\
     \\# With size constraints (aspect ratio always preserved)
@@ -753,6 +755,27 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
                 .interpolation = .bilinear,
             },
         };
+    } else if (std.mem.eql(u8, spec_slice, "iterm2"))
+        .{ .iterm2 = .default }
+    else if (std.mem.startsWith(u8, spec_slice, "iterm2:")) blk: {
+        // Parse iterm2 with dimensions: "iterm2:WIDTHxHEIGHT"
+        const dims_str = spec_slice[7..]; // Skip "iterm2:"
+
+        const dims = parseDimensions(dims_str) catch |err| {
+            const msg = switch (err) {
+                error.InvalidFormat => "Invalid iterm2 format. Use 'iterm2:WIDTHxHEIGHT', 'iterm2:WIDTHx', or 'iterm2:xHEIGHT'",
+                error.InvalidWidth => "Invalid width value in iterm2 format",
+                error.InvalidHeight => "Invalid height value in iterm2 format",
+            };
+            c.PyErr_SetString(c.PyExc_ValueError, msg);
+            return null;
+        };
+
+        // Create iterm2 options with custom dimensions (in pixels)
+        break :blk .{ .iterm2 = .{
+            .width = dims.width,
+            .height = dims.height,
+        } };
     } else if (std.mem.eql(u8, spec_slice, "auto"))
         .{ .auto = .default }
     else if (std.mem.startsWith(u8, spec_slice, "auto:")) blk: {
@@ -790,12 +813,16 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
         // Invalid kitty format that doesn't match "kitty" or "kitty:..."
         c.PyErr_SetString(c.PyExc_ValueError, "Invalid kitty format. Use 'kitty' or 'kitty:WIDTHxHEIGHT' (e.g., 'kitty:800x600', 'kitty:800x', 'kitty:x600')");
         return null;
+    } else if (std.mem.startsWith(u8, spec_slice, "iterm2")) {
+        // Invalid iterm2 format that doesn't match "iterm2" or "iterm2:..."
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid iterm2 format. Use 'iterm2' or 'iterm2:WIDTHxHEIGHT' (e.g., 'iterm2:800x600', 'iterm2:800x', 'iterm2:x600')");
+        return null;
     } else if (std.mem.startsWith(u8, spec_slice, "auto")) {
         // Invalid auto format that doesn't match "auto" or "auto:..."
         c.PyErr_SetString(c.PyExc_ValueError, "Invalid auto format. Use 'auto' or 'auto:WIDTHxHEIGHT' (e.g., 'auto:800x600', 'auto:800x', 'auto:x600')");
         return null;
     } else {
-        c.PyErr_SetString(c.PyExc_ValueError, "Invalid format spec. Use '', 'sgr', 'sgr:WIDTHxHEIGHT', 'braille', 'braille:WIDTHxHEIGHT', 'sixel', 'sixel:WIDTHxHEIGHT', 'kitty', 'kitty:WIDTHxHEIGHT', 'auto', or 'auto:WIDTHxHEIGHT'");
+        c.PyErr_SetString(c.PyExc_ValueError, "Invalid format spec. Use '', 'sgr', 'sgr:WIDTHxHEIGHT', 'braille', 'braille:WIDTHxHEIGHT', 'sixel', 'sixel:WIDTHxHEIGHT', 'kitty', 'kitty:WIDTHxHEIGHT', 'iterm2', 'iterm2:WIDTHxHEIGHT', 'auto', or 'auto:WIDTHxHEIGHT'");
         return null;
     };
 

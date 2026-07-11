@@ -20,6 +20,7 @@
 - **Reusable Quantization & Dithering**: Extracted color quantization and dithering from `sixel.zig` into shared, public modules `image/quantize.zig` and `image/dither.zig`. Both sixel and the new GIF encoder consume them.
   - `quantize.medianCut` for adaptive palette generation, `quantize.ColorLookupTable` for fast nearest-color lookup, plus fixed palettes (`linear_gray_256`, `vga16_palette`, `fixed6x7x6Palette`, `web216Palette`).
   - `dither.Mode` (`none`, `floyd_steinberg`, `atkinson`, `ordered`, `auto`) with `dither.apply`, `dither.applyFloydSteinberg`, `dither.applyAtkinson`, `dither.applyOrdered`.
+- **iTerm2 Inline Image Protocol**: Added `terminal.iterm2` — PNG-encodes and base64-wraps an image into the iTerm2 `OSC 1337` inline-image sequence, with the same aspect-preserving scaling as the kitty/sixel encoders. Wired into `DisplayFormat` (new `.iterm2` variant) and the `.auto` degradation chain (now kitty → iterm2 → sixel → sgr → braille), the CLI `--protocol iterm2`, and terminal detection (`terminal.isIterm2Supported`, via an XTVERSION probe matching iTerm2/WezTerm).
 
 ### Improvements
 - **Single-Threaded Build Robustness**: Sixel's palette LUT cache skips its atomic spinlock under `builtin.single_threaded` (avoids a latent panic on `wasm32-freestanding`).
@@ -27,6 +28,7 @@
 ### Changed
 - **Matrix methods renamed to conventional short names** (breaking): `inverse` → `inv`, `determinant` → `det`, `pseudoInverse` → `pinv`, `cholesky` → `chol`, and the element-wise (Hadamard) product `times` → `hadamard` (in-place `timesBy` → `hadamardBy`). `ProjectiveTransform.inverse` → `inv`. Applies across `Matrix`, `SMatrix`, `Chain`, and the Python bindings.
 - **`RunningStats` now takes a config argument** (breaking): `RunningStats(T)` → `RunningStats(T, config)`, where `RunningStatsConfig` (`.all` / `.variance` / `.summary`) selects which quantities are tracked. Use `.all` for the previous behavior.
+- **Terminal graphics encoders grouped under `terminal`** (breaking): the sixel, kitty, and iterm2 encoders moved out of the top-level namespace into `terminal.*` (`zignal.sixel` → `zignal.terminal.sixel`, `zignal.kitty` → `zignal.terminal.kitty`, `zignal.iterm2` → `zignal.terminal.iterm2`). The source files now live in `src/terminal/`. Detection helpers (`terminal.isSixelSupported`, `terminal.aspectScale`, …) and the `DisplayFormat` tags are unchanged.
 
 ## [0.10.0] - 2026-04-15
 

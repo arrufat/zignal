@@ -11,11 +11,11 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Image = @import("image.zig").Image;
-const Interpolation = @import("image/interpolation.zig").Interpolation;
-const png = @import("codecs.zig").png;
-const Rgb = @import("color.zig").Rgb(u8);
-const terminal = @import("terminal.zig");
+const Image = @import("../image.zig").Image;
+const Interpolation = @import("../image/interpolation.zig").Interpolation;
+const Rgb = @import("../color.zig").Rgb(u8);
+const detect = @import("detect.zig");
+const payload = @import("payload.zig");
 
 /// Options for iTerm2 inline image encoding
 pub const Options = struct {
@@ -41,32 +41,17 @@ pub fn fromImage(
     gpa: Allocator,
     options: Options,
 ) ![]u8 {
-    var image_to_encode = image;
-    var scaled_image: ?Image(T) = null;
-    defer if (scaled_image) |*img| img.deinit(gpa);
-
-    const scale_factor = terminal.aspectScale(options.width, options.height, image.rows, image.cols);
-    if (@abs(scale_factor - 1.0) > 0.001) {
-        scaled_image = try image.scale(gpa, scale_factor, options.interpolation);
-        image_to_encode = scaled_image.?;
-    }
-
-    const png_data = try png.encode(T, gpa, image_to_encode, .default);
-    defer gpa.free(png_data);
-
-    const encoder = std.base64.standard.Encoder;
-    const base64_data = try gpa.alloc(u8, encoder.calcSize(png_data.len));
-    defer gpa.free(base64_data);
-    _ = encoder.encode(base64_data, png_data);
+    const encoded = try payload.scaledPngBase64(T, image, gpa, options.width, options.height, options.interpolation);
+    defer gpa.free(encoded.base64);
 
     var output: std.ArrayList(u8) = .empty;
     errdefer output.deinit(gpa);
-    try output.ensureTotalCapacity(gpa, base64_data.len + 64);
+    try output.ensureTotalCapacity(gpa, encoded.base64.len + 64);
 
     // OSC 1337 ; File=inline=1 ; size=<png bytes> : <base64> BEL.
     // `size` is the decoded (PNG) byte count, not the base64 length.
-    try output.print(gpa, "\x1b]1337;File=inline=1;size={d}:", .{png_data.len});
-    try output.appendSlice(gpa, base64_data);
+    try output.print(gpa, "\x1b]1337;File=inline=1;size={d}:", .{encoded.png_len});
+    try output.appendSlice(gpa, encoded.base64);
     try output.append(gpa, 0x07);
     return output.toOwnedSlice(gpa);
 }
@@ -74,8 +59,8 @@ pub fn fromImage(
 /// Detects if the terminal supports the iTerm2 inline image protocol.
 /// Identified via the terminal's XTVERSION name (iTerm2, WezTerm).
 pub fn isSupported(io: std.Io) bool {
-    if (!terminal.isStdoutTty(io)) return false;
-    return terminal.isIterm2Supported(io) catch false;
+    if (!detect.isStdoutTty(io)) return false;
+    return detect.isIterm2Supported(io) catch false;
 }
 
 // Tests
@@ -145,8 +130,8 @@ test "imageToIterm2 declared size matches decoded payload" {
     const colon = std.mem.indexOfScalarPos(u8, data, size_start, ':') orelse unreachable;
     const declared_size = try std.fmt.parseInt(usize, data[size_start..colon], 10);
 
-    const payload = data[colon + 1 .. data.len - 1]; // strip trailing BEL
+    const b64 = data[colon + 1 .. data.len - 1]; // strip trailing BEL
     const decoder = std.base64.standard.Decoder;
-    const decoded_len = try decoder.calcSizeForSlice(payload);
+    const decoded_len = try decoder.calcSizeForSlice(b64);
     try testing.expectEqual(declared_size, decoded_len);
 }

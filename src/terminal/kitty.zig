@@ -9,11 +9,11 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Image = @import("image.zig").Image;
-const Interpolation = @import("image/interpolation.zig").Interpolation;
-const png = @import("codecs.zig").png;
-const Rgb = @import("color.zig").Rgb(u8);
-const terminal = @import("terminal.zig");
+const Image = @import("../image.zig").Image;
+const Interpolation = @import("../image/interpolation.zig").Interpolation;
+const Rgb = @import("../color.zig").Rgb(u8);
+const detect = @import("detect.zig");
+const payload = @import("payload.zig");
 
 /// Maximum payload size per escape sequence
 const max_chunk_size: usize = 4096;
@@ -64,23 +64,9 @@ pub fn fromImage(
     gpa: Allocator,
     options: Options,
 ) ![]u8 {
-    var image_to_encode = image;
-    var scaled_image: ?Image(T) = null;
-    defer if (scaled_image) |*img| img.deinit(gpa);
-
-    const scale_factor = terminal.aspectScale(options.width, options.height, image.rows, image.cols);
-    if (@abs(scale_factor - 1.0) > 0.001) {
-        scaled_image = try image.scale(gpa, scale_factor, options.interpolation);
-        image_to_encode = scaled_image.?;
-    }
-
-    const png_data = try png.encode(T, gpa, image_to_encode, .default);
-    defer gpa.free(png_data);
-
-    const encoder = std.base64.standard.Encoder;
-    const base64_data = try gpa.alloc(u8, encoder.calcSize(png_data.len));
+    const encoded = try payload.scaledPngBase64(T, image, gpa, options.width, options.height, options.interpolation);
+    const base64_data = encoded.base64;
     defer gpa.free(base64_data);
-    _ = encoder.encode(base64_data, png_data);
 
     var output: std.ArrayList(u8) = .empty;
     errdefer output.deinit(gpa);
@@ -125,8 +111,8 @@ pub fn fromImage(
 
 /// Detects if the terminal supports Kitty graphics protocol
 pub fn isSupported(io: std.Io) bool {
-    if (!terminal.isStdoutTty(io)) return false;
-    return terminal.isKittySupported(io) catch false;
+    if (!detect.isStdoutTty(io)) return false;
+    return detect.isKittySupported(io) catch false;
 }
 
 // Tests
