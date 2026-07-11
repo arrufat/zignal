@@ -81,6 +81,7 @@ pub const dither = @import("image/dither.zig");
 pub const terminal = @import("terminal.zig");
 pub const sixel = @import("sixel.zig");
 pub const kitty = @import("kitty.zig");
+pub const iterm2 = @import("iterm2.zig");
 
 const codecs = @import("codecs.zig");
 pub const png = codecs.png;
