@@ -77,11 +77,8 @@ pub const colormaps = @import("image/colormaps.zig");
 pub const quantize = @import("image/quantize.zig");
 pub const dither = @import("image/dither.zig");
 
-// Terminal graphics protocols
+// Terminal graphics: detection + sixel/kitty/iterm2 encoders, all under `terminal.*`
 pub const terminal = @import("terminal.zig");
-pub const sixel = @import("sixel.zig");
-pub const kitty = @import("kitty.zig");
-pub const iterm2 = @import("iterm2.zig");
 
 const codecs = @import("codecs.zig");
 pub const png = codecs.png;

@@ -63,7 +63,7 @@ for value in np_view.mean(axis=-1).flat:
 noise = zignal.perlin(0.2, 0.4, amplitude=1.2, frequency=2.5, octaves=4)
 print(f"μ={stats.mean:.3f} σ={stats.std_dev:.3f} perlin={noise:.3f}")
 
-# Terminal preview (auto: kitty → sixel → sgr fallback)
+# Terminal preview (auto: kitty → iterm2 → sixel → sgr fallback)
 print(f"{img:auto}")
 
 # Save

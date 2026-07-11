@@ -6,10 +6,10 @@ const Io = std.Io;
 const color = @import("../color.zig");
 const Image = @import("../image.zig").Image;
 const Interpolation = @import("interpolation.zig").Interpolation;
-const iterm2 = @import("../iterm2.zig");
-const kitty = @import("../kitty.zig");
+const iterm2 = @import("../terminal/iterm2.zig");
+const kitty = @import("../terminal/kitty.zig");
 const quantize = @import("quantize.zig");
-const sixel = @import("../sixel.zig");
+const sixel = @import("../terminal/sixel.zig");
 const terminal = @import("../terminal.zig");
 
 /// Display format options

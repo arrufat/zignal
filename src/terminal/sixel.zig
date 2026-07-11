@@ -9,13 +9,13 @@ const Allocator = std.mem.Allocator;
 const expect = std.testing.expect;
 const clamp = std.math.clamp;
 
-const convertColor = @import("color.zig").convertColor;
-const Image = @import("image.zig").Image;
-const Interpolation = @import("image/interpolation.zig").Interpolation;
-const dither = @import("image/dither.zig");
-const quantize = @import("image/quantize.zig");
-const rle = @import("rle.zig");
-const terminal = @import("terminal.zig");
+const convertColor = @import("../color.zig").convertColor;
+const Image = @import("../image.zig").Image;
+const Interpolation = @import("../image/interpolation.zig").Interpolation;
+const dither = @import("../image/dither.zig");
+const quantize = @import("../image/quantize.zig");
+const rle = @import("../rle.zig");
+const detect = @import("detect.zig");
 
 const Rgb = quantize.Rgb;
 const sixel_char_offset: u8 = '?'; // ASCII 63 - base for sixel characters
@@ -129,7 +129,7 @@ pub fn fromImageProfiled(
 
     var width = image.cols;
     var height = image.rows;
-    const scale = terminal.aspectScale(options.width, options.height, image.rows, image.cols);
+    const scale = detect.aspectScale(options.width, options.height, image.rows, image.cols);
     if (@abs(scale - 1.0) > 1e-5) {
         width = @trunc(@as(f32, @floatFromInt(width)) * scale);
         height = @trunc(@as(f32, @floatFromInt(height)) * scale);
@@ -427,8 +427,8 @@ pub fn fromImageProfiled(
 /// Checks if the terminal supports sixel graphics
 pub fn isSupported(io: std.Io) bool {
     // Not a TTY → assume sixel is fine (file output, e.g. piping to a sixel viewer).
-    if (!terminal.isStdoutTty(io)) return true;
-    return terminal.isSixelSupported(io) catch false;
+    if (!detect.isStdoutTty(io)) return true;
+    return detect.isSixelSupported(io) catch false;
 }
 
 test "basic sixel encoding - 2x2 image" {
