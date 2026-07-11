@@ -82,6 +82,7 @@ pub fn build(b: *Build) void {
         .{ .name = "pca", .path = "src/pca.zig" },
         .{ .name = "sixel", .path = "src/sixel.zig" },
         .{ .name = "kitty", .path = "src/kitty.zig" },
+        .{ .name = "iterm2", .path = "src/iterm2.zig" },
         .{ .name = "terminal", .path = "src/terminal.zig" },
         .{ .name = "font", .path = "src/font.zig" },
         .{ .name = "features", .path = "src/features.zig" },
