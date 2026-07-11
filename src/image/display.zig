@@ -6,6 +6,7 @@ const Io = std.Io;
 const color = @import("../color.zig");
 const Image = @import("../image.zig").Image;
 const Interpolation = @import("interpolation.zig").Interpolation;
+const iterm2 = @import("../iterm2.zig");
 const kitty = @import("../kitty.zig");
 const quantize = @import("quantize.zig");
 const sixel = @import("../sixel.zig");
@@ -13,7 +14,7 @@ const terminal = @import("../terminal.zig");
 
 /// Display format options
 pub const DisplayFormat = union(enum) {
-    /// Automatically detect the best format (kitty -> sixel -> sgr)
+    /// Automatically detect the best format (kitty -> iterm2 -> sixel -> sgr)
     auto: struct {
         /// Optional target width in pixels
         width: ?u32 = null,
@@ -25,6 +26,8 @@ pub const DisplayFormat = union(enum) {
     },
     /// Kitty graphics protocol with options
     kitty: kitty.Options,
+    /// iTerm2 inline image protocol with options
+    iterm2: iterm2.Options,
     /// Force sixel output with specific options
     sixel: sixel.Options,
     /// SGR (Select Graphic Rendition) with Unicode half-block characters for 2x vertical resolution
@@ -71,7 +74,7 @@ pub const DisplayFormat = union(enum) {
     /// not resample.
     pub fn setInterpolation(self: *DisplayFormat, interp: Interpolation) void {
         switch (self.*) {
-            inline .kitty, .sixel, .auto => |*opts| opts.interpolation = interp,
+            inline .kitty, .iterm2, .sixel, .auto => |*opts| opts.interpolation = interp,
             .sgr, .braille => {},
         }
     }
@@ -113,6 +116,12 @@ pub fn DisplayFormatter(comptime T: type) type {
                         opts.height = options.height;
                         if (options.interpolation) |interp| opts.interpolation = interp;
                         continue :fmt .{ .kitty = opts };
+                    } else if (iterm2.isSupported(self.io)) {
+                        var opts: iterm2.Options = .default;
+                        opts.width = options.width;
+                        opts.height = options.height;
+                        if (options.interpolation) |interp| opts.interpolation = interp;
+                        continue :fmt .{ .iterm2 = opts };
                     } else if (sixel.isSupported(self.io)) {
                         var opts: sixel.Options = .default;
                         opts.width = options.width;
@@ -135,6 +144,18 @@ pub fn DisplayFormatter(comptime T: type) type {
                     } else {
                         try writer.writeAll("\x1b_Ga=d\x1b\\");
                     }
+                },
+                .iterm2 => |options| {
+                    const data = iterm2.fromImage(T, self.image.*, allocator, options) catch |err| switch (err) {
+                        error.OutOfMemory => iterm2.fromImage(T, self.image.*, allocator, .default) catch null,
+                        else => null,
+                    };
+                    if (data) |d| {
+                        try writer.writeAll(d);
+                    } else if (self.display_format == .auto) {
+                        continue :fmt .{ .sgr = .{ .width = options.width, .height = options.height } };
+                    }
+                    // iTerm2 has no image-reset sequence; on failure emit nothing.
                 },
                 .sixel => |options| {
                     const data = sixel.fromImage(T, self.image.*, allocator, options) catch |err| switch (err) {

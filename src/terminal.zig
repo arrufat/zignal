@@ -1,7 +1,7 @@
 //! Terminal capability detection and support utilities
 //!
 //! Provides cross-platform terminal detection for graphics protocols
-//! (sixel, kitty) and other terminal features.
+//! (sixel, kitty, iterm2) and other terminal features.
 
 const std = @import("std");
 const Io = std.Io;
@@ -93,6 +93,33 @@ pub fn isKittySupported(io: Io) !bool {
     // If we get a graphics query response, Kitty is supported
     // The response will contain "\x1b_G" if Kitty processed the graphics query
     return std.mem.find(u8, response, "\x1b_G") != null;
+}
+
+/// Detect if the terminal supports the iTerm2 inline image protocol.
+///
+/// iTerm2 inline images (`OSC 1337`) have no dedicated probe, so we identify the
+/// terminal via XTVERSION (`CSI > q`), which iTerm2 and WezTerm answer with a
+/// `DCS > | <name> ST` string naming themselves; both implement the protocol.
+/// The query is chased with primary Device Attributes so terminals that ignore
+/// XTVERSION still reply and we don't wait out the full timeout.
+pub fn isIterm2Supported(io: Io) !bool {
+    var state: State = try .init(io);
+    defer state.deinit();
+
+    var response_buf: [response_buffer_size]u8 = undefined;
+    const query_seq = "\x1b[>q\x1b[c";
+
+    const response = state.query(query_seq, &response_buf, 100) catch |err| {
+        std.log.debug("iterm2 xtversion query: {s}", .{@errorName(err)});
+        return err;
+    };
+
+    std.log.debug("iterm2 query response ({d} bytes): {f}", .{ response.len, std.ascii.hexEscape(response, .lower) });
+
+    // XTVERSION name is reported inside the DCS reply, e.g. "iTerm2 3.5.0" or
+    // "WezTerm ...". Both report a stable casing, so an exact match suffices.
+    return std.mem.find(u8, response, "iTerm2") != null or
+        std.mem.find(u8, response, "WezTerm") != null;
 }
 
 /// Compute aspect-preserving scale factor given optional target width/height.
