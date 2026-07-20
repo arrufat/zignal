@@ -48,6 +48,12 @@ body {
   color: #333;
   font-size: clamp(0.9rem, 3vw, 1.1rem);
 }
+/* Canvases are inline by default, which would let sibling panels (e.g. the
+   codec info table) flow beside them instead of stacking. */
+.canvas-group canvas {
+  display: block;
+  margin: 0 auto;
+}
 .image-drop {
   width: 320px;
   height: 200px;
@@ -433,13 +439,15 @@ canvas:hover {
 .mode-select .mode-label {
   color: #333;
 }
-.mode-select label {
+.mode-select label,
+.codec-choice {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   cursor: pointer;
 }
-.mode-select input {
+.mode-select input,
+.codec-choice input {
   accent-color: #007bff;
   margin: 0;
   cursor: pointer;
@@ -822,4 +830,104 @@ input[type="radio"] {
   background: #eee;
   color: #aaa;
   cursor: not-allowed;
+}
+
+/* Codec playground: encoder controls bar and per-panel info tables. */
+.codec-controls {
+  max-width: 720px;
+  margin: 0 auto 20px;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+  padding: 14px 18px;
+  text-align: center;
+}
+/* Reserve the status line's height so appearing text doesn't shift the controls. */
+.codec-controls #status {
+  min-height: 1.2em;
+}
+.codec-controls #status.error {
+  color: #bf616a;
+}
+/* Two-column grid: format radios left, that codec's options right. */
+.codec-table {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 12px 18px;
+  align-items: center;
+  text-align: left;
+}
+/* Layout and accent shared with .mode-select; see the extended selectors there. */
+.codec-choice {
+  gap: 6px;
+  font-weight: 600;
+  color: #333;
+  font-size: 0.9rem;
+}
+.codec-choice input:disabled {
+  cursor: not-allowed;
+}
+.codec-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: #333;
+  font-size: 0.9rem;
+}
+.codec-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.codec-options.inactive {
+  opacity: 0.5;
+}
+.codec-options.inactive label {
+  cursor: not-allowed;
+}
+.codec-options input[type="number"] {
+  width: 70px;
+}
+.codec-options input[type="text"] {
+  width: 130px;
+}
+/* Kill the base #status top margin so it centers in its grid row. */
+.codec-table #status {
+  margin: 0;
+}
+.codec-output {
+  cursor: default;
+  border-style: solid;
+  border-color: #ddd;
+}
+.codec-info {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 6px 10px;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+  font-size: 0.85rem;
+  color: #333;
+  text-align: left;
+}
+.codec-info:empty {
+  display: none;
+}
+.codec-info td {
+  padding: 2px 8px;
+}
+.codec-info td:first-child {
+  color: #666;
+}
+#output-stats {
+  margin: 8px 0 0;
+  color: #333;
+  font-size: 0.9rem;
+}
+/* Sizing tweaks over the unified button rule. */
+.codec-download {
+  margin: 10px 0 0;
+  padding: 8px 20px;
+  font-size: 0.95rem;
 }

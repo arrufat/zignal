@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Image Codec Playground</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" type="image/png" href="favicon.png">
+  </head>
+  <body>
+    <div class="header">
+      <h1>Image Codec Playground</h1>
+      <p>Inspect how an image is encoded and re-encode it with zignal's PNG, JPEG, BMP, and GIF codecs</p>
+    </div>
+
+    <div class="instructions">
+      Drop or click the source panel to load a PNG, JPEG, BMP, or GIF. Decoding and encoding run in your
+      browser with zignal's own codecs — tweak the encoder options to see how they affect the output.
+    </div>
+
+    <div class="codec-controls">
+      <div class="codec-table">
+        <label class="codec-choice"><input type="radio" name="format" value="jpeg" checked> JPEG</label>
+        <div class="codec-options" id="options-jpeg">
+          <label>Quality <input type="range" id="jpeg-quality" min="1" max="100" value="90"> <span id="jpeg-quality-value">90</span></label>
+          <label>Subsampling
+            <select id="jpeg-subsampling">
+              <option value="0">4:4:4</option>
+              <option value="1">4:2:2</option>
+              <option value="2" selected>4:2:0</option>
+            </select>
+          </label>
+          <label>Density (DPI) <input type="number" id="jpeg-dpi" min="1" max="65535" value="72"></label>
+          <label>Comment <input type="text" id="jpeg-comment" placeholder="(none)"></label>
+        </div>
+        <label class="codec-choice"><input type="radio" name="format" value="png"> PNG</label>
+        <div class="codec-options" id="options-png">
+          <label>Filter
+            <select id="png-filter">
+              <option value="0" selected>adaptive</option>
+              <option value="1">none</option>
+              <option value="2">sub</option>
+              <option value="3">up</option>
+              <option value="4">average</option>
+              <option value="5">paeth</option>
+            </select>
+          </label>
+          <label>Compression
+            <select id="png-compression">
+              <option value="0" selected>filtered (default)</option>
+              <option value="1">fastest</option>
+              <option value="2">balanced</option>
+              <option value="3">best</option>
+            </select>
+          </label>
+          <label title="Writes a gAMA chunk; ignored when an sRGB intent is set">Gamma <input type="number" id="png-gamma" min="0" step="0.0001" placeholder="(omit)"></label>
+          <label>sRGB intent
+            <select id="png-intent">
+              <option value="-1" selected>(omit)</option>
+              <option value="0">perceptual</option>
+              <option value="1">relative colorimetric</option>
+              <option value="2">saturation</option>
+              <option value="3">absolute colorimetric</option>
+            </select>
+          </label>
+        </div>
+        <label class="codec-choice"><input type="radio" name="format" value="bmp"> BMP</label>
+        <div class="codec-options" id="options-bmp">
+          <label><input type="checkbox" id="bmp-palette"> Grayscale palette (8bpp indexed)</label>
+          <label><input type="checkbox" id="bmp-topdown"> Top-down rows</label>
+        </div>
+        <label class="codec-choice"><input type="radio" name="format" value="gif"> GIF</label>
+        <div class="codec-options" id="options-gif">
+          <label>Max colors <input type="range" id="gif-colors" min="2" max="256" value="256"> <span id="gif-colors-value">256</span></label>
+          <label><input type="checkbox" id="gif-dither"> Floyd–Steinberg dithering</label>
+        </div>
+        <label class="codec-choice codec-gray" title="Convert to single-channel grayscale before encoding"><input type="checkbox" id="opt-gray"> Grayscale</label>
+        <span id="status"></span>
+      </div>
+    </div>
+
+    <div class="metrics-container">
+      <div class="canvas-group">
+        <h3>Source</h3>
+        <canvas id="source-canvas" class="image-drop" width="320" height="200"></canvas>
+        <div class="codec-info" id="source-info"></div>
+      </div>
+      <div class="canvas-group">
+        <h3>Output</h3>
+        <canvas id="output-canvas" class="image-drop codec-output" width="320" height="200"></canvas>
+        <p id="output-stats"></p>
+        <div class="codec-info" id="output-info"></div>
+        <div><button id="download-button" class="codec-download" disabled>Download</button></div>
+      </div>
+    </div>
+
+    <script src="utils.js"></script>
+    <script src="codec-playground.js"></script>
+  </body>
+</html>
