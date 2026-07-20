@@ -64,6 +64,8 @@ pub const Header = struct {
     frame_type: FrameType,
     num_components: u8,
     precision: u8,
+    /// Derived from SOF sampling factors; null for grayscale or exotic layouts.
+    subsampling: ?Subsampling = null,
 
     pub fn totalPixels(self: Header) u64 {
         return @as(u64, self.width) * @as(u64, self.height);
@@ -142,11 +144,20 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
             const num_components = try reader.takeByte();
             bytes_read += 6; // precision(1) + height(2) + width(2) + components(1)
 
-            // Discard remaining component info if any
-            if (payload_len > 6) {
-                const skip = payload_len - 6;
-                bytes_read += try reader.discard(.limited(skip));
+            var subsampling: ?Subsampling = null;
+            var remaining: usize = payload_len - 6;
+            if (num_components == 3 and remaining >= 9) {
+                var factors: [3]u8 = undefined;
+                for (&factors) |*f| f.* = (try reader.takeArray(3))[1]; // id, sampling (h << 4 | v), quant table
+                bytes_read += 9;
+                remaining -= 9;
+                if (factors[1] == 0x11 and factors[2] == 0x11) {
+                    subsampling = Subsampling.fromLumaFactors(factors[0]);
+                }
             }
+
+            // Discard remaining component info if any
+            bytes_read += try reader.discard(.limited(remaining));
 
             return Header{
                 .width = width,
@@ -154,6 +165,7 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
                 .frame_type = if (marker_val == 0xFFC2) .progressive else .baseline,
                 .num_components = num_components,
                 .precision = precision,
+                .subsampling = subsampling,
             };
         }
 
@@ -204,6 +216,41 @@ test "JPEG getInfo" {
     try std.testing.expectEqual(8, header.precision);
     try std.testing.expectEqual(3, header.num_components);
     try std.testing.expectEqual(FrameType.baseline, header.frame_type);
+    try std.testing.expectEqual(Subsampling.yuv444, header.subsampling);
+}
+
+test "JPEG getInfo subsampling" {
+    const gpa = std.testing.allocator;
+
+    const cases = [_]struct { luma: u8, expected: ?Subsampling }{
+        .{ .luma = 0x22, .expected = .yuv420 },
+        .{ .luma = 0x21, .expected = .yuv422 },
+        .{ .luma = 0x11, .expected = .yuv444 },
+        .{ .luma = 0x12, .expected = null },
+    };
+
+    for (cases) |case| {
+        var data: std.ArrayList(u8) = .empty;
+        defer data.deinit(gpa);
+
+        try data.appendSlice(gpa, &signature);
+        // SOF0
+        try data.append(gpa, 0xFF);
+        try data.append(gpa, 0xC0);
+        try data.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, 17, .big))); // Length
+        try data.append(gpa, 8); // Precision
+        try data.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, 100, .big))); // Height
+        try data.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, 200, .big))); // Width
+        try data.append(gpa, 3); // Components
+        try data.appendSlice(gpa, &[_]u8{ 1, case.luma, 0, 2, 0x11, 1, 3, 0x11, 1 });
+        // EOI
+        try data.append(gpa, 0xFF);
+        try data.append(gpa, 0xD9);
+
+        var reader: Io.Reader = .fixed(data.items);
+        const header = try getInfo(&reader, .{});
+        try std.testing.expectEqual(case.expected, header.subsampling);
+    }
 }
 
 // -----------------------------
@@ -214,6 +261,24 @@ pub const Subsampling = enum {
     yuv444,
     yuv422,
     yuv420,
+
+    /// Packed SOF luma sampling factors (h << 4 | v); chroma is always 1x1.
+    pub fn lumaFactors(self: Subsampling) u8 {
+        return switch (self) {
+            .yuv444 => 0x11,
+            .yuv422 => 0x21,
+            .yuv420 => 0x22,
+        };
+    }
+
+    pub fn fromLumaFactors(factors: u8) ?Subsampling {
+        return switch (factors) {
+            0x11 => .yuv444,
+            0x21 => .yuv422,
+            0x22 => .yuv420,
+            else => null,
+        };
+    }
 };
 
 pub const EncodeOptions = struct {
@@ -440,12 +505,7 @@ fn writeSOF0(dst: *std.ArrayList(u8), gpa: Allocator, width: u16, height: u16, g
         try tmp.append(gpa, 3);
         // Y
         try tmp.append(gpa, 1);
-        const y_sampling: u8 = switch (subsampling) {
-            .yuv444 => 0x11,
-            .yuv422 => 0x21,
-            .yuv420 => 0x22,
-        };
-        try tmp.append(gpa, y_sampling);
+        try tmp.append(gpa, subsampling.lumaFactors());
         try tmp.append(gpa, 0);
         // Cb
         try tmp.append(gpa, 2);

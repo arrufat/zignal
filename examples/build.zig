@@ -21,6 +21,7 @@ pub fn build(b: *std.Build) void {
         "hough_animation",
         "global_optimization",
         "qrcode",
+        "codec_playground",
     };
 
     // List of additional examples to build as executables
