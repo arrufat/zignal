@@ -1,6 +1,6 @@
 //! Pure Zig PNG encoder and decoder implementation.
 //! Supports all PNG color types and bit depths according to the PNG specification.
-//! Zero dependencies - implements deflate compression/decompression internally.
+//! Uses std.compress.flate for deflate compression/decompression.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -127,6 +127,8 @@ pub const Chunk = struct {
     type: [4]u8,
     data: []const u8,
     crc: u32,
+    /// True for a chunk cut short by end of data (CRC bytes absent, unverified).
+    truncated: bool = false,
 };
 
 /// PNG IHDR (header) chunk data and metadata
@@ -243,6 +245,32 @@ fn scanDataLength(header: Header) !usize {
     return std.math.mul(usize, stride, @intCast(header.height)) catch return error.ImageTooLarge;
 }
 
+/// Payload bytes of one scanline in an Adam7 pass (excluding the filter byte).
+fn adam7PassScanlineBytes(pass_width: u32, header: Header) usize {
+    return (@as(usize, pass_width) * header.channels() * header.bit_depth + 7) / 8;
+}
+
+/// Longest prefix of scan data ending on a complete row boundary.
+fn completeScanPrefix(len: usize, header: Header) usize {
+    if (header.interlace_method != 1) {
+        const stride = header.scanlineBytes() + 1;
+        return len - len % stride;
+    }
+    // Adam7: keep whole passes, trim to a row boundary in the first partial pass.
+    var kept: usize = 0;
+    var rem = len;
+    for (0..7) |pass| {
+        const dims = adam7PassDimensions(@intCast(pass), header.width, header.height);
+        if (dims.width == 0 or dims.height == 0) continue;
+        const stride = adam7PassScanlineBytes(dims.width, header) + 1;
+        const pass_total = stride * dims.height;
+        if (rem < pass_total) return kept + rem - rem % stride;
+        kept += pass_total;
+        rem -= pass_total;
+    }
+    return kept;
+}
+
 fn enforceHeaderLimits(header: Header, limits: DecodeLimits) !void {
     if (exceeds(u32, limits.max_width, header.width) or exceeds(u32, limits.max_height, header.height)) {
         return error.ImageTooLarge;
@@ -260,6 +288,9 @@ pub const PngState = struct {
     transparency: ?[]u8 = null, // For palette transparency or single transparent color
     idat_data: ArrayList(u8),
     scan_data_bytes: usize = 0,
+
+    /// Input was truncated; the decoded image may be partial (prefix rows, rest zeroed) or complete.
+    truncated: bool = false,
 
     pub fn deinit(self: *PngState, gpa: Allocator) void {
         self.idat_data.deinit(gpa);
@@ -289,11 +320,8 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
 
     while (true) {
         // Check limits before reading next chunk
-        if (limits.max_png_bytes != 0 and bytes_read > limits.max_png_bytes) {
+        if (exceeds(usize, limits.max_png_bytes, bytes_read)) {
             return error.PngDataTooLarge;
-        }
-        if (limits.max_chunks != 0 and chunk_count > limits.max_chunks) {
-            return error.TooManyChunks;
         }
 
         const length = reader.takeInt(u32, .big) catch |err| switch (err) {
@@ -307,6 +335,9 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
         const chunk_type = chunk_type_ptr.*;
 
         chunk_count += 1;
+        if (exceeds(usize, limits.max_chunks, chunk_count)) {
+            return error.TooManyChunks;
+        }
 
         // Total chunk size: length + 4 (CRC)
         const total_chunk_size = @as(usize, length) + 4;
@@ -385,15 +416,7 @@ test "PNG getInfo" {
 
     try data.appendSlice(gpa, &signature);
 
-    var ihdr: [13]u8 = undefined;
-    std.mem.writeInt(u32, ihdr[0..4], 100, .big);
-    std.mem.writeInt(u32, ihdr[4..8], 200, .big);
-    ihdr[8] = 8;
-    ihdr[9] = @intFromEnum(ColorType.rgba);
-    ihdr[10] = 0;
-    ihdr[11] = 0;
-    ihdr[12] = 0;
-    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+    try appendTestIhdr(&data, gpa, 100, 200, 8, .rgba, 0);
 
     const gama_payload = [_]u8{ 0, 0, 0x88, 0xB8 }; // 35000 -> 0.35
     try appendTestChunk(&data, gpa, "gAMA".*, &gama_payload);
@@ -505,7 +528,11 @@ pub const ChunkReader = struct {
         self.pos += 4;
 
         if (self.pos + length + 4 > self.data.len) {
-            return error.InvalidChunkLength;
+            // Cut short by end of data: return the available payload, CRC unverifiable.
+            const take: u32 = @intCast(@min(length, self.data.len - self.pos));
+            const chunk_data = self.data[self.pos .. self.pos + take];
+            self.pos = self.data.len;
+            return Chunk{ .length = take, .type = chunk_type, .data = chunk_data, .crc = 0, .truncated = true };
         }
 
         const chunk_data = self.data[self.pos .. self.pos + length];
@@ -597,7 +624,8 @@ fn parseHeader(chunk: Chunk) !Header {
     };
 }
 
-// PNG decoder entry point
+/// PNG decoder entry point. Truncated pixel data decodes partially and sets
+/// `truncated`; structural corruption errors.
 pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngState {
     if (png_data.len < 8 or !std.mem.eql(u8, png_data[0..8], &signature)) {
         return error.InvalidPngSignature;
@@ -627,6 +655,12 @@ pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngSt
 
         const chunk_len = chunk.data.len;
         try accumulateWithLimit(&total_chunk_bytes, chunk_len, limits.max_chunk_bytes, error.ChunkDataLimitExceeded);
+
+        // Cut inside a non-IDAT chunk: fatal before pixel data, tolerable after.
+        if (chunk.truncated and !std.mem.eql(u8, &chunk.type, "IDAT")) {
+            if (!chunk_state.seen_idat) return error.InvalidChunkLength;
+            break;
+        }
 
         if (!header_found and !std.mem.eql(u8, &chunk.type, "IHDR")) {
             return error.ChunkBeforeHeader;
@@ -729,6 +763,7 @@ pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngSt
             try ensureArrayCapacityWithinLimit(&png_state.idat_data, gpa, new_len, limits.max_idat_bytes);
             png_state.idat_data.appendSliceAssumeCapacity(chunk.data);
             chunk_state.seen_idat = true;
+            if (chunk.truncated) break;
         } else if (std.mem.eql(u8, &chunk.type, "IEND")) {
             chunk_state.seen_iend = true;
             break;
@@ -744,8 +779,9 @@ pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngSt
         return error.MissingImageData;
     }
 
+    // Missing IEND: cut short, but the pixel data present may still be complete.
     if (!chunk_state.seen_iend) {
-        return error.MissingEndChunk;
+        png_state.truncated = true;
     }
 
     png_state.scan_data_bytes = try scanDataLength(png_state.header);
@@ -756,8 +792,13 @@ pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngSt
     return png_state;
 }
 
+// flate reports truncation as ReadFailed with err == EndOfStream; other recorded errs are corruption.
+fn isZlibTruncation(decompressor: *const flate.Decompress) bool {
+    return if (decompressor.err) |err| err == error.EndOfStream else false;
+}
+
 /// Convert PNG image data to its most natural Zignal Image type
-pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
+pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !union(enum) {
     grayscale: Image(u8),
     rgb: Image(Rgb),
     rgba: Image(Rgba),
@@ -777,6 +818,12 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
     while (remaining.nonzero()) {
         const n = decompressor.reader.stream(&aw.writer, remaining) catch |err| switch (err) {
             error.EndOfStream => break,
+            error.ReadFailed => {
+                if (!isZlibTruncation(&decompressor)) return err;
+                // Truncated stream: recover bytes decompressed but not yet delivered.
+                try aw.writer.writeAll(remaining.sliceConst(decompressor.reader.buffered()));
+                break;
+            },
             else => return err,
         };
         remaining = remaining.subtract(n).?;
@@ -788,11 +835,20 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
             if (n > 0) return error.ImageTooLarge;
         } else |err| switch (err) {
             error.EndOfStream => {}, // This is fine, we're at the end.
+            // Stream cut inside the zlib checksum: all pixel data arrived.
+            error.ReadFailed => if (!isZlibTruncation(&decompressor)) return err,
             else => return err,
         }
     }
+    // Zero-pad to full size: zero filter bytes decode as .none, so padded rows become zero pixels.
+    if (aw.written().len < png_state.scan_data_bytes) {
+        png_state.truncated = true;
+        const keep = completeScanPrefix(aw.written().len, png_state.header);
+        aw.shrinkRetainingCapacity(keep);
+        try aw.writer.splatByteAll(0, png_state.scan_data_bytes - keep);
+    }
     const decompressed = try aw.toOwnedSlice();
-    defer allocator.free(decompressed); // Apply row defiltering
+    defer allocator.free(decompressed);
     try defilterScanlines(decompressed, png_state.header);
 
     const width = png_state.header.width;
@@ -1090,12 +1146,14 @@ pub fn toNativeImage(allocator: Allocator, png_state: PngState) !union(enum) {
 /// Decodes a PNG byte stream into `Image(T)`, converting from the source color format as needed.
 /// Supports grayscale (1/2/4/8/16-bit), RGB (8/16-bit), RGBA (8/16-bit), and palette (1/2/4/8-bit
 /// with transparency), with full Adam7 interlacing.
+/// Truncated pixel data yields a partial image; use `decode` + `toNativeImage`
+/// to observe the `truncated` flag.
 pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u8, limits: DecodeLimits) !Image(T) {
     var png_state = try decode(allocator, png_data, limits);
     defer png_state.deinit(allocator);
 
     // Load the PNG in its native format first, then convert to requested type
-    var native_image = try toNativeImage(allocator, png_state);
+    var native_image = try toNativeImage(allocator, &png_state);
     switch (native_image) {
         .grayscale => |*img| {
             if (T == u8) {
@@ -1379,20 +1437,14 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
     try file.writeStreamingAll(io, png_data);
 }
 
-/// PNG row filtering and defiltering functions
+/// PNG row filtering and defiltering functions.
+// Branchless: |p-a| = |b-c| etc., with value-selects compiling to cmov.
 fn paethPredictor(a: i32, b: i32, c: i32) u8 {
-    const p = a + b - c;
-    const pa = @abs(p - a);
-    const pb = @abs(p - b);
-    const pc = @abs(p - c);
-
-    if (pa <= pb and pa <= pc) {
-        return @intCast(a);
-    } else if (pb <= pc) {
-        return @intCast(b);
-    } else {
-        return @intCast(c);
-    }
+    const pa = @abs(b - c);
+    const pb = @abs(a - c);
+    const pc = @abs(a + b - 2 * c);
+    const bc: i32 = if (pc < pb) c else b;
+    return @intCast(if (pb < pa or pc < pa) bc else a);
 }
 
 fn defilterRow(
@@ -1401,86 +1453,82 @@ fn defilterRow(
     previous_row: ?[]const u8,
     bytes_per_pixel: u8,
 ) void {
+    switch (bytes_per_pixel) {
+        // parseHeader restricts color-type/bit-depth combos to exactly these values.
+        inline 1, 2, 3, 4, 6, 8 => |bpp| defilterRowBpp(bpp, filter_type, current_row, previous_row),
+        else => unreachable,
+    }
+}
+
+fn defilterRowBpp(comptime bpp: usize, filter_type: FilterType, current_row: []u8, previous_row: ?[]const u8) void {
+    std.debug.assert(current_row.len >= bpp and current_row.len % bpp == 0);
     switch (filter_type) {
-        .none => {
-            // No filtering - data is already correct
-        },
-        .sub => {
-            // Add the byte to the left
-            var i: usize = bytes_per_pixel;
-            while (i < current_row.len) : (i += 1) {
-                current_row[i] = current_row[i] +% current_row[i - bytes_per_pixel];
-            }
-        },
-        .up => {
-            // Add the byte above
-            if (previous_row) |prev| {
-                for (current_row, 0..) |*byte, i| {
-                    byte.* = byte.* +% prev[i];
-                }
-            }
-        },
-        .average => {
-            // Add the average of left and above bytes
-            const bpp = bytes_per_pixel;
-            if (previous_row) |prev| {
-                // First pixel (no left neighbor)
-                for (0..bpp) |i| {
-                    const above = prev[i];
-                    const avg = above / 2;
-                    current_row[i] = current_row[i] +% avg;
-                }
-                // Remaining pixels
-                for (bpp..current_row.len) |i| {
-                    const left = current_row[i - bpp];
-                    const above = prev[i];
-                    const avg: u8 = @intCast((@as(u16, left) + above) / 2);
-                    current_row[i] = current_row[i] +% avg;
-                }
-            } else {
-                // First row (no above neighbor), equivalent to SUB but with avg/2 logic?
-                // Actually for first row, Average uses only Left (since Above is 0)
-                // Left + 0 / 2 = Left / 2
-                // First pixel has neither left nor above -> 0
-                // So nothing changes for first pixel.
-                for (bpp..current_row.len) |i| {
-                    const left = current_row[i - bpp];
-                    const avg = left / 2;
-                    current_row[i] = current_row[i] +% avg;
-                }
-            }
-        },
-        .paeth => {
-            // Use Paeth predictor
-            const bpp = bytes_per_pixel;
-            if (previous_row) |prev| {
-                // First pixel (no left neighbor -> left=0, upper_left=0)
-                // Paeth(0, above, 0) -> abs(above - 0) vs abs(above - above) vs abs(above - 0)
-                // -> pa=above, pb=0, pc=above. min is pb=0. Returns above.
-                for (0..bpp) |i| {
-                    const above = prev[i];
-                    // Paeth(0, above, 0) simplifies to 'above'
-                    current_row[i] = current_row[i] +% above;
-                }
-                // Remaining pixels
-                for (bpp..current_row.len) |i| {
-                    const left = current_row[i - bpp];
-                    const above = prev[i];
-                    const upper_left = prev[i - bpp];
-                    const paeth = paethPredictor(left, above, upper_left);
-                    current_row[i] = current_row[i] +% paeth;
-                }
-            } else {
-                // First row: Above = 0, UpperLeft = 0.
-                // Paeth(Left, 0, 0) -> pa=Left, pb=Left, pc=Left.
-                // Ties go to Left. So returns Left.
-                // Same as Sub filter.
-                var i: usize = bpp;
-                while (i < current_row.len) : (i += 1) {
-                    current_row[i] = current_row[i] +% current_row[i - bpp];
-                }
-            }
-        },
+        .none => {},
+        .sub => defilterSub(bpp, current_row),
+        .up => if (previous_row) |prev| defilterUp(current_row, prev),
+        .average => defilterAverage(bpp, current_row, previous_row),
+        // First-row Paeth(left, 0, 0) reduces to left, i.e. Sub.
+        .paeth => if (previous_row) |prev| defilterPaeth(bpp, current_row, prev) else defilterSub(bpp, current_row),
+    }
+}
+
+// cur[i] += prev[i]; scalar tail for Adam7 rows narrower than a vector.
+fn defilterUp(current_row: []u8, prev: []const u8) void {
+    const vec_len = comptime std.simd.suggestVectorLength(u8) orelse 16;
+    const V = @Vector(vec_len, u8);
+    var i: usize = 0;
+    while (i + vec_len <= current_row.len) : (i += vec_len) {
+        current_row[i..][0..vec_len].* = @as(V, current_row[i..][0..vec_len].*) +% @as(V, prev[i..][0..vec_len].*);
+    }
+    while (i < current_row.len) : (i += 1) {
+        current_row[i] +%= prev[i];
+    }
+}
+
+// cur[i] += cur[i-bpp]: the lag-bpp dependency stays in one register-resident vector per pixel.
+fn defilterSub(comptime bpp: usize, current_row: []u8) void {
+    const P = @Vector(bpp, u8);
+    var prev_px: P = current_row[0..bpp].*;
+    var i: usize = bpp;
+    while (i + bpp <= current_row.len) : (i += bpp) {
+        const cur = @as(P, current_row[i..][0..bpp].*) +% prev_px;
+        current_row[i..][0..bpp].* = cur;
+        prev_px = cur;
+    }
+}
+
+// avg via the overflow-free identity (l & a) + ((l ^ a) >> 1), staying in u8 lanes.
+fn defilterAverage(comptime bpp: usize, current_row: []u8, previous_row: ?[]const u8) void {
+    const P = @Vector(bpp, u8);
+    const one: P = @splat(1);
+    if (previous_row) |prev| {
+        // First pixel has no left neighbor: avg = above / 2.
+        var prev_px: P = @as(P, current_row[0..bpp].*) +% (@as(P, prev[0..bpp].*) >> one);
+        current_row[0..bpp].* = prev_px;
+        var i: usize = bpp;
+        while (i + bpp <= current_row.len) : (i += bpp) {
+            const above: P = prev[i..][0..bpp].*;
+            const avg = (prev_px & above) +% ((prev_px ^ above) >> one);
+            const cur = @as(P, current_row[i..][0..bpp].*) +% avg;
+            current_row[i..][0..bpp].* = cur;
+            prev_px = cur;
+        }
+    } else {
+        // First row: above = 0, so avg = left / 2 (first pixel unchanged).
+        for (bpp..current_row.len) |i| {
+            current_row[i] +%= current_row[i - bpp] / 2;
+        }
+    }
+}
+
+// Stays scalar: vector @select chains measured 3.5x slower than the branchless predictor.
+fn defilterPaeth(comptime bpp: usize, current_row: []u8, prev: []const u8) void {
+    // First pixel: Paeth(0, above, 0) reduces to above.
+    for (0..bpp) |i| {
+        current_row[i] +%= prev[i];
+    }
+    for (bpp..current_row.len) |i| {
+        current_row[i] +%= paethPredictor(current_row[i - bpp], prev[i], prev[i - bpp]);
     }
 }
 
@@ -1721,7 +1769,6 @@ fn defilterAdam7Scanlines(data: []u8, header: Header) !void {
     }
 
     const bytes_per_pixel = header.bytesPerPixel();
-    const channels = header.channels();
     var data_offset: usize = 0;
 
     // Process each of the 7 Adam7 passes
@@ -1729,7 +1776,7 @@ fn defilterAdam7Scanlines(data: []u8, header: Header) !void {
         const dims = adam7PassDimensions(@intCast(pass), header.width, header.height);
         if (dims.width == 0 or dims.height == 0) continue;
 
-        const pass_scanline_bytes = (dims.width * channels * header.bit_depth + 7) / 8;
+        const pass_scanline_bytes = adam7PassScanlineBytes(dims.width, header);
         var previous_scanline: ?[]u8 = null;
 
         for (0..dims.height) |y| {
@@ -1762,7 +1809,6 @@ fn deinterlaceAdam7(allocator: Allocator, comptime T: type, decompressed: []u8, 
     }
 
     var output_data = try allocator.alloc(T, @intCast(total_pixels));
-    const channels = header.channels();
     var data_offset: usize = 0;
 
     // Process each of the 7 Adam7 passes
@@ -1771,7 +1817,7 @@ fn deinterlaceAdam7(allocator: Allocator, comptime T: type, decompressed: []u8, 
         if (dims.width == 0 or dims.height == 0) continue;
 
         const pass_info = adam7_passes[pass];
-        const pass_scanline_bytes = (dims.width * channels * header.bit_depth + 7) / 8;
+        const pass_scanline_bytes = adam7PassScanlineBytes(dims.width, header);
 
         for (0..dims.height) |pass_y| {
             const src_row_start = data_offset + pass_y * (pass_scanline_bytes + 1) + 1; // +1 to skip filter byte
@@ -1803,21 +1849,6 @@ fn deinterlaceAdam7(allocator: Allocator, comptime T: type, decompressed: []u8, 
     }
 
     return Image(T).initFromSlice(@intCast(header.height), @intCast(header.width), output_data);
-}
-
-// Apply gamma correction to a color value
-inline fn applyGammaCorrection(value: u8, header: Header) u8 {
-    // PNG gamma handling:
-    // - gAMA chunk indicates the encoding gamma of the file
-    // - sRGB chunk indicates the file is in sRGB color space
-    // - For display purposes, files are already gamma-encoded and should be displayed as-is
-    // - Gamma correction should only be applied when converting to linear space for processing
-    //
-    // Since zignal is primarily used for display and image manipulation (not linear color
-    // processing), we don't apply gamma correction by default. This matches the behavior
-    // of most image viewers and libraries.
-    _ = header;
-    return value;
 }
 
 /// Extract grayscale pixel from Adam7 pass data with optional transparency
@@ -2065,15 +2096,7 @@ test "PNG palette images require PLTE before IDAT" {
 
     try data.appendSlice(gpa, &signature);
 
-    var ihdr: [13]u8 = undefined;
-    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
-    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
-    ihdr[8] = 8;
-    ihdr[9] = @intFromEnum(ColorType.palette);
-    ihdr[10] = 0;
-    ihdr[11] = 0;
-    ihdr[12] = 0;
-    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+    try appendTestIhdr(&data, gpa, 1, 1, 8, .palette, 0);
 
     try appendTestChunk(&data, gpa, "IDAT".*, &[_]u8{});
     try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
@@ -2088,15 +2111,7 @@ test "PNG palette transparency requires PLTE first" {
 
     try data.appendSlice(gpa, &signature);
 
-    var ihdr: [13]u8 = undefined;
-    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
-    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
-    ihdr[8] = 8;
-    ihdr[9] = @intFromEnum(ColorType.palette);
-    ihdr[10] = 0;
-    ihdr[11] = 0;
-    ihdr[12] = 0;
-    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+    try appendTestIhdr(&data, gpa, 1, 1, 8, .palette, 0);
 
     const trns_payload = [_]u8{0x00};
     try appendTestChunk(&data, gpa, "tRNS".*, &trns_payload);
@@ -2116,15 +2131,7 @@ test "PNG rejects PLTE for grayscale" {
 
     try data.appendSlice(gpa, &signature);
 
-    var ihdr: [13]u8 = undefined;
-    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
-    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
-    ihdr[8] = 8;
-    ihdr[9] = @intFromEnum(ColorType.grayscale);
-    ihdr[10] = 0;
-    ihdr[11] = 0;
-    ihdr[12] = 0;
-    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+    try appendTestIhdr(&data, gpa, 1, 1, 8, .grayscale, 0);
 
     const plte_payload = [_]u8{ 0, 0, 0 };
     try appendTestChunk(&data, gpa, "PLTE".*, &plte_payload);
@@ -2139,16 +2146,7 @@ test "PNG IDAT chunks must be consecutive" {
     defer data.deinit(gpa);
 
     try data.appendSlice(gpa, &signature);
-
-    var ihdr: [13]u8 = undefined;
-    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
-    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
-    ihdr[8] = 8;
-    ihdr[9] = @intFromEnum(ColorType.rgb);
-    ihdr[10] = 0;
-    ihdr[11] = 0;
-    ihdr[12] = 0;
-    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+    try appendTestIhdr(&data, gpa, 1, 1, 8, .rgb, 0);
 
     const empty_idat = [_]u8{ 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 };
     try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
@@ -2169,15 +2167,7 @@ test "PNG gamma chunk must precede PLTE" {
 
     try data.appendSlice(gpa, &signature);
 
-    var ihdr: [13]u8 = undefined;
-    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
-    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
-    ihdr[8] = 8;
-    ihdr[9] = @intFromEnum(ColorType.rgb);
-    ihdr[10] = 0;
-    ihdr[11] = 0;
-    ihdr[12] = 0;
-    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+    try appendTestIhdr(&data, gpa, 1, 1, 8, .rgb, 0);
 
     const plte_payload = [_]u8{ 0, 0, 0 };
     try appendTestChunk(&data, gpa, "PLTE".*, &plte_payload);
@@ -2195,16 +2185,7 @@ test "PNG sRGB chunk must precede IDAT" {
     defer data.deinit(gpa);
 
     try data.appendSlice(gpa, &signature);
-
-    var ihdr: [13]u8 = undefined;
-    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
-    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
-    ihdr[8] = 8;
-    ihdr[9] = @intFromEnum(ColorType.rgb);
-    ihdr[10] = 0;
-    ihdr[11] = 0;
-    ihdr[12] = 0;
-    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+    try appendTestIhdr(&data, gpa, 1, 1, 8, .rgb, 0);
 
     const empty_idat = [_]u8{ 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 };
     try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
@@ -2216,27 +2197,276 @@ test "PNG sRGB chunk must precede IDAT" {
     try std.testing.expectError(error.SrgbAfterImageData, decode(gpa, data.items, .{}));
 }
 
-test "PNG requires IEND chunk" {
+test "PNG missing IEND decodes as truncated" {
     const gpa = std.testing.allocator;
     var data: ArrayList(u8) = .empty;
     defer data.deinit(gpa);
 
     try data.appendSlice(gpa, &signature);
-
-    var ihdr: [13]u8 = undefined;
-    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
-    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
-    ihdr[8] = 8;
-    ihdr[9] = @intFromEnum(ColorType.rgb);
-    ihdr[10] = 0;
-    ihdr[11] = 0;
-    ihdr[12] = 0;
-    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+    try appendTestIhdr(&data, gpa, 1, 1, 8, .rgb, 0);
 
     const empty_idat = [_]u8{ 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 };
     try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
 
-    try std.testing.expectError(error.MissingEndChunk, decode(gpa, data.items, .{}));
+    var state = try decode(gpa, data.items, .{});
+    defer state.deinit(gpa);
+    try std.testing.expect(state.truncated);
+
+    const native = try toNativeImage(gpa, &state);
+    var img = switch (native) {
+        .rgb => |*i| i.*,
+        else => @panic("expected RGB"),
+    };
+    defer img.deinit(gpa);
+    try std.testing.expectEqual(1, img.rows);
+    try std.testing.expectEqual(1, img.cols);
+    try std.testing.expectEqual(Rgb{ .r = 0, .g = 0, .b = 0 }, img.data[0]);
+}
+
+fn makeTruncationTestPng(gpa: Allocator) ![]u8 {
+    var img: Image(Rgb) = try .init(gpa, 8, 16);
+    defer img.deinit(gpa);
+    for (img.data, 0..) |*px, i| {
+        px.* = .{ .r = @truncate(i * 3), .g = @truncate(i * 5 + 1), .b = @truncate(i * 7 + 2) };
+    }
+    return encode(Rgb, gpa, img, .default);
+}
+
+fn findTestChunk(data: []const u8, name: *const [4]u8) ?struct { data_start: usize, data_len: usize } {
+    var pos: usize = 8;
+    while (pos + 8 <= data.len) {
+        const len = std.mem.readInt(u32, data[pos..][0..4], .big);
+        if (std.mem.eql(u8, data[pos + 4 ..][0..4], name)) {
+            return .{ .data_start = pos + 8, .data_len = len };
+        }
+        pos += 8 + len + 4;
+    }
+    return null;
+}
+
+fn appendTestIhdr(list: *ArrayList(u8), gpa: Allocator, width: u32, height: u32, bit_depth: u8, color_type: ColorType, interlace: u8) !void {
+    var ihdr: [13]u8 = undefined;
+    std.mem.writeInt(u32, ihdr[0..4], width, .big);
+    std.mem.writeInt(u32, ihdr[4..8], height, .big);
+    ihdr[8] = bit_depth;
+    ihdr[9] = @intFromEnum(color_type);
+    ihdr[10] = 0;
+    ihdr[11] = 0;
+    ihdr[12] = interlace;
+    try appendTestChunk(list, gpa, "IHDR".*, &ihdr);
+}
+
+// Stored-block (BTYPE=00) zlib stream cut short: truncation offset maps 1:1 to output bytes.
+fn appendTruncatedStoredZlib(list: *ArrayList(u8), gpa: Allocator, raw: []const u8, declared_len: u16) !void {
+    try list.appendSlice(gpa, &[_]u8{ 0x78, 0x01, 0x01 });
+    try list.append(gpa, @truncate(declared_len));
+    try list.append(gpa, @truncate(declared_len >> 8));
+    const nlen = ~declared_len;
+    try list.append(gpa, @truncate(nlen));
+    try list.append(gpa, @truncate(nlen >> 8));
+    try list.appendSlice(gpa, raw);
+}
+
+fn expectPrefixOrZero(full: Image(Rgb), partial: Image(Rgb)) !void {
+    try std.testing.expectEqual(full.rows, partial.rows);
+    try std.testing.expectEqual(full.cols, partial.cols);
+    try std.testing.expectEqual(full.data[0], partial.data[0]);
+    for (full.data, partial.data) |f, p| {
+        const is_zero = p.r == 0 and p.g == 0 and p.b == 0;
+        try std.testing.expect(std.meta.eql(f, p) or is_zero);
+    }
+}
+
+test "PNG truncated mid-IDAT decodes partially" {
+    const gpa = std.testing.allocator;
+    const png_data = try makeTruncationTestPng(gpa);
+    defer gpa.free(png_data);
+    var full: Image(Rgb) = try loadFromBytes(Rgb, gpa, png_data, .{});
+    defer full.deinit(gpa);
+
+    const idat = findTestChunk(png_data, "IDAT").?;
+    const cut = png_data[0 .. idat.data_start + idat.data_len / 2];
+
+    var state = try decode(gpa, cut, .{});
+    defer state.deinit(gpa);
+    try std.testing.expect(state.truncated);
+
+    var partial: Image(Rgb) = try loadFromBytes(Rgb, gpa, cut, .{});
+    defer partial.deinit(gpa);
+    try expectPrefixOrZero(full, partial);
+}
+
+test "PNG missing IEND with complete IDAT decodes fully" {
+    const gpa = std.testing.allocator;
+    const png_data = try makeTruncationTestPng(gpa);
+    defer gpa.free(png_data);
+    var full: Image(Rgb) = try loadFromBytes(Rgb, gpa, png_data, .{});
+    defer full.deinit(gpa);
+
+    const cut = png_data[0 .. png_data.len - 12]; // IEND is length + type + CRC
+
+    var state = try decode(gpa, cut, .{});
+    defer state.deinit(gpa);
+    try std.testing.expect(state.truncated);
+
+    var partial: Image(Rgb) = try loadFromBytes(Rgb, gpa, cut, .{});
+    defer partial.deinit(gpa);
+    try std.testing.expectEqualSlices(Rgb, full.data, partial.data);
+}
+
+test "PNG truncated mid-chunk-header decodes fully" {
+    const gpa = std.testing.allocator;
+    const png_data = try makeTruncationTestPng(gpa);
+    defer gpa.free(png_data);
+    var full: Image(Rgb) = try loadFromBytes(Rgb, gpa, png_data, .{});
+    defer full.deinit(gpa);
+
+    const cut = png_data[0 .. png_data.len - 8]; // 4 bytes into the IEND header
+
+    var partial: Image(Rgb) = try loadFromBytes(Rgb, gpa, cut, .{});
+    defer partial.deinit(gpa);
+    try std.testing.expectEqualSlices(Rgb, full.data, partial.data);
+}
+
+test "PNG truncated ancillary chunk after IDAT decodes fully" {
+    const gpa = std.testing.allocator;
+    const png_data = try makeTruncationTestPng(gpa);
+    defer gpa.free(png_data);
+    var full: Image(Rgb) = try loadFromBytes(Rgb, gpa, png_data, .{});
+    defer full.deinit(gpa);
+
+    // Replace IEND with a tEXt chunk cut inside its payload.
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+    try data.appendSlice(gpa, png_data[0 .. png_data.len - 12]);
+    try data.appendSlice(gpa, &([_]u8{ 0x00, 0x00, 0x00, 0x20 } ++ "tEXt".* ++ [_]u8{ 0x41, 0x42 }));
+
+    var state = try decode(gpa, data.items, .{});
+    defer state.deinit(gpa);
+    try std.testing.expect(state.truncated);
+
+    var partial: Image(Rgb) = try loadFromBytes(Rgb, gpa, data.items, .{});
+    defer partial.deinit(gpa);
+    try std.testing.expectEqualSlices(Rgb, full.data, partial.data);
+}
+
+test "PNG truncated zlib stream drops partial row deterministically" {
+    const gpa = std.testing.allocator;
+    // 4x4 RGB: stride = 4*3 + 1 = 13, full scan data = 52 bytes.
+    // Provide 32 bytes (rows 0-1 complete + 6 bytes of row 2).
+    var raw: [32]u8 = undefined;
+    for (0..4) |r| {
+        if (r * 13 >= raw.len) break;
+        raw[r * 13] = 0; // filter byte: none
+        for (1..13) |i| {
+            const idx = r * 13 + i;
+            if (idx >= raw.len) break;
+            raw[idx] = @truncate(r * 16 + i);
+        }
+    }
+
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+    try data.appendSlice(gpa, &signature);
+    try appendTestIhdr(&data, gpa, 4, 4, 8, .rgb, 0);
+
+    var zlib_stream: ArrayList(u8) = .empty;
+    defer zlib_stream.deinit(gpa);
+    try appendTruncatedStoredZlib(&zlib_stream, gpa, &raw, 52);
+    try appendTestChunk(&data, gpa, "IDAT".*, zlib_stream.items);
+    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+
+    // Chunk layer is intact (valid CRCs, IEND present) — only the zlib stream is short.
+    var state = try decode(gpa, data.items, .{});
+    defer state.deinit(gpa);
+    try std.testing.expect(!state.truncated);
+
+    const native = try toNativeImage(gpa, &state);
+    var img = switch (native) {
+        .rgb => |*i| i.*,
+        else => @panic("expected RGB"),
+    };
+    defer img.deinit(gpa);
+    try std.testing.expect(state.truncated);
+
+    // Rows 0-1 decoded, rows 2-3 (incl. the partial row) zeroed.
+    for (0..2) |r| {
+        for (0..4) |c| {
+            const expected: Rgb = .{
+                .r = @truncate(r * 16 + c * 3 + 1),
+                .g = @truncate(r * 16 + c * 3 + 2),
+                .b = @truncate(r * 16 + c * 3 + 3),
+            };
+            try std.testing.expectEqual(expected, img.data[r * 4 + c]);
+        }
+    }
+    for (2..4) |r| {
+        for (0..4) |c| {
+            try std.testing.expectEqual(Rgb{ .r = 0, .g = 0, .b = 0 }, img.data[r * 4 + c]);
+        }
+    }
+}
+
+test "PNG truncated Adam7 keeps complete passes" {
+    const gpa = std.testing.allocator;
+    // 8x8 RGB interlaced. Pass sizes (stride * height): 4, 4, 7, 14, 26, 52, 100 = 207.
+    // Provide 68 bytes: passes 1-5 (55) plus exactly one row of pass 6 (13).
+    var raw: [68]u8 = @splat(0xAB);
+    const row_starts = [_]usize{ 0, 4, 8, 15, 22, 29, 42, 55 }; // filter-byte offsets of the 8 rows present
+    for (row_starts) |offset| raw[offset] = 0;
+
+    var data: ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+    try data.appendSlice(gpa, &signature);
+    try appendTestIhdr(&data, gpa, 8, 8, 8, .rgb, 1); // Adam7
+
+    var zlib_stream: ArrayList(u8) = .empty;
+    defer zlib_stream.deinit(gpa);
+    try appendTruncatedStoredZlib(&zlib_stream, gpa, &raw, 207);
+    try appendTestChunk(&data, gpa, "IDAT".*, zlib_stream.items);
+    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+
+    var state = try decode(gpa, data.items, .{});
+    defer state.deinit(gpa);
+    const native = try toNativeImage(gpa, &state);
+    var img = switch (native) {
+        .rgb => |*i| i.*,
+        else => @panic("expected RGB"),
+    };
+    defer img.deinit(gpa);
+    try std.testing.expect(state.truncated);
+
+    const filled: Rgb = .{ .r = 0xAB, .g = 0xAB, .b = 0xAB };
+    const zero: Rgb = .{ .r = 0, .g = 0, .b = 0 };
+    // Pass 1 survived; pass 6 kept only image row 0; pass 7 (odd rows) fully dropped.
+    try std.testing.expectEqual(filled, img.data[0 * 8 + 0]);
+    try std.testing.expectEqual(filled, img.data[0 * 8 + 1]);
+    try std.testing.expectEqual(zero, img.data[1 * 8 + 1]);
+    try std.testing.expectEqual(zero, img.data[2 * 8 + 1]);
+    for (img.data) |px| try std.testing.expect(std.meta.eql(px, filled) or std.meta.eql(px, zero));
+}
+
+test "PNG structural corruption still errors" {
+    const gpa = std.testing.allocator;
+
+    // Declared length past EOF on a non-IDAT chunk.
+    var bad: ArrayList(u8) = .empty;
+    defer bad.deinit(gpa);
+    try bad.appendSlice(gpa, &signature);
+    try bad.appendSlice(gpa, &([_]u8{ 0x00, 0x00, 0x00, 0x0D } ++ "IHDR".* ++ [_]u8{ 0x00, 0x00 }));
+    try std.testing.expectError(error.InvalidChunkLength, decode(gpa, bad.items, .{}));
+
+    // Garbage zlib bytes in a well-formed IDAT chunk: corruption, not truncation.
+    var corrupt: ArrayList(u8) = .empty;
+    defer corrupt.deinit(gpa);
+    try corrupt.appendSlice(gpa, &signature);
+    try appendTestIhdr(&corrupt, gpa, 1, 1, 8, .rgb, 0);
+    try appendTestChunk(&corrupt, gpa, "IDAT".*, &[_]u8{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF });
+    try appendTestChunk(&corrupt, gpa, "IEND".*, &[_]u8{});
+
+    var state = try decode(gpa, corrupt.items, .{});
+    defer state.deinit(gpa);
+    try std.testing.expectError(error.ReadFailed, toNativeImage(gpa, &state));
 }
 
 test "PNG enforces max_png_bytes limit" {
@@ -2253,15 +2483,7 @@ test "PNG enforces chunk byte limit" {
     defer data.deinit(gpa);
     try data.appendSlice(gpa, &signature);
 
-    var ihdr: [13]u8 = undefined;
-    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
-    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
-    ihdr[8] = 8;
-    ihdr[9] = @intFromEnum(ColorType.rgb);
-    ihdr[10] = 0;
-    ihdr[11] = 0;
-    ihdr[12] = 0;
-    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+    try appendTestIhdr(&data, gpa, 1, 1, 8, .rgb, 0);
 
     const limits: DecodeLimits = .{
         .max_png_bytes = 1024,
@@ -2277,16 +2499,7 @@ test "PNG enforces IDAT byte limit" {
     var data: ArrayList(u8) = .empty;
     defer data.deinit(gpa);
     try data.appendSlice(gpa, &signature);
-
-    var ihdr: [13]u8 = undefined;
-    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
-    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
-    ihdr[8] = 8;
-    ihdr[9] = @intFromEnum(ColorType.rgb);
-    ihdr[10] = 0;
-    ihdr[11] = 0;
-    ihdr[12] = 0;
-    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+    try appendTestIhdr(&data, gpa, 1, 1, 8, .rgb, 0);
 
     const empty_idat = [_]u8{ 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 };
     try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
@@ -2307,15 +2520,7 @@ test "PNG enforces chunk count limit" {
     defer data.deinit(gpa);
     try data.appendSlice(gpa, &signature);
 
-    var ihdr: [13]u8 = undefined;
-    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
-    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
-    ihdr[8] = 8;
-    ihdr[9] = @intFromEnum(ColorType.rgb);
-    ihdr[10] = 0;
-    ihdr[11] = 0;
-    ihdr[12] = 0;
-    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+    try appendTestIhdr(&data, gpa, 1, 1, 8, .rgb, 0);
     try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
 
     const limits: DecodeLimits = .{
@@ -2332,15 +2537,7 @@ test "PNG enforces decompressed byte limit" {
     defer data.deinit(gpa);
     try data.appendSlice(gpa, &signature);
 
-    var ihdr: [13]u8 = undefined;
-    std.mem.writeInt(u32, ihdr[0..4], 1, .big);
-    std.mem.writeInt(u32, ihdr[4..8], 1, .big);
-    ihdr[8] = 8;
-    ihdr[9] = @intFromEnum(ColorType.grayscale);
-    ihdr[10] = 0;
-    ihdr[11] = 0;
-    ihdr[12] = 0;
-    try appendTestChunk(&data, gpa, "IHDR".*, &ihdr);
+    try appendTestIhdr(&data, gpa, 1, 1, 8, .grayscale, 0);
 
     const empty_idat = [_]u8{ 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 };
     try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
@@ -2425,7 +2622,7 @@ test "PNG round-trip encoding/decoding" {
     try std.testing.expectEqual(@as(u8, 8), decoded_png.header.bit_depth);
 
     // Convert back to Image
-    const native_image = try toNativeImage(allocator, decoded_png);
+    const native_image = try toNativeImage(allocator, &decoded_png);
     var decoded_image = switch (native_image) {
         .rgb => |*img| img.*,
         else => @panic("Expected RGB image for this test"),
@@ -2511,7 +2708,7 @@ test "PNG fixed filters round-trip" {
 
         var state = try decode(allocator, png_data, .{});
         defer state.deinit(allocator);
-        const native = try toNativeImage(allocator, state);
+        const native = try toNativeImage(allocator, &state);
         var round = switch (native) {
             .rgb => |*i| i.*,
             else => @panic("expected RGB"),
