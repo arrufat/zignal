@@ -1112,6 +1112,9 @@ pub const JpegState = struct {
     dc_prediction_values: [4]i32 = @splat(0),
     skip_count: u32 = 0, // For progressive AC scans
 
+    /// True when decoding stopped early because limits.max_scans was reached.
+    scan_limit_reached: bool = false,
+
     // Restart marker tracking
     expected_rst_marker: u3 = 0, // Cycles 0-7 for RST0-RST7
 
@@ -1131,12 +1134,6 @@ pub const JpegState = struct {
 
     pub fn deinit(self: *JpegState) void {
         self.allocator.free(self.scan_components);
-        for (&self.dc_tables) |*table| {
-            if (table.*) |*t| t.deinit(self.allocator);
-        }
-        for (&self.ac_tables) |*table| {
-            if (table.*) |*t| t.deinit(self.allocator);
-        }
         if (self.block_storage) |storage| {
             self.allocator.free(storage);
         }
@@ -1159,15 +1156,28 @@ pub const JpegState = struct {
             }
         }
 
-        // Slow path: read one bit at a time and probe the table
+        // Slow path: canonical decode per ITU T.81 F.16
         var code: u16 = 0;
-        var length: u5 = 0;
+        var length: usize = 0;
+        if (self.bit_reader.bit_count >= fast_bits) {
+            // Fast-table miss with 9 valid bits: no code of length <= 9 matches.
+            self.bit_reader.consumeBits(fast_bits);
+            code = @intCast(fast_index);
+            length = fast_bits;
+        }
         while (length < 16) {
-            const bit: u32 = self.bit_reader.getBits(1) catch return error.InvalidHuffmanCode;
-            code = (code << 1) | @as(u16, @intCast(bit & 1));
+            // Preserve EOF distinctly so truncated streams can decode partially.
+            const bit = self.bit_reader.getBits(1) catch |err| switch (err) {
+                error.UnexpectedEndOfData => return err,
+                else => return error.InvalidHuffmanCode,
+            };
+            code = (code << 1) | @as(u16, @intCast(bit));
             length += 1;
-            if (table.code_map.get(.{ .length_minus_one = @intCast(length - 1), .code = code })) |value| {
-                return value;
+            if (code <= table.max_code[length]) {
+                // Canonical construction guarantees code >= min_code at this length.
+                std.debug.assert(code >= table.min_code[length]);
+                const idx = @as(usize, table.val_ptr[length]) + code - table.min_code[length];
+                return table.huffval[idx];
             }
         }
 
@@ -1239,6 +1249,8 @@ pub const JpegState = struct {
 
     // Parse Start of Frame (SOF0/SOF2) marker
     pub fn parseSOF(self: *JpegState, data: []const u8, frame_type: FrameType, limits: DecodeLimits) !void {
+        // One frame header per stream; block_storage is only set by a successful parseSOF.
+        if (self.block_storage != null) return error.DuplicateSOF;
         self.header.frame_type = frame_type;
         if (data.len < 6) return error.InvalidSOF;
 
@@ -1397,27 +1409,30 @@ pub const JpegState = struct {
                 total_codes += count;
             }
 
+            // T.81 caps a table at 256 symbols
+            if (total_codes > 256) return error.InvalidHuffmanTable;
             if (pos + total_codes > length) return error.InvalidDHT;
 
-            // Allocate and read huffman values
-            const huffval = try self.allocator.alloc(u8, total_codes);
-            @memcpy(huffval, data[pos .. pos + total_codes]);
+            // Read huffman values
+            var huffval: [256]u8 = undefined;
+            @memcpy(huffval[0..total_codes], data[pos .. pos + total_codes]);
             pos += total_codes;
-
-            // Build Huffman table
-            var code_map: std.array_hash_map.Auto(HuffmanCode, u8) = .empty;
-            errdefer {
-                code_map.deinit(self.allocator);
-                self.allocator.free(huffval);
-            }
 
             var fast_table: [512]u8 = @splat(255);
             var fast_size: [512]u5 = @splat(0);
+            var max_code: [17]i32 = @splat(-1);
+            var min_code: [17]u16 = @splat(0);
+            var val_ptr: [17]u16 = @splat(0);
 
-            // Build codes according to JPEG standard
+            // Build canonical codes according to JPEG standard
             var code: u16 = 0;
             var huffval_index: usize = 0;
             for (bits, 0..) |count, i| {
+                const code_len = i + 1;
+                if (count > 0) {
+                    val_ptr[code_len] = @intCast(huffval_index);
+                    min_code[code_len] = code;
+                }
                 var j: usize = 0;
                 while (j < count) : (j += 1) {
                     // Check for invalid code (all 1s)
@@ -1427,44 +1442,36 @@ pub const JpegState = struct {
 
                     const byte = huffval[huffval_index];
                     huffval_index += 1;
-                    try code_map.put(self.allocator, .{ .length_minus_one = @intCast(i), .code = code }, byte);
 
                     // Build fast lookup table for codes <= 9 bits
-                    if (i + 1 <= 9) {
-                        const first_index = code << 9 - @as(u4, @intCast(i + 1));
-                        const num_indexes = @as(usize, 1) << @as(u4, @intCast(9 - (i + 1)));
+                    if (code_len <= 9) {
+                        const first_index = code << 9 - @as(u4, @intCast(code_len));
+                        const num_indexes = @as(usize, 1) << @as(u4, @intCast(9 - code_len));
                         for (0..num_indexes) |index| {
                             std.debug.assert(fast_table[first_index + index] == 255);
                             fast_table[first_index + index] = byte;
-                            fast_size[first_index + index] = @intCast(i + 1);
+                            fast_size[first_index + index] = @intCast(code_len);
                         }
                     }
 
                     code += 1;
                 }
+                if (count > 0) max_code[code_len] = @as(i32, code) - 1;
                 code <<= 1;
             }
 
             const table = HuffmanTable{
-                .code_counts = bits,
-                .code_map = code_map,
                 .fast_table = fast_table,
                 .fast_size = fast_size,
+                .max_code = max_code,
+                .min_code = min_code,
+                .val_ptr = val_ptr,
+                .huffval = huffval,
             };
 
-            // Free huffval array - no longer needed after building code_map
-            self.allocator.free(huffval);
-
-            // Store table
             if (table_class == 0) {
-                if (self.dc_tables[table_id]) |*old_table| {
-                    old_table.deinit(self.allocator);
-                }
                 self.dc_tables[table_id] = table;
             } else {
-                if (self.ac_tables[table_id]) |*old_table| {
-                    old_table.deinit(self.allocator);
-                }
                 self.ac_tables[table_id] = table;
             }
         }
@@ -1577,22 +1584,17 @@ pub const JpegState = struct {
     }
 };
 
-// Huffman table for decoding
+// Huffman table for decoding; owns no allocations
 const HuffmanTable = struct {
-    // Number of codes for each bit length (1-16)
-    code_counts: [16]u8,
-    // Hash map for full lookup
-    code_map: std.array_hash_map.Auto(HuffmanCode, u8),
-    // Fast lookup table for short codes
+    // Fast lookup table for codes <= 9 bits (255 = not a short code)
     fast_table: [512]u8, // 2^9 entries
     fast_size: [512]u5,
-
-    pub fn deinit(self: *HuffmanTable, allocator: Allocator) void {
-        self.code_map.deinit(allocator);
-    }
+    // Canonical decode arrays per ITU T.81 F.16, indexed by code length 1-16 (index 0 unused)
+    max_code: [17]i32, // -1 for lengths with no codes
+    min_code: [17]u16,
+    val_ptr: [17]u16,
+    huffval: [256]u8,
 };
-
-const HuffmanCode = struct { length_minus_one: u4, code: u16 };
 
 // Bit reader for entropy-coded segments
 pub const BitReader = struct {
@@ -1674,153 +1676,10 @@ pub const BitReader = struct {
 };
 
 // Perform a scan (baseline or progressive)
-fn performScan(state: *JpegState, scan_info: ScanInfo) !void {
-    if (state.block_storage == null) return error.BlockStorageNotAllocated;
-
-    if (state.header.frame_type == .baseline) {
-        // Baseline JPEG: single scan with all data
-        try performBaselineScan(state, scan_info);
-    } else {
-        // Progressive JPEG: accumulate data across multiple scans
-        try performProgressiveScan(state, scan_info);
-    }
-}
-
-// Upsample and convert a single YCbCr block to RGB
-fn yCbCrToRgbBlock(_: *JpegState, y_block: *[64]i32, cb_block: *const [64]i32, cr_block: *const [64]i32, rgb_block: *[3][64]u8) void {
-    // YCbCr to RGB conversion coefficients (ITU-R BT.601 standard)
-    const co_1: @Vector(8, f32) = @splat(1.402); // Cr to R
-    const co_2: @Vector(8, f32) = @splat(1.772); // Cb to B
-    const co_3: @Vector(8, f32) = @splat(-0.344136); // Cb to G
-    const co_4: @Vector(8, f32) = @splat(-0.714136); // Cr to G
-    const vec_0: @Vector(8, f32) = @splat(0.0);
-    const vec_255: @Vector(8, f32) = @splat(255.0);
-
-    for (0..8) |y| {
-        const y_vec_i32: @Vector(8, i32) = y_block[y * 8 ..][0..8].*;
-        const y_vec: @Vector(8, f32) = @floatFromInt(y_vec_i32);
-
-        const cb_vec_i32: @Vector(8, i32) = cb_block[y * 8 ..][0..8].*;
-        const cb_vec: @Vector(8, f32) = @floatFromInt(cb_vec_i32);
-
-        const cr_vec_i32: @Vector(8, i32) = cr_block[y * 8 ..][0..8].*;
-        const cr_vec: @Vector(8, f32) = @floatFromInt(cr_vec_i32);
-
-        var r_vec = y_vec + cr_vec * co_1;
-        var g_vec = y_vec + cb_vec * co_3 + cr_vec * co_4;
-        var b_vec = y_vec + cb_vec * co_2;
-
-        r_vec = std.math.clamp(r_vec, vec_0, vec_255);
-        g_vec = std.math.clamp(g_vec, vec_0, vec_255);
-        b_vec = std.math.clamp(b_vec, vec_0, vec_255);
-
-        const r_u8: @Vector(8, u8) = @round(r_vec);
-        const g_u8: @Vector(8, u8) = @round(g_vec);
-        const b_u8: @Vector(8, u8) = @round(b_vec);
-
-        var r_array: [8]u8 = undefined;
-        var g_array: [8]u8 = undefined;
-        var b_array: [8]u8 = undefined;
-
-        for (0..8) |i| {
-            r_array[i] = r_u8[i];
-            g_array[i] = g_u8[i];
-            b_array[i] = b_u8[i];
-        }
-
-        @memcpy(rgb_block[0][y * 8 ..][0..8], &r_array);
-        @memcpy(rgb_block[1][y * 8 ..][0..8], &g_array);
-        @memcpy(rgb_block[2][y * 8 ..][0..8], &b_array);
-    }
-}
-
-// Perform baseline scan
-fn performBaselineScan(state: *JpegState, scan_info: ScanInfo) !void {
-    // Calculate maximum sampling factors
-    var max_h_factor: u4 = 1;
-    var max_v_factor: u4 = 1;
-    for (state.components[0..state.header.num_components]) |comp| {
-        max_h_factor = @max(max_h_factor, comp.h_sampling);
-        max_v_factor = @max(max_v_factor, comp.v_sampling);
-    }
-
-    // DC prediction values for each component
-    var prediction_values: [4]i32 = @splat(0);
-
-    // Scan structure
-    const noninterleaved = scan_info.components.len == 1 and scan_info.components[0].component_id == 1;
-    // For non-interleaved scans (Y only), step by 1, otherwise use sampling factors
-    const y_step = if (noninterleaved) 1 else max_v_factor;
-    const x_step = if (noninterleaved) 1 else max_h_factor;
-
-    var mcu_count: u32 = 0;
-    var mcus_since_restart: u32 = 0;
-
-    var y: usize = 0;
-    while (y < state.block_height) : (y += y_step) {
-        var x: usize = 0;
-        while (x < state.block_width) : (x += x_step) {
-            // Handle restart intervals for baseline scans
-            if (state.restart_interval != 0 and mcus_since_restart == state.restart_interval) {
-                // Reset DC predictions
-                prediction_values = @splat(0);
-                mcus_since_restart = 0;
-                // Reset expected RST marker
-                state.expected_rst_marker = 0;
-                // Flush bits to byte boundary
-                state.bit_reader.flushBits();
-            }
-            // Decode each component at this position
-            for (scan_info.components) |scan_comp| {
-                // Find the component index for this scan component
-                var component_index: usize = 0;
-                var v_max: usize = undefined;
-                var h_max: usize = undefined;
-
-                for (state.components[0..state.header.num_components], 0..) |frame_component, i| {
-                    if (frame_component.id == scan_comp.component_id) {
-                        component_index = i;
-                        v_max = if (noninterleaved) 1 else frame_component.v_sampling;
-                        h_max = if (noninterleaved) 1 else frame_component.h_sampling;
-                        break;
-                    }
-                }
-
-                // Decode all blocks for this component in this MCU
-                for (0..v_max) |v| {
-                    for (0..h_max) |h| {
-                        // Standard coordinate calculation
-                        const actual_x = x + h;
-                        const actual_y = y + v;
-
-                        // Compute storage pointer, but always decode the block to keep bitstream in sync
-                        var tmp_block: [64]i32 = undefined;
-                        const in_bounds = (actual_y < state.block_height and actual_x < state.block_width);
-                        const block_ptr: *[64]i32 = if (in_bounds)
-                            &state.block_storage.?[actual_y * state.block_width_actual + actual_x][component_index]
-                        else
-                            &tmp_block;
-
-                        // Fill bit buffer before decoding
-                        try state.bit_reader.fillBits(24);
-
-                        // Decode block
-                        decodeBlockBaseline(state, scan_comp, block_ptr, &prediction_values[component_index]) catch |err| {
-                            if (err == error.UnexpectedEndOfData) return;
-                            return err;
-                        };
-                    }
-                }
-            }
-
-            mcu_count += 1;
-            mcus_since_restart += 1;
-        }
-    }
-}
-
 // Perform progressive scan
 fn performProgressiveScan(state: *JpegState, scan_info: ScanInfo) !void {
+    if (state.block_storage == null) return error.BlockStorageNotAllocated;
+
     var skips: u32 = 0;
 
     // Definition of noninterleaved
@@ -1876,7 +1735,11 @@ fn performProgressiveScan(state: *JpegState, scan_info: ScanInfo) !void {
                         // Fill bits
                         state.bit_reader.fillBits(24) catch {};
 
-                        try decodeBlockProgressive(state, scan_info, scan_comp, block, &state.dc_prediction_values[component_index], &skips);
+                        decodeBlockProgressive(state, scan_info, scan_comp, block, &state.dc_prediction_values[component_index], &skips) catch |err| switch (err) {
+                            // Truncated scan: keep the coefficients decoded so far.
+                            error.UnexpectedEndOfData => return,
+                            else => return err,
+                        };
                     }
                 }
             }
@@ -1892,9 +1755,9 @@ fn performProgressiveScan(state: *JpegState, scan_info: ScanInfo) !void {
 // Decode a single block in progressive mode
 fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: ScanComponent, block: *[64]i32, dc_prediction: *i32, skips: *u32) !void {
     if (scan_info.start_of_spectral_selection == 0) {
-        const dc_table = state.dc_tables[scan_comp.dc_table_id] orelse return error.MissingHuffmanTable;
+        const dc_table = if (state.dc_tables[scan_comp.dc_table_id]) |*t| t else return error.MissingHuffmanTable;
         if (scan_info.approximation_high == 0) {
-            const maybe_magnitude = try state.readCode(&dc_table);
+            const maybe_magnitude = try state.readCode(dc_table);
             if (maybe_magnitude > 11) return error.InvalidDCCoefficient;
             const diff = try state.readMagnitudeCoded(@intCast(maybe_magnitude));
             const dc_coefficient = diff + dc_prediction.*;
@@ -1905,14 +1768,14 @@ fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: Sca
             block[0] += @as(i32, @intCast(bit)) << @intCast(scan_info.approximation_low);
         }
     } else if (scan_info.start_of_spectral_selection != 0) {
-        const ac_table = state.ac_tables[scan_comp.ac_table_id] orelse return error.MissingHuffmanTable;
+        const ac_table = if (state.ac_tables[scan_comp.ac_table_id]) |*t| t else return error.MissingHuffmanTable;
         if (scan_info.approximation_high == 0) {
             var ac: usize = scan_info.start_of_spectral_selection;
             // Check skips == 0 first
             if (skips.* == 0) {
                 while (ac <= scan_info.end_of_spectral_selection and ac < 64) {
                     var coeff: i32 = 0;
-                    const zero_run_length_and_magnitude = try state.readCode(&ac_table);
+                    const zero_run_length_and_magnitude = try state.readCode(ac_table);
                     const zero_run_length = zero_run_length_and_magnitude >> 4;
                     const maybe_magnitude = zero_run_length_and_magnitude & 0x0F;
 
@@ -1952,7 +1815,7 @@ fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: Sca
             if (skips.* == 0) {
                 while (ac <= scan_info.end_of_spectral_selection and ac < 64) {
                     var coeff: i32 = 0;
-                    const zero_run_length_and_magnitude = try state.readCode(&ac_table);
+                    const zero_run_length_and_magnitude = try state.readCode(ac_table);
                     var zero_run_length = zero_run_length_and_magnitude >> 4;
                     const maybe_magnitude = zero_run_length_and_magnitude & 0x0F;
 
@@ -2012,8 +1875,8 @@ fn decodeBlockBaseline(state: *JpegState, scan_comp: ScanComponent, block: *[64]
     @memset(block, 0);
 
     // Decode DC coefficient
-    const dc_table = state.dc_tables[scan_comp.dc_table_id] orelse return error.MissingHuffmanTable;
-    const dc_symbol = try state.readCode(&dc_table);
+    const dc_table = if (state.dc_tables[scan_comp.dc_table_id]) |*t| t else return error.MissingHuffmanTable;
+    const dc_symbol = try state.readCode(dc_table);
 
     if (dc_symbol > 11) return error.InvalidDCCoefficient;
 
@@ -2023,8 +1886,8 @@ fn decodeBlockBaseline(state: *JpegState, scan_comp: ScanComponent, block: *[64]
     block[0] = dc_prediction.*;
 
     // Decode AC coefficients using the existing function
-    const ac_table = state.ac_tables[scan_comp.ac_table_id] orelse return error.MissingHuffmanTable;
-    try state.decodeAC(&ac_table, block);
+    const ac_table = if (state.ac_tables[scan_comp.ac_table_id]) |*t| t else return error.MissingHuffmanTable;
+    try state.decodeAC(ac_table, block);
 }
 
 // Parse JPEG file and decode image
@@ -2083,7 +1946,7 @@ fn processScanMarker(state: *JpegState, data: []const u8, pos: usize) !usize {
     }
 
     // For progressive JPEG, perform the scan
-    performScan(state, scan_info) catch |err| {
+    performProgressiveScan(state, scan_info) catch |err| {
         // Free scan components before propagating error
         state.allocator.free(scan_info.components);
         return err;
@@ -2170,10 +2033,12 @@ pub fn decode(allocator: Allocator, data: []const u8, limits: DecodeLimits) !Jpe
             },
 
             .SOS => {
-                scan_count += 1;
-                if (exceeds(limits.max_scans, scan_count)) {
-                    return error.TooManyScans;
+                if (exceeds(limits.max_scans, scan_count + 1)) {
+                    // Scan cap: keep what was decoded and ignore the rest of the stream.
+                    state.scan_limit_reached = true;
+                    break;
                 }
+                scan_count += 1;
                 const scan_end = try processScanMarker(&state, data, pos);
                 const scan_consumed = scan_end - pos;
                 try accumulateWithLimit(&total_marker_bytes, scan_consumed, limits.max_marker_bytes, error.MarkerDataLimitExceeded);
@@ -2236,6 +2101,7 @@ pub const JpegError = error{
     InvalidJpegFile,
     InvalidMarker,
     InvalidSOF,
+    DuplicateSOF,
     InvalidDHT,
     InvalidDQT,
     InvalidSOS,
@@ -2272,7 +2138,6 @@ pub const JpegError = error{
     JpegDataTooLarge,
     MarkerDataLimitExceeded,
     BlockMemoryLimitExceeded,
-    TooManyScans,
 };
 
 // IDCT implementation based on stb_image
@@ -2328,6 +2193,15 @@ fn idct8x8(block: *[64]i32) void {
     // Load 8 rows as vectors
     for (0..8) |i| {
         rows[i] = block[i * 8 ..][0..8].*;
+    }
+
+    // All-AC-zero block: (dc + 4) >> 3 matches the full two-pass descale exactly.
+    var acc = rows[0];
+    acc[0] = 0;
+    inline for (1..8) |i| acc |= rows[i];
+    if (@reduce(.Or, acc) == 0) {
+        @memset(block, (block[0] + 4) >> 3);
+        return;
     }
 
     // Pass 1: process rows (vectorize across 8 rows)
@@ -2459,51 +2333,6 @@ fn transpose8x8(rows: [8]@Vector(8, i32)) [8]@Vector(8, i32) {
     return res;
 }
 
-// Upsample chroma component for 4:2:0 subsampling using bilinear interpolation
-fn upsampleChroma420(input: []const [64]i32, output: *[256]i32, h_blocks: u4, v_blocks: u4, max_h: u4, max_v: u4) void {
-    // For 4:2:0, input is typically 1 block (8x8), output should be max_h*8 x max_v*8
-    assert(h_blocks == 1 and v_blocks == 1);
-    assert(input.len == 1);
-
-    const src_block = &input[0];
-    const dst_width = @as(usize, max_h) * 8;
-    const dst_height = @as(usize, max_v) * 8;
-    const scale_x = 8.0 / @as(f32, @floatFromInt(dst_width));
-    const scale_y = 8.0 / @as(f32, @floatFromInt(dst_height));
-
-    // Bilinear interpolation upsampling for better quality
-    for (0..dst_height) |dst_y| {
-        for (0..dst_width) |dst_x| {
-            // Calculate source coordinates with sub-pixel precision
-            const src_x_f = (@as(f32, @floatFromInt(dst_x)) + 0.5) * scale_x - 0.5;
-            const src_y_f = (@as(f32, @floatFromInt(dst_y)) + 0.5) * scale_y - 0.5;
-
-            // Get integer and fractional parts
-            const x0: usize = @trunc(std.math.clamp(@floor(src_x_f), 0, 7));
-            const y0: usize = @trunc(std.math.clamp(@floor(src_y_f), 0, 7));
-            const x1: usize = @min(7, x0 + 1);
-            const y1: usize = @min(7, y0 + 1);
-
-            const fx = src_x_f - @as(f32, @floatFromInt(x0));
-            const fy = src_y_f - @as(f32, @floatFromInt(y0));
-
-            // Get the four surrounding pixels
-            const p00: f32 = @floatFromInt(src_block[y0 * 8 + x0]);
-            const p10: f32 = @floatFromInt(src_block[y0 * 8 + x1]);
-            const p01: f32 = @floatFromInt(src_block[y1 * 8 + x0]);
-            const p11: f32 = @floatFromInt(src_block[y1 * 8 + x1]);
-
-            // Bilinear interpolation
-            const interp_x0 = std.math.lerp(p00, p10, fx);
-            const interp_x1 = std.math.lerp(p01, p11, fx);
-            const result = std.math.lerp(interp_x0, interp_x1, fy);
-
-            const dst_idx = dst_y * dst_width + dst_x;
-            output[dst_idx] = @round(result);
-        }
-    }
-}
-
 // Block scan function that fills block storage (from master)
 fn performBlockScan(state: *JpegState) !void {
     if (state.block_storage == null) return error.BlockStorageNotAllocated;
@@ -2574,7 +2403,11 @@ fn performBlockScan(state: *JpegState) !void {
                         _ = state.bit_reader.fillBits(24) catch {};
 
                         // Decode block directly into storage using the baseline path
-                        try decodeBlockBaseline(state, scan_comp, block_ptr, &prediction_values[component_index]);
+                        decodeBlockBaseline(state, scan_comp, block_ptr, &prediction_values[component_index]) catch |err| switch (err) {
+                            // Truncated scan: keep the coefficients decoded so far.
+                            error.UnexpectedEndOfData => return,
+                            else => return err,
+                        };
                     }
                 }
             }
@@ -2582,70 +2415,6 @@ fn performBlockScan(state: *JpegState) !void {
             // Count one MCU completed (one position in interleaved grid)
             mcus_since_restart += 1;
         }
-    }
-}
-
-// Decode a single block directly into block storage (from master)
-fn decodeBlockToStorage(state: *JpegState, scan_comp: ScanComponent, block: *[64]i32, dc_prediction: *i32) !void {
-    // Clear the block
-    @memset(block, 0);
-
-    // Decode DC coefficient
-    const dc_table = state.dc_tables[scan_comp.dc_table_id] orelse return error.MissingHuffmanTable;
-    const dc_symbol = try state.readCode(&dc_table);
-
-    if (dc_symbol > 11) return error.InvalidDCCoefficient;
-
-    var dc_diff: i32 = 0;
-    if (dc_symbol > 0) {
-        const dc_bits = try state.bit_reader.getBits(@intCast(dc_symbol));
-        dc_diff = @intCast(dc_bits);
-
-        // Convert from unsigned to signed
-        if (dc_bits < (@as(u32, 1) << @intCast(dc_symbol - 1))) {
-            dc_diff = @as(i32, @intCast(dc_bits)) - @as(i32, @intCast((@as(u32, 1) << @intCast(dc_symbol)) - 1));
-        }
-    }
-
-    dc_prediction.* += dc_diff;
-    block[0] = dc_prediction.*;
-
-    // Decode AC coefficients
-    const ac_table = state.ac_tables[scan_comp.ac_table_id] orelse return error.MissingHuffmanTable;
-    var k: usize = 1;
-
-    while (k < 64) {
-        const ac_symbol = try state.readCode(&ac_table);
-
-        if (ac_symbol == 0x00) {
-            // End of block
-            break;
-        }
-
-        if (ac_symbol == 0xF0) {
-            // ZRL - 16 zeros
-            k += 16;
-            continue;
-        }
-
-        const zero_run = ac_symbol >> 4;
-        const coeff_bits = ac_symbol & 0x0F;
-
-        if (coeff_bits == 0) return error.InvalidACCoefficient;
-
-        k += zero_run;
-        if (k >= 64) break;
-
-        const ac_bits = try state.bit_reader.getBits(@intCast(coeff_bits));
-        var ac_value: i32 = @intCast(ac_bits);
-
-        // Convert from unsigned to signed
-        if (ac_bits < (@as(u32, 1) << @intCast(coeff_bits - 1))) {
-            ac_value = @as(i32, @intCast(ac_bits)) - @as(i32, @intCast((@as(u32, 1) << @intCast(coeff_bits)) - 1));
-        }
-
-        block[zigzag[k]] = ac_value;
-        k += 1;
     }
 }
 
@@ -2682,52 +2451,6 @@ fn idctAllBlocks(state: *JpegState) void {
                 }
             }
         }
-    }
-}
-
-// Upsample chroma for a specific Y block within an MCU
-fn upsampleChromaForBlock(state: *JpegState, mcu_col: usize, mcu_row: usize, h_offset: usize, v_offset: usize, max_h: u4, max_v: u4, cb_out: *[64]i32, cr_out: *[64]i32) void {
-
-    // For 4:2:0, we need to interpolate from the 2x2 pixel grid at the MCU level to 8x8 for each Y block
-    // The h_offset and v_offset tell us which quadrant of the MCU we're in
-
-    // Get the chroma block for this MCU
-    const chroma_y = mcu_row * max_v;
-    const chroma_x = mcu_col * max_h;
-    if (chroma_y >= state.block_height or chroma_x >= state.block_width) {
-        @memset(cb_out, 0);
-        @memset(cr_out, 0);
-        return;
-    }
-
-    const chroma_block_index = chroma_y * state.block_width_actual + chroma_x;
-    const cb_block = &state.block_storage.?[chroma_block_index][1];
-    const cr_block = &state.block_storage.?[chroma_block_index][2];
-
-    // For 4:2:0 with 2x2 Y blocks per MCU, we need to map the 8x8 chroma to each 8x8 Y block
-    // Each Y block gets a quarter of the chroma samples, interpolated
-    if (max_h == 2 and max_v == 2) {
-        // Calculate which 4x4 region of the chroma block maps to this Y block
-        const chroma_offset_x = h_offset * 4;
-        const chroma_offset_y = v_offset * 4;
-
-        // Simple approach: replicate the 4x4 chroma region to fill the 8x8 Y block
-        for (0..8) |y| {
-            for (0..8) |x| {
-                // Map to the 4x4 region in the original 8x8 chroma block
-                const src_y = chroma_offset_y + (y / 2);
-                const src_x = chroma_offset_x + (x / 2);
-                const src_idx = src_y * 8 + src_x;
-                const dst_idx = y * 8 + x;
-
-                cb_out[dst_idx] = cb_block[src_idx];
-                cr_out[dst_idx] = cr_block[src_idx];
-            }
-        }
-    } else {
-        // For other subsampling ratios, just copy the chroma block
-        @memcpy(cb_out, cb_block);
-        @memcpy(cr_out, cr_block);
     }
 }
 
@@ -3264,6 +2987,72 @@ test "JPEG block limit prevents excessive allocation" {
     const limits: DecodeLimits = .{ .max_blocks = 1 };
     const result = state.parseSOF(&sof_data, .baseline, limits);
     try std.testing.expectError(error.BlockMemoryLimitExceeded, result);
+}
+
+// Minimal hand-built 8x8 grayscale progressive JPEG: three DC scans (first at Al=2,
+// then two successive-approximation refinements) leaving the block's DC at 15,
+// which renders as a flat image of value 15 + 128 = 143 (flat quant table of 8).
+const test_progressive_dqt = [_]u8{ 0xFF, 0xDB, 0x00, 0x43, 0x00 } ++ @as([64]u8, @splat(0x08));
+const test_progressive_sof2 = [_]u8{ 0xFF, 0xC2, 0x00, 0x0B, 0x08, 0x00, 0x08, 0x00, 0x08, 0x01, 0x01, 0x11, 0x00 };
+const test_progressive_dht = [_]u8{ 0xFF, 0xC4, 0x00, 0x14, 0x00, 0x01 } ++ @as([15]u8, @splat(0x00)) ++ [_]u8{0x02};
+// Ss=0 Se=0 Ah=0 Al=2; entropy 0x7F: code '0' -> magnitude 2, bits '11' -> diff 3 -> DC = 3 << 2 = 12
+const test_progressive_scan1 = [_]u8{ 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x00, 0x02, 0x7F };
+// Ah=2 Al=1; refinement bit 1 -> DC += 1 << 1 -> 14 (0xFF needs the 0x00 stuffing byte)
+const test_progressive_scan2 = [_]u8{ 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x00, 0x21, 0xFF, 0x00 };
+// Ah=1 Al=0; refinement bit 1 -> DC += 1 -> 15
+const test_progressive_scan3 = [_]u8{ 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x00, 0x10, 0xFF, 0x00 };
+const test_progressive_eoi = [_]u8{ 0xFF, 0xD9 };
+const test_progressive_jpeg = signature ++ test_progressive_dqt ++ test_progressive_sof2 ++
+    test_progressive_dht ++ test_progressive_scan1 ++ test_progressive_scan2 ++ test_progressive_scan3 ++
+    test_progressive_eoi;
+
+test "JPEG progressive full decode of hand-built stream" {
+    var img = try loadFromBytes(u8, std.testing.allocator, &test_progressive_jpeg, .{});
+    defer img.deinit(std.testing.allocator);
+    try std.testing.expectEqual(8, img.rows);
+    try std.testing.expectEqual(8, img.cols);
+    for (img.data) |px| try std.testing.expectEqual(143, px);
+}
+
+test "JPEG progressive scan limit returns partial image" {
+    // Only the first two of three DC scans are decoded: DC = 14 -> pixel 142.
+    var img = try loadFromBytes(u8, std.testing.allocator, &test_progressive_jpeg, .{ .max_scans = 2 });
+    defer img.deinit(std.testing.allocator);
+    for (img.data) |px| try std.testing.expectEqual(142, px);
+
+    var state = try decode(std.testing.allocator, &test_progressive_jpeg, .{ .max_scans = 2 });
+    defer state.deinit();
+    try std.testing.expect(state.scan_limit_reached);
+}
+
+test "JPEG duplicate SOF is rejected" {
+    const sof0 = [_]u8{ 0xFF, 0xC0 } ++ test_progressive_sof2[2..].*;
+    const data = signature ++ sof0 ++ sof0 ++ test_progressive_eoi;
+    try std.testing.expectError(error.DuplicateSOF, decode(std.testing.allocator, &data, .{}));
+}
+
+test "JPEG truncated progressive stream decodes partially" {
+    // Scan 3 loses its entropy data (and EOI): refinement hits EOF, DC stays at 14.
+    var img = try loadFromBytes(u8, std.testing.allocator, test_progressive_jpeg[0 .. test_progressive_jpeg.len - 4], .{});
+    defer img.deinit(std.testing.allocator);
+    for (img.data) |px| try std.testing.expectEqual(142, px);
+
+    // Stream ends right after the first SOS header, before any entropy data:
+    // the DC-first Huffman read hits EOF, leaving all coefficients zero.
+    const headers_only = signature ++ test_progressive_dqt ++ test_progressive_sof2 ++
+        test_progressive_dht ++ test_progressive_scan1[0 .. test_progressive_scan1.len - 1].*;
+    var img2 = try loadFromBytes(u8, std.testing.allocator, &headers_only, .{});
+    defer img2.deinit(std.testing.allocator);
+    for (img2.data) |px| try std.testing.expectEqual(128, px);
+}
+
+test "JPEG DC-only progressive scan decodes" {
+    // Single DC scan at Al=2: DC = 12 -> flat image of value 140.
+    const dc_only = signature ++ test_progressive_dqt ++ test_progressive_sof2 ++
+        test_progressive_dht ++ test_progressive_scan1 ++ test_progressive_eoi;
+    var img = try loadFromBytes(u8, std.testing.allocator, &dc_only, .{});
+    defer img.deinit(std.testing.allocator);
+    for (img.data) |px| try std.testing.expectEqual(140, px);
 }
 
 // Basic tests
