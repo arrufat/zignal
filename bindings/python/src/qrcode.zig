@@ -256,7 +256,7 @@ fn qrcode_decode(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
     const py_obj = c.PyType_GenericAlloc(@ptrCast(&QrDecodeResultType), 0) orelse return null;
     const obj = python.safeCast(QrDecodeResultObject, py_obj);
     obj.version = result.version;
-    obj.ec_level = @intFromEnum(result.ec_level);
+    obj.ec_level = @backingInt(result.ec_level);
     obj.corrected_errors = result.corrected_errors;
     obj.data = null;
     obj.corners = null;

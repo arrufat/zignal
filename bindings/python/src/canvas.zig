@@ -369,7 +369,7 @@ fn canvas_draw_line(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = python.validateNonNegative(u32, params.width, "Width") catch return null;
     const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @enumFromInt(mode_val);
+    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
 
     canvas.drawLine(p1, p2, rgba, width_val, draw_mode);
 
@@ -403,7 +403,7 @@ fn canvas_draw_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = python.validateNonNegative(u32, params.width, "Width") catch return null;
     const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @enumFromInt(mode_val);
+    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
 
     canvas.drawRectangle(rect, rgba, width_val, draw_mode);
 
@@ -437,7 +437,7 @@ fn canvas_draw_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = python.validateNonNegative(u32, params.width, "Width") catch return null;
     const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @enumFromInt(mode_val);
+    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
 
     canvas.drawPolygon(points, rgba, width_val, draw_mode);
 
@@ -472,7 +472,7 @@ fn canvas_draw_circle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = python.validateNonNegative(u32, params.width, "Width") catch return null;
     const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @enumFromInt(mode_val);
+    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
 
     canvas.drawCircle(center, radius, rgba, width_val, draw_mode);
 
@@ -505,7 +505,7 @@ fn canvas_fill_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     const rect = python.parse(zignal.Rectangle(f32), params.rect) catch return null;
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @enumFromInt(mode_val);
+    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
 
     canvas.fillRectangle(rect, rgba, draw_mode);
 
@@ -601,7 +601,7 @@ fn canvas_fill_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
     defer allocator.free(points);
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @enumFromInt(mode_val);
+    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
 
     canvas.fillPolygon(points, rgba, draw_mode) catch {
         python.setRuntimeError("Failed to fill polygon", .{});
@@ -636,7 +636,7 @@ fn canvas_fill_circle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     const radius = python.validateNonNegative(f32, params.radius, "Radius") catch return null;
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @enumFromInt(mode_val);
+    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
 
     canvas.fillCircle(center, radius, rgba, draw_mode);
 
@@ -674,7 +674,7 @@ fn canvas_draw_quadratic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = python.validateNonNegative(u32, params.width, "Width") catch return null;
     const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @enumFromInt(mode_val);
+    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
 
     canvas.drawQuadraticBezier(p0, p1, p2, rgba, width_val, draw_mode);
 
@@ -703,7 +703,7 @@ fn canvas_draw_cubic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = python.validateNonNegative(u32, params.width, "Width") catch return null;
     const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @enumFromInt(mode_val);
+    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
 
     canvas.drawCubicBezier(p0, p1, p2, p3, rgba, width_val, draw_mode);
 
@@ -729,7 +729,7 @@ fn canvas_draw_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
     const width_val = python.validateNonNegative(u32, params.width, "Width") catch return null;
     const tension_val = python.validateRange(f32, params.tension, 0.0, 1.0, "Tension") catch return null;
     const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @enumFromInt(mode_val);
+    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
 
     canvas.drawSplinePolygon(points, rgba, width_val, tension_val, draw_mode);
 
@@ -753,7 +753,7 @@ fn canvas_fill_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const tension_val = python.validateRange(f32, params.tension, 0.0, 1.0, "Tension") catch return null;
     const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @enumFromInt(mode_val);
+    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
 
     canvas.fillSplinePolygon(points, rgba, tension_val, draw_mode) catch {
         python.setRuntimeError("Failed to fill spline polygon", .{});
@@ -785,7 +785,7 @@ fn canvas_draw_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = python.validateNonNegative(u32, params.width, "Width") catch return null;
     const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @enumFromInt(mode_val);
+    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
 
     canvas.drawArc(center, radius_val, start_angle_val, end_angle_val, rgba, width_val, draw_mode) catch {
         python.setRuntimeError("Failed to draw arc", .{});
@@ -816,7 +816,7 @@ fn canvas_fill_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     const end_angle_val: f32 = @floatCast(params.end_angle);
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @enumFromInt(mode_val);
+    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
 
     canvas.fillArc(center, radius_val, start_angle_val, end_angle_val, rgba, draw_mode) catch {
         python.setRuntimeError("Failed to fill arc", .{});
@@ -851,7 +851,7 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const rgba = color_utils.parseColor(Rgba, @ptrCast(params.color)) catch return null;
 
     const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @enumFromInt(mode_val);
+    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
 
     if (params.font) |font| {
         const bitmap_font_module = @import("bitmap_font.zig");

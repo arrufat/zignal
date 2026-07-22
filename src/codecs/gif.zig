@@ -421,7 +421,7 @@ fn parseGce(reader: *Io.Reader) !GraphicControlExtension {
     const terminator = try reader.takeByte();
     if (terminator != 0) return error.InvalidGraphicControlExtension;
     return .{
-        .disposal = @enumFromInt((packed_byte >> 2) & gce_disposal_mask),
+        .disposal = @fromBackingInt(@intCast((packed_byte >> 2) & gce_disposal_mask)),
         .has_transparent = (packed_byte & gce_flag_transparent) != 0,
         .delay_cs = delay,
         .transparent_index = transparent,

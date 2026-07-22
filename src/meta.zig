@@ -5,13 +5,13 @@ pub fn as(comptime T: type, from: anytype) T {
     return switch (@typeInfo(@TypeOf(from))) {
         .@"enum" => {
             return switch (@typeInfo(T)) {
-                .int => @intFromEnum(from),
+                .int => @backingInt(from),
                 else => @compileError(@typeName(@TypeOf(from)) ++ " can't be converted to " ++ @typeName(T)),
             };
         },
         .int, .comptime_int => {
             return switch (@typeInfo(T)) {
-                .@"enum" => @enumFromInt(from),
+                .@"enum" => @fromBackingInt(from),
                 .int => @intCast(from),
                 .float => @floatFromInt(from),
                 else => @compileError(@typeName(@TypeOf(from)) ++ " can't be converted to " ++ @typeName(T)),

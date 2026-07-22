@@ -286,8 +286,8 @@ const State = struct {
                     raw.lflag.ECHO = false;
 
                     // Set minimum characters and timeout
-                    raw.cc[@intFromEnum(std.posix.V.MIN)] = 0;
-                    raw.cc[@intFromEnum(std.posix.V.TIME)] = 1; // 0.1 second timeout
+                    raw.cc[@backingInt(std.posix.V.MIN)] = 0;
+                    raw.cc[@backingInt(std.posix.V.TIME)] = 1; // 0.1 second timeout
 
                     try std.posix.tcsetattr(self.stdin.handle, .FLUSH, raw);
                 }
