@@ -1099,7 +1099,7 @@ pub const Marker = enum(u16) {
     pub fn fromBytes(bytes: [2]u8) ?Marker {
         const value = (@as(u16, bytes[0]) << 8) | bytes[1];
         return inline for (@typeInfo(Marker).@"enum".field_values) |field_value| {
-            if (value == field_value) break @enumFromInt(value);
+            if (value == field_value) break @fromBackingInt(value);
         } else null;
     }
 };
@@ -2134,7 +2134,7 @@ pub fn decode(allocator: Allocator, data: []const u8, limits: DecodeLimits) !Jpe
 
             else => {
                 // Check for other unsupported SOF markers
-                const marker_value = @intFromEnum(marker);
+                const marker_value = @backingInt(marker);
                 if (marker_value >= 0xFFC5 and marker_value <= 0xFFCF) {
                     // SOF5-SOF15 are unsupported variants
                     return error.UnsupportedJpegVariant;

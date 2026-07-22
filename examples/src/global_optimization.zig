@@ -153,7 +153,7 @@ pub export fn optimizer_step() i32 {
         @memcpy(best_x, b.x);
         last_y = s.point.y;
         best_y = b.y;
-        last_move = @intFromEnum(s.move);
+        last_move = @backingInt(s.move);
         return @intCast(s.eval_index);
     }
     return -1;

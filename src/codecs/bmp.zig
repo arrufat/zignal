@@ -181,7 +181,7 @@ fn readDibHeader(reader: *Io.Reader) !Header {
         .height = 0,
         .bit_depth = 0,
         .compression = .rgb,
-        .dib_kind = @enumFromInt(dib_size),
+        .dib_kind = @fromBackingInt(dib_size),
         .top_down = false,
         .palette_entries = 0,
         .masks = null,
@@ -228,7 +228,7 @@ fn readDibHeader(reader: *Io.Reader) !Header {
     const h: u32 = @intCast(abs_h);
     const bit_depth: u8 = std.math.cast(u8, bd) orelse return error.UnsupportedBitDepth;
 
-    const compression: Compression = @enumFromInt(compression_raw);
+    const compression: Compression = @fromBackingInt(compression_raw);
     switch (compression) {
         .jpeg, .png, .cmyk, .cmyk_rle8, .cmyk_rle4 => return error.UnsupportedCompression,
         else => {},
@@ -317,7 +317,7 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
 
     // Headers (file + DIB + optional v3 BI_BITFIELDS masks) cannot be larger
     // than the declared pixel data offset.
-    var min_offset: u32 = 14 + @intFromEnum(header.dib_kind);
+    var min_offset: u32 = 14 + @backingInt(header.dib_kind);
     if (header.dib_kind == .info) {
         if (header.compression == .bitfields) {
             min_offset += if (shouldReadAlphaMask(file_header, header)) 16 else 12;
@@ -349,7 +349,7 @@ pub const BmpState = struct {
 /// Computes the byte offset where the palette begins, relative to the start of
 /// the file. Accounts for any v3 BI_BITFIELDS / BI_ALPHABITFIELDS mask trailer.
 fn computePostDibOffset(file_header: FileHeader, header: Header) u32 {
-    var off: u32 = 14 + @intFromEnum(header.dib_kind);
+    var off: u32 = 14 + @backingInt(header.dib_kind);
     if (header.dib_kind == .info) {
         if (header.compression == .bitfields) {
             off += if (shouldReadAlphaMask(file_header, header)) 16 else 12;
@@ -874,7 +874,7 @@ fn writeHeaders(out: *ArrayList(u8), gpa: Allocator, args: HeaderArgs) !void {
     try writeLe(i32, out, gpa, h_signed);
     try writeLe(u16, out, gpa, 1); // planes
     try writeLe(u16, out, gpa, args.bit_depth);
-    try writeLe(u32, out, gpa, @intFromEnum(args.compression));
+    try writeLe(u32, out, gpa, @backingInt(args.compression));
     try writeLe(u32, out, gpa, args.pixel_bytes);
     try writeLe(i32, out, gpa, 2835); // ~72 DPI
     try writeLe(i32, out, gpa, 2835);
@@ -1087,7 +1087,7 @@ fn appendInfoHeader(list: *ArrayList(u8), gpa: Allocator, opts: TestInfoHeaderOp
     try writeLe(i32, list, gpa, opts.height);
     try writeLe(u16, list, gpa, 1); // planes
     try writeLe(u16, list, gpa, opts.bit_depth);
-    try writeLe(u32, list, gpa, @intFromEnum(opts.compression));
+    try writeLe(u32, list, gpa, @backingInt(opts.compression));
     try writeLe(u32, list, gpa, opts.size_image);
     try writeLe(i32, list, gpa, 2835); // x_pels_per_meter (~72 DPI)
     try writeLe(i32, list, gpa, 2835); // y_pels_per_meter
@@ -1231,7 +1231,7 @@ test "BMP getInfo: BITMAPV4HEADER" {
     try writeLe(i32, &data, gpa, 8); // height
     try writeLe(u16, &data, gpa, 1); // planes
     try writeLe(u16, &data, gpa, 32); // bit_depth
-    try writeLe(u32, &data, gpa, @intFromEnum(Compression.bitfields));
+    try writeLe(u32, &data, gpa, @backingInt(Compression.bitfields));
     try writeLe(u32, &data, gpa, 0); // size_image
     try writeLe(i32, &data, gpa, 2835);
     try writeLe(i32, &data, gpa, 2835);

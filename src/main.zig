@@ -28,7 +28,7 @@ pub fn logFn(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    if (@intFromEnum(level) > @intFromEnum(cli_args.runtime_log_level)) return;
+    if (@backingInt(level) > @backingInt(cli_args.runtime_log_level)) return;
     std.log.defaultLog(level, scope, format, args);
 }
 

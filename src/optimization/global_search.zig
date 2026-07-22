@@ -692,13 +692,13 @@ test "GlobalOptimizer: step() reports progress and is deterministic" {
     var i: usize = 0;
     while (i < 60) : (i += 1) {
         const s = try opt.step(shiftedBowl);
-        saw_move[@intFromEnum(s.move)] = true;
+        saw_move[@backingInt(s.move)] = true;
         try std.testing.expectEqual(i, s.eval_index);
     }
     const b1 = opt.best();
     try std.testing.expect(b1.y < 1e-2);
     // .init and at least one of the search kinds must have occurred.
-    try std.testing.expect(saw_move[@intFromEnum(GlobalOptimizer.Move.init)]);
+    try std.testing.expect(saw_move[@backingInt(GlobalOptimizer.Move.init)]);
 
     // Same seed -> same trajectory.
     var opt2 = try GlobalOptimizer.init(allocator, &variables, .{ .policy = .min, .seed = 7 });

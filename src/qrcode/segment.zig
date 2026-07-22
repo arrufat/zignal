@@ -120,7 +120,7 @@ pub fn buildCodewords(
 
     var writer: BitWriter = .{};
     errdefer writer.deinit(allocator);
-    try writer.writeBits(allocator, @intFromEnum(mode), 4);
+    try writer.writeBits(allocator, @backingInt(mode), 4);
     try writer.writeBits(allocator, @intCast(data.len), mode.charCountBits(version));
 
     switch (mode) {

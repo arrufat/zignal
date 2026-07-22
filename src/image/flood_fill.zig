@@ -110,7 +110,7 @@ pub fn floodFill(
     };
 
     // Connectivity tag values are the neighbor counts (four = 4, eight = 8).
-    const neighbor_count: usize = @intFromEnum(options.connectivity);
+    const neighbor_count: usize = @backingInt(options.connectivity);
 
     while (stack.pop()) |curr| {
         const orig_val = image.at(curr.r, curr.c).*;
