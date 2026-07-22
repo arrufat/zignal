@@ -123,11 +123,11 @@ pub fn pyToEnum(comptime E: type, obj: *c.PyObject) !E {
     // Validate against declared enum values
     const EI = getEnumInfo(E);
     var matched = false;
-    var out: E = @enumFromInt(0);
+    var out: E = @fromBackingInt(0);
     inline for (EI.field_values) |field_value| {
         if (v == field_value) {
             matched = true;
-            out = @enumFromInt(field_value);
+            out = @fromBackingInt(field_value);
         }
     }
     if (!matched) {
@@ -170,7 +170,7 @@ pub fn pyToUnionTag(comptime U: type, obj: *c.PyObject) !TagOf(U) {
     const EI = getEnumInfo(U);
     inline for (EI.field_values) |field_value| {
         if (v == field_value) {
-            return @enumFromInt(field_value);
+            return @fromBackingInt(field_value);
         }
     }
     var buf: [128]u8 = undefined;
@@ -194,7 +194,7 @@ pub fn longToEnum(comptime T: type, value: c_long) !ResolvedEnum(T) {
     const EI = getEnumInfo(T);
     inline for (EI.field_values) |field_value| {
         if (value == field_value) {
-            return @enumFromInt(field_value);
+            return @fromBackingInt(field_value);
         }
     }
     var buf: [128]u8 = undefined;

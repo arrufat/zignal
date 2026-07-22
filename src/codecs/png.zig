@@ -1247,7 +1247,7 @@ fn createIHDR(header: Header) ![13]u8 {
     ihdr_data[8] = header.bit_depth;
 
     // Color type (1 byte)
-    ihdr_data[9] = @intFromEnum(header.color_type);
+    ihdr_data[9] = @backingInt(header.color_type);
 
     // Compression method (1 byte) - always 0
     ihdr_data[10] = 0;
@@ -1278,7 +1278,7 @@ fn filterScanlines(allocator: Allocator, data: []const u8, header: Header, filte
         const dst_row = filtered_data[dst_row_start + 1 .. dst_row_start + 1 + scanline_bytes];
 
         // Set filter type byte
-        filtered_data[dst_row_start] = @intFromEnum(filter_type);
+        filtered_data[dst_row_start] = @backingInt(filter_type);
 
         // Apply filtering
         const previous_row = if (y > 0)
@@ -1353,7 +1353,7 @@ fn encodeRaw(gpa: Allocator, image_data: []const u8, width: u32, height: u32, co
     // Write color management chunks if specified
     if (options.srgb_intent) |intent| {
         // sRGB chunk - must come before PLTE and IDAT
-        const srgb_data = [_]u8{@intFromEnum(intent)};
+        const srgb_data = [_]u8{@backingInt(intent)};
         try writer.writeChunk("sRGB".*, &srgb_data);
     } else if (options.gamma) |g| {
         // gAMA chunk - must come before PLTE and IDAT
@@ -1708,7 +1708,7 @@ fn filterScanlinesAdaptive(allocator: Allocator, data: []const u8, header: Heade
         } else last_filter; // Reuse last filter
 
         // Set filter type byte
-        filtered_data[dst_row_start] = @intFromEnum(best_filter);
+        filtered_data[dst_row_start] = @backingInt(best_filter);
 
         // Apply the selected filter
         filterRow(best_filter, dst_row, src_row, previous_row, bytes_per_pixel);
@@ -2249,7 +2249,7 @@ fn appendTestIhdr(list: *ArrayList(u8), gpa: Allocator, width: u32, height: u32,
     std.mem.writeInt(u32, ihdr[0..4], width, .big);
     std.mem.writeInt(u32, ihdr[4..8], height, .big);
     ihdr[8] = bit_depth;
-    ihdr[9] = @intFromEnum(color_type);
+    ihdr[9] = @backingInt(color_type);
     ihdr[10] = 0;
     ihdr[11] = 0;
     ihdr[12] = interlace;
@@ -2668,8 +2668,8 @@ test "PNG adaptive filter selection" {
     defer allocator.free(filtered);
 
     const stride = scanline_bytes + 1; // filter byte + scanline data
-    try std.testing.expectEqual(@as(u8, @intFromEnum(FilterType.sub)), filtered[0]);
-    try std.testing.expectEqual(@as(u8, @intFromEnum(FilterType.up)), filtered[stride]);
+    try std.testing.expectEqual(@as(u8, @backingInt(FilterType.sub)), filtered[0]);
+    try std.testing.expectEqual(@as(u8, @backingInt(FilterType.up)), filtered[stride]);
 
     // Defilter back and verify we recover the original bytes
     var roundtrip = try allocator.alloc(u8, filtered.len);
@@ -2934,7 +2934,7 @@ test "PNG filter types" {
             4 => .paeth,
             else => unreachable,
         };
-        try std.testing.expectEqual(filter, @intFromEnum(filter_type));
+        try std.testing.expectEqual(filter, @backingInt(filter_type));
     }
 
     // Test that invalid filter would be caught

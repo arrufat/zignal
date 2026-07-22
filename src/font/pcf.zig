@@ -334,7 +334,7 @@ pub fn load(io: Io, allocator: std.mem.Allocator, path: []const u8, filter: Load
 
 /// Find a table in the table of contents
 fn findTable(tables: []const TableEntry, table_type: TableType) ?TableEntry {
-    const type_value = @intFromEnum(table_type);
+    const type_value = @backingInt(table_type);
     for (tables) |table| {
         if (table.type == type_value) {
             return table;
@@ -859,7 +859,7 @@ fn convertToBitmapFont(
         }
         const format_flags = FormatFlags.decode(bitmap_info.format);
         const pad_bits: u2 = @truncate(bitmap_info.format & 0x3);
-        const glyph_pad: GlyphPadding = @enumFromInt(pad_bits);
+        const glyph_pad: GlyphPadding = @fromBackingInt(pad_bits);
 
         try convertGlyphBitmap(
             gpa,
@@ -1527,7 +1527,7 @@ test "Table bounds validation" {
 
     // Valid table
     const valid_table = TableEntry{
-        .type = @intFromEnum(TableType.metrics),
+        .type = @backingInt(TableType.metrics),
         .format = 0,
         .size = 50,
         .offset = 20,
@@ -1536,7 +1536,7 @@ test "Table bounds validation" {
 
     // Invalid offset
     const invalid_offset_table = TableEntry{
-        .type = @intFromEnum(TableType.metrics),
+        .type = @backingInt(TableType.metrics),
         .format = 0,
         .size = 50,
         .offset = 200,
@@ -1545,7 +1545,7 @@ test "Table bounds validation" {
 
     // Invalid size
     const invalid_size_table = TableEntry{
-        .type = @intFromEnum(TableType.metrics),
+        .type = @backingInt(TableType.metrics),
         .format = 0,
         .size = 100,
         .offset = 50,
@@ -1604,7 +1604,7 @@ test "Properties parsing" {
     try writer.writeAll("PIXEL_SIZE\x00");
 
     const table = TableEntry{
-        .type = @intFromEnum(TableType.properties),
+        .type = @backingInt(TableType.properties),
         .format = 0,
         .size = @intCast(writer.end),
         .offset = 0,

@@ -116,7 +116,7 @@ pub const InterleaveIterator = struct {
 /// Looks up the block structure for a version and error correction level.
 pub fn ecBlocks(version: u8, level: EcLevel) EcBlocks {
     assert(version >= min_version and version <= max_version);
-    return ec_blocks_table[version - 1][@intFromEnum(level)];
+    return ec_blocks_table[version - 1][@backingInt(level)];
 }
 
 /// Indexed by version - 1, then [L, M, Q, H].
