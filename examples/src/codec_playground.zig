@@ -252,7 +252,7 @@ pub export fn encode_png(
             else => png.EncodeOptions.default.compress_options,
         },
         .gamma = if (gamma > 0) gamma else null,
-        .srgb_intent = if (srgb_intent >= 0 and srgb_intent <= 3) @enumFromInt(srgb_intent) else null,
+        .srgb_intent = if (srgb_intent >= 0 and srgb_intent <= 3) @fromBackingInt(@intCast(srgb_intent)) else null,
     });
 }
 
