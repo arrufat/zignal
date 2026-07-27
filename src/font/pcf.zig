@@ -12,10 +12,10 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const testing = std.testing;
-const flate = std.compress.flate;
 
-const max_file_size = @import("../font.zig").max_file_size;
 const LoadFilter = @import("../font.zig").LoadFilter;
+const readFileMaybeGzip = @import("../font.zig").readFileMaybeGzip;
+const writeFileMaybeGzip = @import("../font.zig").writeFileMaybeGzip;
 const BitmapFont = @import("BitmapFont.zig");
 const GlyphData = @import("GlyphData.zig");
 
@@ -97,12 +97,7 @@ const GlyphPadding = enum(u2) {
     pad_8 = 3,
 
     pub fn getPadBytes(self: GlyphPadding) u32 {
-        return switch (self) {
-            .pad_1 => 1,
-            .pad_2 => 2,
-            .pad_4 => 4,
-            .pad_8 => 8,
-        };
+        return @as(u32, 1) << @backingInt(self);
     }
 };
 
@@ -187,53 +182,8 @@ const PropertiesInfo = struct {
 /// Loads a PCF font from `path` (transparently decompressing `.pcf.gz`), keeping only characters
 /// that match `filter`.
 pub fn load(io: Io, allocator: std.mem.Allocator, path: []const u8, filter: LoadFilter) !BitmapFont {
-    // Check if file is gzip compressed
-    const is_compressed = std.mem.endsWith(u8, path, ".gz");
-
-    // Read file into memory
-    const raw_file_contents = try Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(max_file_size));
-    defer allocator.free(raw_file_contents);
-
-    // Decompress if needed
-    var file_contents: []u8 = undefined;
-    var decompressed_data: ?[]u8 = null;
-    defer if (decompressed_data) |data| allocator.free(data);
-
-    if (is_compressed) {
-        var reader: Io.Reader = .fixed(raw_file_contents);
-
-        const buffer = try allocator.alloc(u8, flate.max_window_len);
-        defer allocator.free(buffer);
-
-        var decompressor: flate.Decompress = .init(&reader, .gzip, buffer);
-
-        var aw: Io.Writer.Allocating = .init(allocator);
-        defer aw.deinit();
-
-        var remaining = Io.Limit.limited(max_file_size);
-        while (remaining.nonzero()) {
-            const n = decompressor.reader.stream(&aw.writer, remaining) catch |err| switch (err) {
-                error.EndOfStream => break,
-                error.ReadFailed => return PcfError.InvalidCompression,
-                else => return err,
-            };
-            remaining = remaining.subtract(n).?;
-        } else {
-            var one_byte_buf: [1]u8 = undefined;
-            var dummy_writer = Io.Writer.fixed(&one_byte_buf);
-            if (decompressor.reader.stream(&dummy_writer, .limited(1))) |n| {
-                if (n > 0) return PcfError.InvalidCompression;
-            } else |err| switch (err) {
-                error.EndOfStream => {},
-                error.ReadFailed => return PcfError.InvalidCompression,
-                else => return err,
-            }
-        }
-        decompressed_data = try aw.toOwnedSlice();
-        file_contents = decompressed_data.?;
-    } else {
-        file_contents = raw_file_contents;
-    }
+    const file_contents = try readFileMaybeGzip(io, allocator, path);
+    defer allocator.free(file_contents);
 
     // Use arena for temporary allocations
     var arena: std.heap.ArenaAllocator = .init(allocator);
@@ -368,21 +318,7 @@ fn parseAccelerator(data: []const u8, table: TableEntry) !Accelerator {
 
     var accel: Accelerator = undefined;
 
-    // In PCF, we need to read fields in the correct order
-    // The accelerator table has these fields after format:
-    // 1. noOverlap (1 byte)
-    // 2. constantMetrics (1 byte)
-    // 3. terminalFont (1 byte)
-    // 4. constantWidth (1 byte)
-    // 5. inkInside (1 byte)
-    // 6. inkMetrics (1 byte)
-    // 7. drawDirection (1 byte)
-    // 8. padding (1 byte)
-    // 9. fontAscent (4 bytes)
-    // 10. fontDescent (4 bytes)
-    // etc.
-
-    // Read the boolean flags as individual bytes
+    // Fields follow the PCF accelerator layout: the bool flags are single bytes
     accel.no_overlap = (try reader.takeByte()) != 0;
     accel.constant_metrics = (try reader.takeByte()) != 0;
     accel.terminal_font = (try reader.takeByte()) != 0;
@@ -528,18 +464,18 @@ fn getStringProperty(properties: []const Property, name: []const u8) ?[]const u8
 fn readMetric(reader: *Io.Reader, byte_order: std.builtin.Endian, compressed: bool) !Metric {
     if (compressed) {
         // Read compressed metric (5 bytes, each offset by 0x80)
-        const lsb = try reader.takeVarInt(u8, .little, 1);
-        const rsb = try reader.takeVarInt(u8, .little, 1);
-        const cw = try reader.takeVarInt(u8, .little, 1);
-        const asc = try reader.takeVarInt(u8, .little, 1);
-        const desc = try reader.takeVarInt(u8, .little, 1);
+        const lsb = try reader.takeByte();
+        const rsb = try reader.takeByte();
+        const cw = try reader.takeByte();
+        const asc = try reader.takeByte();
+        const desc = try reader.takeByte();
 
         return Metric{
-            .left_sided_bearing = @intCast(@as(i16, lsb) - 0x80),
-            .right_sided_bearing = @intCast(@as(i16, rsb) - 0x80),
-            .character_width = @intCast(@as(i16, cw) - 0x80),
-            .ascent = @intCast(@as(i16, asc) - 0x80),
-            .descent = @intCast(@as(i16, desc) - 0x80),
+            .left_sided_bearing = @as(i16, lsb) - 0x80,
+            .right_sided_bearing = @as(i16, rsb) - 0x80,
+            .character_width = @as(i16, cw) - 0x80,
+            .ascent = @as(i16, asc) - 0x80,
+            .descent = @as(i16, desc) - 0x80,
             .attributes = 0,
         };
     } else {
@@ -716,24 +652,9 @@ fn parseBitmaps(allocator: std.mem.Allocator, data: []const u8, table: TableEntr
     return result;
 }
 
-/// Check if a glyph should be included based on filter
-fn shouldIncludeGlyph(encoding: u32, filter: LoadFilter) bool {
-    switch (filter) {
-        .all => return true,
-        .ranges => |ranges| {
-            for (ranges) |range| {
-                if (encoding >= range.start and encoding <= range.end) {
-                    return true;
-                }
-            }
-            return false;
-        },
-    }
-}
-
-/// Convert a single glyph bitmap from PCF format to our format
+/// Convert a single glyph bitmap from PCF format to our format.
+/// The caller must have reserved capacity in `output` for the converted bytes.
 fn convertGlyphBitmap(
-    gpa: Allocator,
     bitmap_data: []const u8,
     offset: u32,
     width: u16,
@@ -741,10 +662,9 @@ fn convertGlyphBitmap(
     format_flags: FormatFlags,
     glyph_pad: GlyphPadding,
     output: *std.ArrayList(u8),
-) !void {
+) void {
     const bytes_per_row = (width + 7) / 8;
-    const pcf_pad = glyph_pad.getPadBytes();
-    const pcf_row_bytes = ((bytes_per_row + pcf_pad - 1) / pcf_pad) * pcf_pad;
+    const pcf_row_bytes = std.mem.alignForward(u32, bytes_per_row, glyph_pad.getPadBytes());
 
     // Convert each row
     for (0..height) |row| {
@@ -755,13 +675,9 @@ fn convertGlyphBitmap(
             if (src_offset + byte_idx < bitmap_data.len) {
                 const byte = bitmap_data[src_offset + byte_idx];
                 // PCF uses MSB first by default, convert if needed
-                const converted_byte = if (format_flags.bit_order_msb)
-                    @bitReverse(byte)
-                else
-                    byte;
-                try output.append(gpa, converted_byte);
+                output.appendAssumeCapacity(if (format_flags.bit_order_msb) @bitReverse(byte) else byte);
             } else {
-                try output.append(gpa, 0);
+                output.appendAssumeCapacity(0);
             }
         }
     }
@@ -791,20 +707,18 @@ fn convertToBitmapFont(
     var min_char: u8 = 255;
     var max_char: u8 = 0;
 
+    // PCF uses a 2D encoding table: rows are byte1 (high byte), columns are byte2 (low byte)
+    const chars_per_row = encoding.max_char_or_byte2 - encoding.min_char_or_byte2 + 1;
+
     // Build glyph list based on encodings and filter
     for (encoding.glyph_indices, 0..) |glyph_index, encoding_index| {
         if (glyph_index == 0xFFFF) continue; // Skip non-existent glyphs
 
-        // Calculate codepoint from encoding index
-        // PCF uses a 2D encoding table where:
-        // - rows represent byte1 values (high byte)
-        // - columns represent byte2 values (low byte)
-        const chars_per_row = encoding.max_char_or_byte2 - encoding.min_char_or_byte2 + 1;
         const row = encoding_index / chars_per_row;
         const col = encoding_index % chars_per_row;
         const codepoint: u32 = @intCast(((encoding.min_byte1 + row) << 8) | (encoding.min_char_or_byte2 + col));
 
-        if (!shouldIncludeGlyph(codepoint, filter)) continue;
+        if (!filter.matches(codepoint)) continue;
 
         if (glyph_index < metrics_info.glyph_count) {
             try glyph_list.append(gpa, .{
@@ -842,6 +756,9 @@ fn convertToBitmapFont(
     var glyph_data_list = try gpa.alloc(GlyphData, glyph_list.items.len);
     errdefer gpa.free(glyph_data_list);
 
+    const format_flags = FormatFlags.decode(bitmap_info.format);
+    const glyph_pad: GlyphPadding = @fromBackingInt(format_flags.glyph_pad);
+
     for (glyph_list.items, 0..) |glyph_info, list_index| {
         const metric = glyph_info.metric;
         const dims = getGlyphDimensions(metric);
@@ -857,12 +774,8 @@ fn convertToBitmapFont(
         if (bitmap_offset >= bitmap_info.bitmap_data.len) {
             return PcfError.InvalidBitmapData;
         }
-        const format_flags = FormatFlags.decode(bitmap_info.format);
-        const pad_bits: u2 = @truncate(bitmap_info.format & 0x3);
-        const glyph_pad: GlyphPadding = @fromBackingInt(pad_bits);
 
-        try convertGlyphBitmap(
-            gpa,
+        convertGlyphBitmap(
             bitmap_info.bitmap_data,
             bitmap_offset,
             dims.width,
@@ -889,8 +802,7 @@ fn convertToBitmapFont(
     }
 
     // Create final bitmap data
-    const bitmap_data = try gpa.alloc(u8, converted_bitmaps.items.len);
-    @memcpy(bitmap_data, converted_bitmaps.items);
+    const bitmap_data = try converted_bitmaps.toOwnedSlice(gpa);
 
     return BitmapFont{
         .name = name,
@@ -929,58 +841,24 @@ const GlyphEntry = struct {
     bitmap_offset: u32,
 };
 
-fn alignForward(value: usize, alignment: usize) usize {
-    return (value + alignment - 1) & ~(alignment - 1);
-}
-
-fn collectCodepoints(allocator: Allocator, font: BitmapFont) ![]u21 {
-    var keys: []u21 = undefined;
-
-    if (font.glyph_map) |map| {
-        keys = try allocator.alloc(u21, map.count());
-        var iter = map.iterator();
-        var idx: usize = 0;
-        while (iter.next()) |entry| : (idx += 1) {
-            keys[idx] = @intCast(entry.key_ptr.*);
-        }
-        std.mem.sort(u21, keys, {}, std.sort.asc(u21));
-    } else {
-        if (font.last_char < font.first_char) {
-            return allocator.alloc(u21, 0);
-        }
-
-        const count: usize = font.last_char - font.first_char + 1;
-        keys = try allocator.alloc(u21, count);
-        for (keys, 0..) |*cp, idx| {
-            cp.* = @as(u21, font.first_char) + @as(u21, @intCast(idx));
-        }
-    }
-
-    return keys;
-}
-
 fn buildGlyphEntries(
     allocator: Allocator,
     font: BitmapFont,
     codepoints: []const u21,
 ) !struct {
     entries: []GlyphEntry,
-    offsets: []u32,
     bitmap_data: []u8,
     pad_sizes: [4]u32,
 } {
     var entries = try allocator.alloc(GlyphEntry, codepoints.len);
     errdefer allocator.free(entries);
 
-    var offsets = try allocator.alloc(u32, codepoints.len);
-    errdefer allocator.free(offsets);
-
     var bitmap_buffer: std.ArrayList(u8) = .empty;
     errdefer bitmap_buffer.deinit(allocator);
 
-    var pad_sizes = [_]usize{ 0, 0, 0, 0 };
+    var pad_sizes: [4]u32 = @splat(0);
 
-    const font_ascent = font.font_ascent orelse @as(i16, font.char_height);
+    const font_ascent = font.ascent();
 
     for (codepoints, 0..) |cp, idx| {
         const glyph_info = font.getGlyphInfo(cp) orelse return PcfError.MissingRequired;
@@ -988,56 +866,38 @@ fn buildGlyphEntries(
         const height = glyph_info.height;
         const char_data = font.getCharData(cp) orelse return PcfError.InvalidBitmapData;
 
-        const bytes_per_row: usize = (width + 7) / 8;
-        const row_stride = bytes_per_row;
-
         const left = glyph_info.x_offset;
-        const right = @as(i16, width) + left;
-        const advance = glyph_info.device_width;
-        const ascent = font_ascent - glyph_info.y_offset;
-        var descent = @as(i16, height) - ascent;
-        if (descent < 0) descent = 0;
+        const glyph_ascent = font_ascent - glyph_info.y_offset;
 
-        const metric: GlyphMetrics = .{
-            .left = left,
-            .right = right,
-            .width = advance,
-            .ascent = ascent,
-            .descent = descent,
-            .attributes = 0,
-        };
-
-        offsets[idx] = @intCast(bitmap_buffer.items.len);
-
-        // Copy bitmap data
+        const bitmap_offset: u32 = @intCast(bitmap_buffer.items.len);
         try bitmap_buffer.appendSlice(allocator, char_data);
 
-        // Calculate PCF padding requirements
-        const pad_options = [_]usize{ 1, 2, 4, 8 };
-        for (pad_options, 0..) |pad, pad_idx| {
-            const padded_row = alignForward(row_stride, pad);
-            pad_sizes[pad_idx] += padded_row * height;
+        // Accumulate table sizes for each PCF padding option (1, 2, 4, 8 bytes)
+        for (&pad_sizes, 0..) |*size, pad_idx| {
+            const padded_row = std.mem.alignForward(u32, glyph_info.bytesPerRow(), @as(u32, 1) << @intCast(pad_idx));
+            size.* += padded_row * height;
         }
 
         entries[idx] = GlyphEntry{
             .codepoint = cp,
-            .metrics = metric,
-            .width = @intCast(width),
-            .height = @intCast(height),
-            .bitmap_offset = offsets[idx],
+            .metrics = .{
+                .left = left,
+                .right = @as(i16, width) + left,
+                .width = glyph_info.device_width,
+                .ascent = glyph_ascent,
+                .descent = @max(@as(i16, height) - glyph_ascent, 0),
+                .attributes = 0,
+            },
+            .width = width,
+            .height = height,
+            .bitmap_offset = bitmap_offset,
         };
     }
 
     return .{
         .entries = entries,
-        .offsets = offsets,
         .bitmap_data = try bitmap_buffer.toOwnedSlice(allocator),
-        .pad_sizes = .{
-            @intCast(pad_sizes[0]),
-            @intCast(pad_sizes[1]),
-            @intCast(pad_sizes[2]),
-            @intCast(pad_sizes[3]),
-        },
+        .pad_sizes = pad_sizes,
     };
 }
 
@@ -1067,7 +927,6 @@ fn writeMetricsTable(allocator: Allocator, glyphs: []const GlyphEntry) ![]u8 {
 fn writeBitmapsTable(
     allocator: Allocator,
     glyphs: []const GlyphEntry,
-    offsets: []const u32,
     bitmap_data: []const u8,
     pad_sizes: [4]u32,
 ) ![]u8 {
@@ -1083,18 +942,11 @@ fn writeBitmapsTable(
     try writer.writeInt(u32, 0, .little); // Format
     try writer.writeInt(u32, @intCast(glyph_count), .little);
 
-    for (offsets) |offset| {
-        try writer.writeInt(u32, offset, .little);
+    for (glyphs) |glyph| {
+        try writer.writeInt(u32, glyph.bitmap_offset, .little);
     }
 
-    const stored_sizes = [_]u32{
-        pad_sizes[0],
-        pad_sizes[1],
-        pad_sizes[2],
-        pad_sizes[3],
-    };
-
-    for (stored_sizes) |sz| {
+    for (pad_sizes) |sz| {
         try writer.writeInt(u32, sz, .little);
     }
 
@@ -1229,9 +1081,7 @@ fn writePropertiesTable(allocator: Allocator, font: BitmapFont) ![]u8 {
         try writer.writeInt(i32, pe.val, .little);
     }
 
-    for (0..padding) |_| {
-        try writer.writeByte(0);
-    }
+    try writer.splatByteAll(0, padding);
 
     try writer.writeInt(u32, @intCast(string_pool.items.len), .little);
     try writer.writeAll(string_pool.items);
@@ -1240,49 +1090,42 @@ fn writePropertiesTable(allocator: Allocator, font: BitmapFont) ![]u8 {
 }
 
 fn writeAcceleratorsTable(allocator: Allocator, glyphs: []const GlyphEntry, font_ascent: i16, font_descent: i16) ![]u8 {
-    // Calculate global bounds
+    // Fold global bounds over all glyphs, starting from saturated sentinels
     var min_bounds: Metric = .{
-        .left_sided_bearing = 0,
-        .right_sided_bearing = 0,
-        .character_width = 0,
-        .ascent = 0,
-        .descent = 0,
+        .left_sided_bearing = std.math.maxInt(i16),
+        .right_sided_bearing = std.math.maxInt(i16),
+        .character_width = std.math.maxInt(i16),
+        .ascent = std.math.maxInt(i16),
+        .descent = std.math.maxInt(i16),
         .attributes = 0,
     };
-    var max_bounds = min_bounds;
+    var max_bounds: Metric = .{
+        .left_sided_bearing = std.math.minInt(i16),
+        .right_sided_bearing = std.math.minInt(i16),
+        .character_width = std.math.minInt(i16),
+        .ascent = std.math.minInt(i16),
+        .descent = std.math.minInt(i16),
+        .attributes = 0,
+    };
 
-    if (glyphs.len > 0) {
-        min_bounds = Metric{
-            .left_sided_bearing = std.math.maxInt(i16),
-            .right_sided_bearing = std.math.maxInt(i16),
-            .character_width = std.math.maxInt(i16),
-            .ascent = std.math.maxInt(i16),
-            .descent = std.math.maxInt(i16),
-            .attributes = 0,
-        };
-        max_bounds = Metric{
-            .left_sided_bearing = std.math.minInt(i16),
-            .right_sided_bearing = std.math.minInt(i16),
-            .character_width = std.math.minInt(i16),
-            .ascent = std.math.minInt(i16),
-            .descent = std.math.minInt(i16),
-            .attributes = 0,
-        };
+    for (glyphs) |g| {
+        const m = g.metrics;
+        min_bounds.left_sided_bearing = @min(min_bounds.left_sided_bearing, m.left);
+        min_bounds.right_sided_bearing = @min(min_bounds.right_sided_bearing, m.right);
+        min_bounds.character_width = @min(min_bounds.character_width, m.width);
+        min_bounds.ascent = @min(min_bounds.ascent, m.ascent);
+        min_bounds.descent = @min(min_bounds.descent, m.descent);
 
-        for (glyphs) |g| {
-            const m = g.metrics;
-            min_bounds.left_sided_bearing = @min(min_bounds.left_sided_bearing, m.left);
-            min_bounds.right_sided_bearing = @min(min_bounds.right_sided_bearing, m.right);
-            min_bounds.character_width = @min(min_bounds.character_width, m.width);
-            min_bounds.ascent = @min(min_bounds.ascent, m.ascent);
-            min_bounds.descent = @min(min_bounds.descent, m.descent);
+        max_bounds.left_sided_bearing = @max(max_bounds.left_sided_bearing, m.left);
+        max_bounds.right_sided_bearing = @max(max_bounds.right_sided_bearing, m.right);
+        max_bounds.character_width = @max(max_bounds.character_width, m.width);
+        max_bounds.ascent = @max(max_bounds.ascent, m.ascent);
+        max_bounds.descent = @max(max_bounds.descent, m.descent);
+    }
 
-            max_bounds.left_sided_bearing = @max(max_bounds.left_sided_bearing, m.left);
-            max_bounds.right_sided_bearing = @max(max_bounds.right_sided_bearing, m.right);
-            max_bounds.character_width = @max(max_bounds.character_width, m.width);
-            max_bounds.ascent = @max(max_bounds.ascent, m.ascent);
-            max_bounds.descent = @max(max_bounds.descent, m.descent);
-        }
+    if (glyphs.len == 0) {
+        min_bounds = std.mem.zeroes(Metric);
+        max_bounds = std.mem.zeroes(Metric);
     }
 
     // Size calculation
@@ -1327,12 +1170,11 @@ fn writeAcceleratorsTable(allocator: Allocator, glyphs: []const GlyphEntry, font
 
 /// Save a BitmapFont to a PCF file
 pub fn save(io: Io, gpa: Allocator, font: BitmapFont, path: []const u8) !void {
-    const codepoints = try collectCodepoints(gpa, font);
+    const codepoints = try font.collectCodepoints(gpa);
     defer gpa.free(codepoints);
 
     const glyph_data = try buildGlyphEntries(gpa, font, codepoints);
     defer gpa.free(glyph_data.entries);
-    defer gpa.free(glyph_data.offsets);
     defer gpa.free(glyph_data.bitmap_data);
 
     const metrics_table = try writeMetricsTable(gpa, glyph_data.entries);
@@ -1341,7 +1183,6 @@ pub fn save(io: Io, gpa: Allocator, font: BitmapFont, path: []const u8) !void {
     const bitmaps_table = try writeBitmapsTable(
         gpa,
         glyph_data.entries,
-        glyph_data.offsets,
         glyph_data.bitmap_data,
         glyph_data.pad_sizes,
     );
@@ -1353,37 +1194,28 @@ pub fn save(io: Io, gpa: Allocator, font: BitmapFont, path: []const u8) !void {
     const properties_table = try writePropertiesTable(gpa, font);
     defer gpa.free(properties_table);
 
-    const font_ascent = font.font_ascent orelse @as(i16, font.char_height);
+    const font_ascent = font.ascent();
     const font_descent = if (font.font_ascent) |asc| @as(i16, font.char_height) - asc else 0;
     const accel_table = try writeAcceleratorsTable(gpa, glyph_data.entries, font_ascent, font_descent);
     defer gpa.free(accel_table);
 
     const tables = [_]TableBuffer{
-        .{ .table_type = (1 << 0), .format = 0, .data = properties_table },
-        .{ .table_type = (1 << 1), .format = 0, .data = accel_table },
-        .{ .table_type = (1 << 2), .format = 0, .data = metrics_table },
-        .{ .table_type = (1 << 3), .format = 0, .data = bitmaps_table },
-        .{ .table_type = (1 << 5), .format = 0, .data = encoding_table },
+        .{ .table_type = @backingInt(TableType.properties), .format = 0, .data = properties_table },
+        .{ .table_type = @backingInt(TableType.accelerators), .format = 0, .data = accel_table },
+        .{ .table_type = @backingInt(TableType.metrics), .format = 0, .data = metrics_table },
+        .{ .table_type = @backingInt(TableType.bitmaps), .format = 0, .data = bitmaps_table },
+        .{ .table_type = @backingInt(TableType.bdf_encodings), .format = 0, .data = encoding_table },
     };
 
-    const table_count = tables.len;
-    const header_size = 8 + table_count * 16;
-    var offsets: [5]u32 = @splat(0); // table_count
+    const header_size = 8 + tables.len * 16;
+    var offsets: [tables.len]u32 = @splat(0);
     var current_offset: usize = header_size;
 
     for (tables, 0..) |table, idx| {
-        current_offset = alignForward(current_offset, 4);
+        current_offset = std.mem.alignForward(usize, current_offset, 4);
         offsets[idx] = @intCast(current_offset);
         current_offset += table.data.len;
     }
-
-    const file = if (Io.Dir.path.isAbsolute(path))
-        try Io.Dir.createFileAbsolute(io, path, .{})
-    else
-        try Io.Dir.cwd().createFile(io, path, .{});
-    defer file.close(io);
-
-    const is_compressed = std.ascii.endsWithIgnoreCase(path, ".gz");
 
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1391,7 +1223,7 @@ pub fn save(io: Io, gpa: Allocator, font: BitmapFont, path: []const u8) !void {
     try aw.ensureTotalCapacity(current_offset + 1024);
 
     try aw.writer.writeInt(u32, pcf_file_version, .little);
-    try aw.writer.writeInt(u32, table_count, .little);
+    try aw.writer.writeInt(u32, tables.len, .little);
 
     for (tables, 0..) |table, idx| {
         try aw.writer.writeInt(u32, table.table_type, .little);
@@ -1404,36 +1236,12 @@ pub fn save(io: Io, gpa: Allocator, font: BitmapFont, path: []const u8) !void {
         const target_offset = offsets[idx];
         const current_pos = aw.writer.end;
         if (current_pos < target_offset) {
-            const padding = target_offset - current_pos;
-            for (0..padding) |_| {
-                try aw.writer.writeByte(0);
-            }
+            try aw.writer.splatByteAll(0, target_offset - current_pos);
         }
         try aw.writer.writeAll(table.data);
     }
 
-    const final_data = try aw.toOwnedSlice();
-    defer gpa.free(final_data);
-
-    if (is_compressed) {
-        const compress_buffer = try gpa.alloc(u8, flate.max_window_len);
-        defer gpa.free(compress_buffer);
-
-        // We need a new AllocatingWriter for the compressed output
-        var c_aw: Io.Writer.Allocating = .init(gpa);
-        defer c_aw.deinit();
-        try c_aw.ensureTotalCapacity(final_data.len / 2 + 64);
-
-        var compressor = try flate.Compress.init(&c_aw.writer, compress_buffer, .gzip, .level_1);
-        try compressor.writer.writeAll(final_data);
-        try compressor.finish();
-
-        const compressed_bytes = try c_aw.toOwnedSlice();
-        defer gpa.free(compressed_bytes);
-        try file.writeStreamingAll(io, compressed_bytes);
-    } else {
-        try file.writeStreamingAll(io, final_data);
-    }
+    try writeFileMaybeGzip(io, gpa, path, aw.written());
 }
 
 test "FormatFlags decoding" {

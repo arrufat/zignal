@@ -88,11 +88,9 @@ pub fn create(gpa: std.mem.Allocator, filter: LoadFilter) !BitmapFont {
     var unique_chars: std.ArrayList(u21) = .empty;
     defer unique_chars.deinit(gpa);
 
-    var prev: ?u21 = null;
-    for (char_list.items) |code| {
-        if (prev == null or prev.? != code) {
+    for (char_list.items, 0..) |code, i| {
+        if (i == 0 or code != char_list.items[i - 1]) {
             try unique_chars.append(gpa, code);
-            prev = code;
         }
     }
 
@@ -108,25 +106,22 @@ pub fn create(gpa: std.mem.Allocator, filter: LoadFilter) !BitmapFont {
     var bitmap_data = try gpa.alloc(u8, total_size);
     errdefer gpa.free(bitmap_data);
 
-    // Copy character data
+    // Copy character data; every candidate came from font_data.ranges, so lookup can't fail
     for (unique_chars.items, 0..) |code, idx| {
-        if (font_data.findCharData(code)) |char_info| {
-            // Add to glyph map
-            try glyph_map.put(@intCast(code), idx);
+        const char_info = font_data.findCharData(code).?;
 
-            // Set glyph data
-            glyph_data_list[idx] = GlyphData{
-                .width = 8,
-                .height = 8,
-                .x_offset = 0,
-                .y_offset = 0,
-                .device_width = 8,
-                .bitmap_offset = idx * 8,
-            };
+        try glyph_map.put(code, idx);
 
-            // Copy bitmap data
-            @memcpy(bitmap_data[idx * 8 .. (idx + 1) * 8], char_info.data);
-        }
+        glyph_data_list[idx] = GlyphData{
+            .width = 8,
+            .height = 8,
+            .x_offset = 0,
+            .y_offset = 0,
+            .device_width = 8,
+            .bitmap_offset = idx * 8,
+        };
+
+        @memcpy(bitmap_data[idx * 8 .. (idx + 1) * 8], char_info.data);
     }
 
     const font_name = try gpa.dupe(u8, "8x8 Unicode");
