@@ -9,9 +9,12 @@
 //! and uncompressed metrics, as well as gzip-compressed PCF files.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const testing = std.testing;
+
+const native_endian = builtin.cpu.arch.endian();
 
 const LoadFilter = @import("../font.zig").LoadFilter;
 const readFileMaybeGzip = @import("../font.zig").readFileMaybeGzip;
@@ -519,10 +522,11 @@ fn parseEncodings(allocator: std.mem.Allocator, data: []const u8, table: TableEn
         return PcfError.InvalidEncodingRange;
     }
 
-    // Read glyph indices
+    // Read glyph indices in bulk, swapping bytes only if the file endianness differs
     encoding.glyph_indices = try allocator.alloc(u16, encodings_count);
-    for (encoding.glyph_indices) |*index| {
-        index.* = try reader.takeVarInt(u16, byte_order, @sizeOf(u16));
+    try reader.readSliceAll(std.mem.sliceAsBytes(encoding.glyph_indices));
+    if (byte_order != native_endian) {
+        for (encoding.glyph_indices) |*index| index.* = @byteSwap(index.*);
     }
 
     return encoding;
@@ -614,14 +618,13 @@ fn parseBitmaps(allocator: std.mem.Allocator, data: []const u8, table: TableEntr
         return PcfError.InvalidGlyphCount;
     }
 
-    // Allocate offset array
+    // Read bitmap offsets in bulk, swapping bytes only if the file endianness differs
     var result: BitmapInfo = undefined;
     result.format = format;
     result.offsets = try allocator.alloc(u32, glyph_count);
-
-    // Read offsets
-    for (result.offsets) |*offset| {
-        offset.* = try reader.takeVarInt(u32, byte_order, @sizeOf(u32));
+    try reader.readSliceAll(std.mem.sliceAsBytes(result.offsets));
+    if (byte_order != native_endian) {
+        for (result.offsets) |*offset| offset.* = @byteSwap(offset.*);
     }
 
     // Read bitmap sizes array

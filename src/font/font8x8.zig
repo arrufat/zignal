@@ -108,7 +108,7 @@ pub fn create(gpa: std.mem.Allocator, filter: LoadFilter) !BitmapFont {
 
     // Copy character data; every candidate came from font_data.ranges, so lookup can't fail
     for (unique_chars.items, 0..) |code, idx| {
-        const char_info = font_data.findCharData(code).?;
+        const char_data = font_data.findCharData(code).?;
 
         try glyph_map.put(code, idx);
 
@@ -121,7 +121,7 @@ pub fn create(gpa: std.mem.Allocator, filter: LoadFilter) !BitmapFont {
             .bitmap_offset = idx * 8,
         };
 
-        @memcpy(bitmap_data[idx * 8 .. (idx + 1) * 8], char_info.data);
+        @memcpy(bitmap_data[idx * 8 .. (idx + 1) * 8], char_data);
     }
 
     const font_name = try gpa.dupe(u8, "8x8 Unicode");
