@@ -65,12 +65,7 @@ pub const ImageFormat = enum {
     /// doesn't yet exist so signature sniffing isn't an option. Comparison is
     /// case-insensitive.
     pub fn fromExtension(file_path: []const u8) ?ImageFormat {
-        const matches = struct {
-            fn check(path: []const u8, ext: []const u8) bool {
-                return std.ascii.endsWithIgnoreCase(path, ext);
-            }
-        }.check;
-
+        const matches = std.ascii.endsWithIgnoreCase;
         if (matches(file_path, ".png")) return .png;
         if (matches(file_path, ".jpg") or matches(file_path, ".jpeg")) return .jpeg;
         if (matches(file_path, ".bmp")) return .bmp;
