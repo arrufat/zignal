@@ -245,7 +245,7 @@ pub fn Image(comptime T: type) type {
         /// defer img.deinit(allocator);
         /// ```
         pub fn load(io: Io, allocator: Allocator, file_path: []const u8) !Self {
-            const image_format = try ImageFormat.detectFromPath(io, allocator, file_path) orelse return error.UnsupportedImageFormat;
+            const image_format = try ImageFormat.detectFromPath(io, file_path) orelse return error.UnsupportedImageFormat;
             return switch (image_format) {
                 .png => png.load(T, io, allocator, file_path, .{}),
                 .jpeg => jpeg.load(T, io, allocator, file_path, .{}),

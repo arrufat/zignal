@@ -76,53 +76,60 @@ fn mappedGlyph(self: BitmapFont, codepoint: u21) ?GlyphData {
     return data[idx];
 }
 
-/// Get the bitmap data for a specific character
-/// Returns null if the character is not in the font
-pub fn getCharData(self: BitmapFont, codepoint: u21) ?[]const u8 {
+/// A glyph resolved to its metadata and bitmap in a single lookup
+pub const Glyph = struct {
+    info: GlyphData,
+    data: []const u8,
+};
+
+/// Resolve a codepoint to its glyph info and bitmap data with a single map lookup.
+/// Returns null if the character is not in the font.
+pub fn getGlyph(self: BitmapFont, codepoint: u21) ?Glyph {
+    if (self.mappedGlyph(codepoint)) |glyph| {
+        return .{ .info = glyph, .data = self.data[glyph.bitmap_offset..][0..glyph.bitmapSize()] };
+    }
+
     // For ASCII fonts WITHOUT glyph_map, use the standard fixed-size layout
     if (self.glyph_map == null and codepoint <= 255 and codepoint >= self.first_char and codepoint <= self.last_char) {
         const index: u32 = @as(u8, @intCast(codepoint)) - self.first_char;
         const bytes_per_char = @as(u32, self.char_height) * self.bytesPerRow();
-        const offset = index * bytes_per_char;
-        return self.data[offset .. offset + bytes_per_char];
-    }
-
-    // For Unicode, check glyph map
-    if (self.mappedGlyph(codepoint)) |glyph| {
-        return self.data[glyph.bitmap_offset..][0..glyph.bitmapSize()];
+        return .{
+            .info = .{
+                .width = self.char_width,
+                .height = self.char_height,
+                .x_offset = 0,
+                .y_offset = 0,
+                .device_width = @intCast(self.char_width),
+                .bitmap_offset = index * bytes_per_char,
+            },
+            .data = self.data[index * bytes_per_char ..][0..bytes_per_char],
+        };
     }
 
     return null;
 }
 
+/// Get the bitmap data for a specific character
+/// Returns null if the character is not in the font
+pub fn getCharData(self: BitmapFont, codepoint: u21) ?[]const u8 {
+    const glyph = self.getGlyph(codepoint) orelse return null;
+    return glyph.data;
+}
+
 /// Get bitmap data for a specific row of a character
 /// Returns null if the character is not in the font
 pub fn getCharRow(self: BitmapFont, codepoint: u21, row: u32) ?[]const u8 {
-    // For variable-width fonts, we need to handle per-glyph dimensions
-    if (self.glyph_map != null) {
-        const glyph_info = self.getGlyphInfo(codepoint) orelse return null;
-        if (row >= glyph_info.height) return null;
-
-        const char_data = self.getCharData(codepoint) orelse return null;
-        const glyph_bytes_per_row = glyph_info.bytesPerRow();
-        const row_offset = row * glyph_bytes_per_row;
-        return char_data[row_offset .. row_offset + glyph_bytes_per_row];
-    }
-
-    // Fixed-width font path
-    const char_data = self.getCharData(codepoint) orelse return null;
-    if (row >= self.char_height) return null;
-    const bytes_per_row = self.bytesPerRow();
-    const row_offset = row * bytes_per_row;
-    return char_data[row_offset .. row_offset + bytes_per_row];
+    const glyph = self.getGlyph(codepoint) orelse return null;
+    if (row >= glyph.info.height) return null;
+    const bytes_per_row = glyph.info.bytesPerRow();
+    return glyph.data[row * bytes_per_row ..][0..bytes_per_row];
 }
 
 /// Get the advance width for a character (how much to move the cursor)
 /// Returns per-character width if available, otherwise the default char_width
 pub fn getCharAdvanceWidth(self: BitmapFont, codepoint: u21) u16 {
     if (self.mappedGlyph(codepoint)) |glyph| {
-        // Device width can be negative in theory, but we clamp to 0
-        return if (glyph.device_width > 0) @intCast(glyph.device_width) else 0;
+        return glyph.advanceWidth();
     }
     return self.char_width;
 }
@@ -234,8 +241,9 @@ const no_pixels: TightBounds = .{ .bounds = .{ .l = 0, .t = 0, .r = 0, .b = 0 },
 
 /// Get the visible bounds of a character (excluding padding)
 fn getCharTightBounds(self: BitmapFont, codepoint: u21) TightBounds {
-    const glyph_info = self.getGlyphInfo(codepoint) orelse return no_pixels;
-    const char_data = self.getCharData(codepoint) orelse return no_pixels;
+    const glyph = self.getGlyph(codepoint) orelse return no_pixels;
+    const glyph_info = glyph.info;
+    const char_data = glyph.data;
 
     const bytes_per_row = glyph_info.bytesPerRow();
     // Bits beyond the glyph width in the last byte may contain garbage; mask them off

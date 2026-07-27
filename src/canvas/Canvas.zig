@@ -1526,17 +1526,17 @@ pub fn Canvas(comptime T: type) type {
                     y += line_height;
                     continue;
                 }
-                if (font.getGlyphInfo(codepoint)) |glyph_info| {
-                    if (font.getCharData(codepoint)) |char_data| {
-                        if (scale == 1.0) {
-                            self.renderGlyphUnscaled(glyph_info, char_data, font, x, y, color);
-                        } else switch (mode) {
-                            .fast => self.renderGlyphFastScaled(glyph_info, char_data, font, x, y, scale, clip_rect, color),
-                            .soft => self.renderGlyphSoftScaled(glyph_info, char_data, font, x, y, scale, rgba_color),
-                        }
+                if (font.getGlyph(codepoint)) |glyph| {
+                    if (scale == 1.0) {
+                        self.renderGlyphUnscaled(glyph.info, glyph.data, font, x, y, color);
+                    } else switch (mode) {
+                        .fast => self.renderGlyphFastScaled(glyph.info, glyph.data, font, x, y, scale, clip_rect, color),
+                        .soft => self.renderGlyphSoftScaled(glyph.info, glyph.data, font, x, y, scale, rgba_color),
                     }
+                    x += as(f32, glyph.info.advanceWidth()) * scale;
+                } else {
+                    x += as(f32, font.char_width) * scale;
                 }
-                x += as(f32, font.getCharAdvanceWidth(codepoint)) * scale;
             }
         }
 

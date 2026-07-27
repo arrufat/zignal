@@ -1,7 +1,6 @@
 //! Image format detection and identification
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 const codecs = @import("../codecs.zig");
@@ -51,7 +50,7 @@ pub const ImageFormat = enum {
     }
 
     /// Detect image format from file path by reading the first few bytes
-    pub fn detectFromPath(io: Io, _: Allocator, file_path: []const u8) !?ImageFormat {
+    pub fn detectFromPath(io: Io, file_path: []const u8) !?ImageFormat {
         const file = try Io.Dir.cwd().openFile(io, file_path, .{});
         defer file.close(io);
 

@@ -27,3 +27,8 @@ pub fn bytesPerRow(self: GlyphData) u32 {
 pub fn bitmapSize(self: GlyphData) u32 {
     return @as(u32, self.height) * self.bytesPerRow();
 }
+
+/// Cursor advance for this glyph; negative device widths clamp to 0
+pub fn advanceWidth(self: GlyphData) u16 {
+    return if (self.device_width > 0) @intCast(self.device_width) else 0;
+}
