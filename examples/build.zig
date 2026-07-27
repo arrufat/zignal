@@ -4,7 +4,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const target_query = target.query;
     const is_wasm = target_query.cpu_arch == .wasm32 and target_query.os_tag == .freestanding;
-    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = if (is_wasm) .ReleaseSmall else .ReleaseFast });
+    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = if (is_wasm) .small else .fast });
     const zignal = b.dependency("zignal", .{ .target = target, .optimize = optimize });
 
     // List of WASM examples to build

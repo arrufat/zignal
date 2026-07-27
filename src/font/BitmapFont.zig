@@ -34,7 +34,7 @@ data: []const u8,
 glyph_map: ?std.AutoHashMap(u32, usize) = null,
 /// Optional: Per-character glyph data (width, offsets, etc.)
 glyph_data: ?[]const GlyphData = null,
-/// Optional: Original font ascent from BDF file (for accurate save)
+/// Optional: Original font ascent from the source font file (for accurate save)
 font_ascent: ?i16 = null,
 
 /// Loads a font from `file_path` with automatic format detection (BDF or PCF), keeping only
@@ -50,7 +50,7 @@ font_ascent: ?i16 = null,
 /// const font = try BitmapFont.load(io, allocator, "font.bdf", .{ .ranges = &unicode.ranges.japanese });
 /// ```
 pub fn load(io: Io, allocator: Allocator, file_path: []const u8, filter: LoadFilter) !BitmapFont {
-    const font_format = try FontFormat.detectFromPath(io, allocator, file_path) orelse return error.UnsupportedFontFormat;
+    const font_format = try FontFormat.detectFromPath(io, file_path) orelse return error.UnsupportedFontFormat;
     return switch (font_format) {
         .bdf => bdf.load(io, allocator, file_path, filter),
         .pcf => pcf.load(io, allocator, file_path, filter),
@@ -62,30 +62,34 @@ pub fn bytesPerRow(self: BitmapFont) u32 {
     return (@as(u32, self.char_width) + 7) / 8;
 }
 
+/// Font ascent, falling back to the character height when the source file didn't record one
+pub fn ascent(self: BitmapFont) i16 {
+    return self.font_ascent orelse self.char_height;
+}
+
+/// Glyph data from the glyph map, if this codepoint has an entry
+fn mappedGlyph(self: BitmapFont, codepoint: u21) ?GlyphData {
+    const map = self.glyph_map orelse return null;
+    const idx = map.get(codepoint) orelse return null;
+    const data = self.glyph_data orelse return null;
+    if (idx >= data.len) return null;
+    return data[idx];
+}
+
 /// Get the bitmap data for a specific character
 /// Returns null if the character is not in the font
 pub fn getCharData(self: BitmapFont, codepoint: u21) ?[]const u8 {
     // For ASCII fonts WITHOUT glyph_map, use the standard fixed-size layout
     if (self.glyph_map == null and codepoint <= 255 and codepoint >= self.first_char and codepoint <= self.last_char) {
         const index: u32 = @as(u8, @intCast(codepoint)) - self.first_char;
-        const bytes_per_row = self.bytesPerRow();
-        const bytes_per_char = @as(u32, self.char_height) * bytes_per_row;
+        const bytes_per_char = @as(u32, self.char_height) * self.bytesPerRow();
         const offset = index * bytes_per_char;
         return self.data[offset .. offset + bytes_per_char];
     }
 
     // For Unicode, check glyph map
-    if (self.glyph_map) |map| {
-        if (map.get(codepoint)) |idx| {
-            if (self.glyph_data) |data| {
-                if (idx < data.len) {
-                    const glyph = data[idx];
-                    const glyph_bytes_per_row = (@as(u32, glyph.width) + 7) / 8;
-                    const glyph_size = @as(u32, glyph.height) * glyph_bytes_per_row;
-                    return self.data[glyph.bitmap_offset .. glyph.bitmap_offset + glyph_size];
-                }
-            }
-        }
+    if (self.mappedGlyph(codepoint)) |glyph| {
+        return self.data[glyph.bitmap_offset..][0..glyph.bitmapSize()];
     }
 
     return null;
@@ -100,7 +104,7 @@ pub fn getCharRow(self: BitmapFont, codepoint: u21, row: u32) ?[]const u8 {
         if (row >= glyph_info.height) return null;
 
         const char_data = self.getCharData(codepoint) orelse return null;
-        const glyph_bytes_per_row = (@as(u32, glyph_info.width) + 7) / 8;
+        const glyph_bytes_per_row = glyph_info.bytesPerRow();
         const row_offset = row * glyph_bytes_per_row;
         return char_data[row_offset .. row_offset + glyph_bytes_per_row];
     }
@@ -116,25 +120,10 @@ pub fn getCharRow(self: BitmapFont, codepoint: u21, row: u32) ?[]const u8 {
 /// Get the advance width for a character (how much to move the cursor)
 /// Returns per-character width if available, otherwise the default char_width
 pub fn getCharAdvanceWidth(self: BitmapFont, codepoint: u21) u16 {
-    // For ASCII fonts without glyph data, use char_width
-    if (self.glyph_data == null) {
-        return self.char_width;
+    if (self.mappedGlyph(codepoint)) |glyph| {
+        // Device width can be negative in theory, but we clamp to 0
+        return if (glyph.device_width > 0) @intCast(glyph.device_width) else 0;
     }
-
-    // Check for per-character width data
-    if (self.glyph_map) |map| {
-        if (map.get(codepoint)) |idx| {
-            if (self.glyph_data) |data| {
-                if (idx < data.len) {
-                    // Use the device width for proper character advance
-                    const glyph = data[idx];
-                    // Device width can be negative in theory, but we clamp to 0
-                    return if (glyph.device_width > 0) @intCast(glyph.device_width) else 0;
-                }
-            }
-        }
-    }
-    // Fall back to fixed width
     return self.char_width;
 }
 
@@ -143,7 +132,6 @@ pub fn getCharAdvanceWidth(self: BitmapFont, codepoint: u21) u16 {
 /// For example, an 8x8 character has pixels at positions 0-7, so bounds are (0,0) to (8,8)
 pub fn getTextBounds(self: BitmapFont, text: []const u8, scale: f32) Rectangle(f32) {
     var width: f32 = 0;
-    var height: f32 = @as(f32, self.char_height) * scale;
     var current_line_width: f32 = 0;
     var lines: f32 = 1;
 
@@ -161,7 +149,7 @@ pub fn getTextBounds(self: BitmapFont, text: []const u8, scale: f32) Rectangle(f
         }
     }
     width = @max(width, current_line_width);
-    height = lines * char_height_scaled;
+    const height = lines * char_height_scaled;
 
     // Return bounds where l,t are inclusive and r,b are exclusive
     // For an 8x8 character, bounds should be (0,0) to (8,8)
@@ -224,14 +212,8 @@ pub fn getTextBoundsTight(self: BitmapFont, text: []const u8, scale: f32) Rectan
 
 /// Get glyph information for a character
 pub fn getGlyphInfo(self: BitmapFont, codepoint: u21) ?GlyphData {
-    if (self.glyph_map) |map| {
-        if (map.get(codepoint)) |idx| {
-            if (self.glyph_data) |data| {
-                if (idx < data.len) {
-                    return data[idx];
-                }
-            }
-        }
+    if (self.mappedGlyph(codepoint)) |glyph| {
+        return glyph;
     }
     // For ASCII fonts without glyph data, return default
     if (codepoint <= 255 and codepoint >= self.first_char and codepoint <= self.last_char) {
@@ -247,21 +229,18 @@ pub fn getGlyphInfo(self: BitmapFont, codepoint: u21) ?GlyphData {
     return null;
 }
 
-/// Get the visible bounds of a character (excluding padding)
-fn getCharTightBounds(self: BitmapFont, codepoint: u21) struct { bounds: Rectangle(u8), has_pixels: bool } {
-    const glyph_info = self.getGlyphInfo(codepoint) orelse return .{
-        .bounds = Rectangle(u8){ .l = 0, .t = 0, .r = 0, .b = 0 },
-        .has_pixels = false,
-    };
-    const char_data = self.getCharData(codepoint) orelse return .{
-        .bounds = Rectangle(u8){ .l = 0, .t = 0, .r = 0, .b = 0 },
-        .has_pixels = false,
-    };
+const TightBounds = struct { bounds: Rectangle(u8), has_pixels: bool };
+const no_pixels: TightBounds = .{ .bounds = .{ .l = 0, .t = 0, .r = 0, .b = 0 }, .has_pixels = false };
 
-    const bytes_per_row = if (self.glyph_map != null)
-        (@as(u32, glyph_info.width) + 7) / 8
-    else
-        self.bytesPerRow();
+/// Get the visible bounds of a character (excluding padding)
+fn getCharTightBounds(self: BitmapFont, codepoint: u21) TightBounds {
+    const glyph_info = self.getGlyphInfo(codepoint) orelse return no_pixels;
+    const char_data = self.getCharData(codepoint) orelse return no_pixels;
+
+    const bytes_per_row = glyph_info.bytesPerRow();
+    // Bits beyond the glyph width in the last byte may contain garbage; mask them off
+    const last_bits: u3 = @intCast(glyph_info.width % 8);
+    const last_mask: u8 = if (last_bits == 0) 0xFF else (@as(u8, 1) << last_bits) - 1;
 
     var min_x: u8 = 255;
     var max_x: u8 = 0;
@@ -270,27 +249,23 @@ fn getCharTightBounds(self: BitmapFont, codepoint: u21) struct { bounds: Rectang
     var has_pixels = false;
 
     for (0..glyph_info.height) |row| {
-        for (0..glyph_info.width) |col| {
-            const byte_idx = col / 8;
-            const bit_idx = col % 8;
-            const row_byte_offset = row * bytes_per_row + byte_idx;
-            const bit = (char_data[row_byte_offset] >> @intCast(bit_idx)) & 1;
+        const row_data = char_data[row * bytes_per_row ..][0..bytes_per_row];
+        for (row_data, 0..) |raw, byte_idx| {
+            const byte = if (byte_idx == bytes_per_row - 1) raw & last_mask else raw;
+            if (byte == 0) continue;
 
-            if (bit != 0) {
-                has_pixels = true;
-                min_x = @min(min_x, @as(u8, @intCast(col)));
-                max_x = @max(max_x, @as(u8, @intCast(col)));
-                min_y = @min(min_y, @as(u8, @intCast(row)));
-                max_y = @max(max_y, @as(u8, @intCast(row)));
-            }
+            // Pixels are LSB-first: lowest set bit is the leftmost pixel
+            has_pixels = true;
+            const base: u8 = @intCast(byte_idx * 8);
+            min_x = @min(min_x, base + @ctz(byte));
+            max_x = @max(max_x, base + 7 - @clz(byte));
+            min_y = @min(min_y, @as(u8, @intCast(row)));
+            max_y = @max(max_y, @as(u8, @intCast(row)));
         }
     }
 
     if (!has_pixels) {
-        return .{
-            .bounds = Rectangle(u8){ .l = 0, .t = 0, .r = 0, .b = 0 },
-            .has_pixels = false,
-        };
+        return no_pixels;
     }
 
     return .{
@@ -308,24 +283,46 @@ fn getCharTightBounds(self: BitmapFont, codepoint: u21) struct { bounds: Rectang
 /// Supports BDF (`.bdf`, `.bdf.gz`) and PCF (`.pcf`, `.pcf.gz`) formats.
 /// The format is determined by the file extension.
 pub fn save(self: BitmapFont, io: Io, allocator: Allocator, file_path: []const u8) !void {
-    if (std.ascii.endsWithIgnoreCase(file_path, ".bdf") or std.ascii.endsWithIgnoreCase(file_path, ".bdf.gz")) {
-        return bdf.save(io, allocator, self, file_path);
-    } else if (std.ascii.endsWithIgnoreCase(file_path, ".pcf") or std.ascii.endsWithIgnoreCase(file_path, ".pcf.gz")) {
-        return pcf.save(io, allocator, self, file_path);
+    const font_format = FontFormat.detectFromExtension(file_path) orelse return error.UnsupportedFontFormat;
+    return switch (font_format) {
+        .bdf => bdf.save(io, allocator, self, file_path),
+        .pcf => pcf.save(io, allocator, self, file_path),
+    };
+}
+
+/// Returns the sorted list of codepoints present in this font. Caller owns the slice.
+pub fn collectCodepoints(self: BitmapFont, gpa: Allocator) ![]u21 {
+    if (self.glyph_map) |map| {
+        const keys = try gpa.alloc(u21, map.count());
+        var iter = map.iterator();
+        var idx: usize = 0;
+        while (iter.next()) |entry| : (idx += 1) {
+            keys[idx] = @intCast(entry.key_ptr.*);
+        }
+        std.mem.sort(u21, keys, {}, std.sort.asc(u21));
+        return keys;
     }
-    return error.UnsupportedFontFormat;
+
+    if (self.last_char < self.first_char) {
+        return gpa.alloc(u21, 0);
+    }
+
+    const keys = try gpa.alloc(u21, self.last_char - self.first_char + 1);
+    for (keys, 0..) |*cp, idx| {
+        cp.* = @as(u21, self.first_char) + @as(u21, @intCast(idx));
+    }
+    return keys;
 }
 
 /// Displays the font information: name, dimensions, and character range.
 pub fn format(self: BitmapFont, writer: *Io.Writer) Io.Writer.Error!void {
     // Count total glyphs if using glyph map
-    const glyph_count = if (self.glyph_map) |map| map.count() else blk: {
-        if (self.first_char <= self.last_char) {
-            break :blk self.last_char - self.first_char + 1;
-        } else {
-            break :blk 0;
-        }
-    };
+    const glyph_count: u32 = if (self.glyph_map) |map|
+        map.count()
+    else if (self.first_char <= self.last_char)
+        @as(u32, self.last_char) - self.first_char + 1
+    else
+        0;
 
     // Determine font type
     const font_type = if (self.glyph_map != null) "variable" else "fixed";

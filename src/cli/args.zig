@@ -5,7 +5,7 @@ const builtin = @import("builtin");
 const meta = @import("zignal").meta;
 const common = @import("common.zig");
 
-pub var runtime_log_level: std.log.Level = if (builtin.mode == .Debug) .debug else .err;
+pub var runtime_log_level: std.log.Level = if (builtin.mode == .debug) .debug else .err;
 
 /// Comma-separated list of valid `std.log.Level` names — shared by error messages
 /// and help text so they cannot drift.

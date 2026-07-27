@@ -1,7 +1,6 @@
 //! Font format detection and identification
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 /// Supported font formats for automatic detection and loading
@@ -17,29 +16,24 @@ pub const FontFormat = enum {
 
     /// Detect font format from the first few bytes of data
     pub fn detectFromBytes(data: []const u8) ?FontFormat {
-        if (data.len >= bdf_signature.len) {
-            if (std.mem.startsWith(u8, data, bdf_signature)) {
-                return .bdf;
-            }
-        }
+        if (std.mem.startsWith(u8, data, bdf_signature)) return .bdf;
+        if (std.mem.startsWith(u8, data, pcf_signature)) return .pcf;
+        return null;
+    }
 
-        if (data.len >= pcf_signature.len) {
-            if (std.mem.eql(u8, data[0..pcf_signature.len], pcf_signature)) {
-                return .pcf;
-            }
-        }
-
+    /// Detect font format from the file extension, ignoring a trailing `.gz`
+    pub fn detectFromExtension(path: []const u8) ?FontFormat {
+        const stem = if (std.ascii.endsWithIgnoreCase(path, ".gz")) path[0 .. path.len - 3] else path;
+        if (std.ascii.endsWithIgnoreCase(stem, ".bdf")) return .bdf;
+        if (std.ascii.endsWithIgnoreCase(stem, ".pcf")) return .pcf;
         return null;
     }
 
     /// Detect font format from file path by reading the first few bytes
-    pub fn detectFromPath(io: Io, _: Allocator, file_path: []const u8) !?FontFormat {
-        // Check if file is gzip compressed based on extension
-        if (std.mem.endsWith(u8, file_path, ".pcf.gz")) {
-            return .pcf;
-        }
-        if (std.mem.endsWith(u8, file_path, ".bdf.gz")) {
-            return .bdf;
+    pub fn detectFromPath(io: Io, file_path: []const u8) !?FontFormat {
+        // Compressed files can't be sniffed, so trust the extension
+        if (std.ascii.endsWithIgnoreCase(file_path, ".gz")) {
+            return detectFromExtension(file_path);
         }
 
         const file = try Io.Dir.cwd().openFile(io, file_path, .{});
