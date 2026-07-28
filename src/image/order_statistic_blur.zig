@@ -3,10 +3,142 @@ const Allocator = std.mem.Allocator;
 
 const Image = @import("../image.zig").Image;
 const Histogram = @import("../image.zig").Histogram;
+const percentileRank = @import("histogram.zig").percentileRank;
 const border_module = @import("border.zig");
 const BorderMode = border_module.BorderMode;
 const channel_ops = @import("channel_ops.zig");
 const meta = @import("../meta.zig");
+
+const Vec16 = @Vector(16, u16);
+
+/// Per-column two-level histogram (544 B vs 1 KiB flat): coarse[b] counts values in
+/// [16b, 16b+15], fine[b][s] counts value 16b+s. u16 counts are safe because the
+/// two-level path only runs for window <= 255 (population <= 255^2 < 65536).
+const TwoLevelColumn = struct {
+    coarse: [16]u16 align(32) = @splat(0),
+    fine: [16][16]u16 align(32) = @splat(@splat(0)),
+
+    inline fn addValue(self: *TwoLevelColumn, v: u8) void {
+        self.coarse[v >> 4] += 1;
+        self.fine[v >> 4][v & 15] += 1;
+    }
+
+    inline fn removeValue(self: *TwoLevelColumn, v: u8) void {
+        self.coarse[v >> 4] -= 1;
+        self.fine[v >> 4][v & 15] -= 1;
+    }
+};
+
+/// Selects the value of the given rank from the sliding window: locate the coarse
+/// bucket (<=16 scalar steps), rebuild only that bucket's fine row from the window's
+/// columns (one 16-lane add per column), then scan its 16 bins. Mirrors the cumulative
+/// scan of `stats.percentileWithTotal` exactly.
+fn selectRank(rank: usize, coarse_win: Vec16, window_cols: []const *const TwoLevelColumn) u8 {
+    const coarse: [16]u16 = coarse_win;
+    var cum: u32 = 0;
+    var bucket: usize = 0;
+    while (bucket < 16) : (bucket += 1) {
+        if (cum + coarse[bucket] > rank) break;
+        cum += coarse[bucket];
+    }
+    std.debug.assert(bucket < 16);
+
+    var fine_vec: Vec16 = @splat(0);
+    for (window_cols) |col| fine_vec += @as(Vec16, col.fine[bucket]);
+    const fine: [16]u16 = fine_vec;
+
+    var sub: usize = 0;
+    while (sub < 16) : (sub += 1) {
+        cum += fine[sub];
+        if (cum > rank) break;
+    }
+    std.debug.assert(sub < 16);
+    return @intCast(bucket * 16 + sub);
+}
+
+/// Constant-rank order-statistic filter over two-level histograms. Same window,
+/// border, and rank semantics as the flat path (bit-identical results), but the
+/// per-pixel cost is ~2 coarse vector ops + one fine-row rebuild instead of two
+/// 256-bin merges and a 256-bin scan.
+fn applyScalarOpTwoLevel(
+    image: Image(u8),
+    allocator: Allocator,
+    radius: usize,
+    out: Image(u8),
+    border: BorderMode,
+    percentile: f64,
+) !void {
+    const window = radius * 2 + 1;
+    const rows = image.rows;
+    const cols = image.cols;
+
+    const alias = out.data.ptr == image.data.ptr;
+    var temp_out: Image(u8) = .empty;
+    defer temp_out.deinit(allocator);
+    var target: Image(u8) = out;
+    if (alias) {
+        temp_out = try .initLike(allocator, image);
+        target = temp_out;
+    }
+
+    const column_hists = try allocator.alloc(TwoLevelColumn, cols);
+    defer allocator.free(column_hists);
+
+    const radius_isize: isize = @intCast(radius);
+    for (column_hists, 0..) |*hist, col| {
+        hist.* = .{};
+        for (0..window) |offset| {
+            const row_idx = @as(isize, @intCast(offset)) - radius_isize;
+            hist.addValue(border_module.getPixel(u8, image, row_idx, @intCast(col), border));
+        }
+    }
+
+    // Out-of-range horizontal window positions contribute `window` zeros, matching the
+    // flat path's zero_column; the pointer table hoists all border resolution (which is
+    // row-invariant for columns) out of the per-pixel loops.
+    var zero_col: TwoLevelColumn = .{};
+    zero_col.coarse[0] = @intCast(window);
+    zero_col.fine[0][0] = @intCast(window);
+
+    const col_ptrs = try allocator.alloc(*const TwoLevelColumn, cols + window - 1);
+    defer allocator.free(col_ptrs);
+    for (col_ptrs, 0..) |*ptr, i| {
+        const idx = @as(isize, @intCast(i)) - radius_isize;
+        ptr.* = if (border_module.resolveIndex(idx, @intCast(cols), border)) |resolved|
+            &column_hists[resolved]
+        else
+            &zero_col;
+    }
+
+    // Population is always window^2, so the rank is constant for the whole plane.
+    const rank = percentileRank(percentile, window * window);
+
+    for (0..rows) |row| {
+        var coarse_win: Vec16 = @splat(0);
+        for (col_ptrs[0..window]) |ptr| coarse_win += @as(Vec16, ptr.coarse);
+
+        target.at(row, 0).* = selectRank(rank, coarse_win, col_ptrs[0..window]);
+
+        for (1..cols) |col| {
+            coarse_win -= @as(Vec16, col_ptrs[col - 1].coarse);
+            coarse_win += @as(Vec16, col_ptrs[col + window - 1].coarse);
+            target.at(row, col).* = selectRank(rank, coarse_win, col_ptrs[col .. col + window]);
+        }
+
+        if (row + 1 == rows) break;
+
+        const remove_row = border_module.resolveIndex(@as(isize, @intCast(row)) - radius_isize, @intCast(rows), border);
+        const add_row = border_module.resolveIndex(@as(isize, @intCast(row)) + radius_isize + 1, @intCast(rows), border);
+        for (column_hists, 0..) |*hist, col| {
+            hist.removeValue(if (remove_row) |rr| image.at(rr, col).* else 0);
+            hist.addValue(if (add_row) |ar| image.at(ar, col).* else 0);
+        }
+    }
+
+    if (alias) {
+        target.copy(out);
+    }
+}
 
 pub fn OrderStatisticBlurOps(comptime T: type) type {
     return struct {
@@ -236,6 +368,22 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             border: BorderMode,
             reducer_in: anytype,
         ) !void {
+            // Rank selection (median/percentile/min/max) takes the two-level fast path;
+            // u16 counts require window <= 255 (larger radii keep the flat u32 path).
+            if (@TypeOf(reducer_in) == PercentileReducer and radius * 2 + 1 <= 255) {
+                return applyScalarOpTwoLevel(image, allocator, radius, out, border, reducer_in.percentile);
+            }
+            return applyScalarOpFlat(image, allocator, radius, out, border, reducer_in);
+        }
+
+        fn applyScalarOpFlat(
+            image: Image(u8),
+            allocator: Allocator,
+            radius: usize,
+            out: Image(u8),
+            border: BorderMode,
+            reducer_in: anytype,
+        ) !void {
             const window = radius * 2 + 1;
             if (window > @as(usize, std.math.maxInt(u32))) return Error.InvalidRadius;
 
@@ -274,32 +422,33 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 for (0..window) |offset| {
                     const col_idx = @as(isize, @intCast(offset)) - radius_isize;
                     if (border_module.resolveIndex(col_idx, @intCast(image.cols), border)) |resolved| {
-                        window_hist.addCounts(column_hists[resolved]);
+                        window_hist.addCounts(&column_hists[resolved]);
                     } else {
-                        window_hist.addCounts(zero_column);
+                        window_hist.addCounts(&zero_column);
                     }
                 }
 
-                const area = @as(usize, window_hist.totalPixels());
+                // Border samples are counted into the histograms, so the population is
+                // always exactly window*window; no per-pixel bin scan needed.
+                const area = window * window;
                 target.at(row, 0).* = try reducer.compute(&window_hist, area);
 
                 for (1..image.cols) |col| {
                     const left_idx = @as(isize, @intCast(col)) - radius_isize - 1;
                     if (border_module.resolveIndex(left_idx, @intCast(image.cols), border)) |resolved| {
-                        window_hist.subtractCounts(column_hists[resolved]);
+                        window_hist.subtractCounts(&column_hists[resolved]);
                     } else {
-                        window_hist.subtractCounts(zero_column);
+                        window_hist.subtractCounts(&zero_column);
                     }
 
                     const right_idx = @as(isize, @intCast(col)) + radius_isize;
                     if (border_module.resolveIndex(right_idx, @intCast(image.cols), border)) |resolved| {
-                        window_hist.addCounts(column_hists[resolved]);
+                        window_hist.addCounts(&column_hists[resolved]);
                     } else {
-                        window_hist.addCounts(zero_column);
+                        window_hist.addCounts(&zero_column);
                     }
 
-                    const local_area = @as(usize, window_hist.totalPixels());
-                    target.at(row, col).* = try reducer.compute(&window_hist, local_area);
+                    target.at(row, col).* = try reducer.compute(&window_hist, area);
                 }
 
                 if (row + 1 == image.rows) break;
@@ -338,8 +487,8 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
         const PercentileReducer = struct {
             percentile: f64,
 
-            fn compute(self: *const @This(), hist: *const Histogram(u8), _: usize) Error!u8 {
-                return hist.percentileFraction(self.percentile);
+            fn compute(self: *const @This(), hist: *const Histogram(u8), area: usize) Error!u8 {
+                return hist.percentileFractionWithTotal(self.percentile, area);
             }
         };
 
@@ -399,4 +548,49 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             }
         };
     };
+}
+
+test "two-level rank filter matches flat histogram path" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+    var prng = std.Random.DefaultPrng.init(0x9E3779B97F4A7C15);
+    const random = prng.random();
+
+    const sizes = [_][2]u32{ .{ 1, 1 }, .{ 1, 9 }, .{ 9, 1 }, .{ 5, 5 }, .{ 24, 17 } };
+    const radii = [_]usize{ 1, 2, 4, 9 };
+    const borders = [_]BorderMode{ .zero, .mirror, .replicate, .wrap };
+    const percentiles = [_]f64{ 0.0, 0.13, 0.5, 0.77, 1.0 };
+
+    for (sizes) |size| {
+        var img = try Image(u8).init(allocator, size[0], size[1]);
+        defer img.deinit(allocator);
+        for (img.data) |*px| px.* = random.int(u8);
+
+        var flat = try Image(u8).initLike(allocator, img);
+        defer flat.deinit(allocator);
+        var two = try Image(u8).initLike(allocator, img);
+        defer two.deinit(allocator);
+
+        for (radii) |radius| {
+            for (borders) |mode| {
+                for (percentiles) |p| {
+                    const Ops = OrderStatisticBlurOps(u8);
+                    const flat_reducer = Ops.PercentileReducer{ .percentile = p };
+                    try Ops.applyScalarOpFlat(img, allocator, radius, flat, mode, flat_reducer);
+                    try applyScalarOpTwoLevel(img, allocator, radius, two, mode, p);
+                    try testing.expectEqualSlices(u8, flat.data, two.data);
+                }
+            }
+        }
+    }
+
+    // In-place aliasing through the public dispatch.
+    var img = try Image(u8).init(allocator, 9, 7);
+    defer img.deinit(allocator);
+    for (img.data) |*px| px.* = random.int(u8);
+    var expected = try Image(u8).initLike(allocator, img);
+    defer expected.deinit(allocator);
+    try OrderStatisticBlurOps(u8).medianBlur(img, expected, allocator, 2);
+    try OrderStatisticBlurOps(u8).medianBlur(img, img, allocator, 2);
+    try testing.expectEqualSlices(u8, expected.data, img.data);
 }

@@ -60,6 +60,13 @@ pub fn Histogram(comptime T: type) type {
                 return stats.percentile(&self.values, fraction);
             }
 
+            /// Like `percentileFraction`, but skips the bin-total scan when the caller
+            /// already knows the population (e.g. a constant sliding-window area).
+            pub fn percentileFractionWithTotal(self: *const Self, fraction: f64, total: usize) u8 {
+                std.debug.assert(fraction >= 0.0 and fraction <= 1.0);
+                return stats.percentileWithTotal(&self.values, fraction, total);
+            }
+
             /// Return the smallest intensity with a non-zero count, or null if empty.
             pub fn firstNonZero(self: Self) ?u8 {
                 for (self.values, 0..) |count, value| {
@@ -89,18 +96,26 @@ pub fn Histogram(comptime T: type) type {
                 self.values[value] -= 1;
             }
 
+            const simd_len = std.simd.suggestVectorLength(u32) orelse 4;
+
             /// Add counts from another histogram into this one.
-            pub fn addCounts(self: *Self, other: Self) void {
-                inline for (&self.values, 0..) |*count, i| {
-                    count.* += other.values[i];
+            pub fn addCounts(self: *Self, other: *const Self) void {
+                var i: usize = 0;
+                while (i < self.values.len) : (i += simd_len) {
+                    const a: @Vector(simd_len, u32) = self.values[i..][0..simd_len].*;
+                    const b: @Vector(simd_len, u32) = other.values[i..][0..simd_len].*;
+                    self.values[i..][0..simd_len].* = a + b;
                 }
             }
 
             /// Subtract counts from another histogram out of this one.
-            pub fn subtractCounts(self: *Self, other: Self) void {
-                inline for (&self.values, 0..) |*count, i| {
-                    std.debug.assert(count.* >= other.values[i]);
-                    count.* -= other.values[i];
+            /// Counts being subtracted must be present (unchecked).
+            pub fn subtractCounts(self: *Self, other: *const Self) void {
+                var i: usize = 0;
+                while (i < self.values.len) : (i += simd_len) {
+                    const a: @Vector(simd_len, u32) = self.values[i..][0..simd_len].*;
+                    const b: @Vector(simd_len, u32) = other.values[i..][0..simd_len].*;
+                    self.values[i..][0..simd_len].* = a - b;
                 }
             }
 
@@ -467,6 +482,18 @@ pub fn Histogram(comptime T: type) type {
 }
 
 /// Statistics functions for histogram data (discrete distributions)
+/// 0-based rank of the requested percentile in a population of `total` samples.
+/// Single source of truth for rank semantics across histogram-based selectors.
+pub fn percentileRank(p: f64, total: usize) usize {
+    assert(p >= 0 and p <= 1);
+    assert(total > 0);
+    const total_minus_one = total - 1;
+    const rank_f = p * @as(f64, @floatFromInt(total_minus_one));
+    const rank_floor = std.math.floor(rank_f + 1e-12);
+    const rank_trunc: usize = @trunc(rank_floor);
+    return std.math.clamp(rank_trunc, 0, total_minus_one);
+}
+
 const stats = struct {
     /// Compute mean from histogram bins
     pub fn mean(bins: []const u32) f64 {
@@ -584,19 +611,17 @@ const stats = struct {
 
     /// Compute percentile from histogram bins
     pub fn percentile(bins: []const u32, p: f64) u8 {
-        assert(p >= 0 and p <= 1);
-
         var total: usize = 0;
         for (bins) |count| {
             total += count;
         }
-        if (total == 0) return 0;
+        return percentileWithTotal(bins, p, total);
+    }
 
-        const total_minus_one = total - 1;
-        const rank_f = p * @as(f64, @floatFromInt(total_minus_one));
-        const rank_floor = std.math.floor(rank_f + 1e-12);
-        const rank_trunc: usize = @trunc(rank_floor);
-        const rank = std.math.clamp(rank_trunc, 0, total_minus_one);
+    /// Compute percentile when the bin total is already known.
+    pub fn percentileWithTotal(bins: []const u32, p: f64, total: usize) u8 {
+        if (total == 0) return 0;
+        const rank = percentileRank(p, total);
 
         var cumulative: usize = 0;
 

@@ -52,6 +52,7 @@ pub const HoughTransform = @import("image/hough.zig").HoughTransform;
 pub const Histogram = @import("image/histogram.zig").Histogram;
 pub const BinaryKernel = binary.Kernel;
 const convolution = @import("image/convolution.zig");
+const box_blur = @import("image/box_blur.zig");
 pub const MotionBlur = @import("image/motion_blur.zig").MotionBlur;
 const MotionBlurOps = @import("image/motion_blur.zig").MotionBlurOps;
 pub const Colormap = @import("image/colormaps.zig").Colormap;
@@ -641,10 +642,7 @@ pub fn Image(comptime T: type) type {
                 return;
             }
 
-            var planes: Self.Integral.Planes = .init();
-            defer planes.deinit(allocator);
-            try Self.Integral.compute(self, allocator, &planes);
-            try Self.Integral.boxBlur(&planes, allocator, self, out, radius);
+            try box_blur.boxBlur(T, self, out, allocator, radius);
         }
 
         /// Applies a median blur using a square window with the given radius.
@@ -791,11 +789,7 @@ pub fn Image(comptime T: type) type {
                 return;
             }
 
-            // Compute integral planes and apply sharpening
-            var planes = Self.Integral.Planes.init();
-            defer planes.deinit(allocator);
-            try Self.Integral.compute(self, allocator, &planes);
-            Self.Integral.sharpen(&planes, self, out, radius);
+            try box_blur.sharpen(T, self, out, allocator, radius);
         }
 
         /// Stretches the intensity range so the darkest/brightest pixels map to 0/255, modifying
@@ -1267,5 +1261,6 @@ test {
     _ = @import("image/colormaps.zig");
     _ = @import("image/border.zig");
     _ = @import("image/convolution.zig");
+    _ = @import("image/order_statistic_blur.zig");
     _ = @import("image/tests/flood_fill.zig");
 }
