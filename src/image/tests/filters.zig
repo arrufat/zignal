@@ -1340,3 +1340,45 @@ test "convolve regression issue #255 (missing pixels)" {
         try std.testing.expectEqual(@as(u8, 8), result.at(r, 1).*);
     }
 }
+
+test "convolvePair matches two independent convolves" {
+    const convolution = @import("../convolution.zig");
+    const allocator = std.testing.allocator;
+
+    const kernel_a = [3][3]f32{
+        .{ -1, 0, 1 },
+        .{ -2, 0, 2 },
+        .{ -1, 0, 1 },
+    };
+    const kernel_b = [3][3]f32{
+        .{ -1, -2, -1 },
+        .{ 0, 0, 0 },
+        .{ 1, 2, 1 },
+    };
+
+    inline for ([_]type{ u8, f32 }) |T| {
+        var src: Image(T) = try .init(allocator, 11, 17);
+        defer src.deinit(allocator);
+        for (src.data, 0..) |*px, i| {
+            px.* = @as(u8, @truncate(i * 31 + 7));
+        }
+
+        for ([_]BorderMode{ .replicate, .zero }) |mode| {
+            var pair_a: Image(T) = try .initLike(allocator, src);
+            defer pair_a.deinit(allocator);
+            var pair_b: Image(T) = try .initLike(allocator, src);
+            defer pair_b.deinit(allocator);
+            var solo_a: Image(T) = try .initLike(allocator, src);
+            defer solo_a.deinit(allocator);
+            var solo_b: Image(T) = try .initLike(allocator, src);
+            defer solo_b.deinit(allocator);
+
+            convolution.convolvePair(T, src, pair_a, pair_b, kernel_a, kernel_b, mode);
+            try src.convolve(solo_a, allocator, kernel_a, mode);
+            try src.convolve(solo_b, allocator, kernel_b, mode);
+
+            try std.testing.expectEqualSlices(T, solo_a.data, pair_a.data);
+            try std.testing.expectEqualSlices(T, solo_b.data, pair_b.data);
+        }
+    }
+}

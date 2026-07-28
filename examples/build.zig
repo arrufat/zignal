@@ -32,6 +32,7 @@ pub fn build(b: *std.Build) void {
         "motion_blur_demo",
         "edge_detection",
         "blur_box_vs_gaussian",
+        "convolution_bench",
         "trace_edges",
         "colormaps_demo",
         "optimization_example",
