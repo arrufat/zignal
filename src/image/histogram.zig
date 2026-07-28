@@ -481,7 +481,6 @@ pub fn Histogram(comptime T: type) type {
     };
 }
 
-/// Statistics functions for histogram data (discrete distributions)
 /// 0-based rank of the requested percentile in a population of `total` samples.
 /// Single source of truth for rank semantics across histogram-based selectors.
 pub fn percentileRank(p: f64, total: usize) usize {
@@ -494,6 +493,7 @@ pub fn percentileRank(p: f64, total: usize) usize {
     return std.math.clamp(rank_trunc, 0, total_minus_one);
 }
 
+/// Statistics functions for histogram data (discrete distributions)
 const stats = struct {
     /// Compute mean from histogram bins
     pub fn mean(bins: []const u32) f64 {

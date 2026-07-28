@@ -60,6 +60,40 @@ pub fn MotionBlurOps(comptime T: type) type {
         /// Radial blur types
         pub const RadialType = enum { zoom, spin };
 
+        /// Bilinearly samples all channels at (sample_x, sample_y) into `sums`, preserving
+        /// the per-channel two-stage lerp form. Returns false when the sample is out of
+        /// bounds (nothing accumulated).
+        inline fn accumulateBilinear(image: Image(T), sample_x: f32, sample_y: f32, sums: anytype) bool {
+            const fields = comptime meta.structFields(T);
+            if (!(sample_x >= 0 and sample_x < @as(f32, @floatFromInt(image.cols)) and
+                sample_y >= 0 and sample_y < @as(f32, @floatFromInt(image.rows)))) return false;
+
+            const x0: usize = @floor(sample_x);
+            const x1 = @min(x0 + 1, image.cols - 1);
+            const y0: usize = @floor(sample_y);
+            const y1 = @min(y0 + 1, image.rows - 1);
+
+            const fx = sample_x - @as(f32, @floatFromInt(x0));
+            const fy = sample_y - @as(f32, @floatFromInt(y0));
+
+            const p00 = image.at(y0, x0).*;
+            const p10 = image.at(y0, x1).*;
+            const p01 = image.at(y1, x0).*;
+            const p11 = image.at(y1, x1).*;
+
+            inline for (fields, 0..) |field, i| {
+                const v00 = as(f32, @field(p00, field.name));
+                const v10 = as(f32, @field(p10, field.name));
+                const v01 = as(f32, @field(p01, field.name));
+                const v11 = as(f32, @field(p11, field.name));
+
+                const v0 = v00 * (1 - fx) + v10 * fx;
+                const v1 = v01 * (1 - fx) + v11 * fx;
+                sums[i] += v0 * (1 - fy) + v1 * fy;
+            }
+            return true;
+        }
+
         /// Applies linear motion blur by averaging pixels along a line at the given `angle`
         /// (radians, 0 = horizontal) and `distance` (pixels).
         pub fn linear(image: Image(T), out: Image(T), allocator: Allocator, angle: f32, distance: usize) !void {
@@ -190,36 +224,7 @@ pub fn MotionBlurOps(comptime T: type) type {
                                     const sample_x = @as(f32, @floatFromInt(c)) + t * cos_angle;
                                     const sample_y = @as(f32, @floatFromInt(r)) + t * sin_angle;
 
-                                    // Check bounds
-                                    if (sample_x >= 0 and sample_x < @as(f32, @floatFromInt(image.cols)) and
-                                        sample_y >= 0 and sample_y < @as(f32, @floatFromInt(image.rows)))
-                                    {
-                                        // Bilinear interpolation
-                                        const x0: usize = @floor(sample_x);
-                                        const x1 = @min(x0 + 1, image.cols - 1);
-                                        const y0: usize = @floor(sample_y);
-                                        const y1 = @min(y0 + 1, image.rows - 1);
-
-                                        const fx = sample_x - @as(f32, @floatFromInt(x0));
-                                        const fy = sample_y - @as(f32, @floatFromInt(y0));
-
-                                        const p00 = image.at(y0, x0).*;
-                                        const p10 = image.at(y0, x1).*;
-                                        const p01 = image.at(y1, x0).*;
-                                        const p11 = image.at(y1, x1).*;
-
-                                        inline for (fields, 0..) |field, i| {
-                                            const v00 = as(f32, @field(p00, field.name));
-                                            const v10 = as(f32, @field(p10, field.name));
-                                            const v01 = as(f32, @field(p01, field.name));
-                                            const v11 = as(f32, @field(p11, field.name));
-
-                                            const v0 = v00 * (1 - fx) + v10 * fx;
-                                            const v1 = v01 * (1 - fx) + v11 * fx;
-                                            sums[i] += v0 * (1 - fy) + v1 * fy;
-                                        }
-                                        count += 1;
-                                    }
+                                    if (accumulateBilinear(image, sample_x, sample_y, &sums)) count += 1;
                                     t += 1.0;
                                 }
 
@@ -396,36 +401,7 @@ pub fn MotionBlurOps(comptime T: type) type {
                                     sample_y = cy + distance * @sin(new_angle);
                                 }
 
-                                // Check bounds
-                                if (sample_x >= 0 and sample_x < @as(f32, @floatFromInt(image.cols)) and
-                                    sample_y >= 0 and sample_y < @as(f32, @floatFromInt(image.rows)))
-                                {
-                                    // Bilinear interpolation
-                                    const x0: usize = @floor(sample_x);
-                                    const x1 = @min(x0 + 1, image.cols - 1);
-                                    const y0: usize = @floor(sample_y);
-                                    const y1 = @min(y0 + 1, image.rows - 1);
-
-                                    const fx_interp = sample_x - @as(f32, @floatFromInt(x0));
-                                    const fy_interp = sample_y - @as(f32, @floatFromInt(y0));
-
-                                    const p00 = image.at(y0, x0).*;
-                                    const p10 = image.at(y0, x1).*;
-                                    const p01 = image.at(y1, x0).*;
-                                    const p11 = image.at(y1, x1).*;
-
-                                    inline for (fields, 0..) |field, i| {
-                                        const v00 = as(f32, @field(p00, field.name));
-                                        const v10 = as(f32, @field(p10, field.name));
-                                        const v01 = as(f32, @field(p01, field.name));
-                                        const v11 = as(f32, @field(p11, field.name));
-
-                                        const v0 = v00 * (1 - fx_interp) + v10 * fx_interp;
-                                        const v1 = v01 * (1 - fx_interp) + v11 * fx_interp;
-                                        sums[i] += v0 * (1 - fy_interp) + v1 * fy_interp;
-                                    }
-                                    count += 1;
-                                }
+                                if (accumulateBilinear(image, sample_x, sample_y, &sums)) count += 1;
                             }
 
                             var result_pixel: T = undefined;

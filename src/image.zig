@@ -625,7 +625,7 @@ pub fn Image(comptime T: type) type {
 
         /// Computes the integral image, also known as a summed-area table (SAT), of `self`.
         /// For multi-channel images (e.g., structs like `Rgba`), it computes a per-channel
-        /// integral image, storing the result as an array of floats per pixel in the output `integral` image.
+        /// integral image, storing one f32 plane per channel in `planes`.
         pub fn integral(self: Self, allocator: Allocator, planes: *Self.Integral.Planes) !void {
             return Self.Integral.compute(self, allocator, planes);
         }
