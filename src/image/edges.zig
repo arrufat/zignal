@@ -7,7 +7,7 @@ const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
 const as = meta.as;
 const isScalar = meta.isScalar;
-const convolve = @import("convolution.zig").convolve;
+const convolvePair = @import("convolution.zig").convolvePair;
 const ShenCastan = @import("ShenCastan.zig");
 
 /// Sobel X gradient kernel (horizontal edges)
@@ -54,8 +54,7 @@ pub fn Edges(comptime T: type) type {
                 defer grad_x.deinit(allocator);
                 defer grad_y.deinit(allocator);
 
-                try convolve(f32, gray_float, grad_x, allocator, sobel_x, .replicate);
-                try convolve(f32, gray_float, grad_y, allocator, sobel_y, .replicate);
+                convolvePair(f32, gray_float, grad_x, grad_y, sobel_x, sobel_y, .replicate);
 
                 // Compute gradient magnitude
                 for (0..self.rows) |r| {
@@ -250,8 +249,7 @@ pub fn Edges(comptime T: type) type {
             defer grad_x.deinit(allocator);
             defer grad_y.deinit(allocator);
 
-            try convolve(f32, blurred, grad_x, allocator, sobel_x, .replicate);
-            try convolve(f32, blurred, grad_y, allocator, sobel_y, .replicate);
+            convolvePair(f32, blurred, grad_x, grad_y, sobel_x, sobel_y, .replicate);
 
             // Compute gradient magnitude
             var magnitude = try Image(f32).init(allocator, self.rows, self.cols);
