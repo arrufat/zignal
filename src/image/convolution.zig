@@ -114,7 +114,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                 inline for (0..cols) |kx| {
                     const iry = ir + @as(isize, ky) - half_h;
                     const icx = ic + @as(isize, kx) - half_w;
-                    const pixel_val: AccumScalar = getPixel(T, src, iry, icx, border_mode);
+                    const pixel_val: AccumScalar = border.getPixel(T, src, iry, icx, border_mode);
                     const k_val: AccumScalar = kernel[ky * cols + kx];
                     result += pixel_val * k_val;
                 }
@@ -443,7 +443,7 @@ fn convolveSeparablePlane(
             const ic: isize = @intCast(c);
             for (kernel, 0..) |k, i| {
                 const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half));
-                result += Ops.promote(getPixel(PixelT, img, @intCast(r), icx, mode)) * Ops.promote(k);
+                result += Ops.promote(border.getPixel(PixelT, img, @intCast(r), icx, mode)) * Ops.promote(k);
             }
             return result;
         }
@@ -559,18 +559,11 @@ fn convolveSeparablePlane(
                 const ir: isize = @intCast(r);
                 for (kernel_y, 0..) |k, i| {
                     const iry = ir + @as(isize, @intCast(i)) - @as(isize, @intCast(half_y));
-                    const pixel_val = getPixel(TempT, temp_img, iry, @intCast(c), border_mode);
+                    const pixel_val = border.getPixel(TempT, temp_img, iry, @intCast(c), border_mode);
                     result += Ops.promote(pixel_val) * Ops.promote(k);
                 }
                 dst_img.data[r * dst_img.stride + c] = DstIO.store(result);
             }
         }
     }
-}
-
-/// Widens the result so callers can accumulate in i64/f32 without an extra cast at every callsite.
-fn getPixel(comptime T: type, img: Image(T), row: isize, col: isize, border_mode: BorderMode) if (T == f32) f32 else i32 {
-    if (T != u8 and T != f32 and T != i32) @compileError("getPixel only works with u8, i32 and f32 types");
-    const coords = border.computeCoords(row, col, @intCast(img.rows), @intCast(img.cols), border_mode);
-    return if (coords) |c| img.at(c.row, c.col).* else 0;
 }
