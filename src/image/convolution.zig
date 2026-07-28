@@ -37,6 +37,11 @@ inline fn divClampU8Vec(
     return @intCast(@max(zero_vec, @min(max_vec, rounded)));
 }
 
+/// Quantizes an f32 kernel weight to `fixed_point_scale` fixed-point.
+inline fn quantizeWeight(weight: f32) i32 {
+    return @round(weight * fixed_point_scale);
+}
+
 fn PixelIO(comptime T: type, comptime vec_len: usize, comptime scale: comptime_int) type {
     if (T != u8 and T != f32) {
         @compileError("PixelIO only supports u8 and f32 types");
@@ -96,10 +101,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
             inline for (0..rows) |kr| {
                 inline for (0..cols) |kx| {
                     const val = as(f32, kernel[kr][kx]);
-                    result[idx] = if (T == u8)
-                        @round(val * fixed_point_scale)
-                    else
-                        val;
+                    result[idx] = if (T == u8) quantizeWeight(val) else val;
                     idx += 1;
                 }
             }
@@ -294,11 +296,9 @@ fn convolvePlanes(
     channel_ops.mergeChannels(T, final_channels, out);
 }
 
-fn scaleKernelToInt(allocator: Allocator, kernel: []const f32, scale: comptime_int) ![]i32 {
+fn scaleKernelToInt(allocator: Allocator, kernel: []const f32) ![]i32 {
     const result = try allocator.alloc(i32, kernel.len);
-    for (kernel, 0..) |k, i| {
-        result[i] = @round(k * scale);
-    }
+    for (result, kernel) |*r, k| r.* = quantizeWeight(k);
     return result;
 }
 
@@ -318,9 +318,9 @@ pub fn convolveSeparable(
             var temp = try Image(i32).initLike(allocator, image);
             defer temp.deinit(allocator);
 
-            const kernel_x_int = try scaleKernelToInt(allocator, kernel_x, fixed_point_scale);
+            const kernel_x_int = try scaleKernelToInt(allocator, kernel_x);
             defer allocator.free(kernel_x_int);
-            const kernel_y_int = try scaleKernelToInt(allocator, kernel_y, fixed_point_scale);
+            const kernel_y_int = try scaleKernelToInt(allocator, kernel_y);
             defer allocator.free(kernel_y_int);
 
             convolveSeparablePlane(u8, i32, image, out, temp, kernel_x_int, kernel_y_int, border_mode);
@@ -334,9 +334,9 @@ pub fn convolveSeparable(
         else => switch (@typeInfo(T)) {
             .@"struct" => {
                 if (comptime meta.allFieldsAreU8(T)) {
-                    const kernel_x_int = try scaleKernelToInt(allocator, kernel_x, fixed_point_scale);
+                    const kernel_x_int = try scaleKernelToInt(allocator, kernel_x);
                     defer allocator.free(kernel_x_int);
-                    const kernel_y_int = try scaleKernelToInt(allocator, kernel_y, fixed_point_scale);
+                    const kernel_y_int = try scaleKernelToInt(allocator, kernel_y);
                     defer allocator.free(kernel_y_int);
 
                     // Separable kernel sum is the product of 1D sums; each 1D sum is scaled by fixed_point_scale.
