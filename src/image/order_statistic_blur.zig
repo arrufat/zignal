@@ -15,6 +15,9 @@ const Vec16 = @Vector(16, u16);
 /// [16b, 16b+15], fine[b][s] counts value 16b+s. u16 counts are safe because the
 /// two-level path only runs for window <= 255 (population <= 255^2 < 65536).
 const TwoLevelColumn = struct {
+    /// u16 counts hold up to window^2 samples, so the two-level path requires this.
+    const max_window = 255;
+
     coarse: [16]u16 align(32) = @splat(0),
     fine: [16][16]u16 align(32) = @splat(@splat(0)),
 
@@ -68,28 +71,24 @@ fn applyScalarOpTwoLevel(
     border: BorderMode,
     percentile: f64,
 ) !void {
+    // Aliasing is resolved by the public entry points (percentileBlur et al).
+    std.debug.assert(out.data.ptr != image.data.ptr);
     const window = radius * 2 + 1;
     const rows = image.rows;
     const cols = image.cols;
-
-    const alias = out.data.ptr == image.data.ptr;
-    var temp_out: Image(u8) = .empty;
-    defer temp_out.deinit(allocator);
-    var target: Image(u8) = out;
-    if (alias) {
-        temp_out = try .initLike(allocator, image);
-        target = temp_out;
-    }
+    const target = out;
 
     const column_hists = try allocator.alloc(TwoLevelColumn, cols);
     defer allocator.free(column_hists);
 
     const radius_isize: isize = @intCast(radius);
-    for (column_hists, 0..) |*hist, col| {
-        hist.* = .{};
-        for (0..window) |offset| {
-            const row_idx = @as(isize, @intCast(offset)) - radius_isize;
-            hist.addValue(border_module.getPixel(u8, image, row_idx, @intCast(col), border));
+    for (column_hists) |*hist| hist.* = .{};
+    for (0..window) |offset| {
+        const row_idx = @as(isize, @intCast(offset)) - radius_isize;
+        if (border_module.resolveIndex(row_idx, @intCast(rows), border)) |rr| {
+            for (column_hists, 0..) |*hist, col| hist.addValue(image.at(rr, col).*);
+        } else {
+            for (column_hists) |*hist| hist.addValue(0);
         }
     }
 
@@ -133,10 +132,6 @@ fn applyScalarOpTwoLevel(
             hist.removeValue(if (remove_row) |rr| image.at(rr, col).* else 0);
             hist.addValue(if (add_row) |ar| image.at(ar, col).* else 0);
         }
-    }
-
-    if (alias) {
-        target.copy(out);
     }
 }
 
@@ -370,7 +365,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
         ) !void {
             // Rank selection (median/percentile/min/max) takes the two-level fast path;
             // u16 counts require window <= 255 (larger radii keep the flat u32 path).
-            if (@TypeOf(reducer_in) == PercentileReducer and radius * 2 + 1 <= 255) {
+            if (@TypeOf(reducer_in) == PercentileReducer and radius * 2 + 1 <= TwoLevelColumn.max_window) {
                 return applyScalarOpTwoLevel(image, allocator, radius, out, border, reducer_in.percentile);
             }
             return applyScalarOpFlat(image, allocator, radius, out, border, reducer_in);

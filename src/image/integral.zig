@@ -6,7 +6,7 @@ const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
 const as = meta.as;
 
-/// Integral image operations for fast box filtering and region sums.
+/// Summed-area tables (integral images) for O(1) rectangular region sums.
 pub fn Integral(comptime T: type) type {
     return struct {
         const channel_count = Image(T).channels();

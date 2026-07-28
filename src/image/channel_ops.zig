@@ -39,7 +39,7 @@ pub fn findUniformValue(comptime T: type, data: []const T) ?T {
 }
 
 /// Get the common type of all fields in a struct, or compile error if not uniform
-fn FieldTypeOf(comptime T: type) type {
+pub fn FieldTypeOf(comptime T: type) type {
     const fields = comptime meta.structFields(T);
     if (fields.len == 0) @compileError("Type " ++ @typeName(T) ++ " has no fields");
 
