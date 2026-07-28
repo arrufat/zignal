@@ -170,55 +170,62 @@ pub fn MotionBlurOps(comptime T: type) type {
                         }
                     },
                     .@"struct" => {
-                        // Process struct types (RGB, RGBA, etc.)
+                        // Sampling geometry is channel-independent: compute it once per
+                        // sample and accumulate all channels (bilinear stays in the same
+                        // two-stage form per channel, so results match the old per-channel
+                        // loop bit for bit).
                         const fields = comptime meta.structFields(T);
                         for (0..image.rows) |r| {
                             for (0..image.cols) |c| {
-                                var result_pixel: T = undefined;
+                                var sums: [fields.len]f32 = @splat(0);
+                                var count: f32 = 0;
 
-                                inline for (fields) |field| {
-                                    var sum: f32 = 0;
-                                    var count: f32 = 0;
+                                // Sample along the motion line
+                                var t: f32 = -half_dist;
+                                // Use a safety limit to prevent infinite loops with large float values
+                                const loop_limit = distance + 2;
+                                for (0..loop_limit) |_| {
+                                    if (t > half_dist) break;
 
-                                    // Sample along the motion line
-                                    var t: f32 = -half_dist;
-                                    // Use a safety limit to prevent infinite loops with large float values
-                                    const loop_limit = distance + 2;
-                                    for (0..loop_limit) |_| {
-                                        if (t > half_dist) break;
+                                    const sample_x = @as(f32, @floatFromInt(c)) + t * cos_angle;
+                                    const sample_y = @as(f32, @floatFromInt(r)) + t * sin_angle;
 
-                                        const sample_x = @as(f32, @floatFromInt(c)) + t * cos_angle;
-                                        const sample_y = @as(f32, @floatFromInt(r)) + t * sin_angle;
+                                    // Check bounds
+                                    if (sample_x >= 0 and sample_x < @as(f32, @floatFromInt(image.cols)) and
+                                        sample_y >= 0 and sample_y < @as(f32, @floatFromInt(image.rows)))
+                                    {
+                                        // Bilinear interpolation
+                                        const x0: usize = @floor(sample_x);
+                                        const x1 = @min(x0 + 1, image.cols - 1);
+                                        const y0: usize = @floor(sample_y);
+                                        const y1 = @min(y0 + 1, image.rows - 1);
 
-                                        // Check bounds
-                                        if (sample_x >= 0 and sample_x < @as(f32, @floatFromInt(image.cols)) and
-                                            sample_y >= 0 and sample_y < @as(f32, @floatFromInt(image.rows)))
-                                        {
-                                            // Bilinear interpolation
-                                            const x0: usize = @floor(sample_x);
-                                            const x1 = @min(x0 + 1, image.cols - 1);
-                                            const y0: usize = @floor(sample_y);
-                                            const y1 = @min(y0 + 1, image.rows - 1);
+                                        const fx = sample_x - @as(f32, @floatFromInt(x0));
+                                        const fy = sample_y - @as(f32, @floatFromInt(y0));
 
-                                            const fx = sample_x - @as(f32, @floatFromInt(x0));
-                                            const fy = sample_y - @as(f32, @floatFromInt(y0));
+                                        const p00 = image.at(y0, x0).*;
+                                        const p10 = image.at(y0, x1).*;
+                                        const p01 = image.at(y1, x0).*;
+                                        const p11 = image.at(y1, x1).*;
 
-                                            const v00 = as(f32, @field(image.at(y0, x0).*, field.name));
-                                            const v10 = as(f32, @field(image.at(y0, x1).*, field.name));
-                                            const v01 = as(f32, @field(image.at(y1, x0).*, field.name));
-                                            const v11 = as(f32, @field(image.at(y1, x1).*, field.name));
+                                        inline for (fields, 0..) |field, i| {
+                                            const v00 = as(f32, @field(p00, field.name));
+                                            const v10 = as(f32, @field(p10, field.name));
+                                            const v01 = as(f32, @field(p01, field.name));
+                                            const v11 = as(f32, @field(p11, field.name));
 
                                             const v0 = v00 * (1 - fx) + v10 * fx;
                                             const v1 = v01 * (1 - fx) + v11 * fx;
-                                            const value = v0 * (1 - fy) + v1 * fy;
-
-                                            sum += value;
-                                            count += 1;
+                                            sums[i] += v0 * (1 - fy) + v1 * fy;
                                         }
-                                        t += 1.0;
+                                        count += 1;
                                     }
+                                    t += 1.0;
+                                }
 
-                                    const channel_result = if (count > 0) sum / count else as(f32, @field(image.at(r, c).*, field.name));
+                                var result_pixel: T = undefined;
+                                inline for (fields, 0..) |field, i| {
+                                    const channel_result = if (count > 0) sums[i] / count else as(f32, @field(image.at(r, c).*, field.name));
                                     @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
                                         .int => @trunc(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(channel_result)))),
                                         .float => as(field.type, channel_result),
@@ -266,6 +273,7 @@ pub fn MotionBlurOps(comptime T: type) type {
             switch (@typeInfo(T)) {
                 .int, .float => {
                     // Process scalar types
+                    const max_distance = @sqrt(cx * cx + cy * cy);
                     for (0..image.rows) |r| {
                         for (0..image.cols) |c| {
                             const fx = @as(f32, @floatFromInt(c));
@@ -275,10 +283,9 @@ pub fn MotionBlurOps(comptime T: type) type {
                             const dx = fx - cx;
                             const dy = fy - cy;
                             const distance = @sqrt(dx * dx + dy * dy);
-                            const angle = std.math.atan2(dy, dx);
+                            const angle = if (blur_type == .spin) std.math.atan2(dy, dx) else 0;
 
                             // Calculate blur amount based on distance from center
-                            const max_distance = @sqrt(cx * cx + cy * cy);
                             const blur_amount = if (blur_type == .zoom)
                                 (distance / max_distance) * clamped_strength * 20
                             else
@@ -344,8 +351,11 @@ pub fn MotionBlurOps(comptime T: type) type {
                     }
                 },
                 .@"struct" => {
-                    // Process struct types (RGB, RGBA, etc.)
+                    // Sampling geometry (incl. cos/sin) is channel-independent: compute it
+                    // once per sample and accumulate all channels; the per-channel bilinear
+                    // keeps the same two-stage form, so results are bit-identical.
                     const fields = comptime meta.structFields(T);
+                    const max_distance = @sqrt(cx * cx + cy * cy);
                     for (0..image.rows) |r| {
                         for (0..image.cols) |c| {
                             const fx = @as(f32, @floatFromInt(c));
@@ -355,69 +365,72 @@ pub fn MotionBlurOps(comptime T: type) type {
                             const dx = fx - cx;
                             const dy = fy - cy;
                             const distance = @sqrt(dx * dx + dy * dy);
-                            const angle = std.math.atan2(dy, dx);
+                            const angle = if (blur_type == .spin) std.math.atan2(dy, dx) else 0;
 
                             // Calculate blur amount based on distance from center
-                            const max_distance = @sqrt(cx * cx + cy * cy);
                             const blur_amount = if (blur_type == .zoom)
                                 (distance / max_distance) * clamped_strength * 20
                             else
                                 clamped_strength * 0.5;
 
-                            var result_pixel: T = undefined;
+                            var sums: [fields.len]f32 = @splat(0);
+                            var count: usize = 0;
 
-                            inline for (fields) |field| {
-                                var sum: f32 = 0;
-                                var count: usize = 0;
+                            // Sample along blur path
+                            for (0..num_samples) |s| {
+                                const t = (@as(f32, @floatFromInt(s)) - @as(f32, @floatFromInt(num_samples - 1)) / 2.0) / @as(f32, @floatFromInt(num_samples - 1));
 
-                                // Sample along blur path
-                                for (0..num_samples) |s| {
-                                    const t = (@as(f32, @floatFromInt(s)) - @as(f32, @floatFromInt(num_samples - 1)) / 2.0) / @as(f32, @floatFromInt(num_samples - 1));
+                                var sample_x: f32 = undefined;
+                                var sample_y: f32 = undefined;
 
-                                    var sample_x: f32 = undefined;
-                                    var sample_y: f32 = undefined;
+                                if (blur_type == .zoom) {
+                                    // Zoom blur: sample along radial line
+                                    const scale = 1.0 + t * blur_amount * 0.1;
+                                    sample_x = cx + dx * scale;
+                                    sample_y = cy + dy * scale;
+                                } else {
+                                    // Spin blur: sample along circular arc
+                                    const angle_offset = t * blur_amount;
+                                    const new_angle = angle + angle_offset;
+                                    sample_x = cx + distance * @cos(new_angle);
+                                    sample_y = cy + distance * @sin(new_angle);
+                                }
 
-                                    if (blur_type == .zoom) {
-                                        // Zoom blur: sample along radial line
-                                        const scale = 1.0 + t * blur_amount * 0.1;
-                                        sample_x = cx + dx * scale;
-                                        sample_y = cy + dy * scale;
-                                    } else {
-                                        // Spin blur: sample along circular arc
-                                        const angle_offset = t * blur_amount;
-                                        const new_angle = angle + angle_offset;
-                                        sample_x = cx + distance * @cos(new_angle);
-                                        sample_y = cy + distance * @sin(new_angle);
-                                    }
+                                // Check bounds
+                                if (sample_x >= 0 and sample_x < @as(f32, @floatFromInt(image.cols)) and
+                                    sample_y >= 0 and sample_y < @as(f32, @floatFromInt(image.rows)))
+                                {
+                                    // Bilinear interpolation
+                                    const x0: usize = @floor(sample_x);
+                                    const x1 = @min(x0 + 1, image.cols - 1);
+                                    const y0: usize = @floor(sample_y);
+                                    const y1 = @min(y0 + 1, image.rows - 1);
 
-                                    // Check bounds
-                                    if (sample_x >= 0 and sample_x < @as(f32, @floatFromInt(image.cols)) and
-                                        sample_y >= 0 and sample_y < @as(f32, @floatFromInt(image.rows)))
-                                    {
-                                        // Bilinear interpolation
-                                        const x0: usize = @floor(sample_x);
-                                        const x1 = @min(x0 + 1, image.cols - 1);
-                                        const y0: usize = @floor(sample_y);
-                                        const y1 = @min(y0 + 1, image.rows - 1);
+                                    const fx_interp = sample_x - @as(f32, @floatFromInt(x0));
+                                    const fy_interp = sample_y - @as(f32, @floatFromInt(y0));
 
-                                        const fx_interp = sample_x - @as(f32, @floatFromInt(x0));
-                                        const fy_interp = sample_y - @as(f32, @floatFromInt(y0));
+                                    const p00 = image.at(y0, x0).*;
+                                    const p10 = image.at(y0, x1).*;
+                                    const p01 = image.at(y1, x0).*;
+                                    const p11 = image.at(y1, x1).*;
 
-                                        const v00 = as(f32, @field(image.at(y0, x0).*, field.name));
-                                        const v10 = as(f32, @field(image.at(y0, x1).*, field.name));
-                                        const v01 = as(f32, @field(image.at(y1, x0).*, field.name));
-                                        const v11 = as(f32, @field(image.at(y1, x1).*, field.name));
+                                    inline for (fields, 0..) |field, i| {
+                                        const v00 = as(f32, @field(p00, field.name));
+                                        const v10 = as(f32, @field(p10, field.name));
+                                        const v01 = as(f32, @field(p01, field.name));
+                                        const v11 = as(f32, @field(p11, field.name));
 
                                         const v0 = v00 * (1 - fx_interp) + v10 * fx_interp;
                                         const v1 = v01 * (1 - fx_interp) + v11 * fx_interp;
-                                        const value = v0 * (1 - fy_interp) + v1 * fy_interp;
-
-                                        sum += value;
-                                        count += 1;
+                                        sums[i] += v0 * (1 - fy_interp) + v1 * fy_interp;
                                     }
+                                    count += 1;
                                 }
+                            }
 
-                                const channel_result = if (count > 0) sum / @as(f32, @floatFromInt(count)) else as(f32, @field(image.at(r, c).*, field.name));
+                            var result_pixel: T = undefined;
+                            inline for (fields, 0..) |field, i| {
+                                const channel_result = if (count > 0) sums[i] / @as(f32, @floatFromInt(count)) else as(f32, @field(image.at(r, c).*, field.name));
                                 @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
                                     .int => @trunc(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(channel_result)))),
                                     .float => as(field.type, channel_result),

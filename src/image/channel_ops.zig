@@ -58,51 +58,15 @@ pub fn splitChannelsWithUniform(comptime T: type, image: Image(T), allocator: st
     uniforms: [Image(T).channels()]?FieldTypeOf(T),
 } {
     const num_channels = comptime Image(T).channels();
-    const fields = comptime meta.structFields(T);
     const FieldType = FieldTypeOf(T);
-    const plane_size = image.rows * image.cols;
 
-    var channels: [num_channels][]FieldType = undefined;
-    var has_value: [num_channels]bool = @splat(false);
-    var is_uniform: [num_channels]bool = @splat(true);
-    var uniform_values: [num_channels]FieldType = undefined;
+    const channels = try splitChannels(T, image, allocator);
 
-    // Allocate each channel with proper error handling
-    var allocated_count: u32 = 0;
-    errdefer {
-        for (0..allocated_count) |i| {
-            allocator.free(channels[i]);
-        }
-    }
-
-    inline for (&channels) |*channel| {
-        channel.* = try allocator.alloc(FieldType, plane_size);
-        allocated_count += 1;
-    }
-
-    // Split in single pass for cache efficiency
-    var idx: u32 = 0;
-    for (0..image.rows) |r| {
-        for (0..image.cols) |c| {
-            const pixel = image.at(r, c).*;
-            inline for (fields, 0..) |field, i| {
-                const value: FieldType = @field(pixel, field.name);
-                channels[i][idx] = value;
-
-                if (!has_value[i]) {
-                    uniform_values[i] = value;
-                    has_value[i] = true;
-                } else if (is_uniform[i] and value != uniform_values[i]) {
-                    is_uniform[i] = false;
-                }
-            }
-            idx += 1;
-        }
-    }
-
+    // Detecting uniformity on the split planes (SIMD, early-exit) is far cheaper than
+    // tracking it with per-pixel flag branches inside the deinterleave loop.
     var uniforms: [num_channels]?FieldType = undefined;
-    inline for (&uniforms, has_value, is_uniform, uniform_values) |*slot, have, uni, value| {
-        slot.* = if (have and uni) value else null;
+    inline for (&uniforms, channels) |*slot, plane| {
+        slot.* = findUniformValue(FieldType, plane);
     }
 
     return .{
@@ -115,21 +79,51 @@ pub fn splitChannelsWithUniform(comptime T: type, image: Image(T), allocator: st
 /// Allocates and fills channel planes for all fields.
 /// The caller is responsible for freeing the returned slices.
 pub fn splitChannels(comptime T: type, image: Image(T), allocator: std.mem.Allocator) ![Image(T).channels()][]FieldTypeOf(T) {
-    return (try splitChannelsWithUniform(T, image, allocator)).channels;
+    const num_channels = comptime Image(T).channels();
+    const fields = comptime meta.structFields(T);
+    const FieldType = FieldTypeOf(T);
+    const plane_size = @as(usize, image.rows) * image.cols;
+
+    var channels: [num_channels][]FieldType = undefined;
+    var allocated_count: u32 = 0;
+    errdefer {
+        for (0..allocated_count) |i| {
+            allocator.free(channels[i]);
+        }
+    }
+    inline for (&channels) |*channel| {
+        channel.* = try allocator.alloc(FieldType, plane_size);
+        allocated_count += 1;
+    }
+
+    // Branch-free deinterleave over one contiguous row at a time (rows handle views).
+    var idx: usize = 0;
+    for (0..image.rows) |r| {
+        const row = image.data[r * image.stride ..][0..image.cols];
+        for (row) |pixel| {
+            inline for (fields, 0..) |field, i| {
+                channels[i][idx] = @field(pixel, field.name);
+            }
+            idx += 1;
+        }
+    }
+
+    return channels;
 }
 
 /// Combine channels back into struct image.
 pub fn mergeChannels(comptime T: type, channels: [Image(T).channels()][]const FieldTypeOf(T), out: Image(T)) void {
     const fields = comptime meta.structFields(T);
 
-    var idx: u32 = 0;
+    var idx: usize = 0;
     for (0..out.rows) |r| {
-        for (0..out.cols) |c| {
+        const row = out.data[r * out.stride ..][0..out.cols];
+        for (row) |*pixel| {
             var result_pixel: T = undefined;
             inline for (fields, 0..) |field, i| {
                 @field(result_pixel, field.name) = channels[i][idx];
             }
-            out.at(r, c).* = result_pixel;
+            pixel.* = result_pixel;
             idx += 1;
         }
     }
