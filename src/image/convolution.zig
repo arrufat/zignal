@@ -6,7 +6,7 @@ const meta = @import("../meta.zig");
 const as = meta.as;
 const border = @import("border.zig");
 
-pub const BorderMode = border.BorderMode;
+const BorderMode = border.BorderMode;
 const channel_ops = @import("channel_ops.zig");
 
 /// Fixed-point scale used to represent fractional u8 kernel weights as integers.
@@ -37,17 +37,16 @@ inline fn divClampU8Vec(
     return @intCast(@max(zero_vec, @min(max_vec, rounded)));
 }
 
-fn PixelIO(comptime T: type, comptime vec_len: usize) type {
+fn PixelIO(comptime T: type, comptime vec_len: usize, comptime scale: comptime_int) type {
     if (T != u8 and T != f32) {
         @compileError("PixelIO only supports u8 and f32 types");
     }
 
     return struct {
         const Scalar = if (T == u8) i64 else f32;
-        const scale = if (T == u8) fixed_point_scale else 1;
 
         inline fn load(value: T) Scalar {
-            return if (T == u8) @as(Scalar, value) else value;
+            return value;
         }
 
         inline fn loadVec(src: []const T, offset: usize) @Vector(vec_len, Scalar) {
@@ -88,17 +87,14 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
 
         const vec_len = std.simd.suggestVectorLength(AccumScalar) orelse 1;
 
-        const Pixels = PixelIO(T, vec_len);
+        const Pixels = PixelIO(T, vec_len, fixed_point_scale);
 
         /// Flattens a 2D kernel into a 1D array; for `u8` images, values are scaled by `fixed_point_scale` and rounded.
-        pub fn flatten(kernel: anytype) [size]KernelScalar {
-            const kernel_info = @typeInfo(@TypeOf(kernel));
-            const kernel_height = kernel_info.array.len;
-            const kernel_width = @typeInfo(kernel_info.array.child).array.len;
+        fn flatten(kernel: anytype) [size]KernelScalar {
             var result: [size]KernelScalar = undefined;
             var idx: usize = 0;
-            inline for (0..kernel_height) |kr| {
-                inline for (0..kernel_width) |kx| {
+            inline for (0..rows) |kr| {
+                inline for (0..cols) |kx| {
                     const val = as(f32, kernel[kr][kx]);
                     result[idx] = if (T == u8)
                         @round(val * fixed_point_scale)
@@ -116,8 +112,8 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
             var result: AccumScalar = 0;
             inline for (0..rows) |ky| {
                 inline for (0..cols) |kx| {
-                    const iry = ir + @as(isize, @intCast(ky)) - @as(isize, @intCast(half_h));
-                    const icx = ic + @as(isize, @intCast(kx)) - @as(isize, @intCast(half_w));
+                    const iry = ir + @as(isize, ky) - half_h;
+                    const icx = ic + @as(isize, kx) - half_w;
                     const pixel_val: AccumScalar = getPixel(T, src, iry, icx, border_mode);
                     const k_val: AccumScalar = kernel[ky * cols + kx];
                     result += pixel_val * k_val;
@@ -145,13 +141,13 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
 
                 var c: usize = 0;
 
+                while (c < @min(half_w, src.cols)) : (c += 1) {
+                    convolvePixelWithBorder(src, dst, r, c, kernel, border_mode);
+                }
+
+                const safe_end = src.cols -| half_w;
+
                 if (src.cols >= vec_len + 2 * half_w) {
-                    while (c < half_w) : (c += 1) {
-                        convolvePixelWithBorder(src, dst, r, c, kernel, border_mode);
-                    }
-
-                    const safe_end = src.cols - half_w;
-
                     while (c + vec_len <= safe_end) : (c += vec_len) {
                         var result_vec: @Vector(vec_len, AccumScalar) = @splat(0);
 
@@ -172,22 +168,22 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                     }
                 }
 
-                while (c < src.cols) : (c += 1) {
-                    if (c >= half_w and c + half_w < src.cols) {
-                        var result: AccumScalar = 0;
-                        inline for (0..rows) |ky| {
-                            inline for (0..cols) |kx| {
-                                const src_r = r + ky - half_h;
-                                const src_c = c + kx - half_w;
-                                const pixel_val = Pixels.load(src.data[src_r * src.stride + src_c]);
-                                const k_val: AccumScalar = kernel[ky * cols + kx];
-                                result += pixel_val * k_val;
-                            }
+                while (c < safe_end) : (c += 1) {
+                    var result: AccumScalar = 0;
+                    inline for (0..rows) |ky| {
+                        inline for (0..cols) |kx| {
+                            const src_r = r + ky - half_h;
+                            const src_c = c + kx - half_w;
+                            const pixel_val = Pixels.load(src.data[src_r * src.stride + src_c]);
+                            const k_val: AccumScalar = kernel[ky * cols + kx];
+                            result += pixel_val * k_val;
                         }
-                        dst.data[r * dst.stride + c] = Pixels.store(result);
-                    } else {
-                        convolvePixelWithBorder(src, dst, r, c, kernel, border_mode);
                     }
+                    dst.data[r * dst.stride + c] = Pixels.store(result);
+                }
+
+                while (c < src.cols) : (c += 1) {
+                    convolvePixelWithBorder(src, dst, r, c, kernel, border_mode);
                 }
             }
         }
@@ -214,83 +210,19 @@ pub fn convolve(comptime T: type, self: Image(T), out: Image(T), allocator: Allo
                 if (comptime meta.allFieldsAreU8(T)) {
                     const Kernel = ConvolutionKernel(u8, kernel_height, kernel_width);
                     const kernel_int = Kernel.flatten(kernel);
-                    var kernel_sum: Kernel.KernelScalar = 0;
+                    var kernel_sum: i64 = 0;
                     inline for (kernel_int) |weight| {
                         kernel_sum += weight;
                     }
-                    const plane_size = self.rows * self.cols;
-                    const Pixel = PixelIO(u8, 1);
 
-                    const split = try channel_ops.splitChannelsWithUniform(T, self, allocator);
-                    const channels = split.channels;
-                    const uniforms = split.uniforms;
-                    defer for (channels) |channel| allocator.free(channel);
+                    const PlaneCtx = struct {
+                        kernel: [Kernel.size]Kernel.KernelScalar,
 
-                    const ChannelStrategy = enum { normalized, scaled, non_uniform };
-                    var strategies: [channels.len]ChannelStrategy = undefined;
-
-                    // Only use .normalized or .scaled optimization if the border mode
-                    // preserves uniform regions (not .zero which introduces 0 at edges).
-                    const is_safe_border = border_mode.preservesUniform();
-
-                    inline for (uniforms, 0..) |uniform_value, i| {
-                        if (uniform_value) |_| {
-                            if (is_safe_border) {
-                                strategies[i] = if (kernel_sum == Pixel.scale) .normalized else .scaled;
-                            } else {
-                                strategies[i] = .non_uniform;
-                            }
-                        } else {
-                            strategies[i] = .non_uniform;
+                        fn convolvePlane(ctx: @This(), src: Image(u8), dst: Image(u8), mode: BorderMode) !void {
+                            Kernel.convolve(src, dst, ctx.kernel, mode);
                         }
-                    }
-
-                    var num_alloc_channels: usize = 0;
-                    inline for (strategies) |strategy| {
-                        if (strategy != .normalized) num_alloc_channels += 1;
-                    }
-
-                    const total_alloc_size = try std.math.mul(usize, num_alloc_channels, plane_size);
-                    var contiguous_buffer: []u8 = if (total_alloc_size > 0)
-                        try allocator.alloc(u8, total_alloc_size)
-                    else
-                        &.{};
-                    defer if (contiguous_buffer.len > 0) allocator.free(contiguous_buffer);
-
-                    var out_channels: [channels.len][]u8 = undefined;
-                    var alloc_offset: usize = 0;
-                    inline for (&out_channels, strategies, uniforms) |*out_ch, strategy, uniform_value| {
-                        switch (strategy) {
-                            .normalized => out_ch.* = &.{},
-                            .scaled, .non_uniform => {
-                                out_ch.* = contiguous_buffer[alloc_offset..][0..plane_size];
-                                alloc_offset += plane_size;
-                            },
-                        }
-                        if (strategy == .scaled) {
-                            const value = uniform_value orelse unreachable;
-                            const accum = @as(i64, value) * @as(i64, kernel_sum);
-                            const stored = Pixel.store(accum);
-                            @memset(out_ch.*, stored);
-                        }
-                    }
-
-                    inline for (channels, out_channels, strategies) |src_data, dst_data, strategy| {
-                        if (strategy == .non_uniform) {
-                            const src_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = src_data };
-                            const dst_plane: Image(u8) = .{ .rows = self.rows, .cols = self.cols, .stride = self.cols, .data = dst_data };
-                            Kernel.convolve(src_plane, dst_plane, kernel_int, border_mode);
-                        }
-                    }
-
-                    var final_channels: [channels.len][]const u8 = undefined;
-                    inline for (strategies, out_channels, channels, 0..) |strategy, out_ch, src_ch, i| {
-                        switch (strategy) {
-                            .normalized => final_channels[i] = src_ch,
-                            .scaled, .non_uniform => final_channels[i] = out_ch,
-                        }
-                    }
-                    channel_ops.mergeChannels(T, final_channels, out);
+                    };
+                    try convolvePlanes(T, self, out, allocator, kernel_sum, fixed_point_scale, border_mode, PlaneCtx{ .kernel = kernel_int });
                 } else {
                     @compileError("Convolution only supports structs where all fields are u8. Type " ++ @typeName(T) ++ " is not supported.");
                 }
@@ -298,6 +230,68 @@ pub fn convolve(comptime T: type, self: Image(T), out: Image(T), allocator: Allo
             else => @compileError("Convolution only supports u8, f32, and structs with all u8 fields. Type " ++ @typeName(T) ++ " is not supported."),
         },
     }
+}
+
+const ChannelStrategy = enum { normalized, scaled, non_uniform };
+
+/// Shared struct-pixel path: splits `image` into u8 planes, shortcuts uniform channels
+/// (`kernel_sum` is in `scale` fixed-point units), convolves the rest via `ctx.convolvePlane`,
+/// and merges the results into `out`.
+fn convolvePlanes(
+    comptime T: type,
+    image: Image(T),
+    out: Image(T),
+    allocator: Allocator,
+    kernel_sum: i64,
+    comptime scale: comptime_int,
+    border_mode: BorderMode,
+    ctx: anytype,
+) !void {
+    const plane_size = image.rows * image.cols;
+
+    const split = try channel_ops.splitChannelsWithUniform(T, image, allocator);
+    const channels = split.channels;
+    const uniforms = split.uniforms;
+    defer for (channels) |channel| allocator.free(channel);
+
+    // .zero border injects zeros at the edges, breaking uniform-region shortcuts.
+    const is_safe_border = border_mode.preservesUniform();
+    var strategies: [channels.len]ChannelStrategy = undefined;
+    inline for (uniforms, 0..) |uniform_value, i| {
+        strategies[i] = if (uniform_value != null and is_safe_border)
+            (if (kernel_sum == scale) .normalized else .scaled)
+        else
+            .non_uniform;
+    }
+
+    var num_alloc_channels: usize = 0;
+    inline for (strategies) |strategy| {
+        if (strategy != .normalized) num_alloc_channels += 1;
+    }
+
+    const contiguous_buffer = try allocator.alloc(u8, try std.math.mul(usize, num_alloc_channels, plane_size));
+    defer allocator.free(contiguous_buffer);
+
+    var final_channels: [channels.len][]const u8 = undefined;
+    var alloc_offset: usize = 0;
+    inline for (strategies, uniforms, channels, 0..) |strategy, uniform_value, src_data, i| {
+        if (strategy == .normalized) {
+            final_channels[i] = src_data;
+        } else {
+            const dst_data = contiguous_buffer[alloc_offset..][0..plane_size];
+            alloc_offset += plane_size;
+            final_channels[i] = dst_data;
+            if (strategy == .scaled) {
+                const value = uniform_value orelse unreachable;
+                @memset(dst_data, divClampU8(scale, @as(i64, value) * kernel_sum));
+            } else {
+                const src_plane = Image(u8).initFromSlice(image.rows, image.cols, src_data);
+                const dst_plane = Image(u8).initFromSlice(image.rows, image.cols, dst_data);
+                try ctx.convolvePlane(src_plane, dst_plane, border_mode);
+            }
+        }
+    }
+    channel_ops.mergeChannels(T, final_channels, out);
 }
 
 fn scaleKernelToInt(allocator: Allocator, kernel: []const f32, scale: comptime_int) ![]i32 {
@@ -321,7 +315,7 @@ pub fn convolveSeparable(
 ) !void {
     switch (T) {
         u8 => {
-            var temp = try Image(i32).init(allocator, image.rows, image.cols);
+            var temp = try Image(i32).initLike(allocator, image);
             defer temp.deinit(allocator);
 
             const kernel_x_int = try scaleKernelToInt(allocator, kernel_x, fixed_point_scale);
@@ -332,7 +326,7 @@ pub fn convolveSeparable(
             convolveSeparablePlane(u8, i32, image, out, temp, kernel_x_int, kernel_y_int, border_mode);
         },
         f32 => {
-            var temp = try Image(T).init(allocator, image.rows, image.cols);
+            var temp = try Image(T).initLike(allocator, image);
             defer temp.deinit(allocator);
 
             convolveSeparablePlane(f32, f32, image, out, temp, kernel_x, kernel_y, border_mode);
@@ -340,8 +334,6 @@ pub fn convolveSeparable(
         else => switch (@typeInfo(T)) {
             .@"struct" => {
                 if (comptime meta.allFieldsAreU8(T)) {
-                    const plane_size = image.rows * image.cols;
-
                     const kernel_x_int = try scaleKernelToInt(allocator, kernel_x, fixed_point_scale);
                     defer allocator.free(kernel_x_int);
                     const kernel_y_int = try scaleKernelToInt(allocator, kernel_y, fixed_point_scale);
@@ -352,82 +344,22 @@ pub fn convolveSeparable(
                     for (kernel_x_int) |w| kx_sum += w;
                     var ky_sum: i64 = 0;
                     for (kernel_y_int) |w| ky_sum += w;
-                    const kernel_sum = kx_sum * ky_sum;
-                    const scale_sq: i64 = fixed_point_scale_sq;
 
-                    const split = try channel_ops.splitChannelsWithUniform(T, image, allocator);
-                    const channels = split.channels;
-                    const uniforms = split.uniforms;
-                    defer for (channels) |channel| allocator.free(channel);
+                    const PlaneCtx = struct {
+                        allocator: Allocator,
+                        kernel_x: []const i32,
+                        kernel_y: []const i32,
+                        temp: []i32 = &.{},
 
-                    const ChannelStrategy = enum { normalized, scaled, non_uniform };
-                    var strategies: [channels.len]ChannelStrategy = undefined;
-                    const is_safe_border = border_mode.preservesUniform();
-
-                    inline for (uniforms, 0..) |uniform_value, i| {
-                        if (uniform_value) |_| {
-                            if (is_safe_border) {
-                                strategies[i] = if (kernel_sum == scale_sq) .normalized else .scaled;
-                            } else {
-                                strategies[i] = .non_uniform;
-                            }
-                        } else {
-                            strategies[i] = .non_uniform;
+                        fn convolvePlane(ctx: *@This(), src: Image(u8), dst: Image(u8), mode: BorderMode) !void {
+                            if (ctx.temp.len == 0) ctx.temp = try ctx.allocator.alloc(i32, src.rows * src.cols);
+                            const temp = Image(i32).initFromSlice(src.rows, src.cols, ctx.temp);
+                            convolveSeparablePlane(u8, i32, src, dst, temp, ctx.kernel_x, ctx.kernel_y, mode);
                         }
-                    }
-
-                    var num_alloc_channels: usize = 0;
-                    inline for (strategies) |strategy| {
-                        if (strategy != .normalized) num_alloc_channels += 1;
-                    }
-
-                    const total_u8_size = try std.math.mul(usize, num_alloc_channels, plane_size);
-                    var contiguous_u8_buffer: []u8 = if (total_u8_size > 0)
-                        try allocator.alloc(u8, total_u8_size)
-                    else
-                        &.{};
-                    defer if (contiguous_u8_buffer.len > 0) allocator.free(contiguous_u8_buffer);
-
-                    const temp_plane_data: []i32 = if (num_alloc_channels > 0)
-                        try allocator.alloc(i32, plane_size)
-                    else
-                        &.{};
-                    defer if (temp_plane_data.len > 0) allocator.free(temp_plane_data);
-
-                    var out_channels: [channels.len][]u8 = undefined;
-                    var alloc_offset: usize = 0;
-                    inline for (&out_channels, strategies, uniforms) |*out_ch, strategy, uniform_value| {
-                        switch (strategy) {
-                            .normalized => out_ch.* = &.{},
-                            .scaled, .non_uniform => {
-                                out_ch.* = contiguous_u8_buffer[alloc_offset..][0..plane_size];
-                                alloc_offset += plane_size;
-                            },
-                        }
-                        if (strategy == .scaled) {
-                            const value = uniform_value orelse unreachable;
-                            const accum = @as(i64, value) * kernel_sum;
-                            @memset(out_ch.*, divClampU8(fixed_point_scale_sq, accum));
-                        }
-                    }
-
-                    inline for (channels, out_channels, strategies) |src_data, dst_data, strategy| {
-                        if (strategy == .non_uniform) {
-                            const src_plane: Image(u8) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = src_data };
-                            const dst_plane: Image(u8) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = dst_data };
-                            const tmp_plane: Image(i32) = .{ .rows = image.rows, .cols = image.cols, .stride = image.cols, .data = temp_plane_data };
-                            convolveSeparablePlane(u8, i32, src_plane, dst_plane, tmp_plane, kernel_x_int, kernel_y_int, border_mode);
-                        }
-                    }
-
-                    var final_channels: [channels.len][]const u8 = undefined;
-                    inline for (strategies, out_channels, channels, 0..) |strategy, out_ch, src_ch, i| {
-                        switch (strategy) {
-                            .normalized => final_channels[i] = src_ch,
-                            .scaled, .non_uniform => final_channels[i] = out_ch,
-                        }
-                    }
-                    channel_ops.mergeChannels(T, final_channels, out);
+                    };
+                    var ctx: PlaneCtx = .{ .allocator = allocator, .kernel_x = kernel_x_int, .kernel_y = kernel_y_int };
+                    defer allocator.free(ctx.temp);
+                    try convolvePlanes(T, image, out, allocator, kx_sum * ky_sum, fixed_point_scale_sq, border_mode, &ctx);
                 } else {
                     @compileError("Separable convolution only supports structs where all fields are u8. Type " ++ @typeName(T) ++ " is not supported.");
                 }
@@ -466,6 +398,9 @@ fn convolveSeparablePlane(
         }
     }.check;
 
+    // Two-pass results carry a squared fixed-point scale.
+    const DstIO = PixelIO(PixelT, vec_len, fixed_point_scale_sq);
+
     const Ops = struct {
         inline fn promote(v: anytype) if (@typeInfo(@TypeOf(v)) == .vector) @Vector(vec_len, AccumT) else AccumT {
             return if (AccumT == i64) @intCast(v) else v;
@@ -478,18 +413,6 @@ fn convolveSeparablePlane(
             } else {
                 return ptr[0..vec_len].*;
             }
-        }
-
-        inline fn storeDstVec(val: @Vector(vec_len, AccumT), ptr: [*]PixelT) void {
-            if (PixelT == u8 and AccumT == i64) {
-                ptr[0..vec_len].* = divClampU8Vec(fixed_point_scale_sq, vec_len, val);
-            } else {
-                ptr[0..vec_len].* = val;
-            }
-        }
-
-        inline fn storeDstScalar(val: AccumT) PixelT {
-            return if (PixelT == u8 and AccumT == i64) divClampU8(fixed_point_scale_sq, val) else val;
         }
 
         inline fn storeTempVec(val: @Vector(vec_len, AccumT), ptr: [*]TempT) void {
@@ -513,6 +436,19 @@ fn convolveSeparablePlane(
         }
     };
 
+    // Shared by the left and right border-column loops of the horizontal pass.
+    const hBorderPixel = struct {
+        inline fn accum(img: Image(PixelT), kernel: []const TempT, half: usize, r: usize, c: usize, mode: BorderMode) AccumT {
+            var result: AccumT = 0;
+            const ic: isize = @intCast(c);
+            for (kernel, 0..) |k, i| {
+                const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half));
+                result += Ops.promote(getPixel(PixelT, img, @intCast(r), icx, mode)) * Ops.promote(k);
+            }
+            return result;
+        }
+    }.accum;
+
     // Horizontal pass (src -> temp)
     for (0..rows) |r| {
         const row_offset = r * src_img.stride;
@@ -521,14 +457,7 @@ fn convolveSeparablePlane(
 
         const left_border_end = @min(half_x, cols);
         while (c < left_border_end) : (c += 1) {
-            var result: AccumT = 0;
-            const ic: isize = @intCast(c);
-            for (kernel_x, 0..) |k, i| {
-                const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                const pixel_val = getPixel(PixelT, src_img, @intCast(r), icx, border_mode);
-                result += Ops.promote(pixel_val) * Ops.promote(k);
-            }
-            temp_img.data[temp_offset + c] = Ops.storeTempScalar(result);
+            temp_img.data[temp_offset + c] = Ops.storeTempScalar(hBorderPixel(src_img, kernel_x, half_x, r, c, border_mode));
         }
 
         if (cols > 2 * half_x) {
@@ -564,14 +493,7 @@ fn convolveSeparablePlane(
         }
 
         while (c < cols) : (c += 1) {
-            var result: AccumT = 0;
-            const ic: isize = @intCast(c);
-            for (kernel_x, 0..) |k, i| {
-                const icx = ic + @as(isize, @intCast(i)) - @as(isize, @intCast(half_x));
-                const pixel_val = getPixel(PixelT, src_img, @intCast(r), icx, border_mode);
-                result += Ops.promote(pixel_val) * Ops.promote(k);
-            }
-            temp_img.data[temp_offset + c] = Ops.storeTempScalar(result);
+            temp_img.data[temp_offset + c] = Ops.storeTempScalar(hBorderPixel(src_img, kernel_x, half_x, r, c, border_mode));
         }
     }
 
@@ -602,7 +524,7 @@ fn convolveSeparablePlane(
                         }
                     }
 
-                    Ops.storeDstVec(acc, dst_img.data[r * dst_img.stride + c ..].ptr);
+                    DstIO.storeVec(acc, dst_img.data, r * dst_img.stride + c);
                 }
             }
 
@@ -616,7 +538,7 @@ fn convolveSeparablePlane(
                         const src_val = temp_img.data[rr * temp_img.stride + c];
                         result += Ops.promote(src_val) * Ops.promote(k);
                     }
-                    dst_img.data[r * dst_img.stride + c] = Ops.storeDstScalar(result);
+                    dst_img.data[r * dst_img.stride + c] = DstIO.store(result);
                 }
             }
         }
@@ -640,7 +562,7 @@ fn convolveSeparablePlane(
                     const pixel_val = getPixel(TempT, temp_img, iry, @intCast(c), border_mode);
                     result += Ops.promote(pixel_val) * Ops.promote(k);
                 }
-                dst_img.data[r * dst_img.stride + c] = Ops.storeDstScalar(result);
+                dst_img.data[r * dst_img.stride + c] = DstIO.store(result);
             }
         }
     }
@@ -650,6 +572,5 @@ fn convolveSeparablePlane(
 fn getPixel(comptime T: type, img: Image(T), row: isize, col: isize, border_mode: BorderMode) if (T == f32) f32 else i32 {
     if (T != u8 and T != f32 and T != i32) @compileError("getPixel only works with u8, i32 and f32 types");
     const coords = border.computeCoords(row, col, @intCast(img.rows), @intCast(img.cols), border_mode);
-    const pixel = if (coords) |c| img.at(c.row, c.col).* else 0;
-    return if (T == u8) @as(i32, pixel) else pixel;
+    return if (coords) |c| img.at(c.row, c.col).* else 0;
 }
