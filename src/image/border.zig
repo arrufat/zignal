@@ -6,6 +6,8 @@
 const std = @import("std");
 const clamp = std.math.clamp;
 
+const Image = @import("../image.zig").Image;
+
 /// Border handling modes for operations that access pixels outside image bounds
 pub const BorderMode = enum {
     /// Pad with zeros
@@ -60,6 +62,25 @@ pub fn resolveIndex(idx: isize, length: isize, border: BorderMode) ?usize {
         },
         .wrap => if (length == 0) null else @intCast(@mod(idx, length)),
     };
+}
+
+/// Fetches the pixel at (`row`, `col`), resolving out-of-bounds coordinates with `border`.
+/// Returns 0 when the position maps to no pixel (`.zero` mode or an empty image).
+pub fn getPixel(comptime T: type, img: Image(T), row: isize, col: isize, border: BorderMode) T {
+    const coords = computeCoords(row, col, @intCast(img.rows), @intCast(img.cols), border);
+    return if (coords) |c| img.at(c.row, c.col).* else 0;
+}
+
+test "getPixel border resolution" {
+    const testing = std.testing;
+    var data = [_]u8{ 1, 2, 3, 4 };
+    const img = Image(u8).initFromSlice(2, 2, &data);
+
+    try testing.expectEqual(@as(u8, 1), getPixel(u8, img, 0, 0, .zero));
+    try testing.expectEqual(@as(u8, 0), getPixel(u8, img, -1, 0, .zero));
+    try testing.expectEqual(@as(u8, 1), getPixel(u8, img, -1, -1, .replicate));
+    try testing.expectEqual(@as(u8, 4), getPixel(u8, img, 3, 3, .mirror));
+    try testing.expectEqual(@as(u8, 4), getPixel(u8, img, -1, -1, .wrap));
 }
 
 test "resolveIndex basic" {

@@ -263,7 +263,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 var hist = Histogram(u8).init();
                 for (0..window) |offset| {
                     const row_idx = @as(isize, @intCast(offset)) - radius_isize;
-                    const sample = getPixel(image, border, row_idx, @intCast(col));
+                    const sample = border_module.getPixel(u8, image, row_idx, @intCast(col), border);
                     hist.addValue(sample);
                 }
                 column_hists[col] = hist;
@@ -333,17 +333,6 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             var hist = Histogram(u8).init();
             hist.values[value] = @intCast(count);
             return hist;
-        }
-
-        fn getPixel(image: Image(u8), border: BorderMode, row: isize, col: isize) u8 {
-            const r = border_module.resolveIndex(row, @intCast(image.rows), border);
-            const c = border_module.resolveIndex(col, @intCast(image.cols), border);
-            if (r) |row_idx| {
-                if (c) |col_idx| {
-                    return image.at(row_idx, col_idx).*;
-                }
-            }
-            return 0;
         }
 
         const PercentileReducer = struct {
