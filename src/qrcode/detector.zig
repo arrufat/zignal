@@ -289,13 +289,13 @@ fn confirmCandidate(binary: Image(u8), row: usize, col: usize) ?FinderPattern {
     const vertical = crossCheck(binary, @intCast(row), @intCast(col), 1, 0, cross_tolerance) orelse return null;
     const center_row = vertical.center(row);
 
-    const crow: i64 = @intFromFloat(center_row);
+    const crow: i64 = @trunc(center_row);
     if (!isDark(binary, @intCast(crow), col)) return null;
     const horizontal = crossCheck(binary, crow, @intCast(col), 0, 1, cross_tolerance) orelse return null;
     const center_col = horizontal.center(col);
 
     // Loose diagonal check to reject finder-like data noise.
-    const ccol: i64 = @intFromFloat(center_col);
+    const ccol: i64 = @trunc(center_col);
     if (!isDark(binary, @intCast(crow), @intCast(ccol))) return null;
     _ = crossCheck(binary, crow, ccol, 1, 1, diag_tolerance) orelse return null;
 
@@ -401,8 +401,8 @@ fn estimateVersion(triple: FinderTriple) u8 {
     const side = (triple.top_left.center.distance(triple.top_right.center) +
         triple.top_left.center.distance(triple.bottom_left.center)) / 2;
     const dim_est = side / triple.moduleSize() + 7;
-    const version = @round((dim_est - 17) / 4);
-    return @intFromFloat(std.math.clamp(version, tables.min_version, tables.max_version));
+    const version = (dim_est - 17) / 4;
+    return @round(std.math.clamp(version, tables.min_version, tables.max_version));
 }
 
 /// A fourth-correspondence candidate: an alignment pattern center at module
@@ -460,12 +460,12 @@ fn fourthCandidates(binary: Image(u8), triple: FinderTriple, dim: u16, buf: *[5]
         var y = prediction.y() - radius;
         while (y <= prediction.y() + radius) : (y += step) {
             if (y < 0) continue;
-            const py: usize = @intFromFloat(y);
+            const py: usize = @trunc(y);
             if (py >= binary.rows) break;
             var x = prediction.x() - radius;
             while (x <= prediction.x() + radius) : (x += step) {
                 if (x < 0) continue;
-                const px: usize = @intFromFloat(x);
+                const px: usize = @trunc(x);
                 if (px >= binary.cols) break;
                 if (!isDark(binary, py, px)) continue;
                 const candidate = checkAlignment(binary, py, px, ms) orelse continue;
@@ -534,10 +534,10 @@ fn alignmentAxis(binary: Image(u8), row: i64, col: i64, d_row: i64, d_col: i64, 
 /// Verifies the 1:1:1 dark-light-dark alignment signature on both axes
 /// through (row, col) and refines the center from the run extents.
 fn checkAlignment(binary: Image(u8), row: usize, col: usize, ms: f32) ?Fourth {
-    const limit: usize = @intFromFloat(ms * alignment_run_limit + 1);
+    const limit: usize = @trunc(ms * alignment_run_limit + 1);
 
     const horizontal = alignmentAxis(binary, @intCast(row), @intCast(col), 0, 1, ms, limit) orelse return null;
-    const ccol: usize = @intFromFloat(horizontal.center);
+    const ccol: usize = @trunc(horizontal.center);
     if (ccol >= binary.cols or !isDark(binary, row, ccol)) return null;
     const vertical = alignmentAxis(binary, @intCast(row), @intCast(ccol), 1, 0, ms, limit) orelse return null;
 
@@ -554,7 +554,7 @@ fn checkAlignment(binary: Image(u8), row: usize, col: usize, ms: f32) ?Fourth {
             const pr = vertical.center + diag[0] * probe.scale * local_ms;
             const pc = horizontal.center + diag[1] * probe.scale * local_ms;
             if (!bounds.contains(.init(.{ pc, pr }))) return null;
-            if (isDark(binary, @intFromFloat(pr), @intFromFloat(pc)) != probe.dark) return null;
+            if (isDark(binary, @trunc(pr), @trunc(pc)) != probe.dark) return null;
         }
     }
 
@@ -578,7 +578,7 @@ fn sampleModule(binary: Image(u8), transform: ProjectiveTransform(f64), bounds: 
             if (k == 0) return null;
             continue;
         }
-        if (isDark(binary, @intFromFloat(p.y()), @intFromFloat(p.x()))) votes += 1;
+        if (isDark(binary, @trunc(p.y()), @trunc(p.x()))) votes += 1;
     }
     return @intFromBool(votes >= 3);
 }
@@ -703,7 +703,7 @@ fn photoSimulate(allocator: Allocator, clean: Image(u8), opts: struct {
             if (opts.noise != 0) {
                 value += (random.float(f32) - 0.5) * 2 * opts.noise;
             }
-            out.at(r, c).* = @intFromFloat(std.math.clamp(value, 0, 255));
+            out.at(r, c).* = @trunc(std.math.clamp(value, 0, 255));
         }
     }
 
@@ -797,8 +797,8 @@ test "decode rotated 30 degrees" {
     }
     var photo = try photoSimulate(allocator, clean, .{
         .corners = corners,
-        .out_rows = @intFromFloat(canvas),
-        .out_cols = @intFromFloat(canvas),
+        .out_rows = @trunc(canvas),
+        .out_cols = @trunc(canvas),
     });
     defer photo.deinit(allocator);
     try expectDecodes(allocator, photo, "ROTATED THIRTY");
@@ -828,8 +828,8 @@ test "decode under perspective distortion" {
                 .{ side * 0.05, side * 1.02 },
                 .{ side * 1.15, side * 1.12 },
             },
-            .out_rows = @intFromFloat(side * 1.25),
-            .out_cols = @intFromFloat(side * 1.25),
+            .out_rows = @trunc(side * 1.25),
+            .out_cols = @trunc(side * 1.25),
         });
         defer photo.deinit(allocator);
         try expectDecodes(allocator, photo, payload.data);
@@ -849,8 +849,8 @@ test "decode mirrored perspective" {
             .{ side * 1.12, side * 1.04 },
             .{ side * 0.04, side * 1.10 },
         },
-        .out_rows = @intFromFloat(side * 1.2),
-        .out_cols = @intFromFloat(side * 1.2),
+        .out_rows = @trunc(side * 1.2),
+        .out_cols = @trunc(side * 1.2),
     });
     defer photo.deinit(allocator);
     try expectDecodes(allocator, photo, "MIRRORED");
@@ -870,8 +870,8 @@ test "decode under uneven lighting" {
             .{ 8, side + 8 },
             .{ side + 8, side + 8 },
         },
-        .out_rows = @intFromFloat(side + 16),
-        .out_cols = @intFromFloat(side + 16),
+        .out_rows = @trunc(side + 16),
+        .out_cols = @trunc(side + 16),
         .ramp = 60,
         .perlin_amp = 25,
     });
@@ -891,8 +891,8 @@ test "decode under blur and noise" {
             .{ 8, side + 8 },
             .{ side + 8, side + 8 },
         },
-        .out_rows = @intFromFloat(side + 16),
-        .out_cols = @intFromFloat(side + 16),
+        .out_rows = @trunc(side + 16),
+        .out_cols = @trunc(side + 16),
         .sigma = 1.2,
         .noise = 10,
     });
@@ -920,8 +920,8 @@ test "decode combined photo distortions" {
                 .{ side * 0.04 * k, side * (1 + 0.04 * k) },
                 .{ side * (1 + 0.12 * k), side * (1 + 0.10 * k) },
             },
-            .out_rows = @intFromFloat(side * 1.22),
-            .out_cols = @intFromFloat(side * 1.22),
+            .out_rows = @trunc(side * 1.22),
+            .out_cols = @trunc(side * 1.22),
             .ramp = 40,
             .perlin_amp = 15,
             .sigma = 0.8,
@@ -947,8 +947,8 @@ test "decode version 40 at three pixels per module" {
             .{ side * 0.02, side * 1.01 },
             .{ side * 1.04, side * 1.03 },
         },
-        .out_rows = @intFromFloat(side * 1.08),
-        .out_cols = @intFromFloat(side * 1.08),
+        .out_rows = @trunc(side * 1.08),
+        .out_cols = @trunc(side * 1.08),
     });
     defer photo.deinit(allocator);
     try expectDecodes(allocator, photo, "V40 SUBPIXEL BUDGET CANARY");
