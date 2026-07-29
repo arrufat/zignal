@@ -785,10 +785,6 @@ fn SeparablePass(comptime SrcT: type, comptime DstT: type, comptime dst_scale: c
             }
         }
 
-        /// One vertical-pass output row combined from per-tap source row base offsets
-        /// (`BorderIndexTable.zero_sentinel` = row of zeros). Border rows keep the full
-        /// kernel with explicit zero adds; interior rows skip negligible taps — both
-        /// matching the standard vertical pass per pixel.
         /// Emits the top/bottom border rows from a row-resolved table; shared by the
         /// dense and box vertical passes.
         fn verticalBorderRows(src: Image(SrcT), dst: Image(DstT), allocator: Allocator, kernel: []const KernelT, border_mode: BorderMode) !void {
@@ -811,6 +807,10 @@ fn SeparablePass(comptime SrcT: type, comptime DstT: type, comptime dst_scale: c
             }
         }
 
+        /// One vertical-pass output row combined from per-tap source row base offsets
+        /// (`BorderIndexTable.zero_sentinel` = row of zeros). Border rows keep the full
+        /// kernel with explicit zero adds; interior rows skip negligible taps — both
+        /// matching the standard vertical pass per pixel.
         fn verticalRowFromBases(comptime border_row: bool, src_data: []const SrcT, bases: []const usize, dst: Image(DstT), r: usize, kernel: []const KernelT, folded: bool) void {
             const cols = dst.cols;
             const dst_offset = r * dst.stride;
