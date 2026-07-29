@@ -171,6 +171,28 @@ fn benchSeparable(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: 
     try benchOp(io, name, rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa });
 }
 
+fn benchMedian(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: usize, cols: usize, radius: usize) !void {
+    var name_buf: [64]u8 = undefined;
+    const name = try std.fmt.bufPrint(&name_buf, "medianBlur {s} r={d}", .{ @typeName(T), radius });
+    if (skipped(name, filter)) return;
+
+    var src = try initRandom(T, gpa, random, rows, cols);
+    defer src.deinit(gpa);
+    var dst: Image(T) = try .initLike(gpa, src);
+    defer dst.deinit(gpa);
+
+    const Ctx = struct {
+        src: Image(T),
+        dst: Image(T),
+        gpa: std.mem.Allocator,
+        radius: usize,
+        fn run(self: @This()) !void {
+            try self.src.medianBlur(self.dst, self.gpa, self.radius);
+        }
+    };
+    try benchOp(io, name, rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa, .radius = radius });
+}
+
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const gpa = init.gpa;
@@ -215,4 +237,12 @@ pub fn main(init: std.process.Init) !void {
     try benchSeparable(f32, io, gpa, random, filter, 480, 640);
     try benchSeparable(f32, io, gpa, random, filter, 2048, 2048);
     try benchSeparable(f32, io, gpa, random, filter, 2160, 3840);
+
+    // Median (two-level histogram path; random noise is near-worst-case for it,
+    // so measured throughput is a lower bound)
+    for ([_]usize{ 2, 4, 8, 15, 31, 63 }) |r| {
+        try benchMedian(u8, io, gpa, random, filter, 480, 640, r);
+    }
+    try benchMedian(Rgb, io, gpa, random, filter, 480, 640, 4);
+    try benchMedian(Rgb, io, gpa, random, filter, 480, 640, 15);
 }
