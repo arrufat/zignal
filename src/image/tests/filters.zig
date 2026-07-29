@@ -1382,3 +1382,41 @@ test "convolvePair matches two independent convolves" {
         }
     }
 }
+
+test "boxBlur/sharpen interleaved u8 path matches plane-split path" {
+    const allocator = std.testing.allocator;
+    var prng = std.Random.DefaultPrng.init(0x5eed);
+    const random = prng.random();
+
+    var image: Image(Rgb) = try .init(allocator, 23, 31);
+    defer image.deinit(allocator);
+    for (image.data) |*px| {
+        px.* = .{ .r = random.int(u8), .g = random.int(u8), .b = random.int(u8) };
+    }
+
+    var filtered: Image(Rgb) = try .initLike(allocator, image);
+    defer filtered.deinit(allocator);
+    var chan: Image(u8) = try .init(allocator, image.rows, image.cols);
+    defer chan.deinit(allocator);
+    var chan_filtered: Image(u8) = try .initLike(allocator, chan);
+    defer chan_filtered.deinit(allocator);
+
+    for ([_]u32{ 1, 3, 7 }) |radius| {
+        inline for ([_]enum { blur, sharpen }{ .blur, .sharpen }) |mode| {
+            switch (mode) {
+                .blur => try image.boxBlur(filtered, allocator, radius),
+                .sharpen => try image.sharpen(filtered, allocator, radius),
+            }
+            inline for ([_][]const u8{ "r", "g", "b" }) |name| {
+                for (chan.data, image.data) |*dst, px| dst.* = @field(px, name);
+                switch (mode) {
+                    .blur => try chan.boxBlur(chan_filtered, allocator, radius),
+                    .sharpen => try chan.sharpen(chan_filtered, allocator, radius),
+                }
+                for (chan_filtered.data, filtered.data) |expected, px| {
+                    try expectEqual(expected, @field(px, name));
+                }
+            }
+        }
+    }
+}

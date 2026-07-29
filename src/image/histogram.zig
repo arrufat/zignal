@@ -60,13 +60,6 @@ pub fn Histogram(comptime T: type) type {
                 return stats.percentile(&self.values, fraction);
             }
 
-            /// Like `percentileFraction`, but skips the bin-total scan when the caller
-            /// already knows the population (e.g. a constant sliding-window area).
-            pub fn percentileFractionWithTotal(self: *const Self, fraction: f64, total: usize) u8 {
-                std.debug.assert(fraction >= 0.0 and fraction <= 1.0);
-                return stats.percentileWithTotal(&self.values, fraction, total);
-            }
-
             /// Return the smallest intensity with a non-zero count, or null if empty.
             pub fn firstNonZero(self: Self) ?u8 {
                 for (self.values, 0..) |count, value| {
@@ -487,10 +480,21 @@ pub fn percentileRank(p: f64, total: usize) usize {
     assert(p >= 0 and p <= 1);
     assert(total > 0);
     const total_minus_one = total - 1;
-    const rank_f = p * @as(f64, @floatFromInt(total_minus_one));
-    const rank_floor = std.math.floor(rank_f + 1e-12);
-    const rank_trunc: usize = @trunc(rank_floor);
-    return std.math.clamp(rank_trunc, 0, total_minus_one);
+    const rank: usize = @floor(p * @as(f64, @floatFromInt(total_minus_one)) + 1e-12);
+    return @min(rank, total_minus_one);
+}
+
+/// Percentile over raw bins when the caller already knows the population.
+pub fn percentileWithTotal(bins: []const u32, fraction: f64, total: usize) u8 {
+    if (total == 0) return 0;
+    const rank = percentileRank(fraction, total);
+    var cumulative: usize = 0;
+    for (bins, 0..) |count, value| {
+        if (count == 0) continue;
+        cumulative += count;
+        if (cumulative > rank) return @intCast(value);
+    }
+    return @intCast(bins.len - 1);
 }
 
 /// Statistics functions for histogram data (discrete distributions)
@@ -616,23 +620,6 @@ const stats = struct {
             total += count;
         }
         return percentileWithTotal(bins, p, total);
-    }
-
-    /// Compute percentile when the bin total is already known.
-    pub fn percentileWithTotal(bins: []const u32, p: f64, total: usize) u8 {
-        if (total == 0) return 0;
-        const rank = percentileRank(p, total);
-
-        var cumulative: usize = 0;
-
-        for (bins, 0..) |count, value| {
-            if (count == 0) continue;
-            cumulative += count;
-            if (cumulative > rank) {
-                return @intCast(value);
-            }
-        }
-        return @intCast(bins.len - 1);
     }
 
     /// Find maximum bin count

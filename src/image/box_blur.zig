@@ -72,9 +72,6 @@ fn applyInto(comptime T: type, comptime mode: Mode, image: Image(T), out: Image(
     }
 }
 
-/// One scalar plane. Column sums slide down the rows; a horizontal running sum
-/// slides across each row. The per-pixel division is two reciprocal multiplies,
-/// since window heights are row-invariant and widths are column-invariant.
 /// Reciprocals of the clamped horizontal window widths (column-invariant across rows).
 fn invWidthTable(comptime F: type, allocator: Allocator, cols: usize, radius: usize) ![]F {
     const inv_widths = try allocator.alloc(F, cols);
@@ -101,18 +98,29 @@ inline fn finishU8(comptime len: usize, comptime mode: Mode, src_row: []const u8
     return @round(@max(zero, @min(max, value)));
 }
 
+/// Accumulator type: exact u32 sums for u8 planes, f64 for f32.
+fn SumT(comptime P: type) type {
+    return if (P == u8) u32 else f64;
+}
+
+/// Reciprocal-multiply type.
+fn InvT(comptime P: type) type {
+    return if (P == u8) f32 else f64;
+}
+
+/// One scalar plane. Column sums slide down the rows; a horizontal running sum
+/// slides across each row. The per-pixel division is two reciprocal multiplies,
+/// since window heights are row-invariant and widths are column-invariant.
 fn plane(comptime P: type, comptime mode: Mode, src: Image(P), dst: Image(P), allocator: Allocator, radius: usize) !void {
     if (P != u8 and P != f32) @compileError("box filters support u8 and f32 planes");
     const rows: usize = src.rows;
     const cols: usize = src.cols;
-    const SumT = if (P == u8) u32 else f64;
-    const InvT = if (P == u8) f32 else f64;
 
-    const col_sums = try allocator.alloc(SumT, cols);
+    const col_sums = try allocator.alloc(SumT(P), cols);
     defer allocator.free(col_sums);
     @memset(col_sums, 0);
 
-    const inv_widths = try invWidthTable(InvT, allocator, cols, radius);
+    const inv_widths = try invWidthTable(InvT(P), allocator, cols, radius);
     defer allocator.free(inv_widths);
 
     for (0..@min(radius + 1, rows)) |rr| {
@@ -122,11 +130,17 @@ fn plane(comptime P: type, comptime mode: Mode, src: Image(P), dst: Image(P), al
 
     for (0..rows) |r| {
         if (r > 0) {
-            if (r + radius < rows) {
+            const has_add = r + radius < rows;
+            const has_sub = r >= radius + 1;
+            if (has_add and has_sub) {
+                // One fused pass; add-then-subtract order keeps the sums bit-identical.
+                const add_row = src.data[(r + radius) * src.stride ..][0..cols];
+                const sub_row = src.data[(r - radius - 1) * src.stride ..][0..cols];
+                for (col_sums, add_row, sub_row) |*s, a, b| s.* = s.* + a - b;
+            } else if (has_add) {
                 const row = src.data[(r + radius) * src.stride ..][0..cols];
                 for (col_sums, row) |*s, v| s.* += v;
-            }
-            if (r >= radius + 1) {
+            } else if (has_sub) {
                 const row = src.data[(r - radius - 1) * src.stride ..][0..cols];
                 for (col_sums, row) |*s, v| s.* -= v;
             }
@@ -134,12 +148,12 @@ fn plane(comptime P: type, comptime mode: Mode, src: Image(P), dst: Image(P), al
 
         const r2 = @min(r + radius, rows - 1);
         const height = r2 - (r -| radius) + 1;
-        const inv_h = 1.0 / @as(InvT, @floatFromInt(height));
+        const inv_h = 1.0 / @as(InvT(P), @floatFromInt(height));
 
         const src_row = src.data[r * src.stride ..][0..cols];
         const dst_row = dst.data[r * dst.stride ..][0..cols];
 
-        var hsum: SumT = 0;
+        var hsum: SumT(P) = 0;
         for (col_sums[0..@min(radius + 1, cols)]) |v| hsum += v;
 
         var c: usize = 0;
@@ -179,12 +193,12 @@ inline fn emitAndSlide(
     comptime mode: Mode,
     src_row: []const P,
     dst_row: []P,
-    col_sums: []const (if (P == u8) u32 else f64),
-    inv_widths: []const (if (P == u8) f32 else f64),
-    inv_h: if (P == u8) f32 else f64,
+    col_sums: []const SumT(P),
+    inv_widths: []const InvT(P),
+    inv_h: InvT(P),
     radius: usize,
     c: usize,
-    hsum: *(if (P == u8) u32 else f64),
+    hsum: *SumT(P),
 ) void {
     const hsum_f: @TypeOf(inv_h) = if (P == u8) @floatFromInt(hsum.*) else hsum.*;
     const blurred = hsum_f * inv_h * inv_widths[c];
@@ -233,11 +247,17 @@ fn interleavedU8(comptime T: type, comptime mode: Mode, image: Image(T), out: Im
 
     for (0..rows) |r| {
         if (r > 0) {
-            if (r + radius < rows) {
+            const has_add = r + radius < rows;
+            const has_sub = r >= radius + 1;
+            if (has_add and has_sub) {
+                // One fused pass; add-then-subtract order keeps the sums bit-identical.
+                const add_row = std.mem.sliceAsBytes(image.data[(r + radius) * image.stride ..][0..cols]);
+                const sub_row = std.mem.sliceAsBytes(image.data[(r - radius - 1) * image.stride ..][0..cols]);
+                for (col_sums, add_row, sub_row) |*s, a, b| s.* = s.* + a - b;
+            } else if (has_add) {
                 const row = std.mem.sliceAsBytes(image.data[(r + radius) * image.stride ..][0..cols]);
                 for (col_sums, row) |*s, v| s.* += v;
-            }
-            if (r >= radius + 1) {
+            } else if (has_sub) {
                 const row = std.mem.sliceAsBytes(image.data[(r - radius - 1) * image.stride ..][0..cols]);
                 for (col_sums, row) |*s, v| s.* -= v;
             }
@@ -304,8 +324,5 @@ inline fn storeResult(comptime P: type, comptime mode: Mode, orig: P, blurred: a
         .blur => blurred,
         .sharpen => 2 * @as(F, orig) - blurred,
     };
-    return if (P == u8)
-        @round(std.math.clamp(value, 0, 255))
-    else
-        @floatCast(value);
+    return if (P == u8) meta.clamp(u8, value) else @floatCast(value);
 }

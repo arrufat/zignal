@@ -97,17 +97,7 @@ pub fn splitChannels(comptime T: type, image: Image(T), allocator: std.mem.Alloc
     const FieldType = FieldTypeOf(T);
     const plane_size = @as(usize, image.rows) * image.cols;
 
-    var channels: [num_channels][]FieldType = undefined;
-    var allocated_count: u32 = 0;
-    errdefer {
-        for (0..allocated_count) |i| {
-            allocator.free(channels[i]);
-        }
-    }
-    inline for (&channels) |*channel| {
-        channel.* = try allocator.alloc(FieldType, plane_size);
-        allocated_count += 1;
-    }
+    const channels = try allocPlanes(FieldType, num_channels, allocator, plane_size);
 
     // Branch-free deinterleave over one contiguous row at a time (rows handle views).
     var idx: usize = 0;

@@ -3,7 +3,8 @@ const Allocator = std.mem.Allocator;
 
 const Image = @import("../image.zig").Image;
 const Histogram = @import("../image.zig").Histogram;
-const percentileRank = @import("histogram.zig").percentileRank;
+const histogram = @import("histogram.zig");
+const percentileRank = histogram.percentileRank;
 const border_module = @import("border.zig");
 const BorderMode = border_module.BorderMode;
 const channel_ops = @import("channel_ops.zig");
@@ -43,7 +44,7 @@ const BucketSel = struct { bucket: usize, cum: u32 };
 
 /// Locates the coarse bucket containing `rank` (<=16 scalar steps) and the cumulative
 /// count below it. Together with `scanFine` this mirrors the cumulative scan of
-/// `stats.percentileWithTotal` exactly.
+/// `histogram.percentileWithTotal` exactly.
 inline fn pickBucket(rank: usize, coarse_win: Vec16) BucketSel {
     const coarse: [16]u16 = coarse_win;
     var cum: u32 = 0;
@@ -94,7 +95,6 @@ fn applyScalarOpTwoLevel(
     const window = radius * 2 + 1;
     const rows = image.rows;
     const cols = image.cols;
-    const target = out;
 
     const column_hists = try allocator.alloc(TwoLevelColumn, cols);
     defer allocator.free(column_hists);
@@ -136,7 +136,7 @@ fn applyScalarOpTwoLevel(
         var sel = pickBucket(rank, coarse_win);
         var cached_bucket = sel.bucket;
         var fine_win = buildFineRow(cached_bucket, col_ptrs[0..window]);
-        target.at(row, 0).* = scanFine(rank, sel.cum, cached_bucket, fine_win);
+        out.at(row, 0).* = scanFine(rank, sel.cum, cached_bucket, fine_win);
 
         for (1..cols) |col| {
             const leaving = col_ptrs[col - 1];
@@ -156,7 +156,7 @@ fn applyScalarOpTwoLevel(
                 fine_win = buildFineRow(cached_bucket, col_ptrs[col .. col + window]);
             }
             std.debug.assert(@reduce(.Add, fine_win) == @as([16]u16, coarse_win)[cached_bucket]);
-            target.at(row, col).* = scanFine(rank, sel.cum, cached_bucket, fine_win);
+            out.at(row, col).* = scanFine(rank, sel.cum, cached_bucket, fine_win);
         }
 
         if (row + 1 == rows) break;
@@ -200,16 +200,8 @@ fn applyScalarOpFlat(
     const window = radius * 2 + 1;
     if (window > @as(usize, std.math.maxInt(u32))) return Error.InvalidRadius;
 
-    const alias = out.data.ptr == image.data.ptr;
-
-    var temp_out: Image(u8) = .empty;
-    defer temp_out.deinit(allocator);
-
-    var target: Image(u8) = out;
-    if (alias) {
-        temp_out = try .initLike(allocator, image);
-        target = temp_out;
-    }
+    // Aliasing is resolved by the `run` dispatcher.
+    std.debug.assert(out.data.ptr != image.data.ptr);
 
     var column_hists = try allocator.alloc(Histogram(u8), image.cols);
     defer allocator.free(column_hists);
@@ -244,7 +236,7 @@ fn applyScalarOpFlat(
         // Border samples are counted into the histograms, so the population is
         // always exactly window*window; no per-pixel bin scan needed.
         const area = window * window;
-        target.at(row, 0).* = try reducer.compute(&window_hist, area);
+        out.at(row, 0).* = try reducer.compute(&window_hist, area);
 
         for (1..image.cols) |col| {
             const left_idx = @as(isize, @intCast(col)) - radius_isize - 1;
@@ -261,7 +253,7 @@ fn applyScalarOpFlat(
                 window_hist.addCounts(&zero_column);
             }
 
-            target.at(row, col).* = try reducer.compute(&window_hist, area);
+            out.at(row, col).* = try reducer.compute(&window_hist, area);
         }
 
         if (row + 1 == image.rows) break;
@@ -285,10 +277,6 @@ fn applyScalarOpFlat(
             }
         }
     }
-
-    if (alias) {
-        target.copy(out);
-    }
 }
 
 fn constantHistogram(count: usize, value: u8) Histogram(u8) {
@@ -301,7 +289,7 @@ const PercentileReducer = struct {
     percentile: f64,
 
     fn compute(self: *const @This(), hist: *const Histogram(u8), area: usize) Error!u8 {
-        return hist.percentileFractionWithTotal(self.percentile, area);
+        return histogram.percentileWithTotal(&hist.values, self.percentile, area);
     }
 
     /// Declares this reducer rank-expressible: the two-level path serves it as a
