@@ -56,13 +56,8 @@ fn applyInto(comptime T: type, comptime mode: Mode, image: Image(T), out: Image(
                 defer inline for (planes) |p| allocator.free(p);
 
                 const plane_size = @as(usize, image.rows) * image.cols;
-                var dst_planes: [num_channels][]P = undefined;
-                var allocated: usize = 0;
-                defer for (dst_planes[0..allocated]) |p| allocator.free(p);
-                inline for (&dst_planes) |*p| {
-                    p.* = try allocator.alloc(P, plane_size);
-                    allocated += 1;
-                }
+                const dst_planes = try channel_ops.allocPlanes(P, num_channels, allocator, plane_size);
+                defer for (dst_planes) |p| allocator.free(p);
 
                 inline for (planes, dst_planes) |src_data, dst_data| {
                     const src_plane = Image(P).initFromSlice(image.rows, image.cols, src_data);
@@ -70,9 +65,7 @@ fn applyInto(comptime T: type, comptime mode: Mode, image: Image(T), out: Image(
                     try plane(P, mode, src_plane, dst_plane, allocator, radius);
                 }
 
-                var final: [num_channels][]const P = undefined;
-                inline for (&final, dst_planes) |*f, d| f.* = d;
-                channel_ops.mergeChannels(T, final, out);
+                channel_ops.mergeChannels(T, dst_planes, out);
             }
         },
         else => @compileError("boxBlur/sharpen do not support " ++ @typeName(T)),

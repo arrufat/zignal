@@ -52,6 +52,19 @@ pub fn FieldTypeOf(comptime T: type) type {
     return first_type;
 }
 
+/// Allocate `N` planes of `plane_size` elements each, freeing the partial set if an
+/// allocation fails mid-loop. The caller owns and frees the returned slices.
+pub fn allocPlanes(comptime P: type, comptime N: usize, allocator: std.mem.Allocator, plane_size: usize) ![N][]P {
+    var planes: [N][]P = undefined;
+    var allocated: usize = 0;
+    errdefer for (planes[0..allocated]) |plane| allocator.free(plane);
+    for (&planes) |*plane| {
+        plane.* = try allocator.alloc(P, plane_size);
+        allocated += 1;
+    }
+    return planes;
+}
+
 /// Separate all channels from a struct image into individual planes while tracking uniform channels.
 pub fn splitChannelsWithUniform(comptime T: type, image: Image(T), allocator: std.mem.Allocator) !struct {
     channels: [Image(T).channels()][]FieldTypeOf(T),

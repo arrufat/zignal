@@ -122,28 +122,11 @@ pub fn resize(comptime T: type, self: Image(T), out: Image(T), allocator: Alloca
             };
             defer for (channels) |channel| allocator.free(channel);
 
-            // Allocate output channels
             const out_plane_size = @as(usize, out.rows) * out.cols;
-            var out_channels: [channels.len][]u8 = undefined;
-            var allocated_count: usize = 0;
-            errdefer {
-                for (0..allocated_count) |i| {
-                    allocator.free(out_channels[i]);
-                }
-            }
-
-            // Allocate each output channel
-            for (&out_channels) |*ch| {
-                ch.* = allocator.alloc(u8, out_plane_size) catch {
-                    // Free already allocated channels and fallback
-                    for (0..allocated_count) |i| {
-                        allocator.free(out_channels[i]);
-                    }
-                    resizeGeneric(T, self, out, method);
-                    return;
-                };
-                allocated_count += 1;
-            }
+            const out_channels = channel_ops.allocPlanes(u8, channels.len, allocator, out_plane_size) catch {
+                resizeGeneric(T, self, out, method);
+                return;
+            };
             defer for (out_channels) |ch| allocator.free(ch);
 
             // Resize each channel using optimized plane functions
