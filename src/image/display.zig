@@ -110,27 +110,17 @@ pub fn DisplayFormatter(comptime T: type) type {
 
             fmt: switch (self.display_format) {
                 .auto => |options| {
-                    if (kitty.isSupported(self.io)) {
-                        var opts: kitty.Options = .default;
-                        opts.width = options.width;
-                        opts.height = options.height;
-                        if (options.interpolation) |interp| opts.interpolation = interp;
-                        continue :fmt .{ .kitty = opts };
-                    } else if (iterm2.isSupported(self.io)) {
-                        var opts: iterm2.Options = .default;
-                        opts.width = options.width;
-                        opts.height = options.height;
-                        if (options.interpolation) |interp| opts.interpolation = interp;
-                        continue :fmt .{ .iterm2 = opts };
-                    } else if (sixel.isSupported(self.io)) {
-                        var opts: sixel.Options = .default;
-                        opts.width = options.width;
-                        opts.height = options.height;
-                        if (options.interpolation) |interp| opts.interpolation = interp;
-                        continue :fmt .{ .sixel = opts };
-                    } else {
-                        continue :fmt .{ .sgr = .{ .width = options.width, .height = options.height } };
-                    }
+                    var selected: DisplayFormat = if (kitty.isSupported(self.io))
+                        .{ .kitty = .default }
+                    else if (iterm2.isSupported(self.io))
+                        .{ .iterm2 = .default }
+                    else if (sixel.isSupported(self.io))
+                        .{ .sixel = .default }
+                    else
+                        .{ .sgr = .default };
+                    selected.setSize(options.width, options.height);
+                    if (options.interpolation) |interp| selected.setInterpolation(interp);
+                    continue :fmt selected;
                 },
                 .kitty => |options| {
                     const data = kitty.fromImage(T, self.image.*, allocator, options) catch |err| switch (err) {
