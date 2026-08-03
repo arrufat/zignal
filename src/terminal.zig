@@ -1,17 +1,14 @@
 //! Terminal graphics: capability detection plus the sixel, kitty, and iTerm2
 //! image-encoding protocols.
 //!
-//! Detection helpers are re-exported flat (`terminal.isSixelSupported`, ...),
-//! while each protocol encoder lives under its own namespace
-//! (`terminal.sixel.fromImage`, `terminal.kitty.fromImage`, ...).
+//! Each protocol encoder lives under its own namespace and exposes its
+//! canonical capability probe (`terminal.sixel.fromImage`,
+//! `terminal.kitty.isSupported`, ...).
 
 const detect = @import("terminal/detect.zig");
 
-// Capability detection (see terminal/detect.zig)
+// Shared helpers (see terminal/detect.zig)
 pub const isStdoutTty = detect.isStdoutTty;
-pub const isSixelSupported = detect.isSixelSupported;
-pub const isKittySupported = detect.isKittySupported;
-pub const isIterm2Supported = detect.isIterm2Supported;
 pub const aspectScale = detect.aspectScale;
 pub const isIdentityScale = detect.isIdentityScale;
 

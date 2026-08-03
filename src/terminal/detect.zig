@@ -54,17 +54,54 @@ pub fn isStdoutTty(io: Io) bool {
     };
 }
 
-/// Detect if the terminal supports sixel graphics protocol
+/// Detect if the terminal supports sixel graphics protocol.
+/// XTSMGRAPHICS chased with Device Attributes in one round trip, so terminals
+/// that ignore XTSMGRAPHICS still reply and we don't wait out the timeout.
 pub fn isSixelSupported(io: Io) !bool {
     var state: State = try .init(io);
     defer state.deinit();
 
-    // Try DECRQSS - Request Status String (no visible output)
-    if (state.checkSixelSupport(.param_query)) return true;
+    var response_buf: [response_buffer_size]u8 = undefined;
+    const query_seq = "\x1b[?2;1;0S\x1b[c";
 
-    // Try Device Attributes (no visible output)
-    if (state.checkSixelSupport(.device_attributes)) return true;
+    const response = state.query(query_seq, &response_buf, default_timeout_ms) catch |err| {
+        std.log.debug("sixel query: {s}", .{@errorName(err)});
+        return err;
+    };
 
+    std.log.debug("sixel query response ({d} bytes): {f}", .{ response.len, std.ascii.hexEscape(response, .lower) });
+
+    return parseSixelResponse(response);
+}
+
+/// True when a chained XTSMGRAPHICS + Device Attributes response indicates
+/// sixel support. The buffer may hold either reply or both, in any order.
+fn parseSixelResponse(response: []const u8) bool {
+    // A DCS reply to the graphics query also signals support.
+    if (std.mem.find(u8, response, "\x1bP") != null) return true;
+
+    // Both replies start with CSI ? — tell them apart by their terminator:
+    // XTSMGRAPHICS ends in 'S' (CSI ? Pi ; Ps ; Pv S), DA ends in 'c'.
+    var search: usize = 0;
+    while (std.mem.findPos(u8, response, search, "\x1b[?")) |start| {
+        const attrs_start = start + 3;
+        var i = attrs_start;
+        while (i < response.len and (std.ascii.isDigit(response[i]) or response[i] == ';')) : (i += 1) {}
+        const attrs = response[attrs_start..i];
+        if (i >= response.len) break;
+
+        if (response[i] == 'S') {
+            // XTSMGRAPHICS reply: Ps = 0 means the query succeeded.
+            if (std.mem.startsWith(u8, attrs, "2;0")) return true;
+        } else if (response[i] == 'c') {
+            // Device Attributes reply: standalone attribute 4 means sixel.
+            var it = std.mem.splitScalar(u8, attrs, ';');
+            while (it.next()) |attr| {
+                if (std.mem.eql(u8, attr, "4")) return true;
+            }
+        }
+        search = i;
+    }
     return false;
 }
 
@@ -75,8 +112,7 @@ pub fn isKittySupported(io: Io) !bool {
 
     var response_buf: [response_buffer_size]u8 = undefined;
 
-    // Send Kitty graphics query followed by device attributes
-    // This allows us to detect Kitty support by checking which response we get
+    // Kitty graphics query chased with Device Attributes
     const query_seq = "\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c";
 
     const response = state.query(query_seq, &response_buf, default_timeout_ms) catch |err| {
@@ -86,18 +122,14 @@ pub fn isKittySupported(io: Io) !bool {
 
     std.log.debug("kitty query response ({d} bytes): {f}", .{ response.len, std.ascii.hexEscape(response, .lower) });
 
-    // If we get a graphics query response, Kitty is supported
-    // The response will contain "\x1b_G" if Kitty processed the graphics query
+    // Only Kitty answers the graphics query with an "\x1b_G" response
     return std.mem.find(u8, response, "\x1b_G") != null;
 }
 
 /// Detect if the terminal supports the iTerm2 inline image protocol.
-///
-/// iTerm2 inline images (`OSC 1337`) have no dedicated probe, so we identify the
-/// terminal via XTVERSION (`CSI > q`), which iTerm2 and WezTerm answer with a
-/// `DCS > | <name> ST` string naming themselves; both implement the protocol.
-/// The query is chased with primary Device Attributes so terminals that ignore
-/// XTVERSION still reply and we don't wait out the full timeout.
+/// `OSC 1337` has no dedicated probe, so we identify the terminal via
+/// XTVERSION (chased with Device Attributes): iTerm2 and WezTerm answer with
+/// their name, and both implement the protocol.
 pub fn isIterm2Supported(io: Io) !bool {
     var state: State = try .init(io);
     defer state.deinit();
@@ -153,23 +185,8 @@ pub fn aspectScale(width_opt: ?u32, height_opt: ?u32, rows: usize, cols: usize) 
     return @min(scale, @min(max_dim_f / cols_f, max_dim_f / rows_f));
 }
 
-/// Terminal state manager for capability detection
-///
-/// This struct handles terminal state management for detecting graphics protocol
-/// support. It saves the original terminal settings on initialization and restores
-/// them on cleanup, ensuring the terminal is left in its original state.
-///
-/// The State struct provides methods for:
-/// - Entering raw mode for reading terminal responses
-/// - Sending queries and reading responses with timeouts
-/// - Checking for specific terminal capabilities
-///
-/// Usage:
-/// ```zig
-/// var state: State = try .init();
-/// defer state.deinit();
-/// const supported = state.checkSixelSupport(.device_attributes);
-/// ```
+/// Raw-mode query/response plumbing for the capability probes: saves the
+/// terminal settings on init and restores them on deinit.
 const State = struct {
     io: Io,
     /// Standard input file handle
@@ -179,23 +196,16 @@ const State = struct {
     /// Original terminal state to restore on cleanup
     original_state: TerminalState,
 
-    /// Initialize terminal state for capability detection
-    ///
-    /// Saves the current terminal settings and prepares for raw mode operations.
-    /// On Windows, enables Virtual Terminal Processing for SGR sequence support.
-    /// On POSIX systems, saves the current termios settings.
-    ///
-    /// Returns an error if terminal initialization fails.
+    /// Save current terminal settings; on Windows also enable Virtual Terminal
+    /// Processing and raw input.
     fn init(io: Io) !State {
         const stdin = Io.File.stdin();
         const stdout = Io.File.stdout();
 
         if (builtin.os.tag == .windows) {
-            // Windows-specific initialization
             const stdin_handle = win_api.GetStdHandle(win_api.STD_INPUT_HANDLE);
             const stdout_handle = win_api.GetStdHandle(win_api.STD_OUTPUT_HANDLE);
 
-            // Save original console modes
             var original_output_mode: u32 = 0;
             var original_input_mode: u32 = 0;
 
@@ -206,13 +216,11 @@ const State = struct {
                 return error.ConsoleError;
             }
 
-            // Enable Virtual Terminal Processing for SGR sequences
             const new_output_mode = original_output_mode | win_api.ENABLE_VIRTUAL_TERMINAL_PROCESSING;
             if (win_api.SetConsoleMode(stdout_handle, new_output_mode) == 0) {
                 return error.ConsoleError;
             }
 
-            // Set input mode for raw reading
             const raw_input_mode = original_input_mode & ~(win_api.ENABLE_LINE_INPUT | win_api.ENABLE_ECHO_INPUT);
             _ = win_api.SetConsoleMode(stdin_handle, raw_input_mode);
 
@@ -226,7 +234,6 @@ const State = struct {
                 },
             };
         } else {
-            // POSIX: Get current terminal settings
             const original = try std.posix.tcgetattr(stdin.handle);
 
             return State{
@@ -238,14 +245,9 @@ const State = struct {
         }
     }
 
-    /// Restore terminal to its original state
-    ///
-    /// This method must be called to properly clean up and restore the terminal
-    /// settings that were saved during initialization. Always use defer to ensure
-    /// cleanup happens even if an error occurs.
+    /// Restore the terminal to its original state.
     fn deinit(self: *State) void {
         if (builtin.os.tag == .windows) {
-            // Restore original console modes
             const stdin_handle = win_api.GetStdHandle(win_api.STD_INPUT_HANDLE);
             const stdout_handle = win_api.GetStdHandle(win_api.STD_OUTPUT_HANDLE);
             _ = win_api.SetConsoleMode(stdout_handle, self.original_state.output_mode);
@@ -262,21 +264,15 @@ const State = struct {
         }
     }
 
-    /// Enter raw mode for reading terminal responses
-    ///
-    /// Disables canonical mode and echo to allow reading individual characters
-    /// from the terminal without line buffering. On Windows, this is already
-    /// handled during initialization.
+    /// Disable canonical mode and echo so responses can be read unbuffered.
+    /// Windows is already in raw mode from init.
     fn enterRawMode(self: *const State) !void {
-        // Windows is already in raw mode from init.
         if (builtin.os.tag != .windows) {
             var raw = self.original_state;
 
-            // Disable canonical mode and echo
             raw.lflag.ICANON = false;
             raw.lflag.ECHO = false;
 
-            // Set minimum characters and timeout
             raw.cc[@backingInt(std.posix.V.MIN)] = 0;
             raw.cc[@backingInt(std.posix.V.TIME)] = 1; // 0.1 second timeout
 
@@ -284,13 +280,8 @@ const State = struct {
         }
     }
 
-    /// Read terminal response with timeout
-    ///
-    /// Attempts to read a response from the terminal within the specified timeout.
-    /// Returns the number of bytes read, or error.NoResponse if timeout expires.
-    ///
-    /// On Windows, uses _kbhit() and _getch() for non-blocking reads.
-    /// On POSIX, relies on termios timeout settings.
+    /// Read a terminal response within `timeout_ms`, returning the bytes read
+    /// (0 on timeout). Windows polls _kbhit/_getch; POSIX relies on termios VTIME.
     fn readWithTimeout(self: *const State, buffer: []u8, timeout_ms: u64) !usize {
         if (builtin.os.tag == .windows) {
             const start_time = win_api.GetTickCount64();
@@ -306,7 +297,7 @@ const State = struct {
 
                         if (total_read >= buffer.len) break :poll;
 
-                        // Check for response terminators
+                        // Stop at common response terminators
                         const char: u8 = @intCast(ch);
                         if ((char == 'c' or char == 'R' or char == '\\' or char == ';') and total_read > 3) {
                             break :poll;
@@ -314,13 +305,11 @@ const State = struct {
                     }
                 }
 
-                // Small delay to prevent busy waiting
                 win_api.Sleep(1);
             }
 
             return total_read;
         } else {
-            // POSIX: Use the existing termios timeout mechanism
             var iov = [_][]u8{buffer};
             return self.stdin.readStreaming(self.io, &iov) catch |err| switch (err) {
                 // VMIN=0/VTIME>0 returns 0 bytes on timeout — surfaced as
@@ -335,13 +324,9 @@ const State = struct {
         }
     }
 
-    /// Send a query sequence and read the response
-    ///
-    /// Sends an escape sequence to the terminal and waits for a response.
-    /// Returns the response data or error.NoResponse if no response received.
-    /// Note: enterRawMode uses TCSAFLUSH, which discards any pending input
-    /// before applying the new termios — so no explicit drain is needed here.
-    /// On Windows, drain the input buffer first since console state is global.
+    /// Send a query sequence and return the response (error.NoResponse on timeout).
+    /// enterRawMode uses TCSAFLUSH, which discards pending input before applying
+    /// the new termios; Windows drains explicitly since console state is global.
     fn query(self: *const State, sequence: []const u8, buffer: []u8, timeout_ms: u64) ![]const u8 {
         try self.enterRawMode();
         defer self.restoreTermios();
@@ -361,61 +346,41 @@ const State = struct {
         if (n == 0) return error.NoResponse;
         return buffer[0..n];
     }
-
-    /// Check sixel support using a specific query method
-    ///
-    /// Attempts to detect sixel support using either:
-    /// - param_query: DECRQSS query for sixel parameters
-    /// - device_attributes: Primary Device Attributes query looking for attribute 4
-    ///
-    /// Returns true if the terminal responds with sixel support indication.
-    fn checkSixelSupport(self: *const State, method: enum { param_query, device_attributes }) bool {
-        var response_buf: [response_buffer_size]u8 = undefined;
-
-        switch (method) {
-            .param_query => {
-                // Query sixel graphics parameter
-                const response = self.query("\x1b[?2;1;0S", &response_buf, default_timeout_ms) catch |err| {
-                    std.log.debug("sixel param_query: {s}", .{@errorName(err)});
-                    return false;
-                };
-
-                std.log.debug("sixel param_query response ({d} bytes): {f}", .{ response.len, std.ascii.hexEscape(response, .lower) });
-
-                // Look for positive response indicating sixel support
-                // Expected format: ESC P 1 $ r <params> ESC \
-                return response.len >= 4 and std.mem.find(u8, response, "\x1bP") != null;
-            },
-            .device_attributes => {
-                // Send Primary Device Attributes query
-                const response = self.query("\x1b[c", &response_buf, default_timeout_ms) catch |err| {
-                    std.log.debug("sixel device_attributes: {s}", .{@errorName(err)});
-                    return false;
-                };
-
-                std.log.debug("sixel device_attributes response ({d} bytes): {f}", .{ response.len, std.ascii.hexEscape(response, .lower) });
-
-                // Parse response looking for attribute 4 (sixel graphics)
-                // Format: ESC [ ? <attributes> c
-                if (response.len >= 4 and response[0] == '\x1b' and response[1] == '[' and response[2] == '?') {
-                    // Look for '4' in the attribute list
-                    var i: usize = 3;
-                    while (i < response.len and response[i] != 'c') : (i += 1) {
-                        if (response[i] == '4') {
-                            // Check it's a standalone 4, not part of another number
-                            const prev_is_separator = (i == 3 or response[i - 1] == ';');
-                            const next_is_separator = (i + 1 >= response.len or response[i + 1] == ';' or response[i + 1] == 'c');
-                            if (prev_is_separator and next_is_separator) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-                return false;
-            },
-        }
-    }
 };
+
+test "parseSixelResponse: DA reply with standalone attribute 4" {
+    try std.testing.expect(parseSixelResponse("\x1b[?62;1;4;22c"));
+    try std.testing.expect(parseSixelResponse("\x1b[?4c"));
+}
+
+test "parseSixelResponse: DA reply without sixel attribute" {
+    try std.testing.expect(!parseSixelResponse("\x1b[?62;1;22c"));
+    // 44 must not match as a standalone 4
+    try std.testing.expect(!parseSixelResponse("\x1b[?62;44c"));
+}
+
+test "parseSixelResponse: XTSMGRAPHICS success reply" {
+    try std.testing.expect(parseSixelResponse("\x1b[?2;0;256S"));
+    // Ps != 0 means the query failed
+    try std.testing.expect(!parseSixelResponse("\x1b[?2;1;0S"));
+}
+
+test "parseSixelResponse: combined XTSMGRAPHICS + DA replies" {
+    // Failed graphics query followed by a DA reply advertising sixel
+    try std.testing.expect(parseSixelResponse("\x1b[?2;1;0S\x1b[?62;4c"));
+    // Neither reply indicates support
+    try std.testing.expect(!parseSixelResponse("\x1b[?2;3;0S\x1b[?62;22c"));
+}
+
+test "parseSixelResponse: DCS reply" {
+    try std.testing.expect(parseSixelResponse("\x1bP1$r2;1;0S\x1b\\"));
+}
+
+test "parseSixelResponse: empty or garbage" {
+    try std.testing.expect(!parseSixelResponse(""));
+    try std.testing.expect(!parseSixelResponse("\x1b[?"));
+    try std.testing.expect(!parseSixelResponse("hello"));
+}
 
 test "aspectScale: only width given upscales" {
     // 100x100 image, --width 1000 → scale 10x

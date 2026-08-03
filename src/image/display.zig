@@ -110,7 +110,10 @@ pub fn DisplayFormatter(comptime T: type) type {
 
             fmt: switch (self.display_format) {
                 .auto => |options| {
-                    var selected: DisplayFormat = if (kitty.isSupported(self.io))
+                    // Non-TTY output degrades to sixel (e.g. piping to a sixel viewer).
+                    var selected: DisplayFormat = if (!terminal.isStdoutTty(self.io))
+                        .{ .sixel = .default }
+                    else if (kitty.isSupported(self.io))
                         .{ .kitty = .default }
                     else if (iterm2.isSupported(self.io))
                         .{ .iterm2 = .default }
