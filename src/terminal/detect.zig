@@ -10,6 +10,13 @@ const builtin = @import("builtin");
 // Buffer size for terminal responses
 const response_buffer_size: usize = 256;
 
+// Timeout for terminal responses in milliseconds
+const default_timeout_ms: u64 = 100;
+
+/// Maximum dimension (in pixels) enforced by `aspectScale` to avoid excessive
+/// terminal memory usage. Protocol encoders may rely on this cap.
+pub const max_dimension: u32 = 2048;
+
 // Windows API declarations and constants (conditionally compiled)
 const win_api = if (builtin.os.tag == .windows) struct {
     // Console mode constants
@@ -32,21 +39,10 @@ const win_api = if (builtin.os.tag == .windows) struct {
 } else void;
 
 /// Terminal state for restoration
-const TerminalState = union(enum) {
-    windows: struct {
-        output_mode: u32,
-        input_mode: u32,
-    },
-    posix: std.posix.termios,
-};
-
-/// Configuration options for terminal detection
-pub const DetectionOptions = struct {
-    /// Timeout for terminal responses in milliseconds
-    timeout_ms: u64 = 100,
-    /// Enable functional test (may cause visible output)
-    enable_functional_test: bool = false,
-};
+const TerminalState = if (builtin.os.tag == .windows) struct {
+    output_mode: u32,
+    input_mode: u32,
+} else std.posix.termios;
 
 /// Check if stdout is connected to a TTY
 pub fn isStdoutTty(io: Io) bool {
@@ -83,7 +79,7 @@ pub fn isKittySupported(io: Io) !bool {
     // This allows us to detect Kitty support by checking which response we get
     const query_seq = "\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c";
 
-    const response = state.query(query_seq, &response_buf, 100) catch |err| {
+    const response = state.query(query_seq, &response_buf, default_timeout_ms) catch |err| {
         std.log.debug("kitty query: {s}", .{@errorName(err)});
         return err;
     };
@@ -109,7 +105,7 @@ pub fn isIterm2Supported(io: Io) !bool {
     var response_buf: [response_buffer_size]u8 = undefined;
     const query_seq = "\x1b[>q\x1b[c";
 
-    const response = state.query(query_seq, &response_buf, 100) catch |err| {
+    const response = state.query(query_seq, &response_buf, default_timeout_ms) catch |err| {
         std.log.debug("iterm2 xtversion query: {s}", .{@errorName(err)});
         return err;
     };
@@ -122,11 +118,16 @@ pub fn isIterm2Supported(io: Io) !bool {
         std.mem.find(u8, response, "WezTerm") != null;
 }
 
+/// True when `scale` is close enough to 1 that resampling would be imperceptible.
+pub fn isIdentityScale(scale: f32) bool {
+    return @abs(scale - 1.0) <= 0.001;
+}
+
 /// Compute aspect-preserving scale factor given optional target width/height.
-/// Enforces a maximum dimension of 2048 pixels to avoid excessive terminal memory usage.
+/// Enforces `max_dimension` to avoid excessive terminal memory usage.
 pub fn aspectScale(width_opt: ?u32, height_opt: ?u32, rows: usize, cols: usize) f32 {
     if (rows == 0 or cols == 0) return 1.0;
-    const max_dim: u32 = 2048;
+    const max_dim = max_dimension;
     const cols_f: f32 = @floatFromInt(cols);
     const rows_f: f32 = @floatFromInt(rows);
 
@@ -175,8 +176,6 @@ const State = struct {
     stdin: Io.File,
     /// Standard output file handle
     stdout: Io.File,
-    /// Standard error file handle
-    stderr: Io.File,
     /// Original terminal state to restore on cleanup
     original_state: TerminalState,
 
@@ -190,7 +189,6 @@ const State = struct {
     fn init(io: Io) !State {
         const stdin = Io.File.stdin();
         const stdout = Io.File.stdout();
-        const stderr = Io.File.stderr();
 
         if (builtin.os.tag == .windows) {
             // Windows-specific initialization
@@ -222,11 +220,10 @@ const State = struct {
                 .io = io,
                 .stdin = stdin,
                 .stdout = stdout,
-                .stderr = stderr,
-                .original_state = .{ .windows = .{
+                .original_state = .{
                     .output_mode = original_output_mode,
                     .input_mode = original_input_mode,
-                } },
+                },
             };
         } else {
             // POSIX: Get current terminal settings
@@ -236,8 +233,7 @@ const State = struct {
                 .io = io,
                 .stdin = stdin,
                 .stdout = stdout,
-                .stderr = stderr,
-                .original_state = .{ .posix = original },
+                .original_state = original,
             };
         }
     }
@@ -248,22 +244,21 @@ const State = struct {
     /// settings that were saved during initialization. Always use defer to ensure
     /// cleanup happens even if an error occurs.
     fn deinit(self: *State) void {
-        switch (self.original_state) {
-            .windows => |win_state| {
-                if (builtin.os.tag == .windows) {
-                    // Restore original console modes
-                    const stdin_handle = win_api.GetStdHandle(win_api.STD_INPUT_HANDLE);
-                    const stdout_handle = win_api.GetStdHandle(win_api.STD_OUTPUT_HANDLE);
-                    _ = win_api.SetConsoleMode(stdout_handle, win_state.output_mode);
-                    _ = win_api.SetConsoleMode(stdin_handle, win_state.input_mode);
-                }
-            },
-            .posix => |termios| {
-                if (builtin.os.tag != .windows) {
-                    // Restore original terminal settings
-                    std.posix.tcsetattr(self.stdin.handle, .FLUSH, termios) catch {};
-                }
-            },
+        if (builtin.os.tag == .windows) {
+            // Restore original console modes
+            const stdin_handle = win_api.GetStdHandle(win_api.STD_INPUT_HANDLE);
+            const stdout_handle = win_api.GetStdHandle(win_api.STD_OUTPUT_HANDLE);
+            _ = win_api.SetConsoleMode(stdout_handle, self.original_state.output_mode);
+            _ = win_api.SetConsoleMode(stdin_handle, self.original_state.input_mode);
+        } else {
+            self.restoreTermios();
+        }
+    }
+
+    /// Restore the saved termios (no-op on Windows, where deinit restores console modes).
+    fn restoreTermios(self: *const State) void {
+        if (builtin.os.tag != .windows) {
+            std.posix.tcsetattr(self.stdin.handle, .FLUSH, self.original_state) catch {};
         }
     }
 
@@ -273,25 +268,19 @@ const State = struct {
     /// from the terminal without line buffering. On Windows, this is already
     /// handled during initialization.
     fn enterRawMode(self: *const State) !void {
-        switch (self.original_state) {
-            .windows => {
-                // Already in raw mode from init
-            },
-            .posix => |original| {
-                if (builtin.os.tag != .windows) {
-                    var raw = original;
+        // Windows is already in raw mode from init.
+        if (builtin.os.tag != .windows) {
+            var raw = self.original_state;
 
-                    // Disable canonical mode and echo
-                    raw.lflag.ICANON = false;
-                    raw.lflag.ECHO = false;
+            // Disable canonical mode and echo
+            raw.lflag.ICANON = false;
+            raw.lflag.ECHO = false;
 
-                    // Set minimum characters and timeout
-                    raw.cc[@backingInt(std.posix.V.MIN)] = 0;
-                    raw.cc[@backingInt(std.posix.V.TIME)] = 1; // 0.1 second timeout
+            // Set minimum characters and timeout
+            raw.cc[@backingInt(std.posix.V.MIN)] = 0;
+            raw.cc[@backingInt(std.posix.V.TIME)] = 1; // 0.1 second timeout
 
-                    try std.posix.tcsetattr(self.stdin.handle, .FLUSH, raw);
-                }
-            },
+            try std.posix.tcsetattr(self.stdin.handle, .FLUSH, raw);
         }
     }
 
@@ -307,21 +296,20 @@ const State = struct {
             const start_time = win_api.GetTickCount64();
             var total_read: usize = 0;
 
-            while (win_api.GetTickCount64() - start_time < timeout_ms) {
-                // Check if console has input available
-                if (win_api._kbhit() != 0) {
-                    // Read one character
+            poll: while (win_api.GetTickCount64() - start_time < timeout_ms) {
+                // Drain all queued input before sleeping
+                while (win_api._kbhit() != 0) {
                     const ch = win_api._getch();
                     if (ch >= 0 and ch <= 255) {
                         buffer[total_read] = @intCast(ch);
                         total_read += 1;
 
-                        if (total_read >= buffer.len) break;
+                        if (total_read >= buffer.len) break :poll;
 
                         // Check for response terminators
                         const char: u8 = @intCast(ch);
                         if ((char == 'c' or char == 'R' or char == '\\' or char == ';') and total_read > 3) {
-                            break;
+                            break :poll;
                         }
                     }
                 }
@@ -356,16 +344,7 @@ const State = struct {
     /// On Windows, drain the input buffer first since console state is global.
     fn query(self: *const State, sequence: []const u8, buffer: []u8, timeout_ms: u64) ![]const u8 {
         try self.enterRawMode();
-        defer {
-            switch (self.original_state) {
-                .windows => {},
-                .posix => |termios| {
-                    if (builtin.os.tag != .windows) {
-                        std.posix.tcsetattr(self.stdin.handle, .FLUSH, termios) catch {};
-                    }
-                },
-            }
-        }
+        defer self.restoreTermios();
 
         if (builtin.os.tag == .windows) {
             while (win_api._kbhit() != 0) {
@@ -396,7 +375,7 @@ const State = struct {
         switch (method) {
             .param_query => {
                 // Query sixel graphics parameter
-                const response = self.query("\x1b[?2;1;0S", &response_buf, 100) catch |err| {
+                const response = self.query("\x1b[?2;1;0S", &response_buf, default_timeout_ms) catch |err| {
                     std.log.debug("sixel param_query: {s}", .{@errorName(err)});
                     return false;
                 };
@@ -409,7 +388,7 @@ const State = struct {
             },
             .device_attributes => {
                 // Send Primary Device Attributes query
-                const response = self.query("\x1b[c", &response_buf, 100) catch |err| {
+                const response = self.query("\x1b[c", &response_buf, default_timeout_ms) catch |err| {
                     std.log.debug("sixel device_attributes: {s}", .{@errorName(err)});
                     return false;
                 };

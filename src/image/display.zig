@@ -98,7 +98,7 @@ pub fn DisplayFormatter(comptime T: type) type {
             out_scaled: *?Image(T),
         ) *const Image(T) {
             const scale_factor = terminal.aspectScale(w, h, self.image.rows, self.image.cols);
-            if (@abs(scale_factor - 1.0) <= 0.001) return self.image;
+            if (terminal.isIdentityScale(scale_factor)) return self.image;
             out_scaled.* = self.image.scale(allocator, scale_factor, .bilinear) catch return self.image;
             return &out_scaled.*.?;
         }
@@ -142,7 +142,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                     } else if (self.display_format == .auto) {
                         continue :fmt .{ .sgr = .{ .width = options.width, .height = options.height } };
                     } else {
-                        try writer.writeAll("\x1b_Ga=d\x1b\\");
+                        try writer.writeAll(kitty.delete_all_sequence);
                     }
                 },
                 .iterm2 => |options| {
@@ -167,7 +167,7 @@ pub fn DisplayFormatter(comptime T: type) type {
                     } else if (self.display_format == .auto) {
                         continue :fmt .{ .sgr = .{ .width = options.width, .height = options.height } };
                     } else {
-                        try writer.writeAll("\x1bPq\x1b\\");
+                        try writer.writeAll(sixel.empty_sequence);
                     }
                 },
                 .sgr => |options| {

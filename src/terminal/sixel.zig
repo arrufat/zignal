@@ -4,12 +4,9 @@
 //! which is supported by various terminal emulators for displaying graphics.
 
 const std = @import("std");
-const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const expect = std.testing.expect;
-const clamp = std.math.clamp;
 
-const convertColor = @import("../color.zig").convertColor;
 const Image = @import("../image.zig").Image;
 const Interpolation = @import("../image/interpolation.zig").Interpolation;
 const dither = @import("../image/dither.zig");
@@ -19,7 +16,11 @@ const detect = @import("detect.zig");
 
 const Rgb = quantize.Rgb;
 const sixel_char_offset: u8 = '?'; // ASCII 63 - base for sixel characters
-const max_supported_width: usize = 2048;
+// Row buffers are stack-allocated, so widths past the aspectScale cap are rejected.
+const max_supported_width: usize = detect.max_dimension;
+
+/// An empty sixel sequence (DCS + ST), useful as a visual no-op.
+pub const empty_sequence: []const u8 = "\x1bPq\x1b\\";
 
 /// Dithering modes for color quantization (alias for the shared `dither.Mode`).
 pub const DitherMode = dither.Mode;
@@ -38,68 +39,10 @@ pub const Options = struct {
     interpolation: Interpolation = .nearest,
 
     /// Default options for automatic formatting
-    pub const default: Options = .{
-        .palette = .{ .adaptive = .{ .max_colors = 256 } },
-        .dither = .auto,
-        .width = null,
-        .height = null,
-        .interpolation = .nearest,
-    };
+    pub const default: Options = .{};
     /// Fallback options without dithering
-    pub const fallback: Options = .{
-        .palette = .{ .adaptive = .{ .max_colors = 256 } },
-        .dither = .none,
-        .width = null,
-        .height = null,
-        .interpolation = .nearest,
-    };
+    pub const fallback: Options = .{ .dither = .none };
 };
-
-/// Profiling metrics for sixel encoding. All values are measured in nanoseconds.
-pub const Profile = struct {
-    total_ns: u64 = 0,
-    scale_convert_ns: u64 = 0,
-    palette_ns: u64 = 0,
-    lut_ns: u64 = 0,
-    dither_ns: u64 = 0,
-    palette_emit_ns: u64 = 0,
-    encode_ns: u64 = 0,
-
-    pub fn reset(self: *Profile) void {
-        self.* = .{};
-    }
-};
-
-inline fn monotonicNs() u64 {
-    switch (builtin.os.tag) {
-        .linux => {
-            var ts: std.os.linux.timespec = undefined;
-            _ = std.os.linux.clock_gettime(std.os.linux.CLOCK.MONOTONIC, &ts);
-            return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
-        },
-        .windows => {
-            const kernel32 = struct {
-                extern "kernel32" fn GetTickCount64() callconv(.winapi) u64;
-            };
-            return kernel32.GetTickCount64() * std.time.ns_per_ms;
-        },
-        .macos => {
-            const mach = struct {
-                const mach_timebase_info_data_t = extern struct {
-                    numer: u32,
-                    denom: u32,
-                };
-                extern "c" fn mach_absolute_time() u64;
-                extern "c" fn mach_timebase_info(info: *mach_timebase_info_data_t) c_int;
-            };
-            var info: mach.mach_timebase_info_data_t = undefined;
-            _ = mach.mach_timebase_info(&info);
-            const time = mach.mach_absolute_time();
-            return (time * info.numer) / info.denom;
-        },
-        else => return 0,
-    }
-}
 
 // ========== Main Entry Point ==========
 
@@ -110,48 +53,37 @@ pub fn fromImage(
     gpa: Allocator,
     options: Options,
 ) ![]u8 {
-    return fromImageProfiled(T, image, gpa, options, null);
-}
-
-/// Converts an image to sixel format while capturing optional profiling data.
-pub fn fromImageProfiled(
-    comptime T: type,
-    image: Image(T),
-    gpa: Allocator,
-    options: Options,
-    profiler: ?*Profile,
-) ![]u8 {
-    var total_start: u64 = 0;
-    if (profiler) |p| {
-        p.reset();
-        total_start = monotonicNs();
-    }
-
-    var width = image.cols;
-    var height = image.rows;
+    const is_rgb = T == Rgb;
     const scale = detect.aspectScale(options.width, options.height, image.rows, image.cols);
-    if (@abs(scale - 1.0) > 1e-5) {
-        width = @trunc(@as(f32, @floatFromInt(width)) * scale);
-        height = @trunc(@as(f32, @floatFromInt(height)) * scale);
+
+    // Scale/convert up front so quantization, dithering, and encoding all see
+    // the pixels that are actually emitted.
+    var prepared_img: ?Image(Rgb) = null;
+    defer if (prepared_img) |*img| img.deinit(gpa);
+
+    if (!detect.isIdentityScale(scale)) {
+        if (comptime is_rgb) {
+            prepared_img = try image.scale(gpa, scale, options.interpolation);
+        } else {
+            var scaled = try image.scale(gpa, scale, options.interpolation);
+            defer scaled.deinit(gpa);
+            prepared_img = try scaled.convert(gpa, Rgb);
+        }
+    } else if (!is_rgb) {
+        prepared_img = try image.convert(gpa, Rgb);
     }
+
+    const width: usize = if (prepared_img) |img| img.cols else image.cols;
+    const height: usize = if (prepared_img) |img| img.rows else image.rows;
+    if (width > max_supported_width) return error.ImageTooWide;
 
     var palette: [256]Rgb = undefined;
+    const palette_size = if (prepared_img) |img|
+        quantize.buildPalette(Rgb, gpa, img, options.palette, &palette)
+    else
+        quantize.buildPalette(T, gpa, image, options.palette, &palette);
 
-    var palette_start: u64 = 0;
-    if (profiler != null) palette_start = monotonicNs();
-
-    const palette_size = quantize.buildPalette(T, gpa, image, options.palette, &palette);
-
-    if (profiler) |p| {
-        p.palette_ns += monotonicNs() - palette_start;
-    }
-
-    var lut_start: u64 = 0;
-    if (profiler != null) lut_start = monotonicNs();
     const color_lut = quantize.getPaletteLut(options.palette, palette[0..palette_size]);
-    if (profiler) |p| {
-        p.lut_ns += monotonicNs() - lut_start;
-    }
 
     const dither_mode = switch (options.dither) {
         .auto => blk: {
@@ -165,71 +97,10 @@ pub fn fromImageProfiled(
         else => options.dither,
     };
 
-    const is_rgb = T == Rgb;
-    const need_prepared_image = dither_mode != .none or scale != 1.0 or !is_rgb;
-
-    var prepared_img: ?Image(Rgb) = null;
-    defer if (prepared_img) |*img| img.deinit(gpa);
-
-    if (need_prepared_image) {
-        var convert_start: u64 = 0;
-        if (profiler != null) convert_start = monotonicNs();
-
-        if (scale == 1.0) {
-            prepared_img = try image.convert(gpa, Rgb);
-        } else {
-            var scaled_img = try Image(Rgb).init(gpa, height, width);
-            const inv_scale = 1.0 / scale;
-
-            for (0..height) |row_idx| {
-                const src_y = @as(f32, @floatFromInt(row_idx)) * inv_scale;
-                for (0..width) |col_idx| {
-                    const src_x = @as(f32, @floatFromInt(col_idx)) * inv_scale;
-
-                    const rgb_value = blk: {
-                        if (image.interpolate(src_x, src_y, options.interpolation, .mirror)) |pixel| {
-                            break :blk convertColor(Rgb, pixel);
-                        }
-
-                        // Fallback to clamped nearest sample: interpolate can return null
-                        // for non-finite or out-of-range coords beyond what `.mirror` covers.
-                        const clamped_col: isize = clamp(
-                            @as(isize, @round(src_x)),
-                            0,
-                            @as(isize, @intCast(image.cols - 1)),
-                        );
-                        const clamped_row: isize = clamp(
-                            @as(isize, @round(src_y)),
-                            0,
-                            @as(isize, @intCast(image.rows - 1)),
-                        );
-                        const fallback_pixel = image.at(@intCast(clamped_row), @intCast(clamped_col)).*;
-                        break :blk convertColor(Rgb, fallback_pixel);
-                    };
-
-                    scaled_img.at(row_idx, col_idx).* = rgb_value;
-                }
-            }
-
-            prepared_img = scaled_img;
-        }
-
-        if (profiler) |p| {
-            p.scale_convert_ns += monotonicNs() - convert_start;
-        }
-    }
-
     if (dither_mode != .none) {
-        var dither_start: u64 = 0;
-        if (profiler != null) dither_start = monotonicNs();
-
-        if (prepared_img) |*working_img| {
-            dither.apply(working_img.*, palette[0..palette_size], color_lut, dither_mode);
-        } else unreachable;
-
-        if (profiler) |p| {
-            p.dither_ns += monotonicNs() - dither_start;
-        }
+        // Dithering mutates pixels, so an unscaled Rgb source needs a private copy.
+        if (prepared_img == null) prepared_img = try image.convert(gpa, Rgb);
+        dither.apply(prepared_img.?, palette[0..palette_size], color_lut, dither_mode);
     }
 
     // Pre-allocate output buffer with estimated size
@@ -253,22 +124,12 @@ pub fn fromImageProfiled(
     // black padding for images whose height is not a multiple of 6
     try output.print(gpa, "\x1bPq\"1;1;{d};{d}", .{ width, height });
 
-    var palette_emit_start: u64 = 0;
-    if (profiler != null) palette_emit_start = monotonicNs();
-
     for (palette[0..palette_size], 0..) |p, i| {
         const r_val = (@as(u32, p.r) * 100 + 127) / 255;
         const g_val = (@as(u32, p.g) * 100 + 127) / 255;
         const b_val = (@as(u32, p.b) * 100 + 127) / 255;
         try output.print(gpa, "#{d};2;{d};{d};{d}", .{ i, r_val, g_val, b_val });
     }
-
-    if (profiler) |p| {
-        p.palette_emit_ns += monotonicNs() - palette_emit_start;
-    }
-
-    var encode_start: u64 = 0;
-    if (profiler != null) encode_start = monotonicNs();
 
     const color_map_len = palette_size * width;
     var color_map_storage = try gpa.alloc(u8, color_map_len);
@@ -287,10 +148,6 @@ pub fn fromImageProfiled(
 
     var row: usize = 0;
     while (row < height) : (row += 6) {
-        if (width > max_supported_width) {
-            return error.ImageTooWide;
-        }
-
         var colors_used: [256]bool = undefined;
         @memset(colors_used[0..palette_size], false);
 
@@ -334,9 +191,7 @@ pub fn fromImageProfiled(
                     const rgb = row_slices[bit][col];
                     const color_idx = color_lut.lookup(rgb);
 
-                    if (!colors_used[color_idx]) {
-                        colors_used[color_idx] = true;
-                    }
+                    colors_used[color_idx] = true;
 
                     if (column_stamp[color_idx] != column_generation) {
                         column_stamp[color_idx] = column_generation;
@@ -352,41 +207,39 @@ pub fn fromImageProfiled(
 
                 for (0..column_len) |idx| {
                     const color_idx = column_colors[idx];
-                    const bits = column_bits[idx];
+                    // A column entry is only created when a bit is about to be
+                    // OR'd in, so column_bits is always nonzero here.
                     const offset = @as(usize, color_idx) * width + col;
-                    color_map_storage[offset] = if (bits != 0) bits + sixel_char_offset else sixel_char_offset;
+                    color_map_storage[offset] = column_bits[idx] + sixel_char_offset;
                     color_map_generation[offset] = row_generation;
                 }
             }
         }
 
+        var first_color_in_band = true;
         for (0..palette_size) |c| {
             if (!colors_used[c]) continue;
+
+            // Colors within a band are separated by `$` (carriage return).
+            if (!first_color_in_band) try output.append(gpa, '$');
+            first_color_in_band = false;
 
             try output.print(gpa, "#{d}", .{c});
 
             var row_buffer: [max_supported_width]u8 = undefined;
-            if (width > row_buffer.len) return error.ImageTooWide;
-
             @memset(row_buffer[0..width], sixel_char_offset);
-            var effective_compression_end: usize = 0;
-            if (width > 0) {
-                var current_last_used_col: usize = 0;
-                for (0..width) |col| {
-                    const offset = c * width + col;
-                    if (color_map_generation[offset] == row_generation) {
-                        row_buffer[col] = color_map_storage[offset];
-                        current_last_used_col = col;
-                    }
-                }
-                if (current_last_used_col == 0 and row_buffer[0] == sixel_char_offset) {
-                    effective_compression_end = 0;
-                } else {
-                    effective_compression_end = current_last_used_col + 1;
+            // colors_used[c] guarantees at least one stamped column, so the
+            // last stamped column bounds the RLE run.
+            var last_used_col: usize = 0;
+            for (0..width) |col| {
+                const offset = c * width + col;
+                if (color_map_generation[offset] == row_generation) {
+                    row_buffer[col] = color_map_storage[offset];
+                    last_used_col = col;
                 }
             }
 
-            var compressor: rle.Compressor(u8) = .{ .data = row_buffer[0..effective_compression_end] };
+            var compressor: rle.Compressor(u8) = .{ .data = row_buffer[0 .. last_used_col + 1] };
             while (compressor.next()) |entry| {
                 if (entry.count > 3) {
                     try output.print(gpa, "!{d}{c}", .{ entry.count, entry.value });
@@ -396,17 +249,6 @@ pub fn fromImageProfiled(
                     }
                 }
             }
-
-            var more_colors = false;
-            for (c + 1..palette_size) |nc| {
-                if (colors_used[nc]) {
-                    more_colors = true;
-                    break;
-                }
-            }
-            if (more_colors) {
-                try output.appendSlice(gpa, "$");
-            }
         }
 
         if (row + 6 < height) {
@@ -415,11 +257,6 @@ pub fn fromImageProfiled(
     }
 
     try output.appendSlice(gpa, "\x1b\\");
-
-    if (profiler) |p| {
-        p.encode_ns += monotonicNs() - encode_start;
-        p.total_ns = monotonicNs() - total_start;
-    }
 
     return output.toOwnedSlice(gpa);
 }

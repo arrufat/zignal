@@ -17,6 +17,15 @@ const payload = @import("payload.zig");
 
 /// Maximum payload size per escape sequence
 const max_chunk_size: usize = 4096;
+// Non-final chunks must be multiples of 4 to keep base64 aligned
+comptime {
+    std.debug.assert(max_chunk_size % 4 == 0);
+}
+/// PNG bytes that base64-encode to exactly `max_chunk_size` characters.
+const png_bytes_per_chunk: usize = max_chunk_size / 4 * 3;
+
+/// Control sequence that deletes all transmitted images.
+pub const delete_all_sequence: []const u8 = "\x1b_Ga=d\x1b\\";
 
 /// Options for Kitty graphics protocol encoding
 pub const Options = struct {
@@ -38,16 +47,7 @@ pub const Options = struct {
     interpolation: Interpolation = .bilinear,
 
     /// Default options for automatic formatting
-    pub const default: Options = .{
-        .quiet = 1,
-        .image_id = null,
-        .placement_id = null,
-        .delete_after = false,
-        .enable_chunking = false,
-        .width = null,
-        .height = null,
-        .interpolation = .bilinear,
-    };
+    pub const default: Options = .{};
 };
 
 fn writeControlHeader(output: *std.ArrayList(u8), gpa: Allocator, options: Options) !void {
@@ -64,45 +64,40 @@ pub fn fromImage(
     gpa: Allocator,
     options: Options,
 ) ![]u8 {
-    const encoded = try payload.scaledPngBase64(T, image, gpa, options.width, options.height, options.interpolation);
-    const base64_data = encoded.base64;
-    defer gpa.free(base64_data);
+    const png_data = try payload.scaledPng(T, image, gpa, options.width, options.height, options.interpolation);
+    defer gpa.free(png_data);
+
+    const encoder = std.base64.standard.Encoder;
+    // Chunk in PNG space (3-byte groups) so each chunk base64-encodes independently.
+    const png_chunk_len = if (options.enable_chunking) png_bytes_per_chunk else png_data.len;
+    const chunk_count = if (options.enable_chunking) png_data.len / png_bytes_per_chunk + 1 else 1;
 
     var output: std.ArrayList(u8) = .empty;
     errdefer output.deinit(gpa);
-    try output.ensureTotalCapacity(gpa, base64_data.len + 64);
-
-    if (!options.enable_chunking) {
-        try output.appendSlice(gpa, "\x1b_G");
-        try writeControlHeader(&output, gpa, options);
-        try output.append(gpa, ';');
-        try output.appendSlice(gpa, base64_data);
-        try output.appendSlice(gpa, "\x1b\\");
-        return output.toOwnedSlice(gpa);
-    }
+    try output.ensureTotalCapacity(gpa, encoder.calcSize(png_data.len) + 64 + chunk_count * 16);
 
     var offset: usize = 0;
-    var chunk_index: usize = 0;
-    while (offset < base64_data.len) : (chunk_index += 1) {
-        const is_last = offset + max_chunk_size >= base64_data.len;
-        const chunk_end = if (is_last)
-            base64_data.len
-        else
-            // Non-final chunks must be multiples of 4 to keep base64 aligned
-            offset + (max_chunk_size & ~@as(usize, 3));
-        const chunk = base64_data[offset..chunk_end];
+    var first = true;
+    while (offset < png_data.len) : (first = false) {
+        const chunk_end = @min(offset + png_chunk_len, png_data.len);
+        const is_last = chunk_end == png_data.len;
 
         try output.appendSlice(gpa, "\x1b_G");
-        if (chunk_index == 0) {
+        if (first) {
             try writeControlHeader(&output, gpa, options);
             if (!is_last) try output.appendSlice(gpa, ",m=1");
         } else if (!is_last) {
             try output.appendSlice(gpa, "m=1");
         }
         try output.append(gpa, ';');
-        try output.appendSlice(gpa, chunk);
-        try output.appendSlice(gpa, "\x1b\\");
 
+        // Base64-encode the chunk directly into the output's spare capacity.
+        const b64_len = encoder.calcSize(chunk_end - offset);
+        try output.ensureUnusedCapacity(gpa, b64_len);
+        _ = encoder.encode(output.unusedCapacitySlice()[0..b64_len], png_data[offset..chunk_end]);
+        output.items.len += b64_len;
+
+        try output.appendSlice(gpa, "\x1b\\");
         offset = chunk_end;
     }
 
