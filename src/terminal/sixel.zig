@@ -263,8 +263,7 @@ pub fn fromImage(
 
 /// Checks if the terminal supports sixel graphics
 pub fn isSupported(io: std.Io) bool {
-    // Not a TTY → assume sixel is fine (file output, e.g. piping to a sixel viewer).
-    if (!detect.isStdoutTty(io)) return true;
+    if (!detect.isStdoutTty(io)) return false;
     return detect.isSixelSupported(io) catch false;
 }
 
