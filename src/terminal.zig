@@ -8,12 +8,12 @@
 const detect = @import("terminal/detect.zig");
 
 // Capability detection (see terminal/detect.zig)
-pub const DetectionOptions = detect.DetectionOptions;
 pub const isStdoutTty = detect.isStdoutTty;
 pub const isSixelSupported = detect.isSixelSupported;
 pub const isKittySupported = detect.isKittySupported;
 pub const isIterm2Supported = detect.isIterm2Supported;
 pub const aspectScale = detect.aspectScale;
+pub const isIdentityScale = detect.isIdentityScale;
 
 // Image-encoding protocols
 pub const sixel = @import("terminal/sixel.zig");

@@ -27,11 +27,7 @@ pub const Options = struct {
     interpolation: Interpolation = .bilinear,
 
     /// Default options for automatic formatting
-    pub const default: Options = .{
-        .width = null,
-        .height = null,
-        .interpolation = .bilinear,
-    };
+    pub const default: Options = .{};
 };
 
 /// Converts an image to iTerm2 inline image protocol format
@@ -41,17 +37,25 @@ pub fn fromImage(
     gpa: Allocator,
     options: Options,
 ) ![]u8 {
-    const encoded = try payload.scaledPngBase64(T, image, gpa, options.width, options.height, options.interpolation);
-    defer gpa.free(encoded.base64);
+    const png_data = try payload.scaledPng(T, image, gpa, options.width, options.height, options.interpolation);
+    defer gpa.free(png_data);
+
+    const encoder = std.base64.standard.Encoder;
+    const b64_len = encoder.calcSize(png_data.len);
 
     var output: std.ArrayList(u8) = .empty;
     errdefer output.deinit(gpa);
-    try output.ensureTotalCapacity(gpa, encoded.base64.len + 64);
+    try output.ensureTotalCapacity(gpa, b64_len + 64);
 
     // OSC 1337 ; File=inline=1 ; size=<png bytes> : <base64> BEL.
     // `size` is the decoded (PNG) byte count, not the base64 length.
-    try output.print(gpa, "\x1b]1337;File=inline=1;size={d}:", .{encoded.png_len});
-    try output.appendSlice(gpa, encoded.base64);
+    try output.print(gpa, "\x1b]1337;File=inline=1;size={d}:", .{png_data.len});
+
+    // Base64-encode directly into the output's spare capacity.
+    try output.ensureUnusedCapacity(gpa, b64_len + 1);
+    _ = encoder.encode(output.unusedCapacitySlice()[0..b64_len], png_data);
+    output.items.len += b64_len;
+
     try output.append(gpa, 0x07);
     return output.toOwnedSlice(gpa);
 }
