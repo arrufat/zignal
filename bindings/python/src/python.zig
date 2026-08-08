@@ -165,7 +165,7 @@ pub fn parse(comptime T: type, py_obj: ?*c.PyObject) !T {
 
             // ArrayList(T)
             if (@hasField(T, "items") and @hasField(T, "capacity") and @hasField(T, "allocator")) {
-                const Slice = std.meta.FieldType(T, .items);
+                const Slice = @FieldType(T, "items");
                 const Child = @typeInfo(Slice).pointer.child;
                 return toArrayList(Child, py_obj);
             }
@@ -339,9 +339,9 @@ pub fn getterOptionalPtr(
     comptime field_name: []const u8,
     comptime converter: anytype,
 ) *const anyopaque {
-    const field_index = std.meta.fieldIndex(Obj, field_name) orelse
+    if (!@hasField(Obj, field_name))
         @compileError("Field '" ++ field_name ++ "' not found on type " ++ @typeName(Obj));
-    const FieldType = std.meta.fieldTypes(Obj)[field_index];
+    const FieldType = @FieldType(Obj, field_name);
     const opt_info = @typeInfo(FieldType);
     if (opt_info != .optional) {
         @compileError("Field '" ++ field_name ++ "' on type " ++ @typeName(Obj) ++ " must be optional");

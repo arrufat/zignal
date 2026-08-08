@@ -103,7 +103,7 @@ pub fn toSnake(name: []const u8, buf: []u8) []const u8 {
 pub fn parseEnum(comptime T: type, name: []const u8) ?T {
     const max_len = comptime blk: {
         var m: usize = 0;
-        for (std.meta.fieldNames(T)) |field_name| {
+        for (@typeInfo(T).@"enum".field_names) |field_name| {
             if (field_name.len > m) m = field_name.len;
         }
         break :blk m;
@@ -118,7 +118,11 @@ pub fn parseEnum(comptime T: type, name: []const u8) ?T {
 /// tagged union so help text cannot drift from the type. Tags without
 /// underscores pass through unchanged.
 pub fn joinFieldNames(comptime T: type) []const u8 {
-    const names = std.meta.fieldNames(T);
+    const names = switch (@typeInfo(T)) {
+        .@"enum" => |info| info.field_names,
+        .@"union" => |info| info.field_names,
+        else => @compileError("joinFieldNames requires an enum or tagged union, got " ++ @typeName(T)),
+    };
     var result: []const u8 = "";
     inline for (names, 0..) |name, i| {
         inline for (name) |c| {
