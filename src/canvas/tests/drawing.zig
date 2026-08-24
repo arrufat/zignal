@@ -504,3 +504,30 @@ test "drawLine with soft mode handles out-of-bounds endpoints" {
     // Verify that the visible part of the line was drawn.
     try expect(img.at(200, 200).* > 0);
 }
+
+test "fillPolygon soft antialiases near-horizontal edges" {
+    const allocator = testing.allocator;
+    var img: Image(Rgba) = try .init(allocator, 40, 100);
+    defer img.deinit(allocator);
+    img.fill(Rgba.white);
+    const canvas: Canvas(Rgba) = .init(allocator, img);
+
+    // The hypotenuse (5,10)-(95,20) has slope 1/9 and sweeps across pixel row 15 between x≈45 and x≈55.
+    const triangle = [_]Point(2, f32){ .init(.{ 5, 10 }), .init(.{ 95, 10 }), .init(.{ 95, 20 }) };
+    try canvas.fillPolygon(&triangle, Rgba.black, .soft);
+
+    try expectEqual(img.at(12, 70).*.r, 0);
+    try expectEqual(img.at(15, 30).*.r, 255);
+
+    // Coverage along the shallow edge ramps: ~17% at x=47, ~83% at x=53.
+    const light = img.at(15, 47).*.r;
+    const dark = img.at(15, 53).*.r;
+    try expect(light > 190 and light < 245);
+    try expect(dark > 10 and dark < 70);
+    var prev: u8 = 255;
+    for (44..57) |x| {
+        const value = img.at(15, @intCast(x)).*.r;
+        try expect(value <= prev);
+        prev = value;
+    }
+}
