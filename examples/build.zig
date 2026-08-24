@@ -28,6 +28,7 @@ pub fn build(b: *std.Build) void {
     const exec_examples = [_][]const u8{
         "pca_example",
         "make_logo",
+        "blending_demo",
         "image_demo",
         "motion_blur_demo",
         "edge_detection",

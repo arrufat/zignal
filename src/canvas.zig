@@ -13,6 +13,7 @@
 // Re-export public types
 pub const Canvas = @import("canvas/Canvas.zig").Canvas;
 pub const DrawMode = @import("canvas/Canvas.zig").DrawMode;
+pub const DrawOptions = @import("canvas/Canvas.zig").DrawOptions;
 
 // Run all tests
 test {
@@ -20,4 +21,5 @@ test {
     _ = @import("canvas/tests/regression.zig");
     _ = @import("canvas/tests/drawing.zig");
     _ = @import("canvas/tests/arcs.zig");
+    _ = @import("canvas/tests/blending.zig");
 }

@@ -3,6 +3,7 @@ const std = @import("std");
 const zignal = @import("zignal");
 pub const Canvas = zignal.Canvas;
 const DrawMode = zignal.DrawMode;
+const DrawOptions = zignal.DrawOptions;
 const Blending = zignal.Blending;
 const BitmapFont = zignal.BitmapFont;
 const Rectangle = zignal.Rectangle;
@@ -70,100 +71,100 @@ pub const PyCanvas = struct {
     }
 
     /// Draw a line.
-    pub fn drawLine(self: *Self, p1: anytype, p2: anytype, color: Rgba, width: u32, mode: DrawMode) void {
+    pub fn drawLine(self: *Self, p1: anytype, p2: anytype, color: Rgba, width: u32, opts: DrawOptions) void {
         switch (self.data) {
-            inline else => |*canvas| canvas.drawLine(p1, p2, color, width, mode),
+            inline else => |*canvas| canvas.drawLine(p1, p2, color, width, opts),
         }
     }
 
     /// Draw a rectangle.
-    pub fn drawRectangle(self: *Self, rect: anytype, color: Rgba, width: u32, mode: DrawMode) void {
+    pub fn drawRectangle(self: *Self, rect: anytype, color: Rgba, width: u32, opts: DrawOptions) void {
         switch (self.data) {
-            inline else => |*canvas| canvas.drawRectangle(rect, color, width, mode),
+            inline else => |*canvas| canvas.drawRectangle(rect, color, width, opts),
         }
     }
 
     /// Fill a rectangle.
-    pub fn fillRectangle(self: *Self, rect: anytype, color: Rgba, mode: DrawMode) void {
+    pub fn fillRectangle(self: *Self, rect: anytype, color: Rgba, opts: DrawOptions) void {
         switch (self.data) {
-            inline else => |*canvas| canvas.fillRectangle(rect, color, mode),
+            inline else => |*canvas| canvas.fillRectangle(rect, color, opts),
         }
     }
 
     /// Draw a polygon.
-    pub fn drawPolygon(self: *Self, points: anytype, color: Rgba, width: u32, mode: DrawMode) void {
+    pub fn drawPolygon(self: *Self, points: anytype, color: Rgba, width: u32, opts: DrawOptions) void {
         switch (self.data) {
-            inline else => |*canvas| canvas.drawPolygon(points, color, width, mode),
+            inline else => |*canvas| canvas.drawPolygon(points, color, width, opts),
         }
     }
 
     /// Fill a polygon.
-    pub fn fillPolygon(self: *Self, points: anytype, color: Rgba, mode: DrawMode) !void {
+    pub fn fillPolygon(self: *Self, points: anytype, color: Rgba, opts: DrawOptions) !void {
         switch (self.data) {
-            inline else => |*canvas| try canvas.fillPolygon(points, color, mode),
+            inline else => |*canvas| try canvas.fillPolygon(points, color, opts),
         }
     }
 
     /// Draw a circle.
-    pub fn drawCircle(self: *Self, center: anytype, radius: anytype, color: Rgba, width: u32, mode: DrawMode) void {
+    pub fn drawCircle(self: *Self, center: anytype, radius: anytype, color: Rgba, width: u32, opts: DrawOptions) void {
         switch (self.data) {
-            inline else => |*canvas| canvas.drawCircle(center, radius, color, width, mode),
+            inline else => |*canvas| canvas.drawCircle(center, radius, color, width, opts),
         }
     }
 
     /// Fill a circle.
-    pub fn fillCircle(self: *Self, center: anytype, radius: anytype, color: Rgba, mode: DrawMode) void {
+    pub fn fillCircle(self: *Self, center: anytype, radius: anytype, color: Rgba, opts: DrawOptions) void {
         switch (self.data) {
-            inline else => |*canvas| canvas.fillCircle(center, radius, color, mode),
+            inline else => |*canvas| canvas.fillCircle(center, radius, color, opts),
         }
     }
 
     /// Draw a quadratic Bezier curve.
-    pub fn drawQuadraticBezier(self: *Self, p0: anytype, p1: anytype, p2: anytype, color: Rgba, width: u32, mode: DrawMode) void {
+    pub fn drawQuadraticBezier(self: *Self, p0: anytype, p1: anytype, p2: anytype, color: Rgba, width: u32, opts: DrawOptions) void {
         switch (self.data) {
-            inline else => |*canvas| canvas.drawQuadraticBezier(p0, p1, p2, color, width, mode),
+            inline else => |*canvas| canvas.drawQuadraticBezier(p0, p1, p2, color, width, opts),
         }
     }
 
     /// Draw a cubic Bezier curve.
-    pub fn drawCubicBezier(self: *Self, p0: anytype, p1: anytype, p2: anytype, p3: anytype, color: Rgba, width: u32, mode: DrawMode) void {
+    pub fn drawCubicBezier(self: *Self, p0: anytype, p1: anytype, p2: anytype, p3: anytype, color: Rgba, width: u32, opts: DrawOptions) void {
         switch (self.data) {
-            inline else => |*canvas| canvas.drawCubicBezier(p0, p1, p2, p3, color, width, mode),
+            inline else => |*canvas| canvas.drawCubicBezier(p0, p1, p2, p3, color, width, opts),
         }
     }
 
     /// Draw a spline polygon.
-    pub fn drawSplinePolygon(self: *Self, points: anytype, color: Rgba, width: u32, tension: f32, mode: DrawMode) void {
+    pub fn drawSplinePolygon(self: *Self, points: anytype, color: Rgba, width: u32, tension: f32, opts: DrawOptions) void {
         switch (self.data) {
-            inline else => |*canvas| canvas.drawSplinePolygon(points, color, width, tension, mode),
+            inline else => |*canvas| canvas.drawSplinePolygon(points, color, width, tension, opts),
         }
     }
 
     /// Fill a spline polygon.
-    pub fn fillSplinePolygon(self: *Self, points: anytype, color: Rgba, tension: f32, mode: DrawMode) !void {
+    pub fn fillSplinePolygon(self: *Self, points: anytype, color: Rgba, tension: f32, opts: DrawOptions) !void {
         switch (self.data) {
-            inline else => |*canvas| try canvas.fillSplinePolygon(points, color, tension, mode),
+            inline else => |*canvas| try canvas.fillSplinePolygon(points, color, tension, opts),
         }
     }
 
     /// Draw an arc.
-    pub fn drawArc(self: *Self, center: anytype, radius: f32, start_angle: f32, end_angle: f32, color: Rgba, width: u32, mode: DrawMode) !void {
+    pub fn drawArc(self: *Self, center: anytype, radius: f32, start_angle: f32, end_angle: f32, color: Rgba, width: u32, opts: DrawOptions) !void {
         switch (self.data) {
-            inline else => |*canvas| try canvas.drawArc(center, radius, start_angle, end_angle, color, width, mode),
+            inline else => |*canvas| try canvas.drawArc(center, radius, start_angle, end_angle, color, width, opts),
         }
     }
 
     /// Fill an arc.
-    pub fn fillArc(self: *Self, center: anytype, radius: f32, start_angle: f32, end_angle: f32, color: Rgba, mode: DrawMode) !void {
+    pub fn fillArc(self: *Self, center: anytype, radius: f32, start_angle: f32, end_angle: f32, color: Rgba, opts: DrawOptions) !void {
         switch (self.data) {
-            inline else => |*canvas| try canvas.fillArc(center, radius, start_angle, end_angle, color, mode),
+            inline else => |*canvas| try canvas.fillArc(center, radius, start_angle, end_angle, color, opts),
         }
     }
 
     /// Draw text.
-    pub fn drawText(self: *Self, text: []const u8, position: anytype, color: Rgba, font: BitmapFont, scale: f32, mode: DrawMode) void {
+    pub fn drawText(self: *Self, text: []const u8, position: anytype, color: Rgba, font: BitmapFont, scale: f32, opts: DrawOptions) void {
         switch (self.data) {
-            inline else => |*canvas| canvas.drawText(text, position, color, font, scale, mode),
+            inline else => |*canvas| canvas.drawText(text, position, color, font, scale, opts),
         }
     }
 
@@ -205,6 +206,21 @@ pub const draw_mode_values = [_]stub_metadata.EnumValueDoc{
     .{ .name = "FAST", .doc = "Fast rendering with hard edges" },
     .{ .name = "SOFT", .doc = "Antialiased rendering with smooth edges" },
 };
+
+/// Parses an optional `blending` kwarg: missing => .normal, None => .none.
+fn parseBlending(obj: ?*c.PyObject) !Blending {
+    const o = obj orelse return .normal;
+    if (o == c.Py_None()) return .none;
+    return enum_utils.pyToEnum(Blending, o);
+}
+
+/// Parses the shared `mode` + `blending` kwargs into a DrawOptions.
+fn parseDrawOptions(mode: c_long, blending: ?*c.PyObject) !DrawOptions {
+    return .{
+        .mode = try enum_utils.longToEnum(DrawMode, mode),
+        .blending = try parseBlending(blending),
+    };
+}
 
 // Static default font with all characters, initialized once
 var font8x8: ?BitmapFont = null;
@@ -360,6 +376,7 @@ fn canvas_draw_line(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         color: ?*c.PyObject,
         width: c_long = 1,
         mode: c_long = 0,
+        blending: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
@@ -368,10 +385,9 @@ fn canvas_draw_line(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const p2 = python.parse(zignal.Point(2, f32), params.p2) catch return null;
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = python.validateNonNegative(u32, params.width, "Width") catch return null;
-    const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
+    const opts = parseDrawOptions(params.mode, params.blending) catch return null;
 
-    canvas.drawLine(p1, p2, rgba, width_val, draw_mode);
+    canvas.drawLine(p1, p2, rgba, width_val, opts);
 
     return python.none();
 }
@@ -385,6 +401,7 @@ const canvas_draw_line_doc =
     \\- `color` (int, tuple or color object): Color of the line.
     \\- `width` (int, optional): Line width in pixels (default: 1)
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
 ;
 
 fn canvas_draw_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -395,6 +412,7 @@ fn canvas_draw_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
         color: ?*c.PyObject,
         width: c_long = 1,
         mode: c_long = 0,
+        blending: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
@@ -402,10 +420,9 @@ fn canvas_draw_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     const rect = python.parse(zignal.Rectangle(f32), params.rect) catch return null;
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = python.validateNonNegative(u32, params.width, "Width") catch return null;
-    const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
+    const opts = parseDrawOptions(params.mode, params.blending) catch return null;
 
-    canvas.drawRectangle(rect, rgba, width_val, draw_mode);
+    canvas.drawRectangle(rect, rgba, width_val, opts);
 
     return python.none();
 }
@@ -418,6 +435,7 @@ const canvas_draw_rectangle_doc =
     \\- `color` (int, tuple or color object): Color of the rectangle.
     \\- `width` (int, optional): Line width in pixels (default: 1)
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
 ;
 
 fn canvas_draw_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -428,6 +446,7 @@ fn canvas_draw_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
         color: ?*c.PyObject,
         width: c_long = 1,
         mode: c_long = 0,
+        blending: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
@@ -436,10 +455,9 @@ fn canvas_draw_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
     defer allocator.free(points);
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = python.validateNonNegative(u32, params.width, "Width") catch return null;
-    const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
+    const opts = parseDrawOptions(params.mode, params.blending) catch return null;
 
-    canvas.drawPolygon(points, rgba, width_val, draw_mode);
+    canvas.drawPolygon(points, rgba, width_val, opts);
 
     return python.none();
 }
@@ -452,6 +470,7 @@ const canvas_draw_polygon_doc =
     \\- `color` (int, tuple or color object): Color of the polygon.
     \\- `width` (int, optional): Line width in pixels (default: 1)
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
 ;
 
 fn canvas_draw_circle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -463,6 +482,7 @@ fn canvas_draw_circle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
         color: ?*c.PyObject,
         width: c_long = 1,
         mode: c_long = 0,
+        blending: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
@@ -471,10 +491,9 @@ fn canvas_draw_circle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     const radius = python.validateNonNegative(f32, params.radius, "Radius") catch return null;
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = python.validateNonNegative(u32, params.width, "Width") catch return null;
-    const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
+    const opts = parseDrawOptions(params.mode, params.blending) catch return null;
 
-    canvas.drawCircle(center, radius, rgba, width_val, draw_mode);
+    canvas.drawCircle(center, radius, rgba, width_val, opts);
 
     return python.none();
 }
@@ -488,6 +507,7 @@ const canvas_draw_circle_doc =
     \\- `color` (int, tuple or color object): Color of the circle.
     \\- `width` (int, optional): Line width in pixels (default: 1)
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
 ;
 
 // Fill methods
@@ -498,16 +518,16 @@ fn canvas_fill_rectangle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
         rect: ?*c.PyObject,
         color: ?*c.PyObject,
         mode: c_long = 0,
+        blending: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const rect = python.parse(zignal.Rectangle(f32), params.rect) catch return null;
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
-    const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
+    const opts = parseDrawOptions(params.mode, params.blending) catch return null;
 
-    canvas.fillRectangle(rect, rgba, draw_mode);
+    canvas.fillRectangle(rect, rgba, opts);
 
     return python.none();
 }
@@ -519,6 +539,7 @@ const canvas_fill_rectangle_doc =
     \\- `rect` (Rectangle | tuple[float, float, float, float]): Rectangle object defining the bounds
     \\- `color` (int, tuple or color object): Fill color.
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
 ;
 
 fn canvas_draw_image(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -554,17 +575,7 @@ fn canvas_draw_image(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         }
     }
 
-    var blend_mode: Blending = .normal;
-    if (params.blend_mode) |obj| {
-        if (obj != c.Py_None()) {
-            blend_mode = enum_utils.pyToEnum(Blending, obj) catch {
-                python.setValueError("Invalid blend_mode", .{});
-                return null;
-            };
-        } else {
-            blend_mode = .none;
-        }
-    }
+    const blend_mode = parseBlending(params.blend_mode) catch return null;
 
     canvas.drawImage(py_image_ptr, pos, rect_opt, blend_mode);
 
@@ -593,6 +604,7 @@ fn canvas_fill_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
         points: ?*c.PyObject,
         color: ?*c.PyObject,
         mode: c_long = 0,
+        blending: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
@@ -600,10 +612,9 @@ fn canvas_fill_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
     const points = python.parse([]zignal.Point(2, f32), params.points) catch return null;
     defer allocator.free(points);
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
-    const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
+    const opts = parseDrawOptions(params.mode, params.blending) catch return null;
 
-    canvas.fillPolygon(points, rgba, draw_mode) catch {
+    canvas.fillPolygon(points, rgba, opts) catch {
         python.setRuntimeError("Failed to fill polygon", .{});
         return null;
     };
@@ -618,6 +629,7 @@ const canvas_fill_polygon_doc =
     \\- `points` (list[tuple[float, float]]): List of (x, y) coordinates forming the polygon
     \\- `color` (int, tuple or color object): Fill color.
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
 ;
 
 fn canvas_fill_circle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -628,6 +640,7 @@ fn canvas_fill_circle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
         radius: f64,
         color: ?*c.PyObject,
         mode: c_long = 0,
+        blending: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
@@ -635,10 +648,9 @@ fn canvas_fill_circle(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     const center = python.parse(zignal.Point(2, f32), params.center) catch return null;
     const radius = python.validateNonNegative(f32, params.radius, "Radius") catch return null;
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
-    const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
+    const opts = parseDrawOptions(params.mode, params.blending) catch return null;
 
-    canvas.fillCircle(center, radius, rgba, draw_mode);
+    canvas.fillCircle(center, radius, rgba, opts);
 
     return python.none();
 }
@@ -651,6 +663,7 @@ const canvas_fill_circle_doc =
     \\- `radius` (float): Circle radius
     \\- `color` (int, tuple or color object): Fill color.
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
 ;
 
 // Special methods that need custom handling
@@ -664,6 +677,7 @@ fn canvas_draw_quadratic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds
         color: ?*c.PyObject,
         width: c_long = 1,
         mode: c_long = 0,
+        blending: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
@@ -673,10 +687,9 @@ fn canvas_draw_quadratic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds
     const p2 = python.parse(zignal.Point(2, f32), params.p2) catch return null;
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = python.validateNonNegative(u32, params.width, "Width") catch return null;
-    const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
+    const opts = parseDrawOptions(params.mode, params.blending) catch return null;
 
-    canvas.drawQuadraticBezier(p0, p1, p2, rgba, width_val, draw_mode);
+    canvas.drawQuadraticBezier(p0, p1, p2, rgba, width_val, opts);
 
     return python.none();
 }
@@ -692,6 +705,7 @@ fn canvas_draw_cubic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*
         color: ?*c.PyObject,
         width: c_long = 1,
         mode: c_long = 0,
+        blending: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
@@ -702,10 +716,9 @@ fn canvas_draw_cubic_bezier(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*
     const p3 = python.parse(zignal.Point(2, f32), params.p3) catch return null;
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = python.validateNonNegative(u32, params.width, "Width") catch return null;
-    const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
+    const opts = parseDrawOptions(params.mode, params.blending) catch return null;
 
-    canvas.drawCubicBezier(p0, p1, p2, p3, rgba, width_val, draw_mode);
+    canvas.drawCubicBezier(p0, p1, p2, p3, rgba, width_val, opts);
 
     return python.none();
 }
@@ -719,6 +732,7 @@ fn canvas_draw_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
         width: c_long = 1,
         tension: f64 = 0.5,
         mode: c_long = 0,
+        blending: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
@@ -728,10 +742,9 @@ fn canvas_draw_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = python.validateNonNegative(u32, params.width, "Width") catch return null;
     const tension_val = python.validateRange(f32, params.tension, 0.0, 1.0, "Tension") catch return null;
-    const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
+    const opts = parseDrawOptions(params.mode, params.blending) catch return null;
 
-    canvas.drawSplinePolygon(points, rgba, width_val, tension_val, draw_mode);
+    canvas.drawSplinePolygon(points, rgba, width_val, tension_val, opts);
 
     return python.none();
 }
@@ -744,6 +757,7 @@ fn canvas_fill_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
         color: ?*c.PyObject,
         tension: f64 = 0.5,
         mode: c_long = 0,
+        blending: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
@@ -752,10 +766,9 @@ fn canvas_fill_spline_polygon(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
     defer allocator.free(points);
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const tension_val = python.validateRange(f32, params.tension, 0.0, 1.0, "Tension") catch return null;
-    const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
+    const opts = parseDrawOptions(params.mode, params.blending) catch return null;
 
-    canvas.fillSplinePolygon(points, rgba, tension_val, draw_mode) catch {
+    canvas.fillSplinePolygon(points, rgba, tension_val, opts) catch {
         python.setRuntimeError("Failed to fill spline polygon", .{});
         return null;
     };
@@ -774,6 +787,7 @@ fn canvas_draw_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
         color: ?*c.PyObject,
         width: c_long = 1,
         mode: c_long = 0,
+        blending: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
@@ -784,10 +798,9 @@ fn canvas_draw_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     const end_angle_val: f32 = @floatCast(params.end_angle);
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
     const width_val = python.validateNonNegative(u32, params.width, "Width") catch return null;
-    const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
+    const opts = parseDrawOptions(params.mode, params.blending) catch return null;
 
-    canvas.drawArc(center, radius_val, start_angle_val, end_angle_val, rgba, width_val, draw_mode) catch {
+    canvas.drawArc(center, radius_val, start_angle_val, end_angle_val, rgba, width_val, opts) catch {
         python.setRuntimeError("Failed to draw arc", .{});
         return null;
     };
@@ -805,6 +818,7 @@ fn canvas_fill_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
         end_angle: f64,
         color: ?*c.PyObject,
         mode: c_long = 0,
+        blending: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
@@ -815,10 +829,9 @@ fn canvas_fill_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     const start_angle_val: f32 = @floatCast(params.start_angle);
     const end_angle_val: f32 = @floatCast(params.end_angle);
     const rgba = color_utils.parseColor(Rgba, params.color) catch return null;
-    const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
+    const opts = parseDrawOptions(params.mode, params.blending) catch return null;
 
-    canvas.fillArc(center, radius_val, start_angle_val, end_angle_val, rgba, draw_mode) catch {
+    canvas.fillArc(center, radius_val, start_angle_val, end_angle_val, rgba, opts) catch {
         python.setRuntimeError("Failed to fill arc", .{});
         return null;
     };
@@ -837,6 +850,7 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         font: ?*c.PyObject = null,
         scale: f64 = 1.0,
         mode: c_long = 0,
+        blending: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
@@ -850,8 +864,7 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const position = python.parse(zignal.Point(2, f32), params.position) catch return null;
     const rgba = color_utils.parseColor(Rgba, @ptrCast(params.color)) catch return null;
 
-    const mode_val = python.validateRange(u32, params.mode, 0, 1, "Mode") catch return null;
-    const draw_mode: DrawMode = @fromBackingInt(@intCast(mode_val));
+    const opts = parseDrawOptions(params.mode, params.blending) catch return null;
 
     if (params.font) |font| {
         const bitmap_font_module = @import("bitmap_font.zig");
@@ -863,13 +876,13 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         }
 
         const font_ptr = python.unwrap(bitmap_font_module.BitmapFontObject, "font", font, "BitmapFont") orelse return null;
-        canvas.drawText(text, position, rgba, font_ptr.*, @floatCast(params.scale), draw_mode);
+        canvas.drawText(text, position, rgba, font_ptr.*, @floatCast(params.scale), opts);
     } else {
         const font = getFont8x8() catch {
             python.setRuntimeError("Failed to initialize default font", .{});
             return null;
         };
-        canvas.drawText(text, position, rgba, font, @floatCast(params.scale), draw_mode);
+        canvas.drawText(text, position, rgba, font, @floatCast(params.scale), opts);
     }
 
     return python.none();
@@ -909,6 +922,7 @@ const canvas_draw_quadratic_bezier_doc =
     \\- `color` (int, tuple or color object): Color of the curve.
     \\- `width` (int, optional): Line width in pixels (default: 1)
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
 ;
 
 const canvas_draw_cubic_bezier_doc =
@@ -922,6 +936,7 @@ const canvas_draw_cubic_bezier_doc =
     \\- `color` (int, tuple or color object): Color of the curve.
     \\- `width` (int, optional): Line width in pixels (default: 1)
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
 ;
 
 const canvas_draw_spline_polygon_doc =
@@ -933,6 +948,7 @@ const canvas_draw_spline_polygon_doc =
     \\- `width` (int, optional): Line width in pixels (default: 1)
     \\- `tension` (float, optional): Spline tension (0.0 = angular, 0.5 = smooth, default: 0.5)
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
 ;
 
 const canvas_fill_spline_polygon_doc =
@@ -943,6 +959,7 @@ const canvas_fill_spline_polygon_doc =
     \\- `color` (int, tuple or color object): Fill color.
     \\- `tension` (float, optional): Spline tension (0.0 = angular, 0.5 = smooth, default: 0.5)
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
 ;
 
 const canvas_draw_arc_doc =
@@ -956,6 +973,7 @@ const canvas_draw_arc_doc =
     \\- `color` (int, tuple or color object): Color of the arc.
     \\- `width` (int, optional): Line width in pixels (default: 1)
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
     \\
     \\## Notes
     \\- Angles are measured in radians, with 0 pointing right and increasing clockwise
@@ -973,6 +991,7 @@ const canvas_fill_arc_doc =
     \\- `end_angle` (float): Ending angle in radians
     \\- `color` (int, tuple or color object): Fill color.
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
     \\
     \\## Notes
     \\- Creates a filled pie slice from the center to the arc edge
@@ -990,6 +1009,7 @@ const canvas_draw_text_doc =
     \\- `font` (BitmapFont, optional): Font object to use for rendering. If `None`, uses BitmapFont.font8x8()
     \\- `scale` (float, optional): Text scale factor (default: 1.0)
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
 ;
 
 pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
@@ -1006,7 +1026,7 @@ pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_line),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_line_doc,
-        .params = "self, p1: tuple[float, float], p2: tuple[float, float], color: Color, width: int = 1, mode: DrawMode = DrawMode.FAST",
+        .params = "self, p1: tuple[float, float], p2: tuple[float, float], color: Color, width: int = 1, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
     .{
@@ -1014,7 +1034,7 @@ pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_rectangle),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_rectangle_doc,
-        .params = "self, rect: Rectangle | tuple[float, float, float, float], color: Color, width: int = 1, mode: DrawMode = DrawMode.FAST",
+        .params = "self, rect: Rectangle | tuple[float, float, float, float], color: Color, width: int = 1, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
     .{
@@ -1022,7 +1042,7 @@ pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
         .meth = @ptrCast(&canvas_fill_rectangle),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_fill_rectangle_doc,
-        .params = "self, rect: Rectangle | tuple[float, float, float, float], color: Color, mode: DrawMode = DrawMode.FAST",
+        .params = "self, rect: Rectangle | tuple[float, float, float, float], color: Color, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
     .{
@@ -1030,7 +1050,7 @@ pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_polygon),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_polygon_doc,
-        .params = "self, points: list[tuple[float, float]], color: Color, width: int = 1, mode: DrawMode = DrawMode.FAST",
+        .params = "self, points: list[tuple[float, float]], color: Color, width: int = 1, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
     .{
@@ -1038,7 +1058,7 @@ pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
         .meth = @ptrCast(&canvas_fill_polygon),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_fill_polygon_doc,
-        .params = "self, points: list[tuple[float, float]], color: Color, mode: DrawMode = DrawMode.FAST",
+        .params = "self, points: list[tuple[float, float]], color: Color, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
     .{
@@ -1054,7 +1074,7 @@ pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_circle),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_circle_doc,
-        .params = "self, center: tuple[float, float], radius: float, color: Color, width: int = 1, mode: DrawMode = DrawMode.FAST",
+        .params = "self, center: tuple[float, float], radius: float, color: Color, width: int = 1, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
     .{
@@ -1062,7 +1082,7 @@ pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
         .meth = @ptrCast(&canvas_fill_circle),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_fill_circle_doc,
-        .params = "self, center: tuple[float, float], radius: float, color: Color, mode: DrawMode = DrawMode.FAST",
+        .params = "self, center: tuple[float, float], radius: float, color: Color, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
     .{
@@ -1070,7 +1090,7 @@ pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_arc),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_arc_doc,
-        .params = "self, center: tuple[float, float], radius: float, start_angle: float, end_angle: float, color: Color, width: int = 1, mode: DrawMode = DrawMode.FAST",
+        .params = "self, center: tuple[float, float], radius: float, start_angle: float, end_angle: float, color: Color, width: int = 1, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
     .{
@@ -1078,7 +1098,7 @@ pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
         .meth = @ptrCast(&canvas_fill_arc),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_fill_arc_doc,
-        .params = "self, center: tuple[float, float], radius: float, start_angle: float, end_angle: float, color: Color, mode: DrawMode = DrawMode.FAST",
+        .params = "self, center: tuple[float, float], radius: float, start_angle: float, end_angle: float, color: Color, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
     .{
@@ -1086,7 +1106,7 @@ pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_quadratic_bezier),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_quadratic_bezier_doc,
-        .params = "self, p0: tuple[float, float], p1: tuple[float, float], p2: tuple[float, float], color: Color, width: int = 1, mode: DrawMode = DrawMode.FAST",
+        .params = "self, p0: tuple[float, float], p1: tuple[float, float], p2: tuple[float, float], color: Color, width: int = 1, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
     .{
@@ -1094,7 +1114,7 @@ pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_cubic_bezier),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_cubic_bezier_doc,
-        .params = "self, p0: tuple[float, float], p1: tuple[float, float], p2: tuple[float, float], p3: tuple[float, float], color: Color, width: int = 1, mode: DrawMode = DrawMode.FAST",
+        .params = "self, p0: tuple[float, float], p1: tuple[float, float], p2: tuple[float, float], p3: tuple[float, float], color: Color, width: int = 1, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
     .{
@@ -1102,7 +1122,7 @@ pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_spline_polygon),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_spline_polygon_doc,
-        .params = "self, points: list[tuple[float, float]], color: Color, width: int = 1, tension: float = 0.5, mode: DrawMode = DrawMode.FAST",
+        .params = "self, points: list[tuple[float, float]], color: Color, width: int = 1, tension: float = 0.5, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
     .{
@@ -1110,7 +1130,7 @@ pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
         .meth = @ptrCast(&canvas_fill_spline_polygon),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_fill_spline_polygon_doc,
-        .params = "self, points: list[tuple[float, float]], color: Color, tension: float = 0.5, mode: DrawMode = DrawMode.FAST",
+        .params = "self, points: list[tuple[float, float]], color: Color, tension: float = 0.5, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
     .{
@@ -1118,7 +1138,7 @@ pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_text),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_text_doc,
-        .params = "self, text: str, position: tuple[float, float], color: Color, font: BitmapFont = BitmapFont.font8x8(), scale: float = 1.0, mode: DrawMode = DrawMode.FAST",
+        .params = "self, text: str, position: tuple[float, float], color: Color, font: BitmapFont = BitmapFont.font8x8(), scale: float = 1.0, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
 };

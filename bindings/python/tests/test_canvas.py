@@ -72,3 +72,24 @@ class TestCanvas:
         top_left = dest[0, 0].item()
         assert top_left.r == 128
         assert top_left.g == 0
+
+    def test_blending_kwarg(self):
+        img = zignal.Image(20, 20, (128, 128, 128, 255), dtype=zignal.Rgba)
+        canvas = img.canvas()
+
+        # Multiply with opaque gray halves the base: 128/255 * 128/255 * 255 ~= 64
+        canvas.fill_rectangle((5, 5, 15, 15), (128, 128, 128), blending=zignal.Blending.MULTIPLY)
+        assert 60 < img[10, 10].item().r < 68
+
+        # blending=None overwrites verbatim, including alpha
+        canvas.fill_rectangle((5, 5, 15, 15), (0, 0, 0, 128), blending=None)
+        px = img[10, 10].item()
+        assert px.r == 0 and px.a == 128
+
+        # Default NORMAL blending composites translucent colors in either mode
+        img2 = zignal.Image(20, 20, (255, 255, 255, 255), dtype=zignal.Rgba)
+        canvas2 = img2.canvas()
+        for mode in (zignal.DrawMode.FAST, zignal.DrawMode.SOFT):
+            canvas2.fill((255, 255, 255, 255))
+            canvas2.fill_rectangle((5, 5, 15, 15), (0, 0, 0, 128), mode=mode)
+            assert 120 < img2[10, 10].item().r < 135
