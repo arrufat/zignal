@@ -260,7 +260,6 @@ fn drawPixelPattern(canvas: *Canvas(Rgb), start_x: f32, start_y: f32, size: f32,
             const color_with_alpha = adjusted_rgb.withAlpha(alpha);
 
             const rect: zignal.Rectangle(f32) = .init(x, y, x + pixel_size - 1, y + pixel_size - 1);
-            // Now fillRectangle with .soft mode properly supports alpha blending
             canvas.fillRectangle(rect, color_with_alpha, .soft);
         }
     }

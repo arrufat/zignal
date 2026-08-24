@@ -23,6 +23,17 @@ pub const DrawMode = enum {
     soft,
 };
 
+/// Rendering style shared by all primitives: `mode` controls antialiasing only;
+/// `blending` controls compositing and applies in both modes. The presets mirror
+/// the classic `DrawMode` behavior: `.soft` composites, `.fast` overwrites.
+pub const DrawOptions = struct {
+    mode: DrawMode,
+    blending: Blending,
+
+    pub const soft: DrawOptions = .{ .mode = .soft, .blending = .normal };
+    pub const fast: DrawOptions = .{ .mode = .fast, .blending = .none };
+};
+
 /// A drawing context for an image, providing methods to draw shapes and lines.
 pub fn Canvas(comptime T: type) type {
     return struct {
@@ -125,58 +136,55 @@ pub fn Canvas(comptime T: type) type {
             };
         }
 
-        /// Sets a horizontal span to `color` without alpha blending.
-        fn setHorizontalSpan(self: Self, x1: f32, x2: f32, y: f32, color: T) void {
+        /// Clamps a horizontal span to the image and returns its pixel slice, or null when
+        /// fully outside.
+        fn spanSlice(self: Self, x1: f32, x2: f32, y: f32) ?[]T {
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
 
-            if (y < 0 or y >= frows) return;
-            if (x2 < 0 or x1 >= fcols) return;
+            if (y < 0 or y >= frows) return null;
+            if (x2 < 0 or x1 >= fcols) return null;
 
             const row: u32 = @trunc(y);
             const start: u32 = @trunc(@max(0, @floor(x1)));
             const end: u32 = @trunc(@min(fcols - 1, @ceil(x2)));
 
-            if (start > end) return;
+            if (start > end) return null;
 
             const offset = row * self.image.stride + start;
-            const len = end - start + 1;
-            @memset(self.image.data[offset .. offset + len], color);
+            return self.image.data[offset .. offset + end - start + 1];
         }
 
-        /// Draws a line between two points with configurable width and rendering quality.
-        ///
-        /// Draws a line between two points. `.fast` never blends (Bresenham for width 1,
-        /// rectangle+caps otherwise); `.soft` antialiases (Wu for width 1, distance-based otherwise)
-        /// and honors Rgba alpha.
-        pub fn drawLine(self: Self, p1: Point(2, f32), p2: Point(2, f32), color: anytype, width: u32, mode: DrawMode) void {
+        /// Sets a horizontal span to `color` without alpha blending.
+        fn setHorizontalSpan(self: Self, x1: f32, x2: f32, y: f32, color: T) void {
+            if (self.spanSlice(x1, x2, y)) |span| @memset(span, color);
+        }
+
+        /// Writes a horizontal span: memset for plain overwrites, per-pixel composite otherwise.
+        fn fillSpan(self: Self, x1: f32, x2: f32, y: f32, solid: T, rgba: Rgba, blending: Blending) void {
+            const span = self.spanSlice(x1, x2, y) orelse return;
+            if (isOverwrite(blending, rgba)) {
+                @memset(span, solid);
+            } else {
+                for (span) |*px| assignPixel(px, rgba, blending);
+            }
+        }
+
+        /// Draws a line between two points. `.fast` uses Bresenham (width 1) or a
+        /// rectangle+caps; `.soft` antialiases via Wu (width 1) or distance-based rendering.
+        pub fn drawLine(self: Self, p1: Point(2, f32), p2: Point(2, f32), color: anytype, width: u32, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
 
-            switch (mode) {
-                .fast => self.drawLineFast(p1, p2, width, color),
-                .soft => self.drawLineSoft(p1, p2, width, color),
-            }
-        }
-
-        /// Internal dispatcher for fast (non-antialiased) line rendering.
-        /// - Width 1: Uses Bresenham's algorithm for pixel-perfect precision
-        /// - Width >1: Uses rectangle-based approach with circular end caps
-        fn drawLineFast(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype) void {
-            if (width == 1) {
-                self.drawLineBresenham(p1, p2, color);
-            } else {
-                self.drawLineRectangle(p1, p2, width, color);
-            }
-        }
-        /// Internal dispatcher for soft (antialiased) line rendering.
-        /// - Width 1: Uses Xiaolin Wu's algorithm for optimal thin line antialiasing
-        /// - Width >1: Uses distance-based algorithm for superior thick line quality
-        fn drawLineSoft(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype) void {
-            if (width == 1) {
-                self.drawLineXiaolinWu(p1, p2, color);
-            } else {
-                self.drawLineDistance(p1, p2, width, color);
+            switch (opts.mode) {
+                .fast => if (width == 1)
+                    self.drawLineBresenham(p1, p2, color, opts.blending)
+                else
+                    self.drawLineRectangle(p1, p2, width, color, opts.blending),
+                .soft => if (width == 1)
+                    self.drawLineXiaolinWu(p1, p2, color, opts.blending)
+                else
+                    self.drawLineDistance(p1, p2, width, color, opts.blending),
             }
         }
 
@@ -184,19 +192,21 @@ pub fn Canvas(comptime T: type) type {
         /// Classic rasterization algorithm using integer arithmetic for maximum speed.
         /// Produces pixel-perfect lines with hard edges and no antialiasing.
         /// Optimal for grid-aligned graphics and when performance is critical.
-        fn drawLineBresenham(self: Self, p1: Point(2, f32), p2: Point(2, f32), color: anytype) void {
+        fn drawLineBresenham(self: Self, p1: Point(2, f32), p2: Point(2, f32), color: anytype, blending: Blending) void {
             var x1: i32 = @trunc(p1.x());
             var y1: i32 = @trunc(p1.y());
             const x2: i32 = @trunc(p2.x());
             const y2: i32 = @trunc(p2.y());
 
             const pixel_color = convertColor(T, color);
+            const rgba_color = convertColor(Rgba, color);
+            const overwrite = isOverwrite(blending, rgba_color);
 
-            // Special case for horizontal lines - use fillHorizontalSpan for better performance
+            // Special case for horizontal lines - use fillSpan for better performance
             if (y1 == y2) {
                 const min_x = @min(x1, x2);
                 const max_x = @max(x1, x2);
-                self.setHorizontalSpan(@floatFromInt(min_x), @floatFromInt(max_x), @floatFromInt(y1), pixel_color);
+                self.fillSpan(@floatFromInt(min_x), @floatFromInt(max_x), @floatFromInt(y1), pixel_color, rgba_color, blending);
                 return;
             }
 
@@ -207,7 +217,7 @@ pub fn Canvas(comptime T: type) type {
                 var y = min_y;
                 while (y <= max_y) : (y += 1) {
                     if (self.atOrNull(y, x1)) |pixel| {
-                        pixel.* = pixel_color;
+                        if (overwrite) pixel.* = pixel_color else assignPixel(pixel, rgba_color, blending);
                     }
                 }
                 return;
@@ -222,7 +232,7 @@ pub fn Canvas(comptime T: type) type {
 
             while (true) {
                 if (self.atOrNull(y1, x1)) |pixel| {
-                    pixel.* = pixel_color;
+                    if (overwrite) pixel.* = pixel_color else assignPixel(pixel, rgba_color, blending);
                 }
 
                 if (x1 == x2 and y1 == y2) break;
@@ -243,7 +253,7 @@ pub fn Canvas(comptime T: type) type {
         /// Uses fractional coverage to create smooth line edges with alpha blending.
         /// Handles steep vs. shallow lines optimally by swapping coordinates.
         /// Provides the best quality-to-performance ratio for thin antialiased lines.
-        fn drawLineXiaolinWu(self: Self, p1: Point(2, f32), p2: Point(2, f32), color: anytype) void {
+        fn drawLineXiaolinWu(self: Self, p1: Point(2, f32), p2: Point(2, f32), color: anytype, blending: Blending) void {
             const c2 = convertColor(Rgba, color);
 
             var x1 = p1.x();
@@ -264,20 +274,20 @@ pub fn Canvas(comptime T: type) type {
                 // Left endpoint antialiasing
                 if (min_x > left_x) {
                     const alpha = min_x - left_x;
-                    self.setPoint(.init(.{ left_x, y }), c2.fade(alpha));
+                    self.setPoint(.init(.{ left_x, y }), c2.fade(alpha), blending);
                 }
 
-                // Middle solid part - use fillHorizontalSpan for performance
+                // Middle solid part - use fillSpan for performance
                 const solid_start = @ceil(min_x);
                 const solid_end = @floor(max_x);
                 if (solid_end >= solid_start) {
-                    self.setHorizontalSpan(solid_start, solid_end, y, convertColor(T, c2));
+                    self.fillSpan(solid_start, solid_end, y, convertColor(T, c2), c2, blending);
                 }
 
                 // Right endpoint antialiasing
                 if (max_x < right_x) {
                     const alpha = right_x - max_x;
-                    self.setPoint(.init(.{ right_x, y }), c2.fade(alpha));
+                    self.setPoint(.init(.{ right_x, y }), c2.fade(alpha), blending);
                 }
 
                 return;
@@ -311,11 +321,11 @@ pub fn Canvas(comptime T: type) type {
                 const y_px = @floor(y_end);
 
                 if (steep) {
-                    self.setPoint(.init(.{ y_px, x_px }), c2.fade(rfpart(y_end) * x_gap));
-                    self.setPoint(.init(.{ y_px + 1, x_px }), c2.fade(fpart(y_end) * x_gap));
+                    self.setPoint(.init(.{ y_px, x_px }), c2.fade(rfpart(y_end) * x_gap), blending);
+                    self.setPoint(.init(.{ y_px + 1, x_px }), c2.fade(fpart(y_end) * x_gap), blending);
                 } else {
-                    self.setPoint(.init(.{ x_px, y_px }), c2.fade(rfpart(y_end) * x_gap));
-                    self.setPoint(.init(.{ x_px, y_px + 1 }), c2.fade(fpart(y_end) * x_gap));
+                    self.setPoint(.init(.{ x_px, y_px }), c2.fade(rfpart(y_end) * x_gap), blending);
+                    self.setPoint(.init(.{ x_px, y_px + 1 }), c2.fade(fpart(y_end) * x_gap), blending);
                 }
 
                 if (idx == 0) {
@@ -330,11 +340,11 @@ pub fn Canvas(comptime T: type) type {
             var x = x_px1 + 1;
             while (x < x_px2) : (x += 1) {
                 if (steep) {
-                    self.setPoint(.init(.{ intery, x }), c2.fade(rfpart(intery)));
-                    self.setPoint(.init(.{ @floor(intery) + 1, x }), c2.fade(fpart(intery)));
+                    self.setPoint(.init(.{ intery, x }), c2.fade(rfpart(intery)), blending);
+                    self.setPoint(.init(.{ @floor(intery) + 1, x }), c2.fade(fpart(intery)), blending);
                 } else {
-                    self.setPoint(.init(.{ x, intery }), c2.fade(rfpart(intery)));
-                    self.setPoint(.init(.{ x, @floor(intery) + 1 }), c2.fade(fpart(intery)));
+                    self.setPoint(.init(.{ x, intery }), c2.fade(rfpart(intery)), blending);
+                    self.setPoint(.init(.{ x, @floor(intery) + 1 }), c2.fade(fpart(intery)), blending);
                 }
                 intery += gradient;
             }
@@ -344,9 +354,7 @@ pub fn Canvas(comptime T: type) type {
         /// Constructs a filled rectangle perpendicular to the line direction,
         /// then adds circular end caps for smooth line termination.
         /// Handles zero-length lines by drawing a single filled circle.
-        fn drawLineRectangle(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype) void {
-            const solid_color = convertColor(T, color);
-
+        fn drawLineRectangle(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype, blending: Blending) void {
             // For thick lines, draw as a filled rectangle
             const dx = p2.x() - p1.x();
             const dy = p2.y() - p1.y();
@@ -355,7 +363,7 @@ pub fn Canvas(comptime T: type) type {
             if (line_length == 0) {
                 // Single point - draw a filled circle
                 const half_width: f32 = as(f32, width) / 2.0;
-                self.fillCircle(p1, half_width, color, .fast);
+                self.fillCircle(p1, half_width, color, .{ .mode = .fast, .blending = blending });
                 return;
             }
 
@@ -373,18 +381,18 @@ pub fn Canvas(comptime T: type) type {
             };
 
             // Fill rectangle using scanline algorithm (no anti-aliasing)
-            self.fillPolygon(&corners, solid_color, .fast) catch return;
+            self.fillPolygon(&corners, color, .{ .mode = .fast, .blending = blending }) catch return;
 
             // Add rounded caps using solid circles
-            self.fillCircle(p1, half_width, color, .fast);
-            self.fillCircle(p2, half_width, color, .fast);
+            self.fillCircle(p1, half_width, color, .{ .mode = .fast, .blending = blending });
+            self.fillCircle(p2, half_width, color, .{ .mode = .fast, .blending = blending });
         }
 
         /// Distance-based antialiased rendering for thick lines.
         /// Calculates the perpendicular distance from each pixel to the line segment and
         /// applies smooth alpha falloff at edges. End caps fall out naturally from the
         /// distance test.
-        fn drawLineDistance(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype) void {
+        fn drawLineDistance(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype, blending: Blending) void {
             const half_width: f32 = as(f32, width) / 2.0;
             const c2 = convertColor(Rgba, color);
 
@@ -392,7 +400,7 @@ pub fn Canvas(comptime T: type) type {
             const dy = p2.y() - p1.y();
             const length_sq = dx * dx + dy * dy;
             if (length_sq == 0) {
-                self.fillCircle(p1, half_width, color, .soft);
+                self.fillCircle(p1, half_width, color, .{ .mode = .soft, .blending = blending });
                 return;
             }
 
@@ -401,7 +409,7 @@ pub fn Canvas(comptime T: type) type {
             // for fully-covered interior rows of horizontal lines. End-cap AA still comes from
             // `fillCircle`. Body bbox is tight to the line endpoints so caps don't double-blend.
             if (dx == 0 or dy == 0) {
-                self.drawAxisAlignedThickLine(p1, p2, half_width, c2, color);
+                self.drawAxisAlignedThickLine(p1, p2, half_width, c2, color, blending);
                 return;
             }
 
@@ -430,7 +438,7 @@ pub fn Canvas(comptime T: type) type {
                         alpha = half_width + antialias_edge_offset - dist;
                     }
                     if (alpha > 0) {
-                        self.setPixel(@intCast(r), @intCast(c), c2.fade(alpha));
+                        self.setPixel(@intCast(r), @intCast(c), c2.fade(alpha), blending);
                     }
                 }
             }
@@ -440,9 +448,9 @@ pub fn Canvas(comptime T: type) type {
         /// coverage once per row (or column) — uniform across the body — and uses
         /// `setHorizontalSpan` for fully-covered interior rows of horizontal opaque lines.
         /// End-cap AA is handled by the `fillCircle` calls at the bottom.
-        fn drawAxisAlignedThickLine(self: Self, p1: Point(2, f32), p2: Point(2, f32), half_width: f32, c2: Rgba, color: anytype) void {
+        fn drawAxisAlignedThickLine(self: Self, p1: Point(2, f32), p2: Point(2, f32), half_width: f32, c2: Rgba, color: anytype, blending: Blending) void {
             const is_horizontal = p1.y() == p2.y();
-            const can_memset = c2.a == 255;
+            const can_memset = isOverwrite(blending, c2);
             const solid_color = if (can_memset) convertColor(T, color) else undefined;
 
             // Body bbox is tight to the line's endpoints — end caps are drawn separately,
@@ -469,7 +477,7 @@ pub fn Canvas(comptime T: type) type {
                             self.setHorizontalSpan(as(f32, bbox.l), as(f32, bbox.r - 1), as(f32, r), solid_color);
                         } else {
                             const faded = c2.fade(alpha);
-                            for (bbox.l..bbox.r) |c| self.setPixel(@intCast(r), @intCast(c), faded);
+                            for (bbox.l..bbox.r) |c| self.setPixel(@intCast(r), @intCast(c), faded, blending);
                         }
                     }
                 } else {
@@ -477,13 +485,13 @@ pub fn Canvas(comptime T: type) type {
                         const alpha = perpendicularAlpha(as(f32, c), perp_center, half_width);
                         if (alpha <= 0) continue;
                         const faded = c2.fade(alpha);
-                        for (bbox.t..bbox.b) |r| self.setPixel(@intCast(r), @intCast(c), faded);
+                        for (bbox.t..bbox.b) |r| self.setPixel(@intCast(r), @intCast(c), faded, blending);
                     }
                 }
             }
 
-            self.fillCircle(p1, half_width, color, .soft);
-            self.fillCircle(p2, half_width, color, .soft);
+            self.fillCircle(p1, half_width, color, .{ .mode = .soft, .blending = blending });
+            self.fillCircle(p2, half_width, color, .{ .mode = .soft, .blending = blending });
         }
 
         /// Coverage of a single perpendicular sample at distance |sample - center| from a
@@ -495,31 +503,36 @@ pub fn Canvas(comptime T: type) type {
             return 1.0;
         }
 
-        /// Floors `point` to integer pixel coordinates and writes via `Image.setPixel`,
-        /// which handles type conversion and Rgba alpha blending. Out-of-bounds points are
-        /// silently ignored. For Rgba colors with `a == 255` (or non-Rgba colors) the write
-        /// is an unblended overwrite.
-        /// Writes a pixel at integer (row, col), converting `color` to `T` and alpha-blending
-        /// when `color` is `Rgba` with `a != 255`. Out-of-bounds coordinates are silently ignored.
-        pub inline fn setPixel(self: Self, row: u32, col: u32, color: anytype) void {
+        /// True when the write is a plain overwrite (`.normal` + opaque degenerates to the overlay).
+        inline fn isOverwrite(blending: Blending, color: anytype) bool {
+            return switch (blending) {
+                .none => true,
+                .normal => if (comptime @TypeOf(color) == Rgba) color.a == 255 else true,
+                else => false,
+            };
+        }
+
+        /// Writes a pixel at integer (row, col), compositing `color` with `blending`
+        /// (via an Rgba round-trip on non-Rgba canvases). Out-of-bounds is silently ignored.
+        pub inline fn setPixel(self: Self, row: u32, col: u32, color: anytype, blending: Blending) void {
             const ColorType = @TypeOf(color);
             comptime assert(isColor(ColorType));
             if (row >= self.image.rows or col >= self.image.cols) return;
             const dest = &self.image.data[row * self.image.stride + col];
-            const mode: Blending = if (comptime ColorType == Rgba)
-                if (color.a != 255) .normal else .none
-            else
-                .none;
-            assignPixel(dest, if (comptime ColorType == T) color else convertColor(T, color), mode);
+            if (isOverwrite(blending, color)) {
+                dest.* = if (comptime ColorType == T) color else convertColor(T, color);
+            } else {
+                assignPixel(dest, convertColor(Rgba, color), blending);
+            }
         }
 
         /// Floors `point` to an integer pixel cell and writes via `setPixel`. Bridges
         /// float-coordinate drawing primitives to the integer pixel grid.
-        pub fn setPoint(self: Self, point: Point(2, f32), color: anytype) void {
+        pub fn setPoint(self: Self, point: Point(2, f32), color: anytype, blending: Blending) void {
             const row: i32 = @floor(point.y());
             const col: i32 = @floor(point.x());
             if (row < 0 or col < 0) return;
-            self.setPixel(@intCast(row), @intCast(col), color);
+            self.setPixel(@intCast(row), @intCast(col), color, blending);
         }
 
         /// Draws another image onto this canvas at the given top-left position.
@@ -576,18 +589,18 @@ pub fn Canvas(comptime T: type) type {
         /// The polygon is defined by a sequence of vertices. Lines are drawn between consecutive
         /// vertices, and a final line is drawn from the last vertex to the first to close the shape.
         /// Round joints are added at vertices to ensure smooth connections.
-        pub fn drawPolygon(self: Self, polygon: []const Point(2, f32), color: anytype, width: u32, mode: DrawMode) void {
+        pub fn drawPolygon(self: Self, polygon: []const Point(2, f32), color: anytype, width: u32, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
 
             // Draw all line segments
             for (0..polygon.len) |i| {
-                self.drawLine(polygon[i], polygon[@mod(i + 1, polygon.len)], color, width, mode);
+                self.drawLine(polygon[i], polygon[@mod(i + 1, polygon.len)], color, width, opts);
             }
         }
 
         /// Draws the outline of a rectangle on the given image.
-        pub fn drawRectangle(self: Self, rect: Rectangle(f32), color: anytype, width: u32, mode: DrawMode) void {
+        pub fn drawRectangle(self: Self, rect: Rectangle(f32), color: anytype, width: u32, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
             // Rectangle has exclusive r,b bounds, but drawPolygon needs inclusive points
             // So we subtract 1 from r and b to get the actual corner positions
@@ -597,50 +610,36 @@ pub fn Canvas(comptime T: type) type {
                 .init(.{ rect.r - 1, rect.b - 1 }),
                 .init(.{ rect.l, rect.b - 1 }),
             };
-            self.drawPolygon(points, color, width, mode);
+            self.drawPolygon(points, color, width, opts);
         }
 
         /// Fills a rectangle on the given image.
         /// The rectangle is defined using standard conventions where l,t are inclusive and r,b are exclusive.
         /// This means a rectangle from (0,0) to (10,10) will fill pixels at positions 0-9 in both dimensions.
-        /// - **DrawMode.fast**: hard edges, no alpha blending.
-        /// - **DrawMode.soft**: alpha blending via setPixel.
-        pub fn fillRectangle(self: Self, rect: Rectangle(f32), color: anytype, mode: DrawMode) void {
+        /// Fractional edges are truncated to whole pixels, so `opts.mode` has no effect here.
+        pub fn fillRectangle(self: Self, rect: Rectangle(f32), color: anytype, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
 
-            // Use helper to clamp rectangle to image bounds
             const bounds = self.clampRectToImage(rect) orelse return;
+            const solid_color = convertColor(T, color);
+            const rgba_color = convertColor(Rgba, color);
 
-            switch (mode) {
-                .fast => {
-                    // Fast mode: Use @memset for optimal performance (no alpha blending)
-                    const target_color = convertColor(T, color);
-                    for (bounds.t..bounds.b) |row| {
-                        const start_idx = row * self.image.stride + bounds.l;
-                        const len = bounds.r - bounds.l;
-                        @memset(self.image.data[start_idx .. start_idx + len], target_color);
-                    }
-                },
-                .soft => {
-                    for (bounds.t..bounds.b) |row| {
-                        for (bounds.l..bounds.r) |col| {
-                            self.setPixel(@intCast(row), @intCast(col), color);
-                        }
-                    }
-                },
+            for (bounds.t..bounds.b) |row| {
+                self.fillSpan(as(f32, bounds.l), as(f32, bounds.r - 1), as(f32, row), solid_color, rgba_color, opts.blending);
             }
         }
 
         /// Draws the outline of a circle on the given image.
         /// Use DrawMode.soft for anti-aliased edges or DrawMode.fast for fast aliased edges.
-        pub fn drawCircle(self: Self, center: Point(2, f32), radius: f32, color: anytype, width: u32, mode: DrawMode) void {
+        pub fn drawCircle(self: Self, center: Point(2, f32), radius: f32, color: anytype, width: u32, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
             if (radius <= 0 or width == 0) return;
 
-            switch (mode) {
-                .fast => self.drawCircleFast(center, radius, width, color),
-                .soft => self.drawCircleSoft(center, radius, width, color),
+            if (opts.mode == .fast and width == 1) {
+                return self.drawBresenhamCircle(center, radius, color, .full, opts.blending);
             }
+            const line_width: f32 = @floatFromInt(width);
+            self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, .full, opts);
         }
 
         /// Draws an arc outline. Angles are in radians from the positive X-axis, counter-clockwise,
@@ -651,7 +650,7 @@ pub fn Canvas(comptime T: type) type {
         /// // Red quarter arc from 0 to π/2
         /// try canvas.drawArc(center, 50, 0, std.math.pi / 2.0, Rgb.red, 2, .soft);
         /// ```
-        pub fn drawArc(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype, width: u32, mode: DrawMode) !void {
+        pub fn drawArc(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype, width: u32, opts: DrawOptions) !void {
             comptime assert(isColor(@TypeOf(color)));
             if (radius <= 0 or width == 0) return;
 
@@ -661,15 +660,20 @@ pub fn Canvas(comptime T: type) type {
             }
 
             if (@abs(end_angle - start_angle) >= 2 * std.math.pi) {
-                self.drawCircle(center, radius, color, width, mode);
+                self.drawCircle(center, radius, color, width, opts);
                 return;
             }
 
             // Partial arc
             const arc: ArcRange = .init(start_angle, end_angle);
-            switch (mode) {
-                .fast => self.drawArcFast(center, radius, arc, width, color),
-                .soft => try self.drawArcSoft(center, radius, arc, width, color),
+            switch (opts.mode) {
+                .fast => if (width == 1) {
+                    self.drawBresenhamCircle(center, radius, color, arc, opts.blending);
+                } else {
+                    const line_width: f32 = @floatFromInt(width);
+                    self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, arc, opts);
+                },
+                .soft => try self.drawArcSoft(center, radius, arc, width, color, opts.blending),
             }
         }
 
@@ -785,12 +789,8 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Renders a thick ring outline (or arc segment) by scanning its bounding box and
-        /// shading pixels inside the annulus.
-        ///
-        /// - `aa=false`: writes pre-converted opaque pixels directly to image data — matches
-        ///   the `.fast` contract of never blending.
-        /// - `aa=true`: routes through `setPixel`, so destination-Rgba canvases get alpha blending.
+        /// Renders a thick ring outline (or arc segment) by scanning its bounding box;
+        /// `.fast` uses binary coverage with direct writes for plain overwrites.
         inline fn renderRing(
             self: Self,
             center: Point(2, f32),
@@ -798,24 +798,27 @@ pub fn Canvas(comptime T: type) type {
             outer_radius: f32,
             color: anytype,
             arc: ArcRange,
-            mode: DrawMode,
+            opts: DrawOptions,
         ) void {
             const bbox = self.ringBoundingBox(center, outer_radius) orelse return;
-            const solid_color = if (mode == .fast) convertColor(T, color) else undefined;
-            const rgba_color = if (mode == .soft) convertColor(Rgba, color) else undefined;
+            const rgba_color = convertColor(Rgba, color);
+            const overwrite = isOverwrite(opts.blending, rgba_color);
+            const solid_color = if (opts.mode == .fast and overwrite) convertColor(T, color) else undefined;
             for (bbox.t..bbox.b) |r| {
                 const y = as(f32, r) - center.y();
                 for (bbox.l..bbox.r) |c| {
                     const x = as(f32, c) - center.x();
-                    const coverage = ringCoverage(x, y, inner_radius, outer_radius, mode);
+                    const coverage = ringCoverage(x, y, inner_radius, outer_radius, opts.mode);
                     if (coverage <= 0) continue;
                     if (!arc.isFull()) {
                         if (!arc.contains(std.math.atan2(y, x))) continue;
                     }
-                    if (mode == .soft) {
-                        self.setPixel(@intCast(r), @intCast(c), rgba_color.fade(coverage));
-                    } else {
+                    if (opts.mode == .soft) {
+                        self.setPixel(@intCast(r), @intCast(c), rgba_color.fade(coverage), opts.blending);
+                    } else if (overwrite) {
                         self.image.data[r * self.image.stride + c] = solid_color;
+                    } else {
+                        assignPixel(&self.image.data[r * self.image.stride + c], rgba_color, opts.blending);
                     }
                 }
             }
@@ -829,6 +832,7 @@ pub fn Canvas(comptime T: type) type {
             radius: f32,
             color: anytype,
             arc: ArcRange,
+            blending: Blending,
         ) void {
             const cx = @round(center.x());
             const cy = @round(center.y());
@@ -846,7 +850,7 @@ pub fn Canvas(comptime T: type) type {
                     if (!full) {
                         if (!arc.contains(std.math.atan2(o[1], o[0]))) continue;
                     }
-                    self.setPoint(.init(.{ cx + o[0], cy + o[1] }), color);
+                    self.setPoint(.init(.{ cx + o[0], cy + o[1] }), color, blending);
                 }
                 if (err <= 0) {
                     y += 1;
@@ -859,34 +863,8 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Internal function for drawing solid (aliased) circle outlines.
-        fn drawCircleFast(self: Self, center: Point(2, f32), radius: f32, width: u32, color: anytype) void {
-            if (width == 1) {
-                self.drawBresenhamCircle(center, radius, color, .full);
-            } else {
-                const line_width: f32 = @floatFromInt(width);
-                self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, .full, .fast);
-            }
-        }
-
-        /// Internal function for drawing smooth (anti-aliased) circle outlines.
-        fn drawCircleSoft(self: Self, center: Point(2, f32), radius: f32, width: u32, color: anytype) void {
-            const line_width: f32 = @floatFromInt(width);
-            self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, .full, .soft);
-        }
-
-        /// Internal function for drawing solid (aliased) arc outlines.
-        fn drawArcFast(self: Self, center: Point(2, f32), radius: f32, arc: ArcRange, width: u32, color: anytype) void {
-            if (width == 1) {
-                self.drawBresenhamCircle(center, radius, color, arc);
-            } else {
-                const line_width: f32 = @floatFromInt(width);
-                self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, arc, .fast);
-            }
-        }
-
         /// Internal function for drawing smooth (anti-aliased) arc outlines.
-        fn drawArcSoft(self: Self, center: Point(2, f32), radius: f32, arc: ArcRange, width: u32, color: anytype) !void {
+        fn drawArcSoft(self: Self, center: Point(2, f32), radius: f32, arc: ArcRange, width: u32, color: anytype, blending: Blending) !void {
             const angle_span = arc.span();
             const arc_length = arc.length(radius);
             const segments: u32 = @max(8, @min(bezier_max_segments_count, @as(u32, @ceil(arc_length / 5.0))));
@@ -904,13 +882,13 @@ pub fn Canvas(comptime T: type) type {
             if (width == 1) {
                 fillArcRing(points[0 .. segments + 1], center, radius, arc.start, angle_step);
                 for (0..segments) |i| {
-                    self.drawLine(points[i], points[i + 1], color, 1, .soft);
+                    self.drawLine(points[i], points[i + 1], color, 1, .{ .mode = .soft, .blending = blending });
                 }
             } else {
                 const line_width: f32 = @floatFromInt(width);
                 fillArcRing(points[0 .. segments + 1], center, radius + line_width / 2.0, arc.start, angle_step);
                 fillArcRing(points[segments + 1 ..], center, radius - line_width / 2.0, arc.end, -angle_step);
-                try self.fillPolygon(points, color, .soft);
+                try self.fillPolygon(points, color, .{ .mode = .soft, .blending = blending });
             }
         }
 
@@ -930,9 +908,9 @@ pub fn Canvas(comptime T: type) type {
         /// The polygon is defined by an array of points (vertices).
         ///
         /// **Rendering Modes:**
-        /// - **DrawMode.fast**: hard edges, no alpha blending.
-        /// - **DrawMode.soft**: antialiased edges via alpha blending.
-        pub fn fillPolygon(self: Self, polygon: []const Point(2, f32), color: anytype, mode: DrawMode) !void {
+        /// - **DrawMode.fast**: hard edges.
+        /// - **DrawMode.soft**: antialiased edges.
+        pub fn fillPolygon(self: Self, polygon: []const Point(2, f32), color: anytype, opts: DrawOptions) !void {
             comptime assert(isColor(@TypeOf(color)));
             if (polygon.len < 3) return;
 
@@ -988,7 +966,7 @@ pub fn Canvas(comptime T: type) type {
                     const x_start = @max(0, @floor(left_edge));
                     const x_end = @min(fcols - 1, @ceil(right_edge));
 
-                    switch (mode) {
+                    switch (opts.mode) {
                         .soft => {
                             var x = x_start;
                             while (x <= x_end) : (x += 1) {
@@ -1003,13 +981,12 @@ pub fn Canvas(comptime T: type) type {
                                 alpha = clamp(alpha, 0, 1);
 
                                 if (alpha > 0) {
-                                    self.setPoint(.init(.{ x, y }), c2.fade(alpha));
+                                    self.setPoint(.init(.{ x, y }), c2.fade(alpha), opts.blending);
                                 }
                             }
                         },
                         .fast => {
-                            // Fast mode - use @memset for optimal span filling
-                            self.setHorizontalSpan(left_edge, right_edge, y, solid_color);
+                            self.fillSpan(left_edge, right_edge, y, solid_color, c2, opts.blending);
                         },
                     }
                 }
@@ -1018,13 +995,13 @@ pub fn Canvas(comptime T: type) type {
 
         /// Fills a circle on the given image.
         /// Use DrawMode.soft for anti-aliased edges or DrawMode.fast for hard edges.
-        pub fn fillCircle(self: Self, center: Point(2, f32), radius: f32, color: anytype, mode: DrawMode) void {
+        pub fn fillCircle(self: Self, center: Point(2, f32), radius: f32, color: anytype, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
             if (radius <= 0) return;
 
-            switch (mode) {
-                .fast => self.fillCircleFast(center, radius, color),
-                .soft => self.fillCircleSoft(center, radius, color),
+            switch (opts.mode) {
+                .fast => self.fillCircleFast(center, radius, color, opts.blending),
+                .soft => self.renderRing(center, 0, radius, color, .full, opts),
             }
         }
 
@@ -1036,7 +1013,7 @@ pub fn Canvas(comptime T: type) type {
         /// // Green pie slice from π/4 to 3π/4
         /// try canvas.fillArc(center, 60, std.math.pi / 4.0, 3.0 * std.math.pi / 4.0, Rgb.green, .soft);
         /// ```
-        pub fn fillArc(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype, mode: DrawMode) !void {
+        pub fn fillArc(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype, opts: DrawOptions) !void {
             comptime assert(isColor(@TypeOf(color)));
             if (radius <= 0) return;
 
@@ -1046,26 +1023,22 @@ pub fn Canvas(comptime T: type) type {
             }
 
             if (@abs(end_angle - start_angle) >= 2 * std.math.pi) {
-                self.fillCircle(center, radius, color, mode);
+                self.fillCircle(center, radius, color, opts);
                 return;
             }
 
             // Partial arc
             const arc: ArcRange = .init(start_angle, end_angle);
-            switch (mode) {
-                .fast => self.fillArcFast(center, radius, arc, color),
-                .soft => try self.fillArcSoft(center, radius, arc, color),
+            switch (opts.mode) {
+                .fast => self.fillArcFast(center, radius, arc, color, opts.blending),
+                .soft => try self.fillArcSoft(center, radius, arc, color, opts.blending),
             }
         }
 
-        /// Internal function for filling smooth (anti-aliased) circles.
-        fn fillCircleSoft(self: Self, center: Point(2, f32), radius: f32, color: anytype) void {
-            self.renderRing(center, 0, radius, color, .full, .soft);
-        }
-
         /// Internal function for filling solid (non-anti-aliased) circles.
-        fn fillCircleFast(self: Self, center: Point(2, f32), radius: f32, color: anytype) void {
+        fn fillCircleFast(self: Self, center: Point(2, f32), radius: f32, color: anytype, blending: Blending) void {
             const solid_color = convertColor(T, color);
+            const rgba_color = convertColor(Rgba, color);
             const frows: f32 = @floatFromInt(self.image.rows);
             const top = @max(0, center.y() - radius);
             const bottom = @min(frows - 1, center.y() + radius);
@@ -1078,17 +1051,18 @@ pub fn Canvas(comptime T: type) type {
                 if (dx > 0) {
                     const x1 = center.x() - dx;
                     const x2 = center.x() + dx;
-                    self.setHorizontalSpan(x1, x2, y, solid_color);
+                    self.fillSpan(x1, x2, y, solid_color, rgba_color, blending);
                 }
             }
         }
 
         /// Internal function for filling solid (non-anti-aliased) arcs.
         /// Fills a pie slice (arc + lines to center).
-        fn fillArcFast(self: Self, center: Point(2, f32), radius: f32, arc: ArcRange, color: anytype) void {
+        fn fillArcFast(self: Self, center: Point(2, f32), radius: f32, arc: ArcRange, color: anytype, blending: Blending) void {
             if (arc.span() <= 0) return;
 
             const solid_color = convertColor(T, color);
+            const rgba_color = convertColor(Rgba, color);
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
 
@@ -1139,7 +1113,7 @@ pub fn Canvas(comptime T: type) type {
                         if (!arc.containsCross(nx * sin_s + start_const, nx * sin_e + end_const)) break;
                     }
 
-                    self.setHorizontalSpan(x, span_end, y, solid_color);
+                    self.fillSpan(x, span_end, y, solid_color, rgba_color, blending);
                     x = span_end;
                 }
             }
@@ -1176,7 +1150,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Internal function for filling smooth (anti-aliased) arcs.
-        fn fillArcSoft(self: Self, center: Point(2, f32), radius: f32, arc: ArcRange, color: anytype) !void {
+        fn fillArcSoft(self: Self, center: Point(2, f32), radius: f32, arc: ArcRange, color: anytype, blending: Blending) !void {
             // Precompute edge vectors
             const start_edge = arc.startVector();
             const end_edge = arc.endVector();
@@ -1211,7 +1185,7 @@ pub fn Canvas(comptime T: type) type {
                     const dist = @sqrt(dist_sq);
                     const coverage = calculateArcCoverage(dist, radius, in_arc, start_cross_product, end_cross_product);
                     if (coverage > 0) {
-                        self.setPixel(@intCast(r), @intCast(c), rgba_color.fade(coverage));
+                        self.setPixel(@intCast(r), @intCast(c), rgba_color.fade(coverage), blending);
                     }
                 }
             }
@@ -1225,7 +1199,7 @@ pub fn Canvas(comptime T: type) type {
             p2: Point(2, f32),
             color: anytype,
             width: u32,
-            mode: DrawMode,
+            opts: DrawOptions,
         ) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
@@ -1240,7 +1214,7 @@ pub fn Canvas(comptime T: type) type {
                 .{ p0, p1, p2 },
                 color,
                 width,
-                mode,
+                opts,
             );
         }
 
@@ -1254,13 +1228,13 @@ pub fn Canvas(comptime T: type) type {
             p3: Point(2, f32),
             color: anytype,
             width: u32,
-            mode: DrawMode,
+            opts: DrawOptions,
         ) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
 
             const estimated_length = estimateCubicBezierLength(p0, p1, p2, p3);
-            const pixels_per_segment: f32 = if (mode == .soft or width > 2) pixels_per_segment_soft else pixels_per_segment_fast;
+            const pixels_per_segment: f32 = if (opts.mode == .soft or width > 2) pixels_per_segment_soft else pixels_per_segment_fast;
 
             self.drawBezierTessellated(
                 estimated_length,
@@ -1270,14 +1244,14 @@ pub fn Canvas(comptime T: type) type {
                 .{ p0, p1, p2, p3 },
                 color,
                 width,
-                mode,
+                opts,
             );
         }
 
         /// Draws a spline polygon outline with Bézier curves connecting vertices.
         /// The polygon's edges are rendered as cubic Bézier splines for smooth, curved appearance.
         /// Use tension to control curve smoothness: 0=sharp corners, 1=maximum smoothness.
-        pub fn drawSplinePolygon(self: Self, polygon: []const Point(2, f32), color: anytype, width: u32, tension: f32, mode: DrawMode) void {
+        pub fn drawSplinePolygon(self: Self, polygon: []const Point(2, f32), color: anytype, width: u32, tension: f32, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0 or polygon.len < 3) return;
 
@@ -1286,14 +1260,14 @@ pub fn Canvas(comptime T: type) type {
                 const p1 = polygon[(i + 1) % polygon.len];
                 const p2 = polygon[(i + 2) % polygon.len];
                 const control_points = calculateSmoothControlPoints(p0, p1, p2, tension);
-                self.drawCubicBezier(p0, control_points.cp1, control_points.cp2, p1, color, width, mode);
+                self.drawCubicBezier(p0, control_points.cp1, control_points.cp2, p1, color, width, opts);
             }
         }
 
         /// Fills a spline polygon with Bézier curves connecting vertices.
         /// The polygon's outline is defined by Bézier splines for smooth, curved edges.
         /// Use tension to control curve smoothness: 0=sharp corners, 1=maximum smoothness.
-        pub fn fillSplinePolygon(self: Self, polygon: []const Point(2, f32), color: anytype, tension: f32, mode: DrawMode) !void {
+        pub fn fillSplinePolygon(self: Self, polygon: []const Point(2, f32), color: anytype, tension: f32, opts: DrawOptions) !void {
             comptime assert(isColor(@TypeOf(color)));
             if (polygon.len < 3) return;
 
@@ -1351,7 +1325,7 @@ pub fn Canvas(comptime T: type) type {
                 write_idx += actual_segments;
             }
 
-            try self.fillPolygon(points_buffer, color, mode);
+            try self.fillPolygon(points_buffer, color, opts);
         }
 
         /// Evaluates a quadratic Bézier curve at parameter t.
@@ -1434,7 +1408,7 @@ pub fn Canvas(comptime T: type) type {
             evalArgs: anytype,
             color: anytype,
             width: u32,
-            mode: DrawMode,
+            opts: DrawOptions,
         ) void {
             var stack_buffer: [bezier_max_segments_count]Point(2, f32) = undefined;
 
@@ -1450,7 +1424,7 @@ pub fn Canvas(comptime T: type) type {
 
             // Draw lines between consecutive points
             for (1..actual_segments) |i| {
-                self.drawLine(stack_buffer[i - 1], stack_buffer[i], color, width, mode);
+                self.drawLine(stack_buffer[i - 1], stack_buffer[i], color, width, opts);
             }
         }
 
@@ -1494,7 +1468,7 @@ pub fn Canvas(comptime T: type) type {
         /// Draws text at the specified position using a bitmap font.
         /// The position specifies the top-left corner of the text.
         /// Supports newlines for multi-line text.
-        pub fn drawText(self: Self, text: []const u8, position: Point(2, f32), color: anytype, font: BitmapFont, scale: f32, mode: DrawMode) void {
+        pub fn drawText(self: Self, text: []const u8, position: Point(2, f32), color: anytype, font: BitmapFont, scale: f32, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
             if (scale <= 0) return;
 
@@ -1517,7 +1491,6 @@ pub fn Canvas(comptime T: type) type {
             var y = position.y();
             const start_x = x;
             const line_height = as(f32, font.char_height) * scale;
-            const rgba_color = if (scale != 1.0 and mode == .soft) convertColor(Rgba, color) else undefined;
 
             var utf8_iter = std.unicode.Utf8Iterator{ .bytes = text, .i = 0 };
             while (utf8_iter.nextCodepoint()) |codepoint| {
@@ -1528,10 +1501,10 @@ pub fn Canvas(comptime T: type) type {
                 }
                 if (font.getGlyph(codepoint)) |glyph| {
                     if (scale == 1.0) {
-                        self.renderGlyphUnscaled(glyph.info, glyph.data, font, x, y, color);
-                    } else switch (mode) {
-                        .fast => self.renderGlyphFastScaled(glyph.info, glyph.data, font, x, y, scale, clip_rect, color),
-                        .soft => self.renderGlyphSoftScaled(glyph.info, glyph.data, font, x, y, scale, rgba_color),
+                        self.renderGlyphUnscaled(glyph.info, glyph.data, font, x, y, color, opts.blending);
+                    } else switch (opts.mode) {
+                        .fast => self.renderGlyphFastScaled(glyph.info, glyph.data, font, x, y, scale, clip_rect, color, opts.blending),
+                        .soft => self.renderGlyphSoftScaled(glyph.info, glyph.data, font, x, y, scale, color, opts.blending),
                     }
                     x += as(f32, glyph.info.advanceWidth()) * scale;
                 } else {
@@ -1545,7 +1518,7 @@ pub fn Canvas(comptime T: type) type {
         /// `x`/`y` once (floor commutes with adding the integer col/row/offsets), pre-converts
         /// `color`, hoists the blend-mode branch, and writes pixels through direct memory
         /// access with a single u32 bounds check.
-        fn renderGlyphUnscaled(self: Self, glyph_info: anytype, char_data: []const u8, font: BitmapFont, x: f32, y: f32, color: anytype) void {
+        fn renderGlyphUnscaled(self: Self, glyph_info: anytype, char_data: []const u8, font: BitmapFont, x: f32, y: f32, color: anytype, blending: Blending) void {
             const bytes_per_row = calculateGlyphBytesPerRow(glyph_info, font);
             const render_height = if (font.glyph_map == null) font.char_height else glyph_info.height;
 
@@ -1558,10 +1531,8 @@ pub fn Canvas(comptime T: type) type {
 
             const ColorType = @TypeOf(color);
             const pixel: T = if (comptime ColorType == T) color else convertColor(T, color);
-            const blend_mode: Blending = if (comptime ColorType == Rgba)
-                if (color.a != 255) .normal else .none
-            else
-                .none;
+            const rgba_color = convertColor(Rgba, color);
+            const overwrite = isOverwrite(blending, rgba_color);
 
             for (0..render_height) |row| {
                 const py = base_row + as(i32, row);
@@ -1572,10 +1543,10 @@ pub fn Canvas(comptime T: type) type {
                     const px = base_col + as(i32, col);
                     if (px < 0 or px >= cols_i32) continue;
                     const dest = &self.image.data[row_offset + @as(usize, @intCast(px))];
-                    if (blend_mode == .none) {
+                    if (overwrite) {
                         dest.* = pixel;
                     } else {
-                        assignPixel(dest, pixel, blend_mode);
+                        assignPixel(dest, rgba_color, blending);
                     }
                 }
             }
@@ -1583,8 +1554,11 @@ pub fn Canvas(comptime T: type) type {
 
         /// Nearest-neighbor upscale: each set glyph bit produces a `scale`-wide block of
         /// identical pixels, clipped to the precomputed text rect.
-        fn renderGlyphFastScaled(self: Self, glyph_info: anytype, char_data: []const u8, font: BitmapFont, x: f32, y: f32, scale: f32, clip_rect: Rectangle(f32), color: anytype) void {
+        fn renderGlyphFastScaled(self: Self, glyph_info: anytype, char_data: []const u8, font: BitmapFont, x: f32, y: f32, scale: f32, clip_rect: Rectangle(f32), color: anytype, blending: Blending) void {
             const bytes_per_row = calculateGlyphBytesPerRow(glyph_info, font);
+            const pixel = convertColor(T, color);
+            const rgba_color = convertColor(Rgba, color);
+            const overwrite = isOverwrite(blending, rgba_color);
             for (0..glyph_info.height) |row| {
                 for (0..glyph_info.width) |col| {
                     if (getGlyphBit(char_data, row, col, bytes_per_row) == 0) continue;
@@ -1595,9 +1569,12 @@ pub fn Canvas(comptime T: type) type {
                     const x_end: u32 = @trunc(@min(@ceil(base_x + scale), clip_rect.r));
                     const y_end: u32 = @trunc(@min(@ceil(base_y + scale), clip_rect.b));
                     if (x_start >= x_end or y_start >= y_end) continue;
+                    // clip_rect is inside the image, so writes need no per-pixel bounds check.
                     for (y_start..y_end) |py| {
+                        const row_offset = py * self.image.stride;
                         for (x_start..x_end) |px| {
-                            self.setPoint(.init(.{ as(f32, px), as(f32, py) }), color);
+                            const dest = &self.image.data[row_offset + px];
+                            if (overwrite) dest.* = pixel else assignPixel(dest, rgba_color, blending);
                         }
                     }
                 }
@@ -1606,7 +1583,8 @@ pub fn Canvas(comptime T: type) type {
 
         /// Box-filter antialiased upscale: each destination pixel samples a `1/scale`-radius
         /// box of the source bitmap and writes the area-weighted coverage as alpha.
-        fn renderGlyphSoftScaled(self: Self, glyph_info: anytype, char_data: []const u8, font: BitmapFont, x: f32, y: f32, scale: f32, rgba_color: Rgba) void {
+        fn renderGlyphSoftScaled(self: Self, glyph_info: anytype, char_data: []const u8, font: BitmapFont, x: f32, y: f32, scale: f32, color: anytype, blending: Blending) void {
+            const rgba_color = convertColor(Rgba, color);
             const bytes_per_row = calculateGlyphBytesPerRow(glyph_info, font);
             const glyph_width_f = as(f32, glyph_info.width);
             const glyph_height_f = as(f32, glyph_info.height);
@@ -1651,7 +1629,7 @@ pub fn Canvas(comptime T: type) type {
                     const box_area = (x1 - x0) * (y1 - y0);
                     const normalized_coverage = total_coverage / box_area;
                     if (normalized_coverage > 0) {
-                        self.setPoint(.init(.{ dest_x, dest_y }), rgba_color.fade(normalized_coverage));
+                        self.setPoint(.init(.{ dest_x, dest_y }), rgba_color.fade(normalized_coverage), blending);
                     }
                 }
             }
