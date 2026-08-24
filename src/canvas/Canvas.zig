@@ -57,15 +57,15 @@ pub fn Canvas(comptime T: type) type {
         const pixels_per_segment_fast = 3.0;
         /// Target pixels per segment specifically for quadratic Bézier curves
         const pixels_per_segment_quadratic = 2.0;
-        /// Offset for antialiasing edge calculations (0.5 = pixel center alignment)
+        /// Offset for antialiasing edge calculations (0.5 = pixel center alignment). Soft paths
+        /// treat pixel (r, c) as centered at (c, r); fast span writes are top-left inclusive.
         const antialias_edge_offset = 0.5;
-        /// Stack buffer size for polygon intersection calculations (avoids allocation for most cases)
-        const polygon_intersection_stack_buffer_size = 64;
         /// Vertical samples per pixel row for antialiased polygon fills
         const polygon_subscanlines = 8;
-        /// Stack buffer size (in pixels) for per-row polygon coverage accumulation
-        const polygon_coverage_stack_buffer_size = 1024;
-        /// Stack buffer size for spline polygon tessellation (avoids allocation for typical polygons)
+        /// Stack scratch (bytes) for polygon fills: edges and crossings for 64 vertices plus a
+        /// 1024-pixel coverage row; larger inputs spill to the heap.
+        const polygon_scratch_size = 64 * (@sizeOf(Edge) + @sizeOf(f32)) + 1024 * @sizeOf(CoverageCell);
+        /// Stack scratch (points) for spline polygon tessellation; spills to heap beyond
         const spline_polygon_stack_buffer_size = 400;
 
         /// Creates a drawing canvas from an image.
@@ -159,20 +159,41 @@ pub fn Canvas(comptime T: type) type {
             return self.image.data[offset .. offset + end - start + 1];
         }
 
-        /// Sets a horizontal span to `color` without alpha blending.
-        fn setHorizontalSpan(self: Self, x1: f32, x2: f32, y: f32, color: T) void {
-            if (self.spanSlice(x1, x2, y)) |span| @memset(span, color);
+        /// Writes a horizontal span: memset for plain overwrites, per-pixel composite otherwise.
+        fn fillSpan(self: Self, x1: f32, x2: f32, y: f32, paint: Paint) void {
+            const span = self.spanSlice(x1, x2, y) orelse return;
+            if (paint.overwrite) @memset(span, paint.solid) else for (span) |*px| paint.put(px);
         }
 
-        /// Writes a horizontal span: memset for plain overwrites, per-pixel composite otherwise.
-        fn fillSpan(self: Self, x1: f32, x2: f32, y: f32, solid: T, rgba: Rgba, blending: Blending) void {
-            const span = self.spanSlice(x1, x2, y) orelse return;
-            if (isOverwrite(blending, rgba)) {
-                @memset(span, solid);
-            } else {
-                for (span) |*px| assignPixel(px, rgba, blending);
+        /// A color prepared for writing: pre-converted to the canvas type and to Rgba, with the
+        /// overwrite decision hoisted out of pixel loops.
+        const Paint = struct {
+            solid: T,
+            rgba: Rgba,
+            blending: Blending,
+            overwrite: bool,
+
+            fn init(color: anytype, blending: Blending) Paint {
+                comptime assert(isColor(@TypeOf(color)));
+                const rgba = convertColor(Rgba, color);
+                return .{
+                    .solid = convertColor(T, color),
+                    .rgba = rgba,
+                    .blending = blending,
+                    .overwrite = isOverwrite(blending, rgba),
+                };
             }
-        }
+
+            /// Writes the color at full coverage.
+            inline fn put(p: Paint, dest: *T) void {
+                if (p.overwrite) dest.* = p.solid else assignPixel(dest, p.rgba, p.blending);
+            }
+
+            /// Writes the color scaled by `alpha` coverage; full coverage takes the overwrite path.
+            inline fn cover(p: Paint, dest: *T, alpha: f32) void {
+                if (alpha >= 1) p.put(dest) else if (alpha > 0) assignPixel(dest, p.rgba.fade(alpha), p.blending);
+            }
+        };
 
         /// Draws a line between two points. `.fast` uses Bresenham (width 1) or a
         /// rectangle+caps; `.soft` antialiases via Wu (width 1) or distance-based rendering.
@@ -184,11 +205,11 @@ pub fn Canvas(comptime T: type) type {
                 .fast => if (width == 1)
                     self.drawLineBresenham(p1, p2, color, opts.blending)
                 else
-                    self.drawLineRectangle(p1, p2, width, color, opts.blending),
+                    self.drawLineRectangle(p1, p2, width, color, opts),
                 .soft => if (width == 1)
                     self.drawLineXiaolinWu(p1, p2, color, opts.blending)
                 else
-                    self.drawLineDistance(p1, p2, width, color, opts.blending),
+                    self.drawLineDistance(p1, p2, width, color, opts),
             }
         }
 
@@ -202,15 +223,13 @@ pub fn Canvas(comptime T: type) type {
             const x2: i32 = @trunc(p2.x());
             const y2: i32 = @trunc(p2.y());
 
-            const pixel_color = convertColor(T, color);
-            const rgba_color = convertColor(Rgba, color);
-            const overwrite = isOverwrite(blending, rgba_color);
+            const paint: Paint = .init(color, blending);
 
             // Special case for horizontal lines - use fillSpan for better performance
             if (y1 == y2) {
                 const min_x = @min(x1, x2);
                 const max_x = @max(x1, x2);
-                self.fillSpan(@floatFromInt(min_x), @floatFromInt(max_x), @floatFromInt(y1), pixel_color, rgba_color, blending);
+                self.fillSpan(@floatFromInt(min_x), @floatFromInt(max_x), @floatFromInt(y1), paint);
                 return;
             }
 
@@ -220,9 +239,7 @@ pub fn Canvas(comptime T: type) type {
                 const max_y = @max(y1, y2);
                 var y = min_y;
                 while (y <= max_y) : (y += 1) {
-                    if (self.atOrNull(y, x1)) |pixel| {
-                        if (overwrite) pixel.* = pixel_color else assignPixel(pixel, rgba_color, blending);
-                    }
+                    if (self.atOrNull(y, x1)) |pixel| paint.put(pixel);
                 }
                 return;
             }
@@ -235,9 +252,7 @@ pub fn Canvas(comptime T: type) type {
             var err = dx - dy;
 
             while (true) {
-                if (self.atOrNull(y1, x1)) |pixel| {
-                    if (overwrite) pixel.* = pixel_color else assignPixel(pixel, rgba_color, blending);
-                }
+                if (self.atOrNull(y1, x1)) |pixel| paint.put(pixel);
 
                 if (x1 == x2 and y1 == y2) break;
 
@@ -258,7 +273,8 @@ pub fn Canvas(comptime T: type) type {
         /// Handles steep vs. shallow lines optimally by swapping coordinates.
         /// Provides the best quality-to-performance ratio for thin antialiased lines.
         fn drawLineXiaolinWu(self: Self, p1: Point(2, f32), p2: Point(2, f32), color: anytype, blending: Blending) void {
-            const c2 = convertColor(Rgba, color);
+            const paint: Paint = .init(color, blending);
+            const c2 = paint.rgba;
 
             var x1 = p1.x();
             var y1 = p1.y();
@@ -285,7 +301,7 @@ pub fn Canvas(comptime T: type) type {
                 const solid_start = @ceil(min_x);
                 const solid_end = @floor(max_x);
                 if (solid_end >= solid_start) {
-                    self.fillSpan(solid_start, solid_end, y, convertColor(T, c2), c2, blending);
+                    self.fillSpan(solid_start, solid_end, y, paint);
                 }
 
                 // Right endpoint antialiasing
@@ -358,7 +374,7 @@ pub fn Canvas(comptime T: type) type {
         /// Constructs a filled rectangle perpendicular to the line direction,
         /// then adds circular end caps for smooth line termination.
         /// Handles zero-length lines by drawing a single filled circle.
-        fn drawLineRectangle(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype, blending: Blending) void {
+        fn drawLineRectangle(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype, opts: DrawOptions) void {
             // For thick lines, draw as a filled rectangle
             const dx = p2.x() - p1.x();
             const dy = p2.y() - p1.y();
@@ -367,7 +383,7 @@ pub fn Canvas(comptime T: type) type {
             if (line_length == 0) {
                 // Single point - draw a filled circle
                 const half_width: f32 = as(f32, width) / 2.0;
-                self.fillCircle(p1, half_width, color, .{ .mode = .fast, .blending = blending });
+                self.fillCircle(p1, half_width, color, opts);
                 return;
             }
 
@@ -385,37 +401,38 @@ pub fn Canvas(comptime T: type) type {
             };
 
             // Fill rectangle using scanline algorithm (no anti-aliasing)
-            self.fillPolygon(&corners, color, .{ .mode = .fast, .blending = blending }) catch return;
+            self.fillPolygon(&corners, color, opts) catch return;
 
             // Add rounded caps using solid circles
-            self.fillCircle(p1, half_width, color, .{ .mode = .fast, .blending = blending });
-            self.fillCircle(p2, half_width, color, .{ .mode = .fast, .blending = blending });
+            self.fillCircle(p1, half_width, color, opts);
+            self.fillCircle(p2, half_width, color, opts);
         }
 
         /// Distance-based antialiased rendering for thick lines.
         /// Calculates the perpendicular distance from each pixel to the line segment and
         /// applies smooth alpha falloff at edges. End caps fall out naturally from the
         /// distance test.
-        fn drawLineDistance(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype, blending: Blending) void {
+        fn drawLineDistance(self: Self, p1: Point(2, f32), p2: Point(2, f32), width: u32, color: anytype, opts: DrawOptions) void {
             const half_width: f32 = as(f32, width) / 2.0;
-            const c2 = convertColor(Rgba, color);
 
             const dx = p2.x() - p1.x();
             const dy = p2.y() - p1.y();
             const length_sq = dx * dx + dy * dy;
             if (length_sq == 0) {
-                self.fillCircle(p1, half_width, color, .{ .mode = .soft, .blending = blending });
+                self.fillCircle(p1, half_width, color, opts);
                 return;
             }
 
             // Axis-aligned fast path: per-row (horizontal) or per-col (vertical) alpha is
-            // uniform, so we can skip the per-pixel sqrt and use `setHorizontalSpan` (memset)
+            // uniform, so we can skip the per-pixel sqrt and use `fillSpan` (memset)
             // for fully-covered interior rows of horizontal lines. End-cap AA still comes from
             // `fillCircle`. Body bbox is tight to the line endpoints so caps don't double-blend.
             if (dx == 0 or dy == 0) {
-                self.drawAxisAlignedThickLine(p1, p2, half_width, c2, color, blending);
+                self.drawAxisAlignedThickLine(p1, p2, half_width, color, opts);
                 return;
             }
+
+            const paint: Paint = .init(color, opts.blending);
 
             const inv_length_sq = 1.0 / length_sq;
             const line_rect: Rectangle(f32) = .{
@@ -441,21 +458,18 @@ pub fn Canvas(comptime T: type) type {
                     if (dist > half_width - antialias_edge_offset) {
                         alpha = half_width + antialias_edge_offset - dist;
                     }
-                    if (alpha > 0) {
-                        self.setPixel(@intCast(r), @intCast(c), c2.fade(alpha), blending);
-                    }
+                    paint.cover(&self.image.data[r * self.image.stride + c], alpha);
                 }
             }
         }
 
         /// Specialized renderer for horizontal/vertical thick lines. Computes the perpendicular
         /// coverage once per row (or column) — uniform across the body — and uses
-        /// `setHorizontalSpan` for fully-covered interior rows of horizontal opaque lines.
+        /// `fillSpan` for fully-covered interior rows of horizontal lines.
         /// End-cap AA is handled by the `fillCircle` calls at the bottom.
-        fn drawAxisAlignedThickLine(self: Self, p1: Point(2, f32), p2: Point(2, f32), half_width: f32, c2: Rgba, color: anytype, blending: Blending) void {
+        fn drawAxisAlignedThickLine(self: Self, p1: Point(2, f32), p2: Point(2, f32), half_width: f32, color: anytype, opts: DrawOptions) void {
             const is_horizontal = p1.y() == p2.y();
-            const can_memset = isOverwrite(blending, c2);
-            const solid_color = if (can_memset) convertColor(T, color) else undefined;
+            const paint: Paint = .init(color, opts.blending);
 
             // Body bbox is tight to the line's endpoints — end caps are drawn separately,
             // so excluding their region here avoids double-blend over-saturation.
@@ -476,26 +490,22 @@ pub fn Canvas(comptime T: type) type {
                 if (is_horizontal) {
                     for (bbox.t..bbox.b) |r| {
                         const alpha = perpendicularAlpha(as(f32, r), perp_center, half_width);
-                        if (alpha <= 0) continue;
-                        if (alpha >= 1.0 and can_memset) {
-                            self.setHorizontalSpan(as(f32, bbox.l), as(f32, bbox.r - 1), as(f32, r), solid_color);
+                        if (alpha >= 1.0) {
+                            self.fillSpan(as(f32, bbox.l), as(f32, bbox.r - 1), as(f32, r), paint);
                         } else {
-                            const faded = c2.fade(alpha);
-                            for (bbox.l..bbox.r) |c| self.setPixel(@intCast(r), @intCast(c), faded, blending);
+                            for (bbox.l..bbox.r) |c| paint.cover(&self.image.data[r * self.image.stride + c], alpha);
                         }
                     }
                 } else {
                     for (bbox.l..bbox.r) |c| {
                         const alpha = perpendicularAlpha(as(f32, c), perp_center, half_width);
-                        if (alpha <= 0) continue;
-                        const faded = c2.fade(alpha);
-                        for (bbox.t..bbox.b) |r| self.setPixel(@intCast(r), @intCast(c), faded, blending);
+                        for (bbox.t..bbox.b) |r| paint.cover(&self.image.data[r * self.image.stride + c], alpha);
                     }
                 }
             }
 
-            self.fillCircle(p1, half_width, color, .{ .mode = .soft, .blending = blending });
-            self.fillCircle(p2, half_width, color, .{ .mode = .soft, .blending = blending });
+            self.fillCircle(p1, half_width, color, opts);
+            self.fillCircle(p2, half_width, color, opts);
         }
 
         /// Coverage of a single perpendicular sample at distance |sample - center| from a
@@ -508,10 +518,10 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// True when the write is a plain overwrite (`.normal` + opaque degenerates to the overlay).
-        inline fn isOverwrite(blending: Blending, color: anytype) bool {
+        inline fn isOverwrite(blending: Blending, rgba: Rgba) bool {
             return switch (blending) {
                 .none => true,
-                .normal => if (comptime @TypeOf(color) == Rgba) color.a == 255 else true,
+                .normal => rgba.a == 255,
                 else => false,
             };
         }
@@ -519,15 +529,8 @@ pub fn Canvas(comptime T: type) type {
         /// Writes a pixel at integer (row, col), compositing `color` with `blending`
         /// (via an Rgba round-trip on non-Rgba canvases). Out-of-bounds is silently ignored.
         pub inline fn setPixel(self: Self, row: u32, col: u32, color: anytype, blending: Blending) void {
-            const ColorType = @TypeOf(color);
-            comptime assert(isColor(ColorType));
             if (row >= self.image.rows or col >= self.image.cols) return;
-            const dest = &self.image.data[row * self.image.stride + col];
-            if (isOverwrite(blending, color)) {
-                dest.* = if (comptime ColorType == T) color else convertColor(T, color);
-            } else {
-                assignPixel(dest, convertColor(Rgba, color), blending);
-            }
+            Paint.init(color, blending).put(&self.image.data[row * self.image.stride + col]);
         }
 
         /// Floors `point` to an integer pixel cell and writes via `setPixel`. Bridges
@@ -625,11 +628,10 @@ pub fn Canvas(comptime T: type) type {
             comptime assert(isColor(@TypeOf(color)));
 
             const bounds = self.clampRectToImage(rect) orelse return;
-            const solid_color = convertColor(T, color);
-            const rgba_color = convertColor(Rgba, color);
+            const paint: Paint = .init(color, opts.blending);
 
             for (bounds.t..bounds.b) |row| {
-                self.fillSpan(as(f32, bounds.l), as(f32, bounds.r - 1), as(f32, row), solid_color, rgba_color, opts.blending);
+                self.fillSpan(as(f32, bounds.l), as(f32, bounds.r - 1), as(f32, row), paint);
             }
         }
 
@@ -677,7 +679,7 @@ pub fn Canvas(comptime T: type) type {
                     const line_width: f32 = @floatFromInt(width);
                     self.renderRing(center, radius - line_width / 2.0, radius + line_width / 2.0, color, arc, opts);
                 },
-                .soft => try self.drawArcSoft(center, radius, arc, width, color, opts.blending),
+                .soft => try self.drawArcSoft(center, radius, arc, width, color, opts),
             }
         }
 
@@ -757,19 +759,16 @@ pub fn Canvas(comptime T: type) type {
             }
         };
 
-        /// Screen-space bounding box of the outer circle, clamped to image bounds.
-        /// Returns null when the box has zero area.
+        /// Screen-space bounding box of the outer circle (padded by one pixel for the AA ramp),
+        /// clamped to image bounds. Returns null when the box has zero area.
         inline fn ringBoundingBox(self: Self, center: Point(2, f32), outer_radius: f32) ?Rectangle(u32) {
-            const frows: f32 = @floatFromInt(self.image.rows);
-            const fcols: f32 = @floatFromInt(self.image.cols);
-            // Two-sided clamp before coercion: circles entirely off-image produce a negative
-            // right or top edge that would otherwise wrap to a huge u32.
-            const left: u32 = @round(clamp(center.x() - outer_radius - 1, 0, fcols));
-            const top: u32 = @round(clamp(center.y() - outer_radius - 1, 0, frows));
-            const right: u32 = @round(clamp(center.x() + outer_radius + 1, 0, fcols));
-            const bottom: u32 = @round(clamp(center.y() + outer_radius + 1, 0, frows));
-            if (left >= right or top >= bottom) return null;
-            return .{ .l = left, .t = top, .r = right, .b = bottom };
+            const pad = outer_radius + 1;
+            return self.clampRectToImage(.{
+                .l = @floor(center.x() - pad),
+                .t = @floor(center.y() - pad),
+                .r = @ceil(center.x() + pad),
+                .b = @ceil(center.y() + pad),
+            });
         }
 
         /// Coverage in the annulus [inner_r, outer_r] for a pixel at offset (x,y) from the
@@ -794,7 +793,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Renders a thick ring outline (or arc segment) by scanning its bounding box;
-        /// `.fast` uses binary coverage with direct writes for plain overwrites.
+        /// `.fast` uses binary coverage.
         inline fn renderRing(
             self: Self,
             center: Point(2, f32),
@@ -805,9 +804,7 @@ pub fn Canvas(comptime T: type) type {
             opts: DrawOptions,
         ) void {
             const bbox = self.ringBoundingBox(center, outer_radius) orelse return;
-            const rgba_color = convertColor(Rgba, color);
-            const overwrite = isOverwrite(opts.blending, rgba_color);
-            const solid_color = if (opts.mode == .fast and overwrite) convertColor(T, color) else undefined;
+            const paint: Paint = .init(color, opts.blending);
             for (bbox.t..bbox.b) |r| {
                 const y = as(f32, r) - center.y();
                 for (bbox.l..bbox.r) |c| {
@@ -817,13 +814,7 @@ pub fn Canvas(comptime T: type) type {
                     if (!arc.isFull()) {
                         if (!arc.contains(std.math.atan2(y, x))) continue;
                     }
-                    if (opts.mode == .soft) {
-                        self.setPixel(@intCast(r), @intCast(c), rgba_color.fade(coverage), opts.blending);
-                    } else if (overwrite) {
-                        self.image.data[r * self.image.stride + c] = solid_color;
-                    } else {
-                        assignPixel(&self.image.data[r * self.image.stride + c], rgba_color, opts.blending);
-                    }
+                    paint.cover(&self.image.data[r * self.image.stride + c], coverage);
                 }
             }
         }
@@ -838,8 +829,9 @@ pub fn Canvas(comptime T: type) type {
             arc: ArcRange,
             blending: Blending,
         ) void {
-            const cx = @round(center.x());
-            const cy = @round(center.y());
+            const paint: Paint = .init(color, blending);
+            const cx: i32 = @round(center.x());
+            const cy: i32 = @round(center.y());
             const r = @round(radius);
             var x: f32 = r;
             var y: f32 = 0;
@@ -854,7 +846,9 @@ pub fn Canvas(comptime T: type) type {
                     if (!full) {
                         if (!arc.contains(std.math.atan2(o[1], o[0]))) continue;
                     }
-                    self.setPoint(.init(.{ cx + o[0], cy + o[1] }), color, blending);
+                    const col: i32 = @trunc(o[0]);
+                    const row: i32 = @trunc(o[1]);
+                    if (self.atOrNull(cy + row, cx + col)) |dest| paint.put(dest);
                 }
                 if (err <= 0) {
                     y += 1;
@@ -868,31 +862,29 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Internal function for drawing smooth (anti-aliased) arc outlines.
-        fn drawArcSoft(self: Self, center: Point(2, f32), radius: f32, arc: ArcRange, width: u32, color: anytype, blending: Blending) !void {
+        fn drawArcSoft(self: Self, center: Point(2, f32), radius: f32, arc: ArcRange, width: u32, color: anytype, opts: DrawOptions) !void {
             const angle_span = arc.span();
             const arc_length = arc.length(radius);
             const segments: u32 = @max(8, @min(bezier_max_segments_count, @as(u32, @ceil(arc_length / 5.0))));
             const angle_step = angle_span / as(f32, segments);
-
-            var stack_points: [256]Point(2, f32) = undefined;
             const total_points = if (width > 1) (segments + 1) * 2 else segments + 1;
 
-            const points = if (total_points <= stack_points.len)
-                stack_points[0..total_points]
-            else
-                try self.allocator.alloc(Point(2, f32), total_points);
-            defer if (total_points > stack_points.len) self.allocator.free(points);
+            var stack: [256 * @sizeOf(Point(2, f32))]u8 align(16) = undefined;
+            var buffer_first: std.heap.BufferFirstAllocator = .init(&stack, self.allocator);
+            const scratch = buffer_first.allocator();
+            const points = try scratch.alloc(Point(2, f32), total_points);
+            defer scratch.free(points);
 
             if (width == 1) {
                 fillArcRing(points[0 .. segments + 1], center, radius, arc.start, angle_step);
                 for (0..segments) |i| {
-                    self.drawLine(points[i], points[i + 1], color, 1, .{ .mode = .soft, .blending = blending });
+                    self.drawLine(points[i], points[i + 1], color, 1, opts);
                 }
             } else {
                 const line_width: f32 = @floatFromInt(width);
                 fillArcRing(points[0 .. segments + 1], center, radius + line_width / 2.0, arc.start, angle_step);
                 fillArcRing(points[segments + 1 ..], center, radius - line_width / 2.0, arc.end, -angle_step);
-                try self.fillPolygon(points, color, .{ .mode = .soft, .blending = blending });
+                try self.fillPolygon(points, color, opts);
             }
         }
 
@@ -919,139 +911,152 @@ pub fn Canvas(comptime T: type) type {
             comptime assert(isColor(@TypeOf(color)));
             if (polygon.len < 3) return;
 
-            const frows: f32 = @floatFromInt(self.image.rows);
+            var stack: [polygon_scratch_size]u8 align(16) = undefined;
+            var buffer_first: std.heap.BufferFirstAllocator = .init(&stack, self.allocator);
+            const scratch = buffer_first.allocator();
+            const edges_buf = try scratch.alloc(Edge, polygon.len);
+            defer scratch.free(edges_buf);
+            const crossings_buf = try scratch.alloc(f32, polygon.len);
+            defer scratch.free(crossings_buf);
 
-            var min_x = polygon[0].x();
-            var max_x = polygon[0].x();
-            var min_y = polygon[0].y();
-            var max_y = polygon[0].y();
-            for (polygon) |p| {
-                min_x = @min(min_x, p.x());
-                max_x = @max(max_x, p.x());
-                min_y = @min(min_y, p.y());
-                max_y = @max(max_y, p.y());
-            }
-
-            const start_y = @max(0, @floor(min_y));
-            const end_y = @min(frows - 1, @ceil(max_y));
-
-            // One reusable buffer sized at the worst case (polygon.len crossings per scanline).
-            // Stack-allocated for small polygons; spills to heap once over the threshold.
-            var stack_crossings: [polygon_intersection_stack_buffer_size]f32 = undefined;
-            const crossings_buf: []f32 = if (polygon.len <= stack_crossings.len)
-                stack_crossings[0..polygon.len]
-            else
-                try self.allocator.alloc(f32, polygon.len);
-            defer if (polygon.len > stack_crossings.len) self.allocator.free(crossings_buf);
-
-            const c2 = convertColor(Rgba, color);
+            const edges = polygonEdges(polygon, edges_buf);
+            const bounds: Rectangle(f32) = .fromPoints(polygon);
+            const paint: Paint = .init(color, opts.blending);
 
             switch (opts.mode) {
                 .fast => {
-                    const solid_color = convertColor(T, c2);
-                    var y = start_y;
+                    const frows: f32 = @floatFromInt(self.image.rows);
+                    var y = @max(0, @floor(bounds.t));
+                    const end_y = @min(frows - 1, @ceil(bounds.b));
                     while (y <= end_y) : (y += 1) {
-                        const crossings = scanlineCrossings(polygon, y, crossings_buf);
+                        const crossings = scanlineCrossings(edges, y, crossings_buf);
                         var i: usize = 0;
                         while (i + 1 < crossings.len) : (i += 2) {
-                            self.fillSpan(crossings[i], crossings[i + 1], y, solid_color, c2, opts.blending);
+                            self.fillSpan(crossings[i], crossings[i + 1], y, paint);
                         }
                     }
                 },
-                .soft => try self.fillPolygonSoft(polygon, min_x, max_x, start_y, end_y, crossings_buf, c2, opts.blending),
+                .soft => try self.fillPolygonSoft(edges, bounds, crossings_buf, paint, scratch),
             }
         }
 
-        /// Sorted x-coordinates where the polygon's edges cross the horizontal line at `y`.
-        fn scanlineCrossings(polygon: []const Point(2, f32), y: f32, buf: []f32) []f32 {
+        /// Polygon edge with its y-extent precomputed for scanline crossing tests.
+        const Edge = struct {
+            p1: Point(2, f32),
+            p2: Point(2, f32),
+            y_min: f32,
+            y_max: f32,
+
+            /// x where the edge crosses the horizontal line at `y`, for y in [y_min, y_max).
+            inline fn xAt(e: Edge, y: f32) f32 {
+                return e.p1.x() + (y - e.p1.y()) * (e.p2.x() - e.p1.x()) / (e.p2.y() - e.p1.y());
+            }
+        };
+
+        /// Fills `buf` with the polygon's non-horizontal edges (horizontal ones never cross a scanline).
+        fn polygonEdges(polygon: []const Point(2, f32), buf: []Edge) []Edge {
             var count: usize = 0;
-            for (0..polygon.len) |i| {
-                const p1 = polygon[i];
+            for (polygon, 0..) |p1, i| {
                 const p2 = polygon[(i + 1) % polygon.len];
-                if ((p1.y() <= y and p2.y() > y) or (p2.y() <= y and p1.y() > y)) {
-                    buf[count] = p1.x() + (y - p1.y()) * (p2.x() - p1.x()) / (p2.y() - p1.y());
+                if (p1.y() == p2.y()) continue;
+                buf[count] = .{ .p1 = p1, .p2 = p2, .y_min = @min(p1.y(), p2.y()), .y_max = @max(p1.y(), p2.y()) };
+                count += 1;
+            }
+            return buf[0..count];
+        }
+
+        /// Sorted x-coordinates where `edges` cross the horizontal line at `y`.
+        fn scanlineCrossings(edges: []const Edge, y: f32, buf: []f32) []f32 {
+            var count: usize = 0;
+            for (edges) |e| {
+                if (y >= e.y_min and y < e.y_max) {
+                    buf[count] = e.xAt(y);
                     count += 1;
                 }
             }
             const crossings = buf[0..count];
-            if (count > 1) std.mem.sort(f32, crossings, {}, std.sort.asc(f32));
+            if (count == 2) {
+                if (crossings[0] > crossings[1]) std.mem.swap(f32, &crossings[0], &crossings[1]);
+            } else if (count > 2) {
+                std.mem.sort(f32, crossings, {}, std.sort.asc(f32));
+            }
             return crossings;
         }
 
-        /// Antialiased even-odd fill. Pixel (r, c) covers [c-0.5, c+0.5] × [r-0.5, r+0.5]; each row
-        /// is sampled at `polygon_subscanlines` heights, span ends contribute their exact horizontal
-        /// overlap, and fully covered interiors go through a difference array so per-row cost does
-        /// not scale with the sample count.
-        fn fillPolygonSoft(
-            self: Self,
-            polygon: []const Point(2, f32),
-            min_x: f32,
-            max_x: f32,
-            start_y: f32,
-            end_y: f32,
-            crossings_buf: []f32,
-            c2: Rgba,
-            blending: Blending,
-        ) !void {
-            const fcols: f32 = @floatFromInt(self.image.cols);
-            const col_start: u32 = @trunc(@max(0, @floor(min_x - 0.5)));
-            const col_end: u32 = @trunc(@max(0, @min(fcols - 1, @ceil(max_x + 0.5))));
-            if (col_start > col_end) return;
-            const width = col_end - col_start + 1;
+        /// One pixel of a `fillPolygonSoft` row: `area` accumulates partial coverage at span
+        /// ends, `run` is a difference array for fully covered interiors.
+        const CoverageCell = struct { area: f32 = 0, run: f32 = 0 };
 
-            var stack_coverage: [polygon_coverage_stack_buffer_size + 1]f32 = undefined;
-            const coverage: []f32 = if (width + 1 <= stack_coverage.len)
-                stack_coverage[0 .. width + 1]
-            else
-                try self.allocator.alloc(f32, width + 1);
-            defer if (width + 1 > stack_coverage.len) self.allocator.free(coverage);
+        /// Antialiased even-odd fill. Each pixel row is sampled at `polygon_subscanlines` heights;
+        /// span ends contribute their exact horizontal overlap and fully covered interiors go
+        /// through a difference array, so per-row cost does not scale with the sample count.
+        /// Polygons have no closed-form distance field, hence supersampling rather than the
+        /// analytic coverage used for rings and lines.
+        fn fillPolygonSoft(self: Self, edges: []Edge, bounds: Rectangle(f32), crossings_buf: []f32, paint: Paint, scratch: std.mem.Allocator) !void {
+            const frows: f32 = @floatFromInt(self.image.rows);
+            const end_y = @min(frows - 1, @ceil(bounds.b));
+            const col_start = clampToImageBounds(@floor(bounds.l - 0.5), self.image.cols);
+            const col_end = clampToImageBounds(@ceil(bounds.r + 0.5) + 1, self.image.cols);
+            if (col_start >= col_end) return;
+            const width = col_end - col_start;
 
-            var stack_runs: [polygon_coverage_stack_buffer_size + 2]f32 = undefined;
-            const runs: []f32 = if (width + 2 <= stack_runs.len)
-                stack_runs[0 .. width + 2]
-            else
-                try self.allocator.alloc(f32, width + 2);
-            defer if (width + 2 > stack_runs.len) self.allocator.free(runs);
+            const cells = try scratch.alloc(CoverageCell, width);
+            defer scratch.free(cells);
+            @memset(cells, .{});
 
+            // Buffer-relative x: cell j covers [j, j+1), i.e. image column col_start + j.
             const x_lo = as(f32, col_start) - 0.5;
-            const x_hi = as(f32, col_end) + 0.5;
+            const x_hi = as(f32, col_end) - 0.5;
             const weight = 1.0 / as(f32, polygon_subscanlines);
 
-            var y = start_y;
+            var y = @max(0, @floor(bounds.t));
             while (y <= end_y) : (y += 1) {
-                @memset(coverage, 0);
-                @memset(runs, 0);
-
-                for (0..polygon_subscanlines) |k| {
-                    const sy = y - 0.5 + (as(f32, k) + 0.5) * weight;
-                    const crossings = scanlineCrossings(polygon, sy, crossings_buf);
-                    var i: usize = 0;
-                    while (i + 1 < crossings.len) : (i += 2) {
-                        const left = @max(crossings[i], x_lo);
-                        const right = @min(crossings[i + 1], x_hi);
-                        if (right <= left) continue;
-
-                        const first: u32 = @floor(left + 0.5);
-                        const last: u32 = @floor(right + 0.5);
-                        const fi = first - col_start;
-                        const li = last - col_start;
-                        if (fi == li) {
-                            coverage[fi] += (right - left) * weight;
-                        } else {
-                            coverage[fi] += (as(f32, first) + 0.5 - left) * weight;
-                            coverage[li] += (right - (as(f32, last) - 0.5)) * weight;
-                            runs[fi + 1] += weight;
-                            runs[li] -= weight;
-                        }
+                // Partition the edges overlapping this row's band to the front so the
+                // sub-scanline passes only test those.
+                var active: usize = 0;
+                for (edges, 0..) |e, i| {
+                    if (e.y_min < y + 0.5 and e.y_max > y - 0.5) {
+                        std.mem.swap(Edge, &edges[active], &edges[i]);
+                        active += 1;
                     }
                 }
 
+                var touched_lo: usize = width;
+                var touched_hi: usize = 0;
+                for (0..polygon_subscanlines) |k| {
+                    const sy = y - 0.5 + (as(f32, k) + 0.5) * weight;
+                    const crossings = scanlineCrossings(edges[0..active], sy, crossings_buf);
+                    var i: usize = 0;
+                    while (i + 1 < crossings.len) : (i += 2) {
+                        const left = @max(crossings[i], x_lo) - x_lo;
+                        const right = @min(crossings[i + 1], x_hi) - x_lo;
+                        if (right <= left) continue;
+
+                        const first: usize = @floor(left);
+                        const last_raw: usize = @floor(right);
+                        const last = @min(last_raw, width - 1);
+                        if (first == last) {
+                            cells[first].area += (right - left) * weight;
+                        } else {
+                            cells[first].area += (as(f32, first + 1) - left) * weight;
+                            cells[last].area += (right - as(f32, last)) * weight;
+                            cells[first + 1].run += weight;
+                            cells[last].run -= weight;
+                        }
+                        touched_lo = @min(touched_lo, first);
+                        touched_hi = @max(touched_hi, last);
+                    }
+                }
+                if (touched_lo > touched_hi) continue;
+
                 const row: u32 = @trunc(y);
+                const row_px = self.image.data[row * self.image.stride + col_start ..][0..width];
                 var run: f32 = 0;
-                for (0..width) |i| {
-                    run += runs[i];
-                    const alpha = @min(coverage[i] + run, 1);
-                    if (alpha > 0) self.setPixel(row, col_start + @as(u32, @intCast(i)), c2.fade(alpha), blending);
+                for (cells[touched_lo .. touched_hi + 1], row_px[touched_lo .. touched_hi + 1]) |*cell, *px| {
+                    run += cell.run;
+                    const alpha = @min(cell.area + run, 1);
+                    cell.* = .{};
+                    paint.cover(px, alpha);
                 }
             }
         }
@@ -1100,8 +1105,7 @@ pub fn Canvas(comptime T: type) type {
 
         /// Internal function for filling solid (non-anti-aliased) circles.
         fn fillCircleFast(self: Self, center: Point(2, f32), radius: f32, color: anytype, blending: Blending) void {
-            const solid_color = convertColor(T, color);
-            const rgba_color = convertColor(Rgba, color);
+            const paint: Paint = .init(color, blending);
             const frows: f32 = @floatFromInt(self.image.rows);
             const top = @max(0, center.y() - radius);
             const bottom = @min(frows - 1, center.y() + radius);
@@ -1114,7 +1118,7 @@ pub fn Canvas(comptime T: type) type {
                 if (dx > 0) {
                     const x1 = center.x() - dx;
                     const x2 = center.x() + dx;
-                    self.fillSpan(x1, x2, y, solid_color, rgba_color, blending);
+                    self.fillSpan(x1, x2, y, paint);
                 }
             }
         }
@@ -1124,8 +1128,7 @@ pub fn Canvas(comptime T: type) type {
         fn fillArcFast(self: Self, center: Point(2, f32), radius: f32, arc: ArcRange, color: anytype, blending: Blending) void {
             if (arc.span() <= 0) return;
 
-            const solid_color = convertColor(T, color);
-            const rgba_color = convertColor(Rgba, color);
+            const paint: Paint = .init(color, blending);
             const frows: f32 = @floatFromInt(self.image.rows);
             const fcols: f32 = @floatFromInt(self.image.cols);
 
@@ -1171,12 +1174,12 @@ pub fn Canvas(comptime T: type) type {
                         const nx = span_end + 1;
                         const dnx = nx - center.x();
                         // Guard against scan_right's float imprecision pushing nx past the circle —
-                        // without this, setHorizontalSpan's @ceil can include an extra pixel.
+                        // without this, fillSpan's @ceil can include an extra pixel.
                         if (dnx * dnx + dy * dy > radius_sq) break;
                         if (!arc.containsCross(nx * sin_s + start_const, nx * sin_e + end_const)) break;
                     }
 
-                    self.fillSpan(x, span_end, y, solid_color, rgba_color, blending);
+                    self.fillSpan(x, span_end, y, paint);
                     x = span_end;
                 }
             }
@@ -1219,8 +1222,7 @@ pub fn Canvas(comptime T: type) type {
             const end_edge = arc.endVector();
 
             const bounds = self.ringBoundingBox(center, radius) orelse return;
-
-            const rgba_color = convertColor(Rgba, color);
+            const paint: Paint = .init(color, blending);
 
             for (bounds.t..bounds.b) |r| {
                 const y = as(f32, r) - center.y();
@@ -1247,9 +1249,7 @@ pub fn Canvas(comptime T: type) type {
 
                     const dist = @sqrt(dist_sq);
                     const coverage = calculateArcCoverage(dist, radius, in_arc, start_cross_product, end_cross_product);
-                    if (coverage > 0) {
-                        self.setPixel(@intCast(r), @intCast(c), rgba_color.fade(coverage), blending);
-                    }
+                    paint.cover(&self.image.data[r * self.image.stride + c], coverage);
                 }
             }
         }
@@ -1343,14 +1343,14 @@ pub fn Canvas(comptime T: type) type {
 
             const pixels_per_segment = pixels_per_segment_fast;
 
+            var stack: [spline_polygon_stack_buffer_size * @sizeOf(Point(2, f32)) + 32 * @sizeOf(EdgeCurve)]u8 align(16) = undefined;
+            var buffer_first: std.heap.BufferFirstAllocator = .init(&stack, self.allocator);
+            const scratch = buffer_first.allocator();
+
             // Cache per-edge curve data so the tessellation pass doesn't recompute control
-            // points or curve-length estimates. Stack-cap the common case; spill to heap otherwise.
-            var stack_edges: [32]EdgeCurve = undefined;
-            const edges = if (polygon.len <= stack_edges.len)
-                stack_edges[0..polygon.len]
-            else
-                try self.allocator.alloc(EdgeCurve, polygon.len);
-            defer if (polygon.len > stack_edges.len) self.allocator.free(edges);
+            // points or curve-length estimates.
+            const edges = try scratch.alloc(EdgeCurve, polygon.len);
+            defer scratch.free(edges);
 
             var total_points: u32 = 0;
             for (edges, 0..) |*edge, i| {
@@ -1364,12 +1364,8 @@ pub fn Canvas(comptime T: type) type {
                 total_points += segments;
             }
 
-            var stack_buffer: [spline_polygon_stack_buffer_size]Point(2, f32) = undefined;
-            const points_buffer = if (total_points <= spline_polygon_stack_buffer_size)
-                stack_buffer[0..total_points]
-            else
-                try self.allocator.alloc(Point(2, f32), total_points);
-            defer if (total_points > spline_polygon_stack_buffer_size) self.allocator.free(points_buffer);
+            const points_buffer = try scratch.alloc(Point(2, f32), total_points);
+            defer scratch.free(points_buffer);
 
             var write_idx: u32 = 0;
             for (edges, 0..) |edge, i| {
@@ -1592,10 +1588,7 @@ pub fn Canvas(comptime T: type) type {
             const rows_i32: i32 = @intCast(self.image.rows);
             const cols_i32: i32 = @intCast(self.image.cols);
 
-            const ColorType = @TypeOf(color);
-            const pixel: T = if (comptime ColorType == T) color else convertColor(T, color);
-            const rgba_color = convertColor(Rgba, color);
-            const overwrite = isOverwrite(blending, rgba_color);
+            const paint: Paint = .init(color, blending);
 
             for (0..render_height) |row| {
                 const py = base_row + as(i32, row);
@@ -1605,12 +1598,7 @@ pub fn Canvas(comptime T: type) type {
                     if (getGlyphBit(char_data, row, col, bytes_per_row) == 0) continue;
                     const px = base_col + as(i32, col);
                     if (px < 0 or px >= cols_i32) continue;
-                    const dest = &self.image.data[row_offset + @as(usize, @intCast(px))];
-                    if (overwrite) {
-                        dest.* = pixel;
-                    } else {
-                        assignPixel(dest, rgba_color, blending);
-                    }
+                    paint.put(&self.image.data[row_offset + @as(usize, @intCast(px))]);
                 }
             }
         }
@@ -1619,9 +1607,7 @@ pub fn Canvas(comptime T: type) type {
         /// identical pixels, clipped to the precomputed text rect.
         fn renderGlyphFastScaled(self: Self, glyph_info: anytype, char_data: []const u8, font: BitmapFont, x: f32, y: f32, scale: f32, clip_rect: Rectangle(f32), color: anytype, blending: Blending) void {
             const bytes_per_row = calculateGlyphBytesPerRow(glyph_info, font);
-            const pixel = convertColor(T, color);
-            const rgba_color = convertColor(Rgba, color);
-            const overwrite = isOverwrite(blending, rgba_color);
+            const paint: Paint = .init(color, blending);
             for (0..glyph_info.height) |row| {
                 for (0..glyph_info.width) |col| {
                     if (getGlyphBit(char_data, row, col, bytes_per_row) == 0) continue;
@@ -1637,7 +1623,7 @@ pub fn Canvas(comptime T: type) type {
                         const row_offset = py * self.image.stride;
                         for (x_start..x_end) |px| {
                             const dest = &self.image.data[row_offset + px];
-                            if (overwrite) dest.* = pixel else assignPixel(dest, rgba_color, blending);
+                            paint.put(dest);
                         }
                     }
                 }
@@ -1647,7 +1633,7 @@ pub fn Canvas(comptime T: type) type {
         /// Box-filter antialiased upscale: each destination pixel samples a `1/scale`-radius
         /// box of the source bitmap and writes the area-weighted coverage as alpha.
         fn renderGlyphSoftScaled(self: Self, glyph_info: anytype, char_data: []const u8, font: BitmapFont, x: f32, y: f32, scale: f32, color: anytype, blending: Blending) void {
-            const rgba_color = convertColor(Rgba, color);
+            const paint: Paint = .init(color, blending);
             const bytes_per_row = calculateGlyphBytesPerRow(glyph_info, font);
             const glyph_width_f = as(f32, glyph_info.width);
             const glyph_height_f = as(f32, glyph_info.height);
@@ -1661,7 +1647,7 @@ pub fn Canvas(comptime T: type) type {
                 while (dx < dest_width) : (dx += 1) {
                     const dest_x = x + dx + as(f32, glyph_info.x_offset) * scale;
                     const dest_y = y + dy + as(f32, glyph_info.y_offset) * scale;
-                    if (self.atOrNull(@trunc(dest_y), @trunc(dest_x)) == null) continue;
+                    const dest = self.atOrNull(@floor(dest_y), @floor(dest_x)) orelse continue;
 
                     const src_x = dx / scale;
                     const src_y = dy / scale;
@@ -1692,7 +1678,7 @@ pub fn Canvas(comptime T: type) type {
                     const box_area = (x1 - x0) * (y1 - y0);
                     const normalized_coverage = total_coverage / box_area;
                     if (normalized_coverage > 0) {
-                        self.setPoint(.init(.{ dest_x, dest_y }), rgba_color.fade(normalized_coverage), blending);
+                        paint.cover(dest, normalized_coverage);
                     }
                 }
             }

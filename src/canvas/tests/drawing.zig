@@ -522,8 +522,10 @@ test "fillPolygon soft antialiases near-horizontal edges" {
     // Coverage along the shallow edge ramps: ~17% at x=47, ~83% at x=53.
     const light = img.at(15, 47).*.r;
     const dark = img.at(15, 53).*.r;
-    try expect(light > 190 and light < 245);
-    try expect(dark > 10 and dark < 70);
+    try expect(light > 190);
+    try expect(light < 245);
+    try expect(dark > 10);
+    try expect(dark < 70);
     var prev: u8 = 255;
     for (44..57) |x| {
         const value = img.at(15, @intCast(x)).*.r;

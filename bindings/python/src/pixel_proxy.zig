@@ -239,15 +239,8 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
                     return null;
                 };
 
-                // Parse blend mode
                 const enum_utils = @import("enum_utils.zig");
-                const mode = if (mode_obj != null)
-                    enum_utils.pyToEnum(zignal.Blending, mode_obj.?) catch {
-                        // Error already set
-                        return null;
-                    }
-                else
-                    zignal.Blending.normal;
+                const mode = enum_utils.pyToEnumOpt(zignal.Blending, mode_obj, .{ .missing = .normal, .none = .normal }) catch return null;
 
                 // Get current pixel, blend, and write back
                 const current = pimg.getPixelRgba(@intCast(proxy.row), @intCast(proxy.col));

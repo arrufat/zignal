@@ -25,6 +25,18 @@ pub fn Rectangle(comptime T: type) type {
             return .{ .l = l, .t = t, .r = r, .b = b };
         }
 
+        /// Tightest rectangle containing `points` (must be non-empty).
+        pub fn fromPoints(points: []const Point(2, T)) Self {
+            assert(points.len > 0);
+            var lo = points[0];
+            var hi = points[0];
+            for (points[1..]) |p| {
+                lo = lo.min(p);
+                hi = hi.max(p);
+            }
+            return .{ .l = lo.x(), .t = lo.y(), .r = hi.x(), .b = hi.y() };
+        }
+
         /// Initialize a rectangle at center x, y with the specified width and height.
         pub fn initCenter(x: T, y: T, w: T, h: T) Self {
             assert(w > 0 and h > 0);

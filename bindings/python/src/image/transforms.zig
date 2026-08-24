@@ -704,12 +704,7 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const tag_insert = enum_utils.longToEnum(Interpolation, method_value) catch return null;
     const method = tagToInterpolation(tag_insert);
 
-    var blend_mode: Blending = .none;
-    if (blend_obj) |obj| {
-        if (obj != c.Py_None()) {
-            blend_mode = enum_utils.pyToEnum(Blending, obj) catch return null;
-        }
-    }
+    const blend_mode = enum_utils.pyToEnumOpt(Blending, blend_obj, .{ .missing = .none, .none = .none }) catch return null;
 
     if (!validateF32(angle, "Angle")) return null;
 
