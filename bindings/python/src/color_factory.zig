@@ -449,8 +449,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 return null;
             }
 
-            // Convert mode to Zig Blending (use NORMAL if not provided), in case of failure the error set by enum_utils
-            const mode = if (mode_obj) |obj| enum_utils.pyToEnum(zignal.Blending, obj) catch return null else .normal;
+            const mode = enum_utils.pyToEnumOpt(zignal.Blending, mode_obj, .{ .missing = .normal, .none = .normal }) catch return null;
 
             // Convert self to Zig color
             const zig_color = objectToZigColor(self);

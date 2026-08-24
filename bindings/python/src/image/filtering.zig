@@ -1068,13 +1068,7 @@ pub fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
 
     const overlay: *ImageObject = @ptrCast(overlay_obj.?);
 
-    // Get blend mode (default to normal if not specified)
-    var blend_mode = zignal.Blending.normal;
-    if (mode_obj != null and mode_obj != c.Py_None()) {
-        blend_mode = enum_utils.pyToEnum(zignal.Blending, mode_obj.?) catch {
-            return null; // Error already set
-        };
-    }
+    const blend_mode = enum_utils.pyToEnumOpt(zignal.Blending, mode_obj, .{ .missing = .normal, .none = .normal }) catch return null;
 
     // Overlay must be initialized
     if (overlay.py_image == null) {

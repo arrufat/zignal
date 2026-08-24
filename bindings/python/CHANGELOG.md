@@ -13,6 +13,7 @@
 - **`blending` keyword on canvas primitives**: every `Canvas` draw/fill method (`draw_line`, `fill_circle`, `draw_text`, …) now accepts an optional `blending: Blending` keyword (default `Blending.NORMAL`; pass `None` for a raw overwrite), applying any of the 12 blend modes in either draw mode. Opaque rendering is unchanged; `DrawMode.FAST` now composites translucent colors instead of writing them verbatim.
 
 ### Changed
+- **`mode=None` accepted by `Rgba.blend` / `Image.blend`**: passing `None` for the blend mode now means the default `Blending.NORMAL` (previously a `TypeError`), matching how the other optional enum keywords treat `None`.
 - **Matrix/Transform methods renamed to conventional short names** (breaking): `Matrix.inverse()` → `Matrix.inv()`, `Matrix.determinant()` → `Matrix.det()`, and `ProjectiveTransform.inverse()` → `ProjectiveTransform.inv()`. (`Matrix.pinv()` was already named.)
 
 ## [0.10.0] - 2026-04-15

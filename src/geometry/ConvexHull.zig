@@ -97,13 +97,7 @@ pub fn ConvexHull(comptime T: type) type {
             if (!self.isValid()) {
                 return null;
             }
-            var min = self.hull.items[0].items;
-            var max = self.hull.items[0].items;
-            for (self.hull.items[1..]) |point| {
-                min = @min(point.items, min);
-                max = @max(point.items, max);
-            }
-            return .init(min[0], min[1], max[0], max[1]);
+            return .fromPoints(self.hull.items);
         }
 
         /// Returns true if the point p is inside the convex hull.

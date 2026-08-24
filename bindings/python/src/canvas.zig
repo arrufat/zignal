@@ -207,18 +207,11 @@ pub const draw_mode_values = [_]stub_metadata.EnumValueDoc{
     .{ .name = "SOFT", .doc = "Antialiased rendering with smooth edges" },
 };
 
-/// Parses an optional `blending` kwarg: missing => .normal, None => .none.
-fn parseBlending(obj: ?*c.PyObject) !Blending {
-    const o = obj orelse return .normal;
-    if (o == c.Py_None()) return .none;
-    return enum_utils.pyToEnum(Blending, o);
-}
-
-/// Parses the shared `mode` + `blending` kwargs into a DrawOptions.
+/// Parses the shared `mode` + `blending` kwargs into a DrawOptions (`blending=None` disables blending).
 fn parseDrawOptions(mode: c_long, blending: ?*c.PyObject) !DrawOptions {
     return .{
         .mode = try enum_utils.longToEnum(DrawMode, mode),
-        .blending = try parseBlending(blending),
+        .blending = try enum_utils.pyToEnumOpt(Blending, blending, .{ .missing = .normal, .none = .none }),
     };
 }
 
@@ -575,7 +568,7 @@ fn canvas_draw_image(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         }
     }
 
-    const blend_mode = parseBlending(params.blend_mode) catch return null;
+    const blend_mode = enum_utils.pyToEnumOpt(Blending, params.blend_mode, .{ .missing = .normal, .none = .none }) catch return null;
 
     canvas.drawImage(py_image_ptr, pos, rect_opt, blend_mode);
 

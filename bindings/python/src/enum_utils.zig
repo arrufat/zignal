@@ -189,6 +189,14 @@ fn ResolvedEnum(comptime T: type) type {
     };
 }
 
+/// Parses an optional enum kwarg: `defaults.missing` when it was not passed, `defaults.none`
+/// when it was passed as `None`. Sets a Python exception on failure and returns an error.
+pub fn pyToEnumOpt(comptime E: type, obj: ?*c.PyObject, defaults: struct { missing: E, none: E }) !E {
+    const o = obj orelse return defaults.missing;
+    if (o == c.Py_None()) return defaults.none;
+    return pyToEnum(E, o);
+}
+
 /// Convert a c_long integer to a Zig enum value (or union tag)
 pub fn longToEnum(comptime T: type, value: c_long) !ResolvedEnum(T) {
     const EI = getEnumInfo(T);
