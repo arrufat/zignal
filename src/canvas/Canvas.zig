@@ -61,6 +61,10 @@ pub fn Canvas(comptime T: type) type {
         const antialias_edge_offset = 0.5;
         /// Stack buffer size for polygon intersection calculations (avoids allocation for most cases)
         const polygon_intersection_stack_buffer_size = 64;
+        /// Vertical samples per pixel row for antialiased polygon fills
+        const polygon_subscanlines = 8;
+        /// Stack buffer size (in pixels) for per-row polygon coverage accumulation
+        const polygon_coverage_stack_buffer_size = 1024;
         /// Stack buffer size for spline polygon tessellation (avoids allocation for typical polygons)
         const spline_polygon_stack_buffer_size = 400;
 
@@ -904,23 +908,26 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Fills the given polygon on an image using a scanline algorithm.
+        /// Fills the given polygon on an image using an even-odd scanline algorithm.
         /// The polygon is defined by an array of points (vertices).
         ///
         /// **Rendering Modes:**
-        /// - **DrawMode.fast**: hard edges.
-        /// - **DrawMode.soft**: antialiased edges.
+        /// - **DrawMode.fast**: hard edges, one sample per row.
+        /// - **DrawMode.soft**: antialiased edges in every direction — each row is sampled at
+        ///   `polygon_subscanlines` heights with exact horizontal coverage.
         pub fn fillPolygon(self: Self, polygon: []const Point(2, f32), color: anytype, opts: DrawOptions) !void {
             comptime assert(isColor(@TypeOf(color)));
             if (polygon.len < 3) return;
 
             const frows: f32 = @floatFromInt(self.image.rows);
-            const fcols: f32 = @floatFromInt(self.image.cols);
 
-            // Find bounding box for optimization
+            var min_x = polygon[0].x();
+            var max_x = polygon[0].x();
             var min_y = polygon[0].y();
             var max_y = polygon[0].y();
             for (polygon) |p| {
+                min_x = @min(min_x, p.x());
+                max_x = @max(max_x, p.x());
                 min_y = @min(min_y, p.y());
                 max_y = @max(max_y, p.y());
             }
@@ -928,67 +935,123 @@ pub fn Canvas(comptime T: type) type {
             const start_y = @max(0, @floor(min_y));
             const end_y = @min(frows - 1, @ceil(max_y));
 
-            // One reusable buffer sized at the worst case (polygon.len intersections per scanline).
+            // One reusable buffer sized at the worst case (polygon.len crossings per scanline).
             // Stack-allocated for small polygons; spills to heap once over the threshold.
-            var stack_intersections: [polygon_intersection_stack_buffer_size]f32 = undefined;
-            const intersections_buf: []f32 = if (polygon.len <= stack_intersections.len)
-                stack_intersections[0..polygon.len]
+            var stack_crossings: [polygon_intersection_stack_buffer_size]f32 = undefined;
+            const crossings_buf: []f32 = if (polygon.len <= stack_crossings.len)
+                stack_crossings[0..polygon.len]
             else
                 try self.allocator.alloc(f32, polygon.len);
-            defer if (polygon.len > stack_intersections.len) self.allocator.free(intersections_buf);
+            defer if (polygon.len > stack_crossings.len) self.allocator.free(crossings_buf);
 
             const c2 = convertColor(Rgba, color);
-            const solid_color = convertColor(T, c2);
+
+            switch (opts.mode) {
+                .fast => {
+                    const solid_color = convertColor(T, c2);
+                    var y = start_y;
+                    while (y <= end_y) : (y += 1) {
+                        const crossings = scanlineCrossings(polygon, y, crossings_buf);
+                        var i: usize = 0;
+                        while (i + 1 < crossings.len) : (i += 2) {
+                            self.fillSpan(crossings[i], crossings[i + 1], y, solid_color, c2, opts.blending);
+                        }
+                    }
+                },
+                .soft => try self.fillPolygonSoft(polygon, min_x, max_x, start_y, end_y, crossings_buf, c2, opts.blending),
+            }
+        }
+
+        /// Sorted x-coordinates where the polygon's edges cross the horizontal line at `y`.
+        fn scanlineCrossings(polygon: []const Point(2, f32), y: f32, buf: []f32) []f32 {
+            var count: usize = 0;
+            for (0..polygon.len) |i| {
+                const p1 = polygon[i];
+                const p2 = polygon[(i + 1) % polygon.len];
+                if ((p1.y() <= y and p2.y() > y) or (p2.y() <= y and p1.y() > y)) {
+                    buf[count] = p1.x() + (y - p1.y()) * (p2.x() - p1.x()) / (p2.y() - p1.y());
+                    count += 1;
+                }
+            }
+            const crossings = buf[0..count];
+            if (count > 1) std.mem.sort(f32, crossings, {}, std.sort.asc(f32));
+            return crossings;
+        }
+
+        /// Antialiased even-odd fill. Pixel (r, c) covers [c-0.5, c+0.5] × [r-0.5, r+0.5]; each row
+        /// is sampled at `polygon_subscanlines` heights, span ends contribute their exact horizontal
+        /// overlap, and fully covered interiors go through a difference array so per-row cost does
+        /// not scale with the sample count.
+        fn fillPolygonSoft(
+            self: Self,
+            polygon: []const Point(2, f32),
+            min_x: f32,
+            max_x: f32,
+            start_y: f32,
+            end_y: f32,
+            crossings_buf: []f32,
+            c2: Rgba,
+            blending: Blending,
+        ) !void {
+            const fcols: f32 = @floatFromInt(self.image.cols);
+            const col_start: u32 = @trunc(@max(0, @floor(min_x - 0.5)));
+            const col_end: u32 = @trunc(@max(0, @min(fcols - 1, @ceil(max_x + 0.5))));
+            if (col_start > col_end) return;
+            const width = col_end - col_start + 1;
+
+            var stack_coverage: [polygon_coverage_stack_buffer_size + 1]f32 = undefined;
+            const coverage: []f32 = if (width + 1 <= stack_coverage.len)
+                stack_coverage[0 .. width + 1]
+            else
+                try self.allocator.alloc(f32, width + 1);
+            defer if (width + 1 > stack_coverage.len) self.allocator.free(coverage);
+
+            var stack_runs: [polygon_coverage_stack_buffer_size + 2]f32 = undefined;
+            const runs: []f32 = if (width + 2 <= stack_runs.len)
+                stack_runs[0 .. width + 2]
+            else
+                try self.allocator.alloc(f32, width + 2);
+            defer if (width + 2 > stack_runs.len) self.allocator.free(runs);
+
+            const x_lo = as(f32, col_start) - 0.5;
+            const x_hi = as(f32, col_end) + 0.5;
+            const weight = 1.0 / as(f32, polygon_subscanlines);
 
             var y = start_y;
             while (y <= end_y) : (y += 1) {
-                // Single-pass intersection collection.
-                var count: u32 = 0;
-                for (0..polygon.len) |i| {
-                    const p1 = polygon[i];
-                    const p2 = polygon[(i + 1) % polygon.len];
-                    if ((p1.y() <= y and p2.y() > y) or (p2.y() <= y and p1.y() > y)) {
-                        intersections_buf[count] = p1.x() + (y - p1.y()) * (p2.x() - p1.x()) / (p2.y() - p1.y());
-                        count += 1;
+                @memset(coverage, 0);
+                @memset(runs, 0);
+
+                for (0..polygon_subscanlines) |k| {
+                    const sy = y - 0.5 + (as(f32, k) + 0.5) * weight;
+                    const crossings = scanlineCrossings(polygon, sy, crossings_buf);
+                    var i: usize = 0;
+                    while (i + 1 < crossings.len) : (i += 2) {
+                        const left = @max(crossings[i], x_lo);
+                        const right = @min(crossings[i + 1], x_hi);
+                        if (right <= left) continue;
+
+                        const first: u32 = @floor(left + 0.5);
+                        const last: u32 = @floor(right + 0.5);
+                        const fi = first - col_start;
+                        const li = last - col_start;
+                        if (fi == li) {
+                            coverage[fi] += (right - left) * weight;
+                        } else {
+                            coverage[fi] += (as(f32, first) + 0.5 - left) * weight;
+                            coverage[li] += (right - (as(f32, last) - 0.5)) * weight;
+                            runs[fi + 1] += weight;
+                            runs[li] -= weight;
+                        }
                     }
                 }
-                const intersections = intersections_buf[0..count];
 
-                if (intersections.len > 1) {
-                    std.mem.sort(f32, intersections, {}, std.sort.asc(f32));
-                }
-
-                var i: u32 = 0;
-                while (i + 1 < intersections.len) : (i += 2) {
-                    const left_edge = intersections[i];
-                    const right_edge = intersections[i + 1];
-
-                    const x_start = @max(0, @floor(left_edge));
-                    const x_end = @min(fcols - 1, @ceil(right_edge));
-
-                    switch (opts.mode) {
-                        .soft => {
-                            var x = x_start;
-                            while (x <= x_end) : (x += 1) {
-                                // Apply antialiasing at edges
-                                var alpha: f32 = 1.0;
-                                if (x < left_edge + 1) {
-                                    alpha = @min(alpha, x + antialias_edge_offset - left_edge);
-                                }
-                                if (x > right_edge - 1) {
-                                    alpha = @min(alpha, right_edge - (x - antialias_edge_offset));
-                                }
-                                alpha = clamp(alpha, 0, 1);
-
-                                if (alpha > 0) {
-                                    self.setPoint(.init(.{ x, y }), c2.fade(alpha), opts.blending);
-                                }
-                            }
-                        },
-                        .fast => {
-                            self.fillSpan(left_edge, right_edge, y, solid_color, c2, opts.blending);
-                        },
-                    }
+                const row: u32 = @trunc(y);
+                var run: f32 = 0;
+                for (0..width) |i| {
+                    run += runs[i];
+                    const alpha = @min(coverage[i] + run, 1);
+                    if (alpha > 0) self.setPixel(row, col_start + @as(u32, @intCast(i)), c2.fade(alpha), blending);
                 }
             }
         }
