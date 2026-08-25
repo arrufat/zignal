@@ -7,6 +7,7 @@ const zignal = @import("zignal");
 const python = @import("python.zig");
 const color_registry = @import("color_registry.zig");
 const stub_metadata = @import("stub_metadata.zig");
+const enums = @import("enums.zig");
 const color_factory = @import("color_factory.zig");
 
 // Import modules that contain metadata
@@ -21,10 +22,7 @@ const pca_module = @import("pca.zig");
 const rectangle_module = @import("rectangle.zig");
 const convex_hull_module = @import("convex_hull.zig");
 const font_module = @import("font.zig");
-const blending_module = @import("blending.zig");
 const qrcode_module = @import("qrcode.zig");
-const interpolation_module = @import("interpolation.zig");
-const border_mode_module = @import("border_mode.zig");
 const optimization_module = @import("optimization.zig");
 const transforms_module = @import("transforms.zig");
 const running_stats_module = @import("running_stats.zig");
@@ -453,87 +451,15 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         .special_methods = null,
     });
 
-    // Generate Interpolation enum
-    try generateEnumFromMetadata(&stub, .{
-        .name = "Interpolation",
-        .base = "IntEnum",
-        .doc = interpolation_module.interpolation_doc,
-        .zig_type = zignal.Interpolation,
-        .value_docs = &interpolation_module.interpolation_values,
-    });
-
-    // Generate Blending enum
-    try generateEnumFromMetadata(&stub, .{
-        .name = "Blending",
-        .base = "IntEnum",
-        .doc = blending_module.blending_doc,
-        .zig_type = zignal.Blending,
-        .value_docs = &blending_module.blending_values,
-    });
-
-    // Generate EcLevel enum
-    try generateEnumFromMetadata(&stub, .{
-        .name = "EcLevel",
-        .base = "IntEnum",
-        .doc = qrcode_module.ec_level_doc,
-        .zig_type = zignal.qrcode.EcLevel,
-        .value_docs = &qrcode_module.ec_level_values,
-    });
-
-    // Generate BorderMode enum
-    try generateEnumFromMetadata(&stub, .{
-        .name = "BorderMode",
-        .base = "IntEnum",
-        .doc = border_mode_module.border_mode_doc,
-        .zig_type = zignal.BorderMode,
-        .value_docs = &border_mode_module.border_mode_values,
-    });
-
-    // Generate ThresholdMode enum
-    try generateEnumFromMetadata(&stub, .{
-        .name = "ThresholdMode",
-        .base = "IntEnum",
-        .doc = image_module.threshold_mode_doc,
-        .zig_type = zignal.FloodFillOptions.ThresholdMode,
-        .value_docs = &image_module.threshold_mode_values,
-    });
-
-    // Generate DrawMode enum
-    try generateEnumFromMetadata(&stub, .{
-        .name = "DrawMode",
-        .base = "IntEnum",
-        .doc = canvas_module.draw_mode_doc,
-        .zig_type = zignal.DrawMode,
-        .value_docs = &canvas_module.draw_mode_values,
-    });
-
-    // Generate the text alignment enums
-    try generateEnumFromMetadata(&stub, .{
-        .name = "TextAlign",
-        .base = "IntEnum",
-        .doc = canvas_module.text_align_doc,
-        .zig_type = zignal.TextAlign,
-        .value_docs = &canvas_module.text_align_values,
-    });
-    try generateEnumFromMetadata(&stub, .{
-        .name = "VerticalAlign",
-        .base = "IntEnum",
-        .doc = canvas_module.vertical_align_doc,
-        .zig_type = zignal.VerticalAlign,
-        .value_docs = &canvas_module.vertical_align_values,
-    });
-
-    // Generate OptimizationPolicy enum
-    try generateEnumFromMetadata(&stub, .{
-        .name = "OptimizationPolicy",
-        .base = "IntEnum",
-        .doc = optimization_module.optimization_policy_doc,
-        .zig_type = zignal.optimization.OptimizationPolicy,
-        .value_docs = &[_]stub_metadata.EnumValueDoc{
-            .{ .name = "MIN", .doc = "Minimize total cost" },
-            .{ .name = "MAX", .doc = "Maximize total cost (profit)" },
-        },
-    });
+    inline for (enums.registry) |entry| {
+        try generateEnumFromMetadata(&stub, .{
+            .name = comptime zignal.meta.getSimpleTypeName(entry.type),
+            .base = "IntEnum",
+            .doc = entry.doc,
+            .zig_type = entry.type,
+            .value_docs = entry.values,
+        });
+    }
 
     // Generate MotionBlur classes
     try generateMotionBlurClasses(&stub);
@@ -747,6 +673,11 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
         try stub.writef("    {s} as {s},\n", .{ class_name, class_name });
     }
 
+    inline for (enums.registry) |entry| {
+        const name = comptime zignal.meta.getSimpleTypeName(entry.type);
+        try stub.writef("    {s} as {s},\n", .{ name, name });
+    }
+
     // Add Image and classes
     try stub.write(
         \\    Rectangle as Rectangle,
@@ -754,18 +685,9 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
         \\    Image as Image,
         \\    Matrix as Matrix,
         \\    Canvas as Canvas,
-        \\    Interpolation as Interpolation,
-        \\    Blending as Blending,
-        \\    BorderMode as BorderMode,
-        \\    DrawMode as DrawMode,
-        \\    TextAlign as TextAlign,
-        \\    VerticalAlign as VerticalAlign,
-        \\    ThresholdMode as ThresholdMode,
         \\    MotionBlur as MotionBlur,
         \\    Colormap as Colormap,
-        \\    OptimizationPolicy as OptimizationPolicy,
         \\    Assignment as Assignment,
-        \\    EcLevel as EcLevel,
         \\    QrDecodeResult as QrDecodeResult,
         \\    FeatureDistributionMatching as FeatureDistributionMatching,
         \\    PCA as PCA,

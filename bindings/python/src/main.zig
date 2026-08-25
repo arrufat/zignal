@@ -2,7 +2,6 @@ const std = @import("std");
 const zignal = @import("zignal");
 
 const font = @import("font.zig");
-const blending = @import("blending.zig");
 const canvas = @import("canvas.zig");
 const color = @import("color.zig");
 const colormaps = @import("colormaps.zig");
@@ -12,8 +11,6 @@ const image = @import("image.zig");
 const pixel_proxy = @import("pixel_proxy.zig");
 const matrix = @import("matrix.zig");
 const motion_blur = @import("motion_blur.zig");
-const interpolation = @import("interpolation.zig");
-const border_mode = @import("border_mode.zig");
 const optimization = @import("optimization.zig");
 const pca = @import("pca.zig");
 const pixel_iterator = @import("pixel_iterator.zig");
@@ -25,6 +22,7 @@ const c = python.c;
 const rectangle = @import("rectangle.zig");
 const transforms = @import("transforms.zig");
 const enum_utils = @import("enum_utils.zig");
+const enums = @import("enums.zig");
 
 // ============================================================================
 // MODULE FUNCTIONS
@@ -94,24 +92,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
     // Enum Registration (table-driven)
     // ========================================================================
 
-    const EnumReg = struct {
-        type: type,
-        doc: []const u8,
-    };
-
-    const enum_registrations = [_]EnumReg{
-        .{ .type = zignal.DrawMode, .doc = canvas.draw_mode_doc },
-        .{ .type = zignal.TextAlign, .doc = canvas.text_align_doc },
-        .{ .type = zignal.VerticalAlign, .doc = canvas.vertical_align_doc },
-        .{ .type = zignal.Blending, .doc = blending.blending_doc },
-        .{ .type = zignal.Interpolation, .doc = interpolation.interpolation_doc },
-        .{ .type = zignal.BorderMode, .doc = border_mode.border_mode_doc },
-        .{ .type = zignal.FloodFillOptions.ThresholdMode, .doc = image.threshold_mode_doc },
-        .{ .type = zignal.optimization.OptimizationPolicy, .doc = optimization.optimization_policy_doc },
-        .{ .type = zignal.qrcode.EcLevel, .doc = qrcode.ec_level_doc },
-    };
-
-    inline for (enum_registrations) |reg| {
+    inline for (enums.registry) |reg| {
         enum_utils.registerEnum(reg.type, @ptrCast(m), reg.doc) catch |err| {
             std.log.err("Failed to register {s}: {}", .{ @typeName(reg.type), err });
             c.Py_DecRef(m);

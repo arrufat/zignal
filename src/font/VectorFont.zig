@@ -190,28 +190,34 @@ pub const Layout = struct {
 
     pub fn next(self: *Layout) ?Item {
         while (self.iter.nextCodepoint()) |codepoint| {
-            if (codepoint == '\n') {
-                self.x = 0;
-                self.baseline += self.line_height;
-                self.prev = null;
-                continue;
-            }
-            const gid = self.font.glyphIndex(codepoint);
-            if (self.prev) |p| self.x += as(f32, self.font.kern(p, gid)) * self.scale;
-            const metrics = self.font.glyphMetrics(gid);
-            const bounds = if (self.with_bounds or !self.font.lsb_is_at_x_zero) self.font.glyphBounds(gid) else null;
-            // Unless head says the outline already starts at its bearing, shift it there.
-            const shift: f32 = if (self.font.lsb_is_at_x_zero or bounds == null) 0 else as(f32, @as(i32, metrics.lsb) - bounds.?.x_min);
-            const item: Item = .{
-                .gid = gid,
-                .origin = .init(.{ self.x + shift * self.scale, self.baseline }),
-                .bounds = bounds,
-            };
-            self.x += as(f32, metrics.advance) * self.scale + self.letter_spacing;
-            self.prev = gid;
-            return item;
+            if (self.place(codepoint)) |item| return item;
         }
         return null;
+    }
+
+    /// Places `codepoint` at the pen and advances past it; `\n` starts the next line and
+    /// places nothing.
+    pub fn place(self: *Layout, codepoint: u21) ?Item {
+        if (codepoint == '\n') {
+            self.x = 0;
+            self.baseline += self.line_height;
+            self.prev = null;
+            return null;
+        }
+        const gid = self.font.glyphIndex(codepoint);
+        if (self.prev) |p| self.x += as(f32, self.font.kern(p, gid)) * self.scale;
+        const metrics = self.font.glyphMetrics(gid);
+        const bounds = if (self.with_bounds or !self.font.lsb_is_at_x_zero) self.font.glyphBounds(gid) else null;
+        // Unless head says the outline already starts at its bearing, shift it there.
+        const shift: f32 = if (self.font.lsb_is_at_x_zero or bounds == null) 0 else as(f32, @as(i32, metrics.lsb) - bounds.?.x_min);
+        const item: Item = .{
+            .gid = gid,
+            .origin = .init(.{ self.x + shift * self.scale, self.baseline }),
+            .bounds = bounds,
+        };
+        self.x += as(f32, metrics.advance) * self.scale + self.letter_spacing;
+        self.prev = gid;
+        return item;
     }
 
     /// Device-pixel box of the glyph's ink, relative to the text's top-left corner.

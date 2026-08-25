@@ -6,6 +6,7 @@ const clamp = std.math.clamp;
 
 const convertColor = @import("../color.zig").convertColor;
 const isColor = @import("../color.zig").isColor;
+const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
 const Blending = @import("../color.zig").Blending;
 const BitmapFont = @import("../font.zig").BitmapFont;
@@ -100,9 +101,12 @@ pub fn Canvas(comptime T: type) type {
         const antialias_edge_offset = 0.5;
         /// Vertical samples per pixel row for antialiased polygon fills
         const polygon_subscanlines = 8;
-        /// Stack scratch (bytes) for polygon fills: edges and crossings for 256 vertices plus a
-        /// 1024-pixel coverage row; larger inputs spill to the heap.
-        const polygon_scratch_size = 256 * (@sizeOf(Edge) + @sizeOf(Crossing)) + 1024 * @sizeOf(CoverageCell);
+        /// Cells per touched-block flag in the area rasterizer.
+        const area_block = 8;
+        /// Stack scratch (bytes) for polygon fills: edges and crossings for 256 vertices, a
+        /// 1024-pixel coverage row and a 12k-cell area accumulator (a 110x110 shape); larger
+        /// inputs spill to the heap.
+        const polygon_scratch_size = 256 * (@sizeOf(Edge) + @sizeOf(Crossing)) + 1024 * @sizeOf(CoverageCell) + 12 * 1024 * (@sizeOf(f32) + 1);
         /// Stack scratch (bytes) for flattening a glyph outline; spills to heap beyond
         const glyph_scratch_size = 1024 * @sizeOf(Point(2, f32)) + 64 * @sizeOf([]const Point(2, f32));
         /// Stack scratch (points) for spline polygon tessellation; spills to heap beyond
@@ -231,7 +235,26 @@ pub fn Canvas(comptime T: type) type {
 
             /// Writes the color scaled by `alpha` coverage; full coverage takes the overwrite path.
             inline fn cover(p: Paint, dest: *T, alpha: f32) void {
-                if (alpha >= 1) p.put(dest) else if (alpha > 0) assignPixel(dest, p.rgba.fade(alpha), p.blending);
+                if (alpha >= 1) return p.put(dest);
+                if (alpha <= 0) return;
+                if (comptime T == Rgb or T == Rgba) {
+                    if (p.blending == .normal and p.rgba.a == 255 and (T == Rgb or dest.a == 255)) return p.coverOpaque(dest, alpha);
+                }
+                assignPixel(dest, p.rgba.fade(alpha), p.blending);
+            }
+
+            /// Normal blending of the opaque paint over an opaque pixel: `blendColors`'
+            /// arithmetic, in its order, without the generic conversions around it.
+            inline fn coverOpaque(p: Paint, dest: *T, alpha: f32) void {
+                const a8: u8 = @trunc(255 * @min(alpha, 1));
+                if (a8 == 0) return;
+                if (a8 == 255) return p.put(dest);
+                const t: u32 = a8;
+                const w: u32 = 255 - t;
+                inline for (.{ "r", "g", "b" }) |channel| {
+                    const mixed = @as(u32, @field(p.rgba, channel)) * t + @as(u32, @field(dest, channel)) * w;
+                    @field(dest, channel) = @intCast((mixed + 127) / 255);
+                }
             }
         };
 
@@ -632,15 +655,12 @@ pub fn Canvas(comptime T: type) type {
             return 1 - fpart(x);
         }
 
-        /// Draws the outline of a polygon on the given image.
-        /// The polygon is defined by a sequence of vertices. Lines are drawn between consecutive
-        /// vertices, and a final line is drawn from the last vertex to the first to close the shape.
-        /// Each edge is an independent `drawLine`; vertices get no joins.
+        /// Draws the outline of a polygon: its edges in order, closed from the last vertex back
+        /// to the first. Widths above 1 get round joins; width 1 draws pixel lines.
         pub fn drawPolygon(self: Self, polygon: []const Point(2, f32), color: anytype, width: u32, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
-            if (width == 0) return;
-
-            // Draw all line segments
+            if (width == 0 or polygon.len == 0) return;
+            if (width > 1) return self.strokePath(&.{polygon}, true, width, color, opts);
             for (0..polygon.len) |i| {
                 self.drawLine(polygon[i], polygon[@mod(i + 1, polygon.len)], color, width, opts);
             }
@@ -1012,50 +1032,134 @@ pub fn Canvas(comptime T: type) type {
             return self.fillContours(flat.polys, .nonzero, mode, sink);
         }
 
-        /// Strokes closed polylines `width` pixels wide with round joins and caps: each becomes
-        /// a union of one quad per segment plus a polygonal disc at every vertex whose turn
-        /// would otherwise leave a visible gap, all wound the same way and filled in a single
-        /// nonzero pass so the overlaps never double-blend.
-        fn strokePolylines(self: Self, scratch: std.mem.Allocator, polys: []const []const Point(2, f32), width: f32, comptime mode: DrawMode, sink: anytype) !void {
+        /// Strokes polylines `width` pixels wide with round joins and caps. Each polyline
+        /// becomes one outline: its left offsets forward, a round end cap, its right offsets
+        /// backward and a round start cap; outer joins are arcs, inner joins detour through
+        /// the vertex so the overlap winds like the rest and a single nonzero pass fills it.
+        /// Closed polylines repeat their first point, which turns the two caps into a join.
+        fn strokePolylines(self: Self, scratch: std.mem.Allocator, polys: []const []const Point(2, f32), closed: bool, width: f32, comptime mode: DrawMode, sink: anytype) !void {
             const radius = @max(width, 0.5) / 2;
-            const sides: usize = @intFromFloat(@min(64, @max(8, @ceil(radius * 2))));
-            // The quads' vertex order and the disc's descending angle wind the same way.
-            var disc: [64]Point(2, f32) = undefined;
-            fillArcRing(disc[0..sides], .init(.{ 0, 0 }), radius, 0, -2 * std.math.pi / as(f32, sides));
+            // Chords of an arc stay within the flatness tolerance at this angular step.
+            const step: f32 = if (radius <= Outline.flatness_tolerance) std.math.pi else 2 * std.math.acos(1 - Outline.flatness_tolerance / radius);
+            const arc_points: usize = @intFromFloat(@ceil(std.math.pi / step) + 1);
 
-            var vertices: usize = 0;
-            for (polys) |poly| vertices += poly.len;
-            const piece_points = try scratch.alloc(Point(2, f32), vertices * (4 + sides));
-            defer scratch.free(piece_points);
-            const pieces = try scratch.alloc([]const Point(2, f32), vertices * 2);
-            defer scratch.free(pieces);
+            var total: usize = 0;
+            for (polys) |poly| total += (poly.len + 1) * 2 * (arc_points + 3) + 2 * arc_points + 4;
+            const points = try scratch.alloc(Point(2, f32), total);
+            defer scratch.free(points);
+            const contours = try scratch.alloc([]const Point(2, f32), polys.len);
+            defer scratch.free(contours);
 
             var n: usize = 0;
             var k: usize = 0;
             for (polys) |poly| {
-                var incoming: ?Point(2, f32) = if (poly.len > 1) unitDirection(poly[poly.len - 1], poly[0]) else null;
-                for (poly, 0..) |p, i| {
-                    const outgoing = if (poly.len > 1) unitDirection(p, poly[(i + 1) % poly.len]) else null;
-                    if (outgoing) |d| {
-                        const q = poly[(i + 1) % poly.len];
-                        const normal: Point(2, f32) = .init(.{ -d.y() * radius, d.x() * radius });
-                        piece_points[n..][0..4].* = .{ p.add(normal), q.add(normal), q.sub(normal), p.sub(normal) };
-                        pieces[k] = piece_points[n..][0..4];
-                        n += 4;
-                        k += 1;
-                    }
-                    // A join's gap is r·(1 − cos(θ/2)); below the flatness tolerance it is invisible.
-                    const gap = if (incoming) |a| if (outgoing) |b| radius * (1 - @sqrt(@max(0, (1 + a.x() * b.x() + a.y() * b.y()) / 2))) else radius else radius;
-                    if (gap >= Outline.flatness_tolerance) {
-                        for (disc[0..sides], 0..) |offset, j| piece_points[n + j] = p.add(offset);
-                        pieces[k] = piece_points[n..][0..sides];
-                        n += sides;
-                        k += 1;
-                    }
-                    if (outgoing) |d| incoming = d;
+                if (poly.len == 0) continue;
+                var builder: StrokeBuilder = .{ .out = points[n..], .radius = radius, .step = step };
+                builder.polyline(poly, closed);
+                const contour = points[n..][0..builder.len];
+                // Every stroke winds the same way, so overlapping strokes add up instead of cancelling.
+                if (signedArea(contour) < 0) std.mem.reverse(Point(2, f32), contour);
+                contours[k] = contour;
+                k += 1;
+                n += builder.len;
+            }
+            return self.fillContours(contours[0..k], .nonzero, mode, sink);
+        }
+
+        /// Writes the outline of one stroked polyline.
+        const StrokeBuilder = struct {
+            out: []Point(2, f32),
+            len: usize = 0,
+            radius: f32,
+            step: f32,
+
+            fn emit(b: *StrokeBuilder, p: Point(2, f32)) void {
+                b.out[b.len] = p;
+                b.len += 1;
+            }
+
+            fn offset(b: StrokeBuilder, p: Point(2, f32), dir: Point(2, f32), side: f32) Point(2, f32) {
+                return p.add(perpendicular(dir).scale(side * b.radius));
+            }
+
+            /// Points on the circle around `center` from angle `from`, sweeping `sweep`
+            /// radians: the end included, the start not.
+            fn arc(b: *StrokeBuilder, center: Point(2, f32), from: f32, sweep: f32) void {
+                const steps: usize = @intFromFloat(@max(1, @ceil(@abs(sweep) / b.step)));
+                for (1..steps + 1) |i| {
+                    const angle = from + sweep * as(f32, i) / as(f32, steps);
+                    b.emit(.init(.{ center.x() + b.radius * @cos(angle), center.y() + b.radius * @sin(angle) }));
                 }
             }
-            return self.fillContours(pieces[0..k], .nonzero, mode, sink);
+
+            /// The join at `v` on `side` (+1 left, -1 right) between the incoming direction
+            /// `in_dir` and the outgoing `out_dir`, both in traversal order.
+            fn join(b: *StrokeBuilder, v: Point(2, f32), in_dir: Point(2, f32), out_dir: Point(2, f32), side: f32) void {
+                const cross = in_dir.x() * out_dir.y() - in_dir.y() * out_dir.x();
+                const dot = in_dir.x() * out_dir.x() + in_dir.y() * out_dir.y();
+                // The left side lies outside a turn with negative cross (and a reversal).
+                const outer = if (side > 0) cross < 0 or (cross == 0 and dot < 0) else cross > 0;
+                b.emit(b.offset(v, in_dir, side));
+                if (outer) {
+                    const start = perpendicular(in_dir).scale(side);
+                    b.arc(v, std.math.atan2(start.y(), start.x()), std.math.atan2(cross, dot));
+                } else if (cross != 0 or dot < 0) {
+                    // The inner offsets cross each other; the loop they close is invisible
+                    // below the flatness tolerance, otherwise detouring through the vertex
+                    // makes it wind like the stroke.
+                    const turn = std.math.atan2(@abs(cross), dot);
+                    if (b.radius * @tan(turn / 2) >= Outline.flatness_tolerance) b.emit(v);
+                    b.emit(b.offset(v, out_dir, side));
+                }
+            }
+
+            fn polyline(b: *StrokeBuilder, input: []const Point(2, f32), closed: bool) void {
+                const m = input.len + @intFromBool(closed and input.len > 1);
+                const first_dir = for (0..m -| 1) |i| {
+                    if (unitDirection(input[i], input[(i + 1) % input.len])) |d| break d;
+                } else {
+                    // Every point coincides: a dot.
+                    b.emit(input[0].add(.init(.{ b.radius, 0 })));
+                    b.arc(input[0], 0, 2 * std.math.pi);
+                    return;
+                };
+                // Direction of each segment, degenerate ones borrowing their predecessor's.
+                var dir = first_dir;
+                b.emit(b.offset(input[0], dir, 1));
+                for (1..m - 1) |i| {
+                    const next = unitDirection(input[i % input.len], input[(i + 1) % input.len]) orelse dir;
+                    b.join(input[i % input.len], dir, next, 1);
+                    dir = next;
+                }
+                const last = input[(m - 1) % input.len];
+                b.emit(b.offset(last, dir, 1));
+                // End cap: from the left offset around the tip to the right one.
+                const tip = perpendicular(dir);
+                b.arc(last, std.math.atan2(tip.y(), tip.x()), -std.math.pi);
+                // Back along the right side; the incoming direction is now the later segment's.
+                var i = m - 1;
+                while (i > 1) : (i -= 1) {
+                    const prev = unitDirection(input[(i - 2) % input.len], input[(i - 1) % input.len]) orelse dir;
+                    b.join(input[(i - 1) % input.len], dir, prev, -1);
+                    dir = prev;
+                }
+                b.emit(b.offset(input[0], dir, -1));
+                const tail = perpendicular(dir).scale(-1);
+                b.arc(input[0], std.math.atan2(tail.y(), tail.x()), -std.math.pi);
+            }
+        };
+
+        fn perpendicular(d: Point(2, f32)) Point(2, f32) {
+            return .init(.{ -d.y(), d.x() });
+        }
+
+        fn signedArea(polygon: []const Point(2, f32)) f32 {
+            var area: f32 = 0;
+            for (polygon, 0..) |p, i| {
+                const q = polygon[(i + 1) % polygon.len];
+                area += p.x() * q.y() - q.x() * p.y();
+            }
+            return area / 2;
         }
 
         /// Unit vector from `p` to `q`, or null when they coincide.
@@ -1063,6 +1167,16 @@ pub fn Canvas(comptime T: type) type {
             const d = q.sub(p);
             const len = d.norm();
             return if (len > 0) d.scale(1 / len) else null;
+        }
+
+        /// `strokePolylines` for the shape API: thick outlines of polygons and curves.
+        fn strokePath(self: Self, polys: []const []const Point(2, f32), closed: bool, width: u32, color: anytype, opts: DrawOptions) void {
+            var stack: [glyph_scratch_size]u8 align(16) = undefined;
+            var buffer_first: std.heap.BufferFirstAllocator = .init(&stack, self.allocator);
+            const paint: Paint = .init(color, opts.blending);
+            switch (opts.mode) {
+                inline else => |mode| self.strokePolylines(buffer_first.allocator(), polys, closed, as(f32, width), mode, paint) catch return,
+            }
         }
 
         /// Scanline fill shared by every polygon entry point. `sink` is a `Paint` or, for
@@ -1091,14 +1205,236 @@ pub fn Canvas(comptime T: type) type {
                 .fast => {
                     comptime assert(@TypeOf(sink) == Paint);
                     const frows: f32 = @floatFromInt(self.image.rows);
-                    var y = @max(0, @floor(shape_bounds.t));
+                    const first_row = @max(0, @floor(shape_bounds.t));
                     const end_y = @min(frows - 1, @ceil(shape_bounds.b));
-                    while (y <= end_y) : (y += 1) {
-                        var spans: SpanIter = .{ .crossings = scanlineCrossings(edges, y, crossings_buf), .rule = fill_rule };
+                    if (first_row > end_y) return;
+                    const num_rows: usize = @intFromFloat(end_y - first_row + 1);
+
+                    // Bucket the edges by the row they start on (counting sort), then sweep:
+                    // a row only tests the edges spanning it.
+                    const starts = try scratch.alloc(u32, num_rows + 1);
+                    defer scratch.free(starts);
+                    @memset(starts, 0);
+                    const bucket = try scratch.alloc(u32, edges.len);
+                    defer scratch.free(bucket);
+                    for (edges, 0..) |e, i| {
+                        bucket[i] = @intFromFloat(@min(@max(@floor(e.y_min) - first_row, 0), as(f32, num_rows - 1)));
+                        starts[bucket[i] + 1] += 1;
+                    }
+                    for (1..num_rows + 1) |r| starts[r] += starts[r - 1];
+                    const order = try scratch.alloc(u32, edges.len);
+                    defer scratch.free(order);
+                    for (bucket, 0..) |b, i| {
+                        order[starts[b]] = @intCast(i);
+                        starts[b] += 1;
+                    }
+                    const active = try scratch.alloc(u32, edges.len);
+                    defer scratch.free(active);
+
+                    var next: usize = 0;
+                    var count: usize = 0;
+                    var y = first_row;
+                    var row: usize = 0;
+                    while (row < num_rows) : ({
+                        row += 1;
+                        y += 1;
+                    }) {
+                        while (next < starts[row]) : (next += 1) {
+                            active[count] = order[next];
+                            count += 1;
+                        }
+                        var crossings: usize = 0;
+                        var i: usize = 0;
+                        while (i < count) {
+                            const e = edges[active[i]];
+                            if (e.y_max <= y) {
+                                count -= 1;
+                                active[i] = active[count];
+                                continue;
+                            }
+                            if (y >= e.y_min) {
+                                crossings_buf[crossings] = .{ .x = e.xAt(y), .dir = e.dir };
+                                crossings += 1;
+                            }
+                            i += 1;
+                        }
+                        var spans: SpanIter = .{ .crossings = sortCrossings(crossings_buf[0..crossings]), .rule = fill_rule };
                         while (spans.next()) |span| self.fillSpan(span[0], span[1], y, sink);
                     }
                 },
-                .soft => try self.fillPolygonSoft(edges, shape_bounds, crossings_buf, fill_rule, sink, scratch),
+                .soft => switch (fill_rule) {
+                    .nonzero => try self.fillPolygonArea(edges, shape_bounds, sink, scratch),
+                    .even_odd => try self.fillPolygonSoft(edges, shape_bounds, crossings_buf, fill_rule, sink, scratch),
+                },
+            }
+        }
+
+        /// Antialiased nonzero fill by signed-area accumulation: every edge deposits its exact
+        /// area and cover contribution into the cells of the rows it crosses, and a running
+        /// sum along each row turns them into coverage (the winding's magnitude, clamped).
+        /// Work follows the edges and the cells they touch rather than the rows of the shape,
+        /// so tall hollow outlines cost their perimeter, not their area.
+        fn fillPolygonArea(self: Self, edges: []const Edge, bounds: Rectangle(f32), sink: anytype, scratch: std.mem.Allocator) !void {
+            // Pixel (r, c) spans [c - 0.5, c + 0.5) x [r - 0.5, r + 0.5); in accumulation space
+            // it is the unit cell at (r - row_start, c - col_start).
+            const frows: f32 = @floatFromInt(self.image.rows);
+            const row_start: usize = @intFromFloat(@max(0, @floor(bounds.t + 0.5)));
+            const row_end: usize = @intFromFloat(@min(frows, @ceil(bounds.b + 0.5)));
+            if (row_start >= row_end) return;
+            const height = row_end - row_start;
+            const col_start: i64 = @intFromFloat(@floor(bounds.l + 0.5));
+            const col_end: i64 = @intFromFloat(@ceil(bounds.r + 0.5));
+            // One spare cell on the right for the last contribution.
+            const width: usize = @intCast(col_end - col_start + 2);
+
+            // Cells are zeroed block by block as edges first touch them; the resolve leaps
+            // over untouched blocks while the running sum is zero.
+            const blocks = (width + area_block - 1) / area_block;
+            const acc = try scratch.alloc(f32, blocks * area_block * height);
+            defer scratch.free(acc);
+            const touched = try scratch.alloc(u8, blocks * height);
+            defer scratch.free(touched);
+            @memset(touched, 0);
+            const shift_x = 0.5 - as(f32, col_start);
+            const shift_y = 0.5 - as(f32, row_start);
+            for (edges) |e| {
+                accumulateEdge(acc, touched, width, height, .init(.{ e.p1.x() + shift_x, e.p1.y() + shift_y }), .init(.{ e.p2.x() + shift_x, e.p2.y() + shift_y }));
+            }
+
+            // Cells left of the image still feed the running sum; only the visible ones paint.
+            const image_cols: i64 = @intCast(self.image.cols);
+            const visible_lo: usize = @intCast(clamp(-col_start, 0, @as(i64, @intCast(width))));
+            const visible_hi: usize = @intCast(clamp(image_cols - col_start, 0, @as(i64, @intCast(width))));
+            if (visible_lo >= visible_hi) return;
+            const threshold = 1.0 / 512.0;
+            for (0..height) |r| {
+                const row_acc = acc[r * blocks * area_block ..][0 .. blocks * area_block];
+                const row_touched = touched[r * blocks ..][0..blocks];
+                const row_px = self.image.data[(row_start + r) * self.image.stride ..];
+                var sum: f32 = 0;
+                for (row_touched, 0..) |flag, b| {
+                    if (flag == 0 and @abs(sum) <= threshold) continue;
+                    // Cells before the visible range only feed the sum.
+                    const lo = b * area_block;
+                    const hi = @min(lo + area_block, visible_hi);
+                    const paint_from = @max(lo, visible_lo);
+                    for (row_acc[lo..paint_from]) |a| sum += a;
+                    if (paint_from >= hi) continue;
+                    const px_base: usize = @intCast(col_start + @as(i64, @intCast(paint_from)));
+                    for (row_acc[paint_from..hi], row_px[px_base..][0 .. hi - paint_from]) |a, *px| {
+                        sum += a;
+                        // Snap accumulation error to full or no coverage so the paint takes its
+                        // overwrite path on the interior.
+                        const alpha = @abs(sum);
+                        if (alpha >= 1 - threshold) sink.cover(px, 1) else if (alpha > threshold) sink.cover(px, alpha);
+                    }
+                }
+            }
+        }
+
+        /// Marks the blocks holding cells `first..=last` of a row as touched, zeroing each
+        /// block the first time.
+        inline fn touchBlocks(row: []f32, row_touched: []u8, first: usize, last: usize) void {
+            for (first / area_block..last / area_block + 1) |b| {
+                if (row_touched[b] == 0) {
+                    row_touched[b] = 1;
+                    row[b * area_block ..][0..area_block].* = @splat(0);
+                }
+            }
+        }
+
+        /// Adds one edge's contributions to the accumulation buffer: `d` per row is the
+        /// signed height crossed, split between the cells the edge passes through by area.
+        fn accumulateEdge(acc: []f32, touched: []u8, width: usize, height: usize, p0: Point(2, f32), p1: Point(2, f32)) void {
+            if (p0.y() == p1.y()) return;
+            const dir: f32 = if (p0.y() < p1.y()) 1 else -1;
+            const top = if (dir > 0) p0 else p1;
+            const bottom = if (dir > 0) p1 else p0;
+            if (bottom.y() <= 0 or top.y() >= as(f32, height)) return;
+            const dxdy = (bottom.x() - top.x()) / (bottom.y() - top.y());
+            const x_max: f32 = as(f32, width - 2);
+            const blocks = (width + area_block - 1) / area_block;
+            const row_len = blocks * area_block;
+            var x = top.x();
+            var y: usize = 0;
+            if (top.y() >= 0) {
+                y = @intFromFloat(@floor(top.y()));
+            } else {
+                x -= top.y() * dxdy;
+            }
+            const y_end: usize = @intFromFloat(@min(as(f32, height), @ceil(bottom.y())));
+            if (dxdy == 0) {
+                // Vertical: the same two cells in every row, fully crossed except at the ends.
+                const xc = @max(0, @min(x, x_max));
+                const x_floor = @floor(xc);
+                const xi: usize = @intFromFloat(x_floor);
+                const xmf = xc - x_floor;
+                const full_start: usize = @intFromFloat(@min(@ceil(@max(top.y(), 0)), as(f32, height)));
+                const full_end: usize = @intFromFloat(@max(@floor(@min(bottom.y(), as(f32, height))), 0));
+                const b0 = xi / area_block;
+                const b1 = (xi + 1) / area_block;
+                const full_lo = dir - dir * xmf;
+                const full_hi = dir * xmf;
+                while (y < y_end) : (y += 1) {
+                    const row_touched = touched[y * blocks ..][0..blocks];
+                    const row = acc[y * row_len ..][0..row_len];
+                    if (row_touched[b0] == 0) {
+                        row_touched[b0] = 1;
+                        row[b0 * area_block ..][0..area_block].* = @splat(0);
+                    }
+                    if (b1 != b0 and row_touched[b1] == 0) {
+                        row_touched[b1] = 1;
+                        row[b1 * area_block ..][0..area_block].* = @splat(0);
+                    }
+                    if (y >= full_start and y < full_end) {
+                        row[xi] += full_lo;
+                        row[xi + 1] += full_hi;
+                    } else {
+                        const fy = as(f32, y);
+                        const d = (@min(fy + 1, bottom.y()) - @max(fy, top.y())) * dir;
+                        row[xi] += d - d * xmf;
+                        row[xi + 1] += d * xmf;
+                    }
+                }
+                return;
+            }
+            while (y < y_end) : (y += 1) {
+                const row = acc[y * row_len ..][0..row_len];
+                const fy = as(f32, y);
+                const dy = @min(fy + 1, bottom.y()) - @max(fy, top.y());
+                const x_next = x + dxdy * dy;
+                const d = dy * dir;
+                const x0 = @max(0, @min(@min(x, x_next), x_max));
+                const x1 = @max(0, @min(@max(x, x_next), x_max));
+                const x0_floor = @floor(x0);
+                const x0i: usize = @intFromFloat(x0_floor);
+                const x1_ceil = @ceil(x1);
+                const x1i: usize = @intFromFloat(x1_ceil);
+                touchBlocks(row, touched[y * blocks ..][0..blocks], x0i, x1i);
+                if (x1i <= x0i + 1) {
+                    // Within one cell: split by the midpoint.
+                    const xmf = 0.5 * (x0 + x1) - x0_floor;
+                    row[x0i] += d - d * xmf;
+                    row[x0i + 1] += d * xmf;
+                } else {
+                    const s = 1 / (x1 - x0);
+                    const x0f = x0 - x0_floor;
+                    const a0 = 0.5 * s * (1 - x0f) * (1 - x0f);
+                    const x1f = x1 - x1_ceil + 1;
+                    const am = 0.5 * s * x1f * x1f;
+                    row[x0i] += d * a0;
+                    if (x1i == x0i + 2) {
+                        row[x0i + 1] += d * (1 - a0 - am);
+                    } else {
+                        const a1 = s * (1.5 - x0f);
+                        row[x0i + 1] += d * (a1 - a0);
+                        for (x0i + 2..x1i - 1) |xi| row[xi] += d * s;
+                        const a2 = a1 + as(f32, x1i - x0i - 3) * s;
+                        row[x1i - 1] += d * (1 - a2 - am);
+                    }
+                    row[x1i] += d * am;
+                }
+                x = x_next;
             }
         }
 
@@ -1158,11 +1494,21 @@ pub fn Canvas(comptime T: type) type {
                     count += 1;
                 }
             }
-            const crossings = buf[0..count];
-            if (count == 2) {
-                if (crossings[0].x > crossings[1].x) std.mem.swap(Crossing, &crossings[0], &crossings[1]);
-            } else if (count > 2) {
-                std.mem.sort(Crossing, crossings, {}, Crossing.lessThan);
+            return sortCrossings(buf[0..count]);
+        }
+
+        /// Sorts crossings by x. Rows rarely have more than a handful, where a plain
+        /// insertion sort beats the generic sorts' setup many times over.
+        fn sortCrossings(crossings: []Crossing) []Crossing {
+            if (crossings.len <= 32) {
+                for (1..@max(crossings.len, 1)) |i| {
+                    const c = crossings[i];
+                    var j = i;
+                    while (j > 0 and crossings[j - 1].x > c.x) : (j -= 1) crossings[j] = crossings[j - 1];
+                    crossings[j] = c;
+                }
+            } else {
+                std.sort.pdq(Crossing, crossings, {}, Crossing.lessThan);
             }
             return crossings;
         }
@@ -1530,13 +1876,43 @@ pub fn Canvas(comptime T: type) type {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0 or polygon.len < 3) return;
 
+            if (width == 1) {
+                for (0..polygon.len) |i| {
+                    const p0 = polygon[i];
+                    const p1 = polygon[(i + 1) % polygon.len];
+                    const p2 = polygon[(i + 2) % polygon.len];
+                    const control_points = calculateSmoothControlPoints(p0, p1, p2, tension);
+                    self.drawCubicBezier(p0, control_points.cp1, control_points.cp2, p1, color, width, opts);
+                }
+                return;
+            }
+
+            // Thick strokes join the segments: tessellate the whole closed curve first.
+            var stack: [spline_polygon_stack_buffer_size * @sizeOf(Point(2, f32))]u8 align(16) = undefined;
+            var buffer_first: std.heap.BufferFirstAllocator = .init(&stack, self.allocator);
+            const scratch = buffer_first.allocator();
+            const points = scratch.alloc(Point(2, f32), polygon.len * bezier_max_segments_count) catch return;
+            defer scratch.free(points);
+            const pixels_per_segment: f32 = if (opts.mode == .soft or width > 2) pixels_per_segment_soft else pixels_per_segment_fast;
+            var n: usize = 0;
             for (0..polygon.len) |i| {
                 const p0 = polygon[i];
                 const p1 = polygon[(i + 1) % polygon.len];
                 const p2 = polygon[(i + 2) % polygon.len];
                 const control_points = calculateSmoothControlPoints(p0, p1, p2, tension);
-                self.drawCubicBezier(p0, control_points.cp1, control_points.cp2, p1, color, width, opts);
+                const segments = tessellateBezier(
+                    estimateCubicBezierLength(p0, control_points.cp1, control_points.cp2, p1),
+                    pixels_per_segment,
+                    spline_min_segments_count,
+                    bezier_max_segments_count,
+                    evalCubicBezier,
+                    .{ p0, control_points.cp1, control_points.cp2, p1 },
+                    points[n..],
+                );
+                // The next segment starts on this one's end point.
+                n += segments - 1;
             }
+            self.strokePath(&.{points[0..n]}, true, width, color, opts);
         }
 
         /// Fills a spline polygon with Bézier curves connecting vertices.
@@ -1693,9 +2069,10 @@ pub fn Canvas(comptime T: type) type {
                 &stack_buffer,
             );
 
-            // Draw lines between consecutive points
-            for (1..actual_segments) |i| {
-                self.drawLine(stack_buffer[i - 1], stack_buffer[i], color, width, opts);
+            const points = stack_buffer[0..actual_segments];
+            if (width > 1) return self.strokePath(&.{points}, false, width, color, opts);
+            for (1..points.len) |i| {
+                self.drawLine(points[i - 1], points[i], color, width, opts);
             }
         }
 
@@ -1799,7 +2176,7 @@ pub fn Canvas(comptime T: type) type {
                 };
                 const position: Point(2, f32) = .init(.{ x, y });
                 switch (font) {
-                    .bitmap => |bitmap| self.drawTextBitmap(line.text, position, paint, bitmap, bitmap.scaleFor(px), layout.letter_spacing, style, mode),
+                    .bitmap => |bitmap| try self.drawTextBitmap(line.text, position, paint, bitmap, bitmap.scaleFor(px), layout.letter_spacing, style, mode),
                     .vector => |vector| try self.drawTextVector(line.text, position, paint, vector, px, layout.letter_spacing, style, mode),
                 }
             }
@@ -1828,17 +2205,97 @@ pub fn Canvas(comptime T: type) type {
                 switch (mode) {
                     inline else => |m| switch (style) {
                         .fill => try self.fillContours(flat.polys, .nonzero, m, paint),
-                        .outline => |width| try self.strokePolylines(scratch, flat.polys, width, m, paint),
+                        .outline => |width| try self.strokePolylines(scratch, flat.polys, true, width, m, paint),
                     },
                 }
             }
         }
 
-        /// Draws one line of bitmap glyphs. An `.outline` style blits every glyph at each
-        /// integer offset within its reach, dilating it into a halo; the stamps blend
-        /// independently, so translucent halos darken where they overlap.
-        fn drawTextBitmap(self: Self, text: []const u8, position: Point(2, f32), paint: Paint, font: BitmapFont, scale: f32, letter_spacing: f32, style: GlyphStyle, mode: DrawMode) void {
-            const radius: i32 = @intFromFloat(@ceil(style.reach()));
+        /// Draws one line of bitmap glyphs. An `.outline` style renders the line into a
+        /// coverage mask, dilates it by the stroke radius and paints it once, so the halo
+        /// composites like any other shape.
+        fn drawTextBitmap(self: Self, text: []const u8, position: Point(2, f32), paint: Paint, font: BitmapFont, scale: f32, letter_spacing: f32, style: GlyphStyle, mode: DrawMode) !void {
+            const radius: u32 = @intFromFloat(@ceil(style.reach()));
+            if (radius == 0) return self.blitBitmapLine(text, position, paint, font, scale, letter_spacing, mode);
+
+            // The line's box grown by the radius, clipped to the image, in whole pixels.
+            const glyphs = std.unicode.utf8CountCodepoints(text) catch text.len;
+            const bounds = font.getTextBounds(text, scale);
+            const line_rect: Rectangle(f32) = .{
+                .l = position.x(),
+                .t = position.y(),
+                .r = position.x() + bounds.r + @max(letter_spacing, 0) * as(f32, glyphs),
+                .b = position.y() + bounds.b,
+            };
+            const area = line_rect.grow(as(f32, radius)).intersect(self.imageRect()) orelse return;
+            const left: u32 = @intFromFloat(@floor(area.l));
+            const top: u32 = @intFromFloat(@floor(area.t));
+            const width = @as(u32, @intFromFloat(@ceil(area.r))) - left;
+            const height = @as(u32, @intFromFloat(@ceil(area.b))) - top;
+            if (height == 0 or width == 0) return;
+
+            // Source coverage plus the dilated result, then per-row scratch for the running max.
+            const radius_px: usize = radius;
+            const padded = width + 2 * radius_px;
+            const buffers = try self.allocator.alloc(u8, 2 * height * width + 4 * padded);
+            defer self.allocator.free(buffers);
+            @memset(buffers, 0);
+            const coverage = buffers[0 .. height * width];
+            const dilated = buffers[height * width .. 2 * height * width];
+            const mask: Canvas(u8) = .init(self.allocator, .initFromSlice(height, width, coverage));
+            const origin: Point(2, f32) = .init(.{ position.x() - as(f32, left), position.y() - as(f32, top) });
+            mask.blitBitmapLine(text, origin, .init(@as(u8, 255), .none), font, scale, letter_spacing, mode);
+
+            // Dilate by a disc: every source row, widened by the disc's half-width at each
+            // vertical offset, is max-merged into the rows it reaches.
+            const row_max = buffers[2 * height * width ..][0..padded];
+            const prefix = buffers[2 * height * width + padded ..][0..padded];
+            const suffix = buffers[2 * height * width + 2 * padded ..][0..padded];
+            const widened = buffers[2 * height * width + 3 * padded ..][0..padded];
+            for (0..height) |sy| {
+                const source = coverage[sy * width ..][0..width];
+                if (std.mem.allEqual(u8, source, 0)) continue;
+                var dy: usize = 0;
+                while (dy <= radius_px) : (dy += 1) {
+                    const half: usize = @intFromFloat(@sqrt(as(f32, radius_px * radius_px - dy * dy)));
+                    runningMax(source, half, row_max, prefix, suffix, widened[0..width]);
+                    for ([_]bool{ false, true }) |up| {
+                        if (up and dy == 0) continue;
+                        const ty = if (up) std.math.sub(usize, sy, dy) catch continue else sy + dy;
+                        if (ty >= height) continue;
+                        const target = dilated[ty * width ..][0..width];
+                        for (target, widened[0..width]) |*t, w| t.* = @max(t.*, w);
+                    }
+                }
+            }
+            for (0..height) |row| {
+                for (dilated[row * width ..][0..width], 0..) |value, col| {
+                    if (value > 0) paint.cover(&self.image.data[(top + row) * self.image.stride + left + col], as(f32, value) / 255);
+                }
+            }
+        }
+
+        /// `out[i] = max(src[i - half ..= i + half])`, clipped to the row, in O(n) (van Herk):
+        /// block prefix/suffix maxima over the zero-padded row.
+        fn runningMax(src: []const u8, half: usize, padded: []u8, prefix: []u8, suffix: []u8, out: []u8) void {
+            const n = src.len;
+            if (half == 0) return @memcpy(out, src);
+            const window = 2 * half + 1;
+            const m = n + 2 * half;
+            @memset(padded[0..half], 0);
+            @memcpy(padded[half..][0..n], src);
+            @memset(padded[half + n .. m], 0);
+            for (0..m) |j| prefix[j] = if (j % window == 0) padded[j] else @max(prefix[j - 1], padded[j]);
+            var j = m;
+            while (j > 0) {
+                j -= 1;
+                suffix[j] = if (j % window == window - 1 or j == m - 1) padded[j] else @max(suffix[j + 1], padded[j]);
+            }
+            for (0..n) |i| out[i] = @max(suffix[i], prefix[i + window - 1]);
+        }
+
+        /// Blits one line of bitmap glyphs at `position`.
+        fn blitBitmapLine(self: Self, text: []const u8, position: Point(2, f32), paint: Paint, font: BitmapFont, scale: f32, letter_spacing: f32, mode: DrawMode) void {
             const glyphs = std.unicode.utf8CountCodepoints(text) catch text.len;
             const text_bounds = font.getTextBounds(text, scale);
             const text_rect: Rectangle(f32) = .{
@@ -1847,27 +2304,18 @@ pub fn Canvas(comptime T: type) type {
                 .r = position.x() + text_bounds.r + @max(letter_spacing, 0) * as(f32, glyphs),
                 .b = position.y() + text_bounds.b,
             };
-            const clip_rect = text_rect.grow(as(f32, radius)).intersect(self.imageRect()) orelse return;
+            const clip_rect = text_rect.intersect(self.imageRect()) orelse return;
 
             var x = position.x();
             const y = position.y();
             var utf8_iter = std.unicode.Utf8Iterator{ .bytes = text, .i = 0 };
             while (utf8_iter.nextCodepoint()) |codepoint| {
                 if (font.getGlyph(codepoint)) |glyph| {
-                    var dy: i32 = -radius;
-                    while (dy <= radius) : (dy += 1) {
-                        var dx: i32 = -radius;
-                        while (dx <= radius) : (dx += 1) {
-                            if (dx * dx + dy * dy > radius * radius) continue;
-                            const gx = x + as(f32, dx);
-                            const gy = y + as(f32, dy);
-                            if (scale == 1.0) {
-                                self.renderGlyphUnscaled(glyph.info, glyph.data, font, gx, gy, paint);
-                            } else switch (mode) {
-                                .fast => self.renderGlyphFastScaled(glyph.info, glyph.data, font, gx, gy, scale, clip_rect, paint),
-                                .soft => self.renderGlyphSoftScaled(glyph.info, glyph.data, font, gx, gy, scale, paint),
-                            }
-                        }
+                    if (scale == 1.0) {
+                        self.renderGlyphUnscaled(glyph.info, glyph.data, font, x, y, paint);
+                    } else switch (mode) {
+                        .fast => self.renderGlyphFastScaled(glyph.info, glyph.data, font, x, y, scale, clip_rect, paint),
+                        .soft => self.renderGlyphSoftScaled(glyph.info, glyph.data, font, x, y, scale, paint),
                     }
                     x += as(f32, glyph.info.advanceWidth()) * scale;
                 } else {

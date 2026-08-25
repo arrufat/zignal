@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const zignal = @import("zignal");
+const stub_metadata = @import("stub_metadata.zig");
 const optimization = zignal.optimization;
 
 const enum_utils = @import("enum_utils.zig");
@@ -20,7 +21,12 @@ pub const optimization_policy_doc =
     \\Determines whether to minimize or maximize the total cost.
 ;
 
-// No runtime wrapper; OptimizationPolicy is registered via enum_utils.registerEnum in main
+pub const optimization_policy_values = [_]stub_metadata.EnumValueDoc{
+    .{ .name = "MIN", .doc = "Minimize total cost" },
+    .{ .name = "MAX", .doc = "Maximize total cost (profit)" },
+};
+
+// No runtime wrapper; OptimizationPolicy is registered through `enums.registry`.
 
 // ============================================================================
 // ASSIGNMENT TYPE

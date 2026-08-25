@@ -5,7 +5,10 @@
 const std = @import("std");
 
 const Font = @import("../font.zig").Font;
+const BitmapFont = @import("BitmapFont.zig");
+const VectorFont = @import("VectorFont.zig");
 const Rectangle = @import("../geometry.zig").Rectangle;
+const as = @import("../meta.zig").as;
 
 pub const TextAlign = enum { left, center, right };
 pub const VerticalAlign = enum { top, middle, bottom };
@@ -25,12 +28,67 @@ pub const TextLayout = struct {
     pub const default: TextLayout = .{};
 };
 
-/// Width of `slice` drawn on one line: its advance plus `letter_spacing` between its
-/// codepoints, never negative.
+/// A cursor over the glyphs of one line, in device pixels: kerned for vector fonts,
+/// `letter_spacing` after every glyph for either kind. Wrapping and measuring walk the
+/// text once through it.
+pub const Pen = struct {
+    const Bitmap = struct { font: BitmapFont, scale: f32, x: f32 = 0 };
+
+    inner: union(enum) { bitmap: Bitmap, vector: VectorFont.Layout },
+    iter: std.unicode.Utf8Iterator,
+    letter_spacing: f32,
+    glyphs: usize = 0,
+
+    pub fn init(font: Font, text: []const u8, size: f32, letter_spacing: f32) Pen {
+        return .{
+            .inner = switch (font) {
+                .bitmap => |b| .{ .bitmap = .{ .font = b, .scale = b.scaleFor(size) } },
+                .vector => |v| blk: {
+                    var layout: VectorFont.Layout = .init(v, text, size);
+                    layout.letter_spacing = letter_spacing;
+                    layout.with_bounds = false;
+                    break :blk .{ .vector = layout };
+                },
+            },
+            .iter = .{ .bytes = text, .i = 0 },
+            .letter_spacing = letter_spacing,
+        };
+    }
+
+    pub const Glyph = struct {
+        codepoint: u21,
+        /// Byte offset just past the codepoint.
+        end: usize,
+    };
+
+    /// Places the next codepoint and advances past it.
+    pub fn next(self: *Pen) ?Glyph {
+        const codepoint = self.iter.nextCodepoint() orelse return null;
+        switch (self.inner) {
+            .bitmap => |*b| b.x += as(f32, b.font.getCharAdvanceWidth(codepoint)) * b.scale + self.letter_spacing,
+            .vector => |*v| _ = v.place(codepoint),
+        }
+        self.glyphs += 1;
+        return .{ .codepoint = codepoint, .end = self.iter.i };
+    }
+
+    /// Width of what has been placed: the pen position less the trailing letter spacing,
+    /// never negative.
+    pub fn width(self: Pen) f32 {
+        if (self.glyphs == 0) return 0;
+        const x = switch (self.inner) {
+            .bitmap => |b| b.x,
+            .vector => |v| v.x,
+        };
+        return @max(0, x - self.letter_spacing);
+    }
+};
+
+/// Width of `slice` drawn on one line with `letter_spacing` between its glyphs.
 pub fn lineWidth(font: Font, slice: []const u8, size: f32, letter_spacing: f32) f32 {
-    const glyphs = std.unicode.utf8CountCodepoints(slice) catch slice.len;
-    const gaps: f32 = @floatFromInt(glyphs -| 1);
-    return @max(0, font.getTextBounds(slice, size).r + letter_spacing * gaps);
+    var pen: Pen = .init(font, slice, size, letter_spacing);
+    while (pen.next()) |_| {}
+    return pen.width();
 }
 
 /// Baseline-to-baseline distance under `layout`.
@@ -87,43 +145,49 @@ pub const Lines = struct {
     const Fit = struct { len: usize, consumed: usize, width: f32 };
 
     /// The longest prefix of `paragraph` ending at a word boundary that fits `max_width`,
-    /// its width, and how far to skip past the spaces after it. The whole paragraph, when
-    /// it fits, comes back as `len == paragraph.len`. A first word too wide for the width
-    /// keeps as many codepoints as fit, at least one.
+    /// its width, and how far to skip past the spaces after it, from one walk of the
+    /// paragraph. The whole paragraph, when it fits, comes back as `len == paragraph.len`.
+    /// A first word too wide for the width keeps as many codepoints as fit, at least one.
     fn fit(self: Lines, paragraph: []const u8, max_width: f32) Fit {
+        var pen: Pen = .init(self.font, paragraph, self.size, self.letter_spacing);
         var accepted: usize = 0;
-        var width_so_far: f32 = 0;
-        var i: usize = 0;
+        var accepted_width: f32 = 0;
+        // The word being walked: where it ends and the width there.
+        var word_end: usize = 0;
+        var word_width: f32 = 0;
+        // Longest prefix of the first word that fits, should no whole word.
+        var partial: usize = 0;
+        var partial_width: f32 = 0;
+        var first_word = true;
         while (true) {
-            var word_start = i;
-            while (word_start < paragraph.len and paragraph[word_start] == ' ') word_start += 1;
-            if (word_start == paragraph.len) return .{ .len = paragraph.len, .consumed = paragraph.len, .width = width_so_far };
-            const word_end = std.mem.indexOfScalarPos(u8, paragraph, word_start, ' ') orelse paragraph.len;
-            const candidate = self.width(paragraph[0..word_end]);
-            if (candidate > max_width) break;
-            accepted = word_end;
-            width_so_far = candidate;
-            i = word_end;
+            const glyph = pen.next();
+            const at_space = if (glyph) |g| g.codepoint == ' ' else true;
+            if (at_space) {
+                if (word_end > accepted) {
+                    if (word_width > max_width) break;
+                    accepted = word_end;
+                    accepted_width = word_width;
+                }
+                if (glyph == null) return .{ .len = paragraph.len, .consumed = paragraph.len, .width = accepted_width };
+                if (word_end > 0) first_word = false;
+                continue;
+            }
+            word_end = glyph.?.end;
+            word_width = pen.width();
+            if (first_word) {
+                if (word_width <= max_width or partial == 0) {
+                    partial = word_end;
+                    partial_width = word_width;
+                }
+            } else if (word_width > max_width) break;
         }
         if (accepted == 0) {
-            var word_start: usize = 0;
-            while (paragraph[word_start] == ' ') word_start += 1;
-            const word_end = std.mem.indexOfScalarPos(u8, paragraph, word_start, ' ') orelse paragraph.len;
-            var view: std.unicode.Utf8View = .initUnchecked(paragraph[word_start..word_end]);
-            var iter = view.iterator();
-            _ = iter.nextCodepointSlice();
-            accepted = word_start + iter.i;
-            width_so_far = self.width(paragraph[0..accepted]);
-            while (iter.nextCodepointSlice()) |_| {
-                const candidate = self.width(paragraph[0 .. word_start + iter.i]);
-                if (candidate > max_width) break;
-                accepted = word_start + iter.i;
-                width_so_far = candidate;
-            }
+            accepted = partial;
+            accepted_width = partial_width;
         }
         var consumed = accepted;
         while (consumed < paragraph.len and paragraph[consumed] == ' ') consumed += 1;
-        return .{ .len = accepted, .consumed = consumed, .width = width_so_far };
+        return .{ .len = accepted, .consumed = consumed, .width = accepted_width };
     }
 };
 
@@ -142,6 +206,7 @@ pub fn measure(font: Font, text: []const u8, size: f32, max_width: ?f32, layout:
 
 const testing = std.testing;
 const font8x8 = @import("font8x8.zig");
+const synthetic = @import("truetype/synthetic.zig");
 
 fn expectLines(font: Font, text: []const u8, max_width: ?f32, expected: []const []const u8) !void {
     var lines: Lines = .init(font, text, 8, max_width, 0);
@@ -203,8 +268,25 @@ test "spacing and measure" {
     try testing.expectEqual(font.getTextBounds("ab\ncd", 8), measure(font, "ab\ncd", 8, null, .default));
 }
 
+test "pen walks bitmap and vector lines alike" {
+    var buf: [synthetic.buffer_size]u8 = undefined;
+    const vector: Font = .{ .vector = synthetic.font(&buf, .{}) };
+    const bitmap: Font = .{ .bitmap = font8x8.basic };
+    for ([_]Font{ bitmap, vector }) |font| {
+        var pen: Pen = .init(font, "AB", 10, 3);
+        try testing.expectEqual(0, pen.width());
+        const a = pen.next().?;
+        try testing.expectEqual('A', a.codepoint);
+        try testing.expectEqual(1, a.end);
+        try testing.expectEqual(font.getTextBounds("A", 10).r, pen.width());
+        _ = pen.next().?;
+        try testing.expectEqual(font.getTextBounds("AB", 10).r + 3, pen.width());
+        try testing.expectEqual(null, pen.next());
+        try testing.expectEqual(pen.width(), lineWidth(font, "AB", 10, 3));
+    }
+}
+
 test "vector widths follow kerning" {
-    const synthetic = @import("truetype/synthetic.zig");
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font: Font = .{ .vector = synthetic.font(&buf, .{}) };
     // A then B kerns by -30 units; at 1000 px per em that is 800 - 30 + 800.
