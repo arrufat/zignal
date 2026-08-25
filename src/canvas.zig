@@ -4,7 +4,8 @@
 //! The Canvas supports:
 //! - Lines with configurable width and antialiasing
 //! - Circles and arcs (outline and filled)
-//! - Rectangles and polygons
+//! - Rectangles and polygons (even-odd or nonzero fills, multiple contours)
+//! - Text with bitmap or TrueType fonts
 //! - Bezier curves (quadratic and cubic)
 //! - Spline curves
 //!
@@ -14,6 +15,7 @@
 pub const Canvas = @import("canvas/Canvas.zig").Canvas;
 pub const DrawMode = @import("canvas/Canvas.zig").DrawMode;
 pub const DrawOptions = @import("canvas/Canvas.zig").DrawOptions;
+pub const FillRule = @import("canvas/Canvas.zig").FillRule;
 
 // Run all tests
 test {

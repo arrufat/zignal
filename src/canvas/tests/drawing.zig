@@ -8,6 +8,8 @@ const Rectangle = @import("../../geometry.zig").Rectangle;
 const Point = @import("../../geometry/Point.zig").Point;
 const Image = @import("../../image.zig").Image;
 const Canvas = @import("../Canvas.zig").Canvas;
+const DrawOptions = @import("../Canvas.zig").DrawOptions;
+const FillRule = @import("../Canvas.zig").FillRule;
 
 test "line endpoints are connected" {
     const allocator = testing.allocator;
@@ -532,4 +534,113 @@ test "fillPolygon soft antialiases near-horizontal edges" {
         try expect(value <= prev);
         prev = value;
     }
+}
+
+const Outline = @import("../../font.zig").Outline;
+const VectorFont = @import("../../font.zig").VectorFont;
+const synthetic = @import("../../font/truetype/synthetic.zig");
+
+fn whiteCanvas(img: Image(Rgba)) Canvas(Rgba) {
+    img.fill(Rgba.white);
+    return .init(testing.allocator, img);
+}
+
+test "fill rules on overlapping contours" {
+    var img: Image(Rgba) = try .init(testing.allocator, 100, 100);
+    defer img.deinit(testing.allocator);
+    const black: Rgba = .{ .r = 0, .g = 0, .b = 0, .a = 255 };
+    const same_winding = [_][]const Point(2, f32){
+        &.{ .init(.{ 10, 10 }), .init(.{ 10, 60 }), .init(.{ 60, 60 }), .init(.{ 60, 10 }) },
+        &.{ .init(.{ 40, 40 }), .init(.{ 40, 90 }), .init(.{ 90, 90 }), .init(.{ 90, 40 }) },
+    };
+    const with_hole = [_][]const Point(2, f32){
+        &.{ .init(.{ 10, 10 }), .init(.{ 10, 90 }), .init(.{ 90, 90 }), .init(.{ 90, 10 }) },
+        &.{ .init(.{ 30, 30 }), .init(.{ 70, 30 }), .init(.{ 70, 70 }), .init(.{ 30, 70 }) },
+    };
+    for ([_]DrawOptions{ .fast, .soft }) |opts| {
+        var canvas = whiteCanvas(img);
+        try canvas.fillPolygons(&same_winding, black, .even_odd, opts);
+        try expectEqual(@as(u8, 255), canvas.at(50, 50).r); // overlap is a hole
+        try expectEqual(@as(u8, 0), canvas.at(20, 20).r);
+        try expectEqual(@as(u8, 0), canvas.at(80, 80).r);
+
+        canvas = whiteCanvas(img);
+        try canvas.fillPolygons(&same_winding, black, .nonzero, opts);
+        try expectEqual(@as(u8, 0), canvas.at(50, 50).r); // overlap is filled
+        try expectEqual(@as(u8, 0), canvas.at(20, 20).r);
+        try expectEqual(@as(u8, 255), canvas.at(5, 5).r);
+
+        for ([_]FillRule{ .even_odd, .nonzero }) |rule| {
+            canvas = whiteCanvas(img);
+            try canvas.fillPolygons(&with_hole, black, rule, opts);
+            try expectEqual(@as(u8, 255), canvas.at(50, 50).r);
+            try expectEqual(@as(u8, 0), canvas.at(20, 50).r);
+        }
+    }
+}
+
+test "fillPolygon is the even-odd single-contour case" {
+    var a: Image(Rgba) = try .init(testing.allocator, 64, 64);
+    defer a.deinit(testing.allocator);
+    var b: Image(Rgba) = try .init(testing.allocator, 64, 64);
+    defer b.deinit(testing.allocator);
+    const tri = [_]Point(2, f32){ .init(.{ 5.5, 3.2 }), .init(.{ 60.1, 20.7 }), .init(.{ 12.4, 58.9 }) };
+    const red: Rgba = .{ .r = 200, .g = 30, .b = 30, .a = 255 };
+    for ([_]DrawOptions{ .fast, .soft }) |opts| {
+        const ca = whiteCanvas(a);
+        const cb = whiteCanvas(b);
+        try ca.fillPolygon(&tri, red, opts);
+        try cb.fillPolygons(&.{&tri}, red, .even_odd, opts);
+        try testing.expectEqualSlices(Rgba, a.data, b.data);
+    }
+}
+
+test "coverage masks accumulate with max" {
+    var buf: [20 * 20]u8 = @splat(0);
+    const mask: Canvas(u8) = .init(testing.allocator, .initFromSlice(20, 20, &buf));
+    // A square whose left edge sits on a pixel centre: that column is half covered.
+    const square = [_]Point(2, f32){ .init(.{ 5, 5 }), .init(.{ 15, 5 }), .init(.{ 15, 15 }), .init(.{ 5, 15 }) };
+    try mask.fillPolygonsCoverage(&.{&square}, .nonzero);
+    try expectEqual(@as(u8, 255), buf[10 * 20 + 10]);
+    try expectEqual(@as(u8, 0), buf[10 * 20 + 2]);
+    try expectEqual(@as(u8, 0), buf[2 * 20 + 10]);
+    const edge = buf[10 * 20 + 5];
+    try expect(edge > 100 and edge < 156);
+
+    var again = buf;
+    const mask2: Canvas(u8) = .init(testing.allocator, .initFromSlice(20, 20, &again));
+    try mask2.fillPolygonsCoverage(&.{&square}, .nonzero);
+    try testing.expectEqualSlices(u8, &buf, &again);
+
+    // Conservation: each interior row sums to the square's width in pixels.
+    var row_sum: u32 = 0;
+    for (buf[10 * 20 ..][0..20]) |v| row_sum += v;
+    try expect(row_sum >= 10 * 255 - 3 and row_sum <= 10 * 255 + 3);
+}
+
+test "glyph coverage into a caller-sized mask" {
+    var font_buf: [synthetic.buffer_size]u8 = undefined;
+    const font: VectorFont = try .loadFromBytes(synthetic.build(&font_buf, .{}));
+    var outline = try font.outline(testing.allocator, 1);
+    defer outline.deinit(testing.allocator);
+
+    // gid 1 spans 100..700 x 0..700 font units; at 0.05 px/unit that is 30x35 px.
+    const scale: f32 = 0.05;
+    const bounds = font.glyphBounds(1).?;
+    const w: u32 = @ceil(@as(f32, @floatFromInt(bounds.x_max)) * scale + 2);
+    const h: u32 = @ceil(@as(f32, @floatFromInt(bounds.y_max - bounds.y_min)) * scale + 2);
+    const buf = try testing.allocator.alloc(u8, w * h);
+    defer testing.allocator.free(buf);
+    @memset(buf, 0);
+    const mask: Canvas(u8) = .init(testing.allocator, .initFromSlice(h, w, buf));
+    const t: Outline.Transform = .{ .scale = scale, .origin = .init(.{ 0, @as(f32, @floatFromInt(h - 1)) }) };
+    try mask.fillGlyphCoverage(outline, t);
+
+    // Centre of the counter is empty, the frame around it is inked.
+    try expectEqual(@as(u8, 0), buf[(h - 1 - 17) * w + 20]);
+    try expectEqual(@as(u8, 255), buf[(h - 1 - 5) * w + 20]);
+    try expectEqual(@as(u8, 255), buf[(h - 1 - 17) * w + 8]);
+    var inked: usize = 0;
+    for (buf) |v| inked += @intFromBool(v != 0);
+    try expect(inked > 500 and inked < 30 * 35);
 }

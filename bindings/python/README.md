@@ -12,7 +12,7 @@ Zero-dependency image processing primitives written in Zig and packaged for Pyth
 | **Images** | PNG/JPEG load/save, resize & warp, crop/letterbox, insert/extract, Gaussian/median filters, motion blur |
 | **Pixels & Arrays** | Direct indexing/assignment, slice updates, zero-copy NumPy interop both directions |
 | **Colors** | 12 color models (Rgb/Rgba, Hsl/Hsv, Lab/Lch, Xyz/Xyb, Oklab/Oklch, Lms, Ycbcr) with automatic conversion |
-| **Canvas & Fonts** | Lines, arcs, splines, polygons, flood fills, bitmap font text rendering |
+| **Canvas & Fonts** | Lines, arcs, splines, polygons, flood fills, text rendering with bitmap (BDF/PCF) and TrueType fonts |
 | **Geometry** | Rectangle algebra, convex hulls, similarity/affine/projective transforms |
 | **Terminal Output** | SGR, Braille, Sixel, and Kitty renderers with automatic format negotiation |
 | **Numerics** | Matrices with rich linear algebra, PCA, optimization (Hungarian assignment + MaxLIPO+TR global optimizer), running statistics |

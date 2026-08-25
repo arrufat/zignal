@@ -1,8 +1,9 @@
 //! Font system for zignal
 //!
-//! This module provides bitmap font rendering capabilities including:
+//! This module provides font rendering capabilities including:
 //! - Default 8x8 bitmap font
-//! - BDF font loading with Unicode support
+//! - BDF and PCF bitmap font loading with Unicode support
+//! - TrueType (`.ttf`) vector fonts with kerning
 //! - Variable-width font support
 //!
 //! The font system is organized into subdirectories for better modularity.
@@ -12,6 +13,8 @@ const Allocator = std.mem.Allocator;
 const flate = std.compress.flate;
 const Io = std.Io;
 
+const Rectangle = @import("geometry.zig").Rectangle;
+
 /// Maximum file size for font files (50MB)
 /// This limit prevents DoS attacks and accidental memory exhaustion
 /// while being large enough for all known font files
@@ -19,6 +22,83 @@ pub const max_file_size = 50 * 1024 * 1024;
 
 // Core font types
 pub const BitmapFont = @import("font/BitmapFont.zig");
+pub const VectorFont = @import("font/VectorFont.zig");
+pub const Outline = @import("font/Outline.zig");
+pub const truetype = @import("font/truetype.zig");
+
+/// A font of either kind, so text APIs can take one transparently. `size` is always
+/// the pixel size: the em height for vector fonts, the character height for bitmap fonts.
+pub const Font = union(enum) {
+    bitmap: BitmapFont,
+    vector: VectorFont,
+
+    /// Size a vector font is drawn at when none is given; bitmap fonts use their own.
+    pub const default_vector_size: f32 = 16;
+
+    /// Loads any supported format by sniffing the file; bitmap fonts load all characters.
+    pub fn load(io: Io, gpa: Allocator, path: []const u8) !Font {
+        const format = try FontFormat.detectFromPath(io, path) orelse return error.UnsupportedFontFormat;
+        return switch (format) {
+            .bdf, .pcf => .{ .bitmap = try BitmapFont.load(io, gpa, path, .all) },
+            .ttf => .{ .vector = try VectorFont.load(io, gpa, path) },
+        };
+    }
+
+    pub fn deinit(self: *Font, gpa: Allocator) void {
+        switch (self.*) {
+            .bitmap => |*b| b.deinit(gpa),
+            .vector => |*v| v.deinit(gpa),
+        }
+    }
+
+    /// The size used when a caller gives none: a bitmap font's character height (1:1
+    /// pixels), `default_vector_size` for vector fonts.
+    pub fn defaultSize(self: Font) f32 {
+        return switch (self) {
+            .bitmap => |b| @floatFromInt(b.char_height),
+            .vector => default_vector_size,
+        };
+    }
+
+    /// Distance from the top of a line to its baseline, in pixels.
+    pub fn ascent(self: Font, size: f32) f32 {
+        return switch (self) {
+            .bitmap => |b| @as(f32, @floatFromInt(b.ascent())) * b.scaleFor(size),
+            .vector => |v| @as(f32, @floatFromInt(v.ascent)) * v.scaleFor(size),
+        };
+    }
+
+    /// Baseline-to-baseline distance, in pixels.
+    pub fn lineHeight(self: Font, size: f32) f32 {
+        return switch (self) {
+            .bitmap => size,
+            .vector => |v| v.lineHeight(size),
+        };
+    }
+
+    pub fn hasGlyph(self: Font, codepoint: u21) bool {
+        return switch (self) {
+            .bitmap => |b| b.getGlyph(codepoint) != null,
+            .vector => |v| v.glyphIndex(codepoint) != 0,
+        };
+    }
+
+    /// Box occupied by `text` relative to its top-left corner.
+    pub fn getTextBounds(self: Font, text: []const u8, size: f32) Rectangle(f32) {
+        return switch (self) {
+            .bitmap => |b| b.getTextBounds(text, b.scaleFor(size)),
+            .vector => |v| v.getTextBounds(text, size),
+        };
+    }
+
+    /// Box of the inked pixels of `text` relative to its top-left corner.
+    pub fn getTextBoundsTight(self: Font, text: []const u8, size: f32) Rectangle(f32) {
+        return switch (self) {
+            .bitmap => |b| b.getTextBoundsTight(text, b.scaleFor(size)),
+            .vector => |v| v.getTextBoundsTight(text, size),
+        };
+    }
+};
 
 /// Font loading filter
 pub const LoadFilter = union(enum) {
@@ -134,4 +214,34 @@ test {
     _ = font8x8;
     _ = bdf;
     _ = pcf;
+    _ = VectorFont;
+    _ = Outline;
+    _ = truetype;
+}
+
+test "Font.load dispatches on the format" {
+    const synthetic = @import("font/truetype/synthetic.zig");
+    var buf: [synthetic.buffer_size]u8 = undefined;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "synth.ttf", .data = synthetic.build(&buf, .{}) });
+    const path = try tmp.dir.realPathFileAlloc(std.testing.io, "synth.ttf", std.testing.allocator);
+    defer std.testing.allocator.free(path);
+
+    var font: Font = try .load(std.testing.io, std.testing.allocator, path);
+    defer font.deinit(std.testing.allocator);
+    try std.testing.expect(font == .vector);
+    try std.testing.expect(font.hasGlyph('A'));
+    try std.testing.expect(!font.hasGlyph('Z'));
+    try std.testing.expectEqual(@as(f32, 45), font.ascent(50));
+    try std.testing.expectEqual(@as(f32, 57.5), font.lineHeight(50));
+    try std.testing.expectError(error.UnsupportedFontFormat, BitmapFont.load(std.testing.io, std.testing.allocator, path, .all));
+
+    try std.testing.expectEqual(@as(f32, 16), font.defaultSize());
+    const bitmap: Font = .{ .bitmap = font8x8.basic };
+    try std.testing.expectEqual(@as(f32, 8), bitmap.defaultSize());
+    try std.testing.expectEqual(@as(f32, 24), font8x8.basic.getTextBounds("abc", 1).r);
+    try std.testing.expectEqual(@as(f32, 48), bitmap.getTextBounds("abc", 16).r);
+    try std.testing.expectEqual(@as(f32, 16), bitmap.lineHeight(16));
+    try std.testing.expect(bitmap.hasGlyph('a'));
 }

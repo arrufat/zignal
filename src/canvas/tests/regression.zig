@@ -9,6 +9,7 @@ const Point = @import("../../geometry/Point.zig").Point;
 const Image = @import("../../image.zig").Image;
 const Canvas = @import("../Canvas.zig").Canvas;
 const font8x8 = @import("../../font.zig").font8x8;
+const synthetic = @import("../../font/truetype/synthetic.zig");
 
 const DrawTestCase = struct {
     name: []const u8,
@@ -285,17 +286,69 @@ fn fillSplinePolygonFast(canvas: Canvas(Rgba)) void {
 
 fn drawTextScale1(canvas: Canvas(Rgba)) void {
     const color: Rgba = .{ .r = 32, .g = 32, .b = 32, .a = 255 };
-    canvas.drawText("Zignal!", .init(.{ 8, 46 }), color, font8x8.basic, 1.0, .fast);
+    canvas.drawText("Zignal!", .init(.{ 8, 46 }), color, .{ .bitmap = font8x8.basic }, null, .fast) catch {};
 }
 
 fn drawTextFastScaled(canvas: Canvas(Rgba)) void {
     const color: Rgba = .{ .r = 192, .g = 32, .b = 32, .a = 255 };
-    canvas.drawText("Hi", .init(.{ 12, 30 }), color, font8x8.basic, 3.0, .fast);
+    canvas.drawText("Hi", .init(.{ 12, 30 }), color, .{ .bitmap = font8x8.basic }, 24, .fast) catch {};
 }
 
 fn drawTextSoftScaled(canvas: Canvas(Rgba)) void {
     const color: Rgba = .{ .r = 32, .g = 32, .b = 192, .a = 255 };
-    canvas.drawText("Hi", .init(.{ 12, 30 }), color, font8x8.basic, 3.0, .soft);
+    canvas.drawText("Hi", .init(.{ 12, 30 }), color, .{ .bitmap = font8x8.basic }, 24, .soft) catch {};
+}
+
+// Two same-winding overlapping squares: even-odd leaves the overlap empty, nonzero fills it.
+const overlapping_squares = [_][]const Point(2, f32){
+    &.{ .init(.{ 15, 15 }), .init(.{ 15, 60 }), .init(.{ 60, 60 }), .init(.{ 60, 15 }) },
+    &.{ .init(.{ 40, 40 }), .init(.{ 40, 85 }), .init(.{ 85, 85 }), .init(.{ 85, 40 }) },
+};
+
+fn fillPolygonsEvenOdd(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 40, .g = 120, .b = 200, .a = 255 };
+    canvas.fillPolygons(&overlapping_squares, color, .even_odd, .soft) catch {};
+}
+
+fn fillPolygonsNonzero(canvas: Canvas(Rgba)) void {
+    const color: Rgba = .{ .r = 40, .g = 120, .b = 200, .a = 255 };
+    canvas.fillPolygons(&overlapping_squares, color, .nonzero, .soft) catch {};
+}
+
+fn drawTextVectorSoft(canvas: Canvas(Rgba)) void {
+    var buf: [synthetic.buffer_size]u8 = undefined;
+    const font = synthetic.font(&buf, .{});
+    const color: Rgba = .{ .r = 32, .g = 32, .b = 32, .a = 255 };
+    canvas.drawText("ABC", .init(.{ 4, 20 }), color, .{ .vector = font }, 36, .soft) catch {};
+}
+
+fn drawTextVectorFast(canvas: Canvas(Rgba)) void {
+    var buf: [synthetic.buffer_size]u8 = undefined;
+    const font = synthetic.font(&buf, .{});
+    const color: Rgba = .{ .r = 192, .g = 32, .b = 32, .a = 255 };
+    canvas.drawText("ABC", .init(.{ 4, 20 }), color, .{ .vector = font }, 36, .fast) catch {};
+}
+
+fn drawTextVectorComposite(canvas: Canvas(Rgba)) void {
+    var buf: [synthetic.buffer_size]u8 = undefined;
+    const font = synthetic.font(&buf, .{});
+    const color: Rgba = .{ .r = 32, .g = 32, .b = 192, .a = 255 };
+    canvas.drawText("DE\nF", .init(.{ 2, 2 }), color, .{ .vector = font }, 40, .soft) catch {};
+}
+
+fn fillGlyphCoverageSheared(canvas: Canvas(Rgba)) void {
+    var buf: [synthetic.buffer_size]u8 = undefined;
+    const font = synthetic.font(&buf, .{});
+    var outline = font.outline(canvas.allocator, 1) catch return;
+    defer outline.deinit(canvas.allocator);
+
+    var mask_buf: [100 * 100]u8 = @splat(0);
+    const mask: Canvas(u8) = .init(canvas.allocator, .initFromSlice(100, 100, &mask_buf));
+    mask.fillGlyphCoverage(outline, .{ .scale = 0.1, .origin = .init(.{ 10.5, 85 }), .shear = 0.25 }) catch {};
+    for (canvas.image.data, mask_buf) |*px, coverage| {
+        const v = 255 - coverage;
+        px.* = .{ .r = v, .g = v, .b = v, .a = 255 };
+    }
 }
 
 const md5_checksums = [_]DrawTestCase{
@@ -335,6 +388,12 @@ const md5_checksums = [_]DrawTestCase{
     .{ .name = "drawTextScale1", .md5sum = "6aae9a7cc19d3c2045118de0c7e21bc9", .draw_fn = drawTextScale1 },
     .{ .name = "drawTextFastScaled", .md5sum = "043ab942f7991837fb4fd63969857587", .draw_fn = drawTextFastScaled },
     .{ .name = "drawTextSoftScaled", .md5sum = "f2bb866800a6a56b4a65a711f047d422", .draw_fn = drawTextSoftScaled },
+    .{ .name = "fillPolygonsEvenOdd", .md5sum = "2a8026acb4db5acd870e460ede31c6de", .draw_fn = fillPolygonsEvenOdd },
+    .{ .name = "fillPolygonsNonzero", .md5sum = "591a08251ffaf652625db39f1ddbaa8e", .draw_fn = fillPolygonsNonzero },
+    .{ .name = "drawTextVectorSoft", .md5sum = "c1c2727d255903c559a0a76822bd9ce1", .draw_fn = drawTextVectorSoft },
+    .{ .name = "drawTextVectorFast", .md5sum = "e0add7efb36c574cf74c97fcdfa96179", .draw_fn = drawTextVectorFast },
+    .{ .name = "drawTextVectorComposite", .md5sum = "dd1f8e58c1b993af3a37c396c4f5d241", .draw_fn = drawTextVectorComposite },
+    .{ .name = "fillGlyphCoverageSheared", .md5sum = "04c03333d556cd12e9dcdb41eaa912a1", .draw_fn = fillGlyphCoverageSheared },
 };
 
 test "MD5 checksum regression tests" {

@@ -1,7 +1,7 @@
 const std = @import("std");
 const zignal = @import("zignal");
 
-const bitmap_font = @import("bitmap_font.zig");
+const font = @import("font.zig");
 const blending = @import("blending.zig");
 const canvas = @import("canvas.zig");
 const color = @import("color.zig");
@@ -73,7 +73,7 @@ pub export fn PyInit__zignal() ?*c.PyObject {
         .{ .name = "AffineTransform", .ty = @ptrCast(&transforms.AffineTransformType) },
         .{ .name = "ProjectiveTransform", .ty = @ptrCast(&transforms.ProjectiveTransformType) },
         .{ .name = "Canvas", .ty = @ptrCast(&canvas.CanvasType) },
-        .{ .name = "BitmapFont", .ty = @ptrCast(&bitmap_font.BitmapFontType) },
+        .{ .name = "Font", .ty = @ptrCast(&font.FontType) },
         .{ .name = "PCA", .ty = @ptrCast(&pca.PCAType) },
         .{ .name = "FeatureDistributionMatching", .ty = @ptrCast(&fdm.FeatureDistributionMatchingType) },
         .{ .name = "Assignment", .ty = @ptrCast(&optimization.AssignmentType) },

@@ -5,7 +5,7 @@ pub const Canvas = zignal.Canvas;
 const DrawMode = zignal.DrawMode;
 const DrawOptions = zignal.DrawOptions;
 const Blending = zignal.Blending;
-const BitmapFont = zignal.BitmapFont;
+const Font = zignal.Font;
 const Rectangle = zignal.Rectangle;
 
 const color_utils = @import("color_utils.zig");
@@ -161,10 +161,10 @@ pub const PyCanvas = struct {
         }
     }
 
-    /// Draw text.
-    pub fn drawText(self: *Self, text: []const u8, position: anytype, color: Rgba, font: BitmapFont, scale: f32, opts: DrawOptions) void {
+    /// Draw text at `size` pixels, or the font's default size.
+    pub fn drawText(self: *Self, text: []const u8, position: anytype, color: Rgba, font: Font, size: ?f32, opts: DrawOptions) !void {
         switch (self.data) {
-            inline else => |*canvas| canvas.drawText(text, position, color, font, scale, opts),
+            inline else => |*canvas| try canvas.drawText(text, position, color, font, size, opts),
         }
     }
 
@@ -213,16 +213,6 @@ fn parseDrawOptions(mode: c_long, blending: ?*c.PyObject) !DrawOptions {
         .mode = try enum_utils.longToEnum(DrawMode, mode),
         .blending = try enum_utils.pyToEnumOpt(Blending, blending, .{ .missing = .normal, .none = .none }),
     };
-}
-
-// Static default font with all characters, initialized once
-var font8x8: ?BitmapFont = null;
-
-fn getFont8x8() !BitmapFont {
-    if (font8x8 == null) {
-        font8x8 = try zignal.font.font8x8.create(allocator, .all);
-    }
-    return font8x8.?;
 }
 
 pub const CanvasObject = extern struct {
@@ -841,7 +831,7 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         position: ?*c.PyObject,
         color: ?*c.PyObject,
         font: ?*c.PyObject = null,
-        scale: f64 = 1.0,
+        size: ?*c.PyObject = null,
         mode: c_long = 0,
         blending: ?*c.PyObject = null,
     };
@@ -859,24 +849,20 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 
     const opts = parseDrawOptions(params.mode, params.blending) catch return null;
 
-    if (params.font) |font| {
-        const bitmap_font_module = @import("bitmap_font.zig");
-        if (c.PyObject_IsInstance(font, @ptrCast(&bitmap_font_module.BitmapFontType)) <= 0) {
-            if (c.PyErr_Occurred() == null) {
-                python.setTypeError("BitmapFont instance or None", font);
-            }
-            return null;
-        }
-
-        const font_ptr = python.unwrap(bitmap_font_module.BitmapFontObject, "font", font, "BitmapFont") orelse return null;
-        canvas.drawText(text, position, rgba, font_ptr.*, @floatCast(params.scale), opts);
-    } else {
-        const font = getFont8x8() catch {
-            python.setRuntimeError("Failed to initialize default font", .{});
-            return null;
-        };
-        canvas.drawText(text, position, rgba, font, @floatCast(params.scale), opts);
+    const font_module = @import("font.zig");
+    const font_obj = if (params.font == null or params.font == c.Py_None()) font_module.font8x8Object() orelse return null else params.font;
+    if (c.PyObject_IsInstance(font_obj, @ptrCast(&font_module.FontType)) <= 0) {
+        python.setTypeError("Font instance or None", font_obj);
+        return null;
     }
+    const font = python.unwrap(font_module.FontObject, "font", font_obj, "Font") orelse return null;
+
+    const size: ?f32 = if (params.size == null or params.size == c.Py_None()) null else python.parse(f32, params.size) catch return null;
+
+    canvas.drawText(text, position, rgba, font.*, size, opts) catch {
+        python.setRuntimeError("Failed to draw text", .{});
+        return null;
+    };
 
     return python.none();
 }
@@ -993,14 +979,15 @@ const canvas_fill_arc_doc =
 ;
 
 const canvas_draw_text_doc =
-    \\Draw text on the
+    \\Draw text with its top-left corner at `position`.
     \\
     \\## Parameters
-    \\- `text` (str): Text to draw
+    \\- `text` (str): Text to draw; `\n` starts a new line
     \\- `position` (tuple[float, float]): Position coordinates (x, y)
     \\- `color` (int, tuple or color object): Text color.
-    \\- `font` (BitmapFont, optional): Font object to use for rendering. If `None`, uses BitmapFont.font8x8()
-    \\- `scale` (float, optional): Text scale factor (default: 1.0)
+    \\- `font` (Font, optional): Font to render with. If `None`, uses `Font.font8x8()`
+    \\- `size` (float, optional): Font size in pixels: the em height for TrueType fonts, the character
+    \\  height for bitmap fonts. Defaults to the bitmap font's native size, or 16 for TrueType fonts
     \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
     \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
 ;
@@ -1131,7 +1118,7 @@ pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
         .meth = @ptrCast(&canvas_draw_text),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_text_doc,
-        .params = "self, text: str, position: tuple[float, float], color: Color, font: BitmapFont = BitmapFont.font8x8(), scale: float = 1.0, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
+        .params = "self, text: str, position: tuple[float, float], color: Color, font: Font | None = None, size: float | None = None, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
 };
