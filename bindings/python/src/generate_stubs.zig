@@ -507,6 +507,22 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         .value_docs = &canvas_module.draw_mode_values,
     });
 
+    // Generate the text alignment enums
+    try generateEnumFromMetadata(&stub, .{
+        .name = "TextAlign",
+        .base = "IntEnum",
+        .doc = canvas_module.text_align_doc,
+        .zig_type = zignal.TextAlign,
+        .value_docs = &canvas_module.text_align_values,
+    });
+    try generateEnumFromMetadata(&stub, .{
+        .name = "VerticalAlign",
+        .base = "IntEnum",
+        .doc = canvas_module.vertical_align_doc,
+        .zig_type = zignal.VerticalAlign,
+        .value_docs = &canvas_module.vertical_align_values,
+    });
+
     // Generate OptimizationPolicy enum
     try generateEnumFromMetadata(&stub, .{
         .name = "OptimizationPolicy",
@@ -742,6 +758,8 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
         \\    Blending as Blending,
         \\    BorderMode as BorderMode,
         \\    DrawMode as DrawMode,
+        \\    TextAlign as TextAlign,
+        \\    VerticalAlign as VerticalAlign,
         \\    ThresholdMode as ThresholdMode,
         \\    MotionBlur as MotionBlur,
         \\    Colormap as Colormap,

@@ -255,6 +255,39 @@ fn textBounds(comptime method: []const u8) PyMethod {
     }.call;
 }
 
+const font_measure_text_doc =
+    \\Box `Canvas.draw_text_box` fills with `text` at `size`, relative to its top-left corner:
+    \\the widest line by the number of lines times the line advance.
+    \\
+    \\## Parameters
+    \\- `text` (str): Text to measure; `\n` starts a new line
+    \\- `size` (float): Font size in pixels
+    \\- `wrap_width` (float | None, optional): Wrap lines at spaces to this width (default: no wrapping)
+    \\- `line_spacing` (float, optional): Multiplier on the font's line height (default: 1.0)
+    \\- `letter_spacing` (float, optional): Extra pixels between glyphs (default: 0.0)
+;
+
+fn font_measure_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const font = python.unwrap(FontObject, "font", self_obj, "Font") orelse return null;
+    const Params = struct {
+        text: [*c]const u8,
+        size: f64,
+        wrap_width: ?*c.PyObject = null,
+        line_spacing: f64 = 1,
+        letter_spacing: f64 = 0,
+    };
+    var params: Params = undefined;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
+    const wrap_width: ?f32 = if (params.wrap_width == null or params.wrap_width == c.Py_None()) null else python.parse(f32, params.wrap_width) catch return null;
+    const layout: zignal.TextLayout = .{
+        .wrap = wrap_width != null,
+        .line_spacing = @floatCast(params.line_spacing),
+        .letter_spacing = @floatCast(params.letter_spacing),
+    };
+    const rect = font.measureText(std.mem.span(params.text), @floatCast(params.size), wrap_width, layout);
+    return python.create(rect.as(f64));
+}
+
 fn fontKind(font: *Font) ?*c.PyObject {
     return python.create(@tagName(font.*));
 }
@@ -336,6 +369,14 @@ pub const font_methods_metadata = [_]python.MethodWithMetadata{
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = font_get_text_bounds_tight_doc,
         .params = "self, text: str, size: float",
+        .returns = "Rectangle",
+    },
+    .{
+        .name = "measure_text",
+        .meth = @ptrCast(&font_measure_text),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = font_measure_text_doc,
+        .params = "self, text: str, size: float, wrap_width: float | None = None, line_spacing: float = 1.0, letter_spacing: float = 0.0",
         .returns = "Rectangle",
     },
 };

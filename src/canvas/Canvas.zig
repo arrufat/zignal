@@ -12,6 +12,8 @@ const BitmapFont = @import("../font.zig").BitmapFont;
 const Font = @import("../font.zig").Font;
 const VectorFont = @import("../font.zig").VectorFont;
 const Outline = @import("../font.zig").Outline;
+const TextLayout = @import("../font.zig").TextLayout;
+const text_layout = @import("../font.zig").layout;
 const Rectangle = @import("../geometry.zig").Rectangle;
 const Point = @import("../geometry/Point.zig").Point;
 const Image = @import("../image.zig").Image;
@@ -52,6 +54,21 @@ const CoverageMax = struct {
     inline fn cover(_: CoverageMax, dest: *u8, alpha: f32) void {
         const coverage: u8 = @round(@min(alpha, 1) * 255);
         dest.* = @max(dest.*, coverage);
+    }
+};
+
+/// How text glyphs are painted.
+const GlyphStyle = union(enum) {
+    fill,
+    /// Stroke width in pixels.
+    outline: f32,
+
+    /// How far past the ink the paint reaches.
+    fn reach(style: GlyphStyle) f32 {
+        return switch (style) {
+            .fill => 0,
+            .outline => |width| width / 2,
+        };
     }
 };
 
@@ -618,7 +635,7 @@ pub fn Canvas(comptime T: type) type {
         /// Draws the outline of a polygon on the given image.
         /// The polygon is defined by a sequence of vertices. Lines are drawn between consecutive
         /// vertices, and a final line is drawn from the last vertex to the first to close the shape.
-        /// Round joints are added at vertices to ensure smooth connections.
+        /// Each edge is an independent `drawLine`; vertices get no joins.
         pub fn drawPolygon(self: Self, polygon: []const Point(2, f32), color: anytype, width: u32, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
             if (width == 0) return;
@@ -947,7 +964,7 @@ pub fn Canvas(comptime T: type) type {
         /// Accumulates antialiased coverage of `contours` into an 8-bit mask:
         /// `dest = max(dest, 255 * coverage)`. Pixels outside the shape are never written, so
         /// clear the mask first. Only for `Canvas(u8)`.
-        pub fn fillPolygonsCoverage(self: Self, contours: []const []const Point(2, f32), fill_rule: FillRule) !void {
+        pub fn rasterizePolygons(self: Self, contours: []const []const Point(2, f32), fill_rule: FillRule) !void {
             comptime assert(T == u8);
             return self.fillContours(contours, fill_rule, .soft, CoverageMax{});
         }
@@ -961,21 +978,91 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Antialiased coverage of a glyph outline into an 8-bit mask, as `fillPolygonsCoverage`.
-        pub fn fillGlyphCoverage(self: Self, outline: Outline, transform: Outline.Transform) !void {
+        /// Antialiased coverage of a glyph outline into an 8-bit mask, as `rasterizePolygons`.
+        pub fn rasterizeGlyph(self: Self, outline: Outline, transform: Outline.Transform) !void {
             comptime assert(T == u8);
             return self.fillOutline(outline, transform, .soft, CoverageMax{});
         }
+
+        /// A glyph outline flattened into device-space polygons, in scratch memory.
+        const FlatGlyph = struct {
+            points: []Point(2, f32),
+            contours: [][]const Point(2, f32),
+            polys: [][]const Point(2, f32),
+
+            fn init(scratch: std.mem.Allocator, outline: Outline, transform: Outline.Transform) !FlatGlyph {
+                const points = try scratch.alloc(Point(2, f32), outline.flattenedPointCount(transform));
+                errdefer scratch.free(points);
+                const contours = try scratch.alloc([]const Point(2, f32), outline.contourCount());
+                return .{ .points = points, .contours = contours, .polys = outline.flatten(transform, points, contours) };
+            }
+
+            fn deinit(self: FlatGlyph, scratch: std.mem.Allocator) void {
+                scratch.free(self.contours);
+                scratch.free(self.points);
+            }
+        };
 
         fn fillOutline(self: Self, outline: Outline, transform: Outline.Transform, comptime mode: DrawMode, sink: anytype) !void {
             var stack: [glyph_scratch_size]u8 align(16) = undefined;
             var buffer_first: std.heap.BufferFirstAllocator = .init(&stack, self.allocator);
             const scratch = buffer_first.allocator();
-            const points = try scratch.alloc(Point(2, f32), outline.flattenedPointCount(transform));
-            defer scratch.free(points);
-            const contours = try scratch.alloc([]const Point(2, f32), outline.contourCount());
-            defer scratch.free(contours);
-            return self.fillContours(outline.flatten(transform, points, contours), .nonzero, mode, sink);
+            const flat = try FlatGlyph.init(scratch, outline, transform);
+            defer flat.deinit(scratch);
+            return self.fillContours(flat.polys, .nonzero, mode, sink);
+        }
+
+        /// Strokes closed polylines `width` pixels wide with round joins and caps: each becomes
+        /// a union of one quad per segment plus a polygonal disc at every vertex whose turn
+        /// would otherwise leave a visible gap, all wound the same way and filled in a single
+        /// nonzero pass so the overlaps never double-blend.
+        fn strokePolylines(self: Self, scratch: std.mem.Allocator, polys: []const []const Point(2, f32), width: f32, comptime mode: DrawMode, sink: anytype) !void {
+            const radius = @max(width, 0.5) / 2;
+            const sides: usize = @intFromFloat(@min(64, @max(8, @ceil(radius * 2))));
+            // The quads' vertex order and the disc's descending angle wind the same way.
+            var disc: [64]Point(2, f32) = undefined;
+            fillArcRing(disc[0..sides], .init(.{ 0, 0 }), radius, 0, -2 * std.math.pi / as(f32, sides));
+
+            var vertices: usize = 0;
+            for (polys) |poly| vertices += poly.len;
+            const piece_points = try scratch.alloc(Point(2, f32), vertices * (4 + sides));
+            defer scratch.free(piece_points);
+            const pieces = try scratch.alloc([]const Point(2, f32), vertices * 2);
+            defer scratch.free(pieces);
+
+            var n: usize = 0;
+            var k: usize = 0;
+            for (polys) |poly| {
+                var incoming: ?Point(2, f32) = if (poly.len > 1) unitDirection(poly[poly.len - 1], poly[0]) else null;
+                for (poly, 0..) |p, i| {
+                    const outgoing = if (poly.len > 1) unitDirection(p, poly[(i + 1) % poly.len]) else null;
+                    if (outgoing) |d| {
+                        const q = poly[(i + 1) % poly.len];
+                        const normal: Point(2, f32) = .init(.{ -d.y() * radius, d.x() * radius });
+                        piece_points[n..][0..4].* = .{ p.add(normal), q.add(normal), q.sub(normal), p.sub(normal) };
+                        pieces[k] = piece_points[n..][0..4];
+                        n += 4;
+                        k += 1;
+                    }
+                    // A join's gap is r·(1 − cos(θ/2)); below the flatness tolerance it is invisible.
+                    const gap = if (incoming) |a| if (outgoing) |b| radius * (1 - @sqrt(@max(0, (1 + a.x() * b.x() + a.y() * b.y()) / 2))) else radius else radius;
+                    if (gap >= Outline.flatness_tolerance) {
+                        for (disc[0..sides], 0..) |offset, j| piece_points[n + j] = p.add(offset);
+                        pieces[k] = piece_points[n..][0..sides];
+                        n += sides;
+                        k += 1;
+                    }
+                    if (outgoing) |d| incoming = d;
+                }
+            }
+            return self.fillContours(pieces[0..k], .nonzero, mode, sink);
+        }
+
+        /// Unit vector from `p` to `q`, or null when they coincide.
+        fn unitDirection(p: Point(2, f32), q: Point(2, f32)) ?Point(2, f32) {
+            const d = q.sub(p);
+            const len = d.norm();
+            return if (len > 0) d.scale(1 / len) else null;
         }
 
         /// Scanline fill shared by every polygon entry point. `sink` is a `Paint` or, for
@@ -1654,12 +1741,35 @@ pub fn Canvas(comptime T: type) type {
         /// `font.defaultSize()`, a bitmap font's native size. `\n` starts a new line.
         pub fn drawText(self: Self, text: []const u8, position: Point(2, f32), color: anytype, font: Font, font_size: ?f32, opts: DrawOptions) !void {
             comptime assert(isColor(@TypeOf(color)));
-            const px = font_size orelse font.defaultSize();
-            if (px <= 0) return;
-            switch (font) {
-                .bitmap => |bitmap| self.drawTextBitmap(text, position, color, bitmap, bitmap.scaleFor(px), opts),
-                .vector => |vector| try self.drawTextVector(text, position, color, vector, px, opts),
-            }
+            return self.renderText(text, unboundedBox(position), .init(color, opts.blending), font, font_size, .default, .fill, opts.mode);
+        }
+
+        /// Lays `text` out inside `box` as `layout` says: wrapped to the box width when asked,
+        /// each line aligned horizontally and the block vertically. Text that does not fit
+        /// is clipped by the image only, not the box.
+        pub fn drawTextBox(self: Self, text: []const u8, box: Rectangle(f32), color: anytype, font: Font, font_size: ?f32, layout: TextLayout, opts: DrawOptions) !void {
+            comptime assert(isColor(@TypeOf(color)));
+            return self.renderText(text, box, .init(color, opts.blending), font, font_size, layout, .fill, opts.mode);
+        }
+
+        /// `drawText` stroking each glyph's outline `width` pixels wide (round joins and caps)
+        /// instead of filling it. Bitmap fonts have no outlines and get a halo of that
+        /// diameter; draw the text over it for a readable label.
+        pub fn drawTextOutline(self: Self, text: []const u8, position: Point(2, f32), color: anytype, font: Font, font_size: ?f32, width: f32, opts: DrawOptions) !void {
+            comptime assert(isColor(@TypeOf(color)));
+            return self.renderText(text, unboundedBox(position), .init(color, opts.blending), font, font_size, .default, .{ .outline = width }, opts.mode);
+        }
+
+        /// `drawTextBox` stroking the glyphs as `drawTextOutline` does.
+        pub fn drawTextBoxOutline(self: Self, text: []const u8, box: Rectangle(f32), color: anytype, font: Font, font_size: ?f32, width: f32, layout: TextLayout, opts: DrawOptions) !void {
+            comptime assert(isColor(@TypeOf(color)));
+            return self.renderText(text, box, .init(color, opts.blending), font, font_size, layout, .{ .outline = width }, opts.mode);
+        }
+
+        /// The box `drawText` uses: anchored at `position`, open to the right and below, so
+        /// only left/top alignment without wrapping makes sense in it.
+        fn unboundedBox(position: Point(2, f32)) Rectangle(f32) {
+            return .{ .l = position.x(), .t = position.y(), .r = std.math.inf(f32), .b = std.math.inf(f32) };
         }
 
         /// The canvas area as a float rectangle, for clipping tests.
@@ -1667,56 +1777,103 @@ pub fn Canvas(comptime T: type) type {
             return .{ .l = 0, .t = 0, .r = as(f32, self.cols()), .b = as(f32, self.rows()) };
         }
 
-        /// Lays out each glyph with `VectorFont.Layout`, then fills its outline. Glyphs that
-        /// fail to parse are skipped; only allocation errors propagate.
-        fn drawTextVector(self: Self, text: []const u8, position: Point(2, f32), color: anytype, font: VectorFont, font_size: f32, opts: DrawOptions) !void {
+        /// Shared by every text entry point: breaks `text` into lines, places the block and
+        /// each line inside `box` per `layout`, and draws the lines.
+        fn renderText(self: Self, text: []const u8, box: Rectangle(f32), paint: Paint, font: Font, font_size: ?f32, layout: TextLayout, style: GlyphStyle, mode: DrawMode) !void {
+            const px = font_size orelse font.defaultSize();
+            if (px <= 0) return;
+            const max_width: ?f32 = if (layout.wrap) box.width() else null;
+            const advance = text_layout.lineAdvance(font, px, layout);
+            var y = box.t;
+            if (layout.valign != .top) {
+                const block = text_layout.measure(font, text, px, max_width, layout).b;
+                y = if (layout.valign == .middle) box.t + (box.height() - block) / 2 else box.b - block;
+            }
+
+            var lines: text_layout.Lines = .init(font, text, px, max_width, layout.letter_spacing);
+            while (lines.next()) |line| : (y += advance) {
+                const x: f32 = switch (layout.halign) {
+                    .left => box.l,
+                    .center => box.l + (box.width() - line.width) / 2,
+                    .right => box.r - line.width,
+                };
+                const position: Point(2, f32) = .init(.{ x, y });
+                switch (font) {
+                    .bitmap => |bitmap| self.drawTextBitmap(line.text, position, paint, bitmap, bitmap.scaleFor(px), layout.letter_spacing, style, mode),
+                    .vector => |vector| try self.drawTextVector(line.text, position, paint, vector, px, layout.letter_spacing, style, mode),
+                }
+            }
+        }
+
+        /// Lays out one line with `VectorFont.Layout`, then fills or strokes each glyph's
+        /// outline. Glyphs that fail to parse are skipped; only allocation errors propagate.
+        fn drawTextVector(self: Self, text: []const u8, position: Point(2, f32), paint: Paint, font: VectorFont, font_size: f32, letter_spacing: f32, style: GlyphStyle, mode: DrawMode) !void {
             const canvas_rect = self.imageRect();
+            const margin = style.reach() + 1;
             var layout: VectorFont.Layout = .init(font, text, font_size);
+            layout.letter_spacing = letter_spacing;
             while (layout.next()) |item| {
                 const ink = layout.inkBounds(item) orelse continue;
-                if (ink.translate(position.x(), position.y()).grow(1).intersect(canvas_rect) == null) continue;
+                if (ink.translate(position.x(), position.y()).grow(margin).intersect(canvas_rect) == null) continue;
                 var outline = font.outline(self.allocator, item.gid) catch |err| switch (err) {
                     error.OutOfMemory => return error.OutOfMemory,
                     else => continue,
                 };
                 defer outline.deinit(self.allocator);
-                try self.fillGlyph(outline, layout.transform(item, position), color, opts);
+                var stack: [glyph_scratch_size]u8 align(16) = undefined;
+                var buffer_first: std.heap.BufferFirstAllocator = .init(&stack, self.allocator);
+                const scratch = buffer_first.allocator();
+                const flat = try FlatGlyph.init(scratch, outline, layout.transform(item, position));
+                defer flat.deinit(scratch);
+                switch (mode) {
+                    inline else => |m| switch (style) {
+                        .fill => try self.fillContours(flat.polys, .nonzero, m, paint),
+                        .outline => |width| try self.strokePolylines(scratch, flat.polys, width, m, paint),
+                    },
+                }
             }
         }
 
-        fn drawTextBitmap(self: Self, text: []const u8, position: Point(2, f32), color: anytype, font: BitmapFont, scale: f32, opts: DrawOptions) void {
+        /// Draws one line of bitmap glyphs. An `.outline` style blits every glyph at each
+        /// integer offset within its reach, dilating it into a halo; the stamps blend
+        /// independently, so translucent halos darken where they overlap.
+        fn drawTextBitmap(self: Self, text: []const u8, position: Point(2, f32), paint: Paint, font: BitmapFont, scale: f32, letter_spacing: f32, style: GlyphStyle, mode: DrawMode) void {
+            const radius: i32 = @intFromFloat(@ceil(style.reach()));
+            const glyphs = std.unicode.utf8CountCodepoints(text) catch text.len;
             const text_bounds = font.getTextBounds(text, scale);
             const text_rect: Rectangle(f32) = .{
                 .l = position.x() + text_bounds.l,
                 .t = position.y() + text_bounds.t,
-                .r = position.x() + text_bounds.r,
+                .r = position.x() + text_bounds.r + @max(letter_spacing, 0) * as(f32, glyphs),
                 .b = position.y() + text_bounds.b,
             };
-            const clip_rect = text_rect.intersect(self.imageRect()) orelse return;
+            const clip_rect = text_rect.grow(as(f32, radius)).intersect(self.imageRect()) orelse return;
 
             var x = position.x();
-            var y = position.y();
-            const start_x = x;
-            const line_height = as(f32, font.char_height) * scale;
-
+            const y = position.y();
             var utf8_iter = std.unicode.Utf8Iterator{ .bytes = text, .i = 0 };
             while (utf8_iter.nextCodepoint()) |codepoint| {
-                if (codepoint == '\n') {
-                    x = start_x;
-                    y += line_height;
-                    continue;
-                }
                 if (font.getGlyph(codepoint)) |glyph| {
-                    if (scale == 1.0) {
-                        self.renderGlyphUnscaled(glyph.info, glyph.data, font, x, y, color, opts.blending);
-                    } else switch (opts.mode) {
-                        .fast => self.renderGlyphFastScaled(glyph.info, glyph.data, font, x, y, scale, clip_rect, color, opts.blending),
-                        .soft => self.renderGlyphSoftScaled(glyph.info, glyph.data, font, x, y, scale, color, opts.blending),
+                    var dy: i32 = -radius;
+                    while (dy <= radius) : (dy += 1) {
+                        var dx: i32 = -radius;
+                        while (dx <= radius) : (dx += 1) {
+                            if (dx * dx + dy * dy > radius * radius) continue;
+                            const gx = x + as(f32, dx);
+                            const gy = y + as(f32, dy);
+                            if (scale == 1.0) {
+                                self.renderGlyphUnscaled(glyph.info, glyph.data, font, gx, gy, paint);
+                            } else switch (mode) {
+                                .fast => self.renderGlyphFastScaled(glyph.info, glyph.data, font, gx, gy, scale, clip_rect, paint),
+                                .soft => self.renderGlyphSoftScaled(glyph.info, glyph.data, font, gx, gy, scale, paint),
+                            }
+                        }
                     }
                     x += as(f32, glyph.info.advanceWidth()) * scale;
                 } else {
                     x += as(f32, font.char_width) * scale;
                 }
+                x += letter_spacing;
             }
         }
 
@@ -1725,7 +1882,7 @@ pub fn Canvas(comptime T: type) type {
         /// `x`/`y` once (floor commutes with adding the integer col/row/offsets), pre-converts
         /// `color`, hoists the blend-mode branch, and writes pixels through direct memory
         /// access with a single u32 bounds check.
-        fn renderGlyphUnscaled(self: Self, glyph_info: anytype, char_data: []const u8, font: BitmapFont, x: f32, y: f32, color: anytype, blending: Blending) void {
+        fn renderGlyphUnscaled(self: Self, glyph_info: anytype, char_data: []const u8, font: BitmapFont, x: f32, y: f32, paint: Paint) void {
             const bytes_per_row = calculateGlyphBytesPerRow(glyph_info, font);
             const render_height = if (font.glyph_map == null) font.char_height else glyph_info.height;
 
@@ -1735,8 +1892,6 @@ pub fn Canvas(comptime T: type) type {
             const base_row = fy + as(i32, glyph_info.y_offset);
             const rows_i32: i32 = @intCast(self.image.rows);
             const cols_i32: i32 = @intCast(self.image.cols);
-
-            const paint: Paint = .init(color, blending);
 
             for (0..render_height) |row| {
                 const py = base_row + as(i32, row);
@@ -1753,9 +1908,8 @@ pub fn Canvas(comptime T: type) type {
 
         /// Nearest-neighbor upscale: each set glyph bit produces a `scale`-wide block of
         /// identical pixels, clipped to the precomputed text rect.
-        fn renderGlyphFastScaled(self: Self, glyph_info: anytype, char_data: []const u8, font: BitmapFont, x: f32, y: f32, scale: f32, clip_rect: Rectangle(f32), color: anytype, blending: Blending) void {
+        fn renderGlyphFastScaled(self: Self, glyph_info: anytype, char_data: []const u8, font: BitmapFont, x: f32, y: f32, scale: f32, clip_rect: Rectangle(f32), paint: Paint) void {
             const bytes_per_row = calculateGlyphBytesPerRow(glyph_info, font);
-            const paint: Paint = .init(color, blending);
             for (0..glyph_info.height) |row| {
                 for (0..glyph_info.width) |col| {
                     if (getGlyphBit(char_data, row, col, bytes_per_row) == 0) continue;
@@ -1780,8 +1934,7 @@ pub fn Canvas(comptime T: type) type {
 
         /// Box-filter antialiased upscale: each destination pixel samples a `1/scale`-radius
         /// box of the source bitmap and writes the area-weighted coverage as alpha.
-        fn renderGlyphSoftScaled(self: Self, glyph_info: anytype, char_data: []const u8, font: BitmapFont, x: f32, y: f32, scale: f32, color: anytype, blending: Blending) void {
-            const paint: Paint = .init(color, blending);
+        fn renderGlyphSoftScaled(self: Self, glyph_info: anytype, char_data: []const u8, font: BitmapFont, x: f32, y: f32, scale: f32, paint: Paint) void {
             const bytes_per_row = calculateGlyphBytesPerRow(glyph_info, font);
             const glyph_width_f = as(f32, glyph_info.width);
             const glyph_height_f = as(f32, glyph_info.height);

@@ -162,3 +162,71 @@ def test_face_on_a_bitmap_font(tmp_path):
     assert zignal.Font.load(path, face=0).kind == "bitmap"
     with pytest.raises(ValueError):
         zignal.Font.load(path, face=1)
+
+
+def test_text_box_layout():
+    font = zignal.Font.font8x8()
+
+    def drawn_at(x, y):
+        img = zignal.Image(60, 100, 0)
+        img.canvas().draw_text("AB", (x, y), 255, font)
+        return img.to_numpy()
+
+    # "AB" is 16 x 8 px; the box variants land exactly where draw_text would.
+    box = (10, 10, 90, 50)
+    centered = zignal.Image(60, 100, 0)
+    centered.canvas().draw_text_box(
+        "AB", box, 255, font, halign=zignal.TextAlign.CENTER, valign=zignal.VerticalAlign.MIDDLE
+    )
+    np.testing.assert_array_equal(centered.to_numpy(), drawn_at(10 + 32, 10 + 16))
+    corner = zignal.Image(60, 100, 0)
+    corner.canvas().draw_text_box(
+        "AB", zignal.Rectangle(10, 10, 90, 50), 255, font,
+        halign=zignal.TextAlign.RIGHT, valign=zignal.VerticalAlign.BOTTOM,
+    )
+    np.testing.assert_array_equal(corner.to_numpy(), drawn_at(90 - 16, 50 - 8))
+
+    # Wrapping at spaces matches an explicit newline; measure_text agrees.
+    wrapped = zignal.Image(60, 100, 0)
+    wrapped.canvas().draw_text_box("AB AB", (10, 10, 27, 60), 255, font, wrap=True, line_spacing=1.5)
+    twoline = zignal.Image(60, 100, 0)
+    twoline.canvas().draw_text("AB", (10, 10), 255, font)
+    twoline.canvas().draw_text("AB", (10, 22), 255, font)
+    np.testing.assert_array_equal(wrapped.to_numpy(), twoline.to_numpy())
+    measured = font.measure_text("AB AB", 8, wrap_width=17, line_spacing=1.5)
+    assert (measured.width, measured.height) == (16, 24)
+    assert font.measure_text("AB AB", 8).width == 40
+    assert font.measure_text("AB", 8, letter_spacing=3).width == 19
+
+    with pytest.raises(TypeError):
+        centered.canvas().draw_text_box("AB", "not a rect", 255, font)
+    with pytest.raises(ValueError):
+        centered.canvas().draw_text_outline("AB", (0, 0), 255, -1.0, font)
+
+
+def test_text_outline_and_halo():
+    # Bitmap fonts get a halo: a strict superset of the glyph's own pixels.
+    plain = render("H", size=None)
+    halo = zignal.Image(40, 80, 0)
+    halo.canvas().draw_text_outline("H", (5, 5), 255, 4.0)
+    assert inked(halo) > inked(plain)
+    assert np.all(halo.to_numpy()[plain.to_numpy() > 0] > 0)
+
+    if SYSTEM_FONT is None:
+        return
+    font = zignal.Font.load(SYSTEM_FONT)
+    fill = zignal.Image(100, 100, 0)
+    fill.canvas().draw_text("I", (10, 10), 255, font, size=72, mode=zignal.DrawMode.SOFT)
+    hollow = zignal.Image(100, 100, 0)
+    hollow.canvas().draw_text_outline("I", (10, 10), 255, 2.0, font, size=72, mode=zignal.DrawMode.SOFT)
+    tight = font.get_text_bounds_tight("I", 72)
+    row = int(10 + (tight.top + tight.bottom) / 2)
+    col = int(10 + (tight.left + tight.right) / 2)
+    assert fill.to_numpy()[row, col] > 0
+    assert hollow.to_numpy()[row, col] == 0
+    assert 0 < inked(hollow) < inked(fill)
+    boxed = zignal.Image(100, 100, 0)
+    boxed.canvas().draw_text_box_outline(
+        "I", (10, 10, 100, 100), 255, 2.0, font, size=72, mode=zignal.DrawMode.SOFT
+    )
+    np.testing.assert_array_equal(boxed.to_numpy(), hollow.to_numpy())
