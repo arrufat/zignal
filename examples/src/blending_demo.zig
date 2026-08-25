@@ -52,7 +52,7 @@ pub fn main() !void {
         canvas.fillCircle(center, tile * 0.32, orange, opts);
         canvas.drawCircle(center, tile * 0.40, translucent_white, 3, opts);
 
-        canvas.drawText(@tagName(blending), .init(.{ gx + 6, gy + 6 }), Rgba.white, font, 1.0, .soft);
+        try canvas.drawText(@tagName(blending), .init(.{ gx + 6, gy + 6 }), Rgba.white, .{ .bitmap = font }, null, .soft);
     }
 
     try image.save(io, allocator, "blending_demo.png");

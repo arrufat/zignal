@@ -54,6 +54,7 @@ pub fn load(io: Io, allocator: Allocator, file_path: []const u8, filter: LoadFil
     return switch (font_format) {
         .bdf => bdf.load(io, allocator, file_path, filter),
         .pcf => pcf.load(io, allocator, file_path, filter),
+        .ttf => error.UnsupportedFontFormat,
     };
 }
 
@@ -65,6 +66,11 @@ pub fn bytesPerRow(self: BitmapFont) u32 {
 /// Font ascent, falling back to the character height when the source file didn't record one
 pub fn ascent(self: BitmapFont) i16 {
     return self.font_ascent orelse self.char_height;
+}
+
+/// Scale that renders the font `size` pixels tall.
+pub fn scaleFor(self: BitmapFont, size: f32) f32 {
+    return size / @as(f32, @floatFromInt(self.char_height));
 }
 
 /// Glyph data from the glyph map, if this codepoint has an entry
@@ -295,6 +301,7 @@ pub fn save(self: BitmapFont, io: Io, allocator: Allocator, file_path: []const u
     return switch (font_format) {
         .bdf => bdf.save(io, allocator, self, file_path),
         .pcf => pcf.save(io, allocator, self, file_path),
+        .ttf => error.UnsupportedFontFormat,
     };
 }
 

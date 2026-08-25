@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Added
+- **TrueType fonts**: `Font.load(path)` detects BDF, PCF (optionally gzipped) and TrueType (`.ttf`) files, and `Canvas.draw_text` renders TrueType text with antialiased outlines and kerning. New `Font` members: `ascent(size)`, `line_height(size)`, `has_glyph(char)`, `get_text_bounds(text, size)`, `get_text_bounds_tight(text, size)` and the `kind` (`"bitmap"` / `"vector"`), `name` and `height` properties.
+
+### Changed
+- **`BitmapFont` is now `Font`** (breaking): one class for every font format; `save` still writes BDF/PCF and raises `ValueError` for TrueType fonts; the `width` property was removed.
+- **`Canvas.draw_text` takes `size=` in pixels instead of `scale=`** (breaking): the em height for TrueType fonts, the character height for bitmap fonts. Omitted, it is the bitmap font's natural size (the old `scale=1.0`) or 16 px for TrueType fonts; `font=None` selects the built-in font.
 - **iTerm2 inline images**: `f"{img:iterm2}"` (and `iterm2:WIDTHxHEIGHT` / `iterm2:WIDTHx` / `iterm2:xHEIGHT`) renders via the iTerm2 inline image protocol. `f"{img:auto}"` now prefers kitty → iterm2 → sixel → sgr.
 - **QR codes**: `qrcode_encode(data, ec_level=EcLevel.MEDIUM, version=None, module_size=8, quiet_zone=4)` renders text or bytes as a grayscale `Image`; `qrcode_decode(image)` scans clean images and photographs (perspective, uneven lighting, rotation, mirroring) and returns a `QrDecodeResult` (`data`, `text`, `version`, `ec_level`, `corrected_errors`, `corners`) or `None` when no symbol is found. Adds the `EcLevel` enum (LOW/MEDIUM/QUARTILE/HIGH).
 - **Global optimizer**: `optimize(objective, bounds, max_evals, ...)` exposes the MaxLIPO+Trust-Region global optimizer as a single free function. The objective is a Python callable `objective(x: list[float]) -> float`, `bounds` is a list of `(lower, upper)` pairs, and all settings (`policy`, `is_integer`, `seed`, `target`, `patience`, `pure_random_probability`, `num_random_samples`, `trust_region_eps`, `relative_noise_magnitude`, `solver_eps`) are keyword arguments with sane defaults. Returns `(best_x, best_y)`. Evaluation is sequential (the GIL serializes Python callbacks); exceptions raised by the objective propagate out unchanged.

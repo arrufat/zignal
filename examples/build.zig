@@ -37,6 +37,7 @@ pub fn build(b: *std.Build) void {
         "trace_edges",
         "colormaps_demo",
         "optimization_example",
+        "font_demo",
     };
 
     // Build exec_examples with run steps and check compilation

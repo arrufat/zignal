@@ -38,7 +38,7 @@ pub fn main() !void {
     try drawSignalWaves(&canvas, allocator);
 
     // Draw the main "ZIGNAL" text using the font system
-    drawZignalText(&canvas);
+    try drawZignalText(&canvas);
 
     // Add decorative elements
     drawDecorativeElements(&canvas);
@@ -108,12 +108,13 @@ fn drawSignalWaves(canvas: *Canvas(Rgb), allocator: std.mem.Allocator) !void {
     }
 }
 
-fn drawZignalText(canvas: *Canvas(Rgb)) void {
+fn drawZignalText(canvas: *Canvas(Rgb)) !void {
     // Use the default 8x8 font
     const font = zignal.font.font8x8.basic;
 
     // Scale factor for the text
     const scale: f32 = 10;
+    const size = scale * (zignal.Font{ .bitmap = font }).defaultSize();
 
     // Calculate text dimensions
     const text = "ZIGNAL";
@@ -143,10 +144,10 @@ fn drawZignalText(canvas: *Canvas(Rgb)) void {
         const char_str = [_]u8{char};
 
         // Shadow layer for depth
-        canvas.drawText(&char_str, .init(.{ current_x + 2, y_pos + 2 }), shadow_color, font, scale, .fast);
+        try canvas.drawText(&char_str, .init(.{ current_x + 2, y_pos + 2 }), shadow_color, .{ .bitmap = font }, size, .fast);
 
         // Main character
-        canvas.drawText(&char_str, .init(.{ current_x, y_pos }), text_color, font, scale, .fast);
+        try canvas.drawText(&char_str, .init(.{ current_x, y_pos }), text_color, .{ .bitmap = font }, size, .fast);
 
         // Calculate next position using tight bounds
         const tight_bounds = font.getTextBoundsTight(&char_str, scale);

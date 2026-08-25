@@ -868,6 +868,10 @@ pub fn setErrorWithPath(err: anyerror, path: []const u8) void {
 
         error.UnsupportedImageFormat,
         error.UnsupportedFontFormat,
+        error.InvalidFormat,
+        error.UnexpectedEof,
+        error.MissingTable,
+        error.UnsupportedCmap,
         => c.PyExc_ValueError,
 
         error.OutOfMemory => c.PyExc_MemoryError,
@@ -878,7 +882,7 @@ pub fn setErrorWithPath(err: anyerror, path: []const u8) void {
 
     // Format error message with path and error name for debugging
     var buffer: [Io.Dir.max_path_bytes + 128]u8 = undefined;
-    const msg = std.fmt.bufPrintSentinel(&buffer, "Could not open file '{s}': {s}", .{ path, @errorName(err) }, 0) catch "Could not open file";
+    const msg = std.fmt.bufPrintSentinel(&buffer, "Could not load '{s}': {s}", .{ path, @errorName(err) }, 0) catch "Could not load file";
     c.PyErr_SetString(exc_type, msg.ptr);
 }
 

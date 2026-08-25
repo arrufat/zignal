@@ -34,6 +34,7 @@ pub const version = @import("build_options").version;
 pub const Canvas = @import("canvas.zig").Canvas;
 pub const DrawMode = @import("canvas.zig").DrawMode;
 pub const DrawOptions = @import("canvas.zig").DrawOptions;
+pub const FillRule = @import("canvas.zig").FillRule;
 
 const color = @import("color.zig");
 pub const convertColor = color.convertColor;
@@ -108,6 +109,9 @@ pub const FeatureDistributionMatching = @import("fdm.zig").FeatureDistributionMa
 // Font system
 pub const font = @import("font.zig");
 pub const BitmapFont = font.BitmapFont;
+pub const VectorFont = font.VectorFont;
+pub const Font = font.Font;
+pub const Outline = font.Outline;
 
 // PCA (Principal Component Analysis) system
 const pca = @import("pca.zig");

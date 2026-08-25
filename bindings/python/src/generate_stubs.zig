@@ -20,7 +20,7 @@ const fdm_module = @import("fdm.zig");
 const pca_module = @import("pca.zig");
 const rectangle_module = @import("rectangle.zig");
 const convex_hull_module = @import("convex_hull.zig");
-const bitmap_font_module = @import("bitmap_font.zig");
+const font_module = @import("font.zig");
 const blending_module = @import("blending.zig");
 const qrcode_module = @import("qrcode.zig");
 const interpolation_module = @import("interpolation.zig");
@@ -440,18 +440,18 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         .special_methods = &rectangle_module.rectangle_special_methods_metadata,
     });
 
-    // Generate BitmapFont class from metadata
-    const bitmap_font_methods = stub_metadata.extractMethodInfo(&bitmap_font_module.bitmap_font_methods_metadata);
-    const bitmap_font_doc = std.mem.span(bitmap_font_module.BitmapFontType.tp_doc);
+    // Generate Font class from metadata
+    const font_methods = stub_metadata.extractMethodInfo(&font_module.font_methods_metadata);
+    const font_properties = stub_metadata.extractPropertyInfo(&font_module.font_properties_metadata);
+    const font_doc = std.mem.span(font_module.FontType.tp_doc);
     try generateClassFromMetadata(&stub, .{
-        .name = "BitmapFont",
-        .doc = bitmap_font_doc,
-        .methods = &bitmap_font_methods,
-        .properties = &[_]stub_metadata.PropertyInfo{},
+        .name = "Font",
+        .doc = font_doc,
+        .methods = &font_methods,
+        .properties = &font_properties,
         .bases = &.{},
         .special_methods = null,
     });
-    // Note: BitmapFont.font8x8() returns a cached singleton
 
     // Generate Interpolation enum
     try generateEnumFromMetadata(&stub, .{
@@ -734,7 +734,7 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
     // Add Image and classes
     try stub.write(
         \\    Rectangle as Rectangle,
-        \\    BitmapFont as BitmapFont,
+        \\    Font as Font,
         \\    Image as Image,
         \\    Matrix as Matrix,
         \\    Canvas as Canvas,
