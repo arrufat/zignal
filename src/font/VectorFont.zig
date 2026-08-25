@@ -1,6 +1,7 @@
-//! A scalable font parsed in place from TrueType or CFF OpenType bytes. Glyph
-//! outlines, advances and kerning are read on demand from the borrowed buffer;
-//! nothing is decoded up front, so loading is allocation-free.
+//! A scalable font parsed in place from TrueType or CFF OpenType bytes, standalone
+//! or one face of a `.ttc` collection. Glyph outlines, advances and kerning are read
+//! on demand from the borrowed buffer; nothing is decoded up front, so loading is
+//! allocation-free.
 //!
 //! Example:
 //! ```zig
@@ -41,6 +42,8 @@ pub const Bounds = struct {
 
 /// The sfnt bytes. Borrowed by `loadFromBytes`, owned after `load`.
 data: []const u8,
+/// Faces in the file: 1 for a single font, the collection size for `ttcf`.
+num_faces: u32,
 units_per_em: u16,
 num_glyphs: u16,
 num_h_metrics: u16,
@@ -62,15 +65,28 @@ tables: truetype.Tables,
 cmap: truetype.cmap.Subtable,
 
 /// Parses the header tables of `data`, which must outlive the font. No allocation, no I/O.
+/// A collection yields its first face; see `loadFromBytesFace`.
 pub fn loadFromBytes(data: []const u8) Error!VectorFont {
     return truetype.parse(data);
 }
 
-/// Reads and parses a `.ttf` or `.otf` (optionally gzipped). The font owns the bytes; call `deinit`.
+/// `loadFromBytes` for face `face` of a `.ttc` collection; `error.InvalidFormat` past the
+/// last face (a single font has only face 0).
+pub fn loadFromBytesFace(data: []const u8, face: u32) Error!VectorFont {
+    return truetype.parseFace(data, face);
+}
+
+/// Reads and parses a `.ttf`, `.otf` or `.ttc` (optionally gzipped). The font owns the
+/// bytes; call `deinit`. A collection yields its first face; see `loadFace`.
 pub fn load(io: Io, gpa: Allocator, path: []const u8) !VectorFont {
+    return loadFace(io, gpa, path, 0);
+}
+
+/// `load` for face `face` of a collection.
+pub fn loadFace(io: Io, gpa: Allocator, path: []const u8, face: u32) !VectorFont {
     const data = try font_mod.readFileMaybeGzip(io, gpa, path);
     errdefer gpa.free(data);
-    return loadFromBytes(data);
+    return loadFromBytesFace(data, face);
 }
 
 /// Frees the bytes of a font from `load`. Not for fonts from `loadFromBytes`.
@@ -233,12 +249,14 @@ pub fn getTextBoundsTight(self: VectorFont, text: []const u8, size: f32) Rectang
 }
 
 pub fn format(self: VectorFont, writer: *Io.Writer) Io.Writer.Error!void {
-    try writer.print("VectorFont{{ .units_per_em = {d}, .glyphs = {d}, .ascent = {d}, .descent = {d} }}", .{
+    try writer.print("VectorFont{{ .units_per_em = {d}, .glyphs = {d}, .ascent = {d}, .descent = {d}", .{
         self.units_per_em,
         self.num_glyphs,
         self.ascent,
         self.descent,
     });
+    if (self.num_faces > 1) try writer.print(", .faces = {d}", .{self.num_faces});
+    try writer.writeAll(" }");
 }
 
 const testing = std.testing;
@@ -305,8 +323,9 @@ test "rejects other formats and truncation without panicking" {
     const full = synthetic.build(&buf, .{});
     var otto: [64]u8 = undefined;
     @memcpy(otto[0..64], full[0..64]);
+    // A collection header claiming zero faces.
     @memcpy(otto[0..4], "ttcf");
-    try testing.expectError(error.UnsupportedFontFormat, VectorFont.loadFromBytes(&otto));
+    try testing.expectError(error.InvalidFormat, VectorFont.loadFromBytes(&otto));
     @memcpy(otto[0..4], "abcd");
     try testing.expectError(error.InvalidFormat, VectorFont.loadFromBytes(&otto));
     try testing.expectError(error.UnexpectedEof, VectorFont.loadFromBytes(""));
@@ -329,6 +348,36 @@ test "rejects other formats and truncation without panicking" {
                 var owned = o;
                 owned.deinit(testing.allocator);
             } else |_| {}
+        } else |_| {}
+    }
+}
+
+test "collections" {
+    var buf: [synthetic.buffer_size]u8 = undefined;
+    const bytes = synthetic.build(&buf, .{ .collection = true });
+    try testing.expectEqual(.ttc, font_mod.FontFormat.detectFromBytes(bytes));
+    const first = try VectorFont.loadFromBytes(bytes);
+    const second = try VectorFont.loadFromBytesFace(bytes, 1);
+    try testing.expectEqual(2, first.num_faces);
+    try testing.expectEqual(first.tables, second.tables);
+    try testing.expectEqual(first.glyphIndex('B'), second.glyphIndex('B'));
+    try testing.expectError(error.InvalidFormat, VectorFont.loadFromBytesFace(bytes, 2));
+
+    var single: [synthetic.buffer_size]u8 = undefined;
+    const plain = synthetic.build(&single, .{});
+    try testing.expectEqual(1, (try VectorFont.loadFromBytes(plain)).num_faces);
+    try testing.expectError(error.InvalidFormat, VectorFont.loadFromBytesFace(plain, 1));
+
+    var text: [128]u8 = undefined;
+    const printed = try std.fmt.bufPrint(&text, "{f}", .{first});
+    try testing.expectEqualStrings("VectorFont{ .units_per_em = 1000, .glyphs = 7, .ascent = 900, .descent = -250, .faces = 2 }", printed);
+
+    // Truncated collections fail cleanly too.
+    var len: usize = 0;
+    while (len < bytes.len) : (len += 7) {
+        if (VectorFont.loadFromBytesFace(bytes[0..len], 1)) |font| {
+            _ = font.glyphIndex('A');
+            _ = font.glyphBounds(4);
         } else |_| {}
     }
 }
@@ -372,6 +421,40 @@ test "system font, when one is installed" {
     try testing.expect(b.contourCount() >= 2);
     try testing.expect(font.kern(a, font.glyphIndex('V')) <= 0);
     try testing.expect(font.getTextBounds("Hello", 24).r > 24);
+}
+
+test "system collection, when one is installed" {
+    const candidates = [_][]const u8{
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/OTF/NotoSansCJK-Regular.ttc",
+    };
+    const path = for (candidates) |path| {
+        Io.Dir.cwd().access(testing.io, path, .{}) catch continue;
+        break path;
+    } else return error.SkipZigTest;
+    var font: VectorFont = try .load(testing.io, testing.allocator, path);
+    defer font.deinit(testing.allocator);
+
+    try testing.expect(font.num_faces > 1);
+    try testing.expect(font.tables.outlines == .cff);
+    try testing.expect(font.tables.outlines.cff.cid != null);
+    try testing.expect(font.glyphIndex(0x4E2D) != 0);
+    // Hiragana "a": curves, unlike the straight strokes of many kanji.
+    const kana = font.glyphIndex(0x3042);
+    try testing.expect(kana != 0);
+    var o = try font.outline(testing.allocator, kana);
+    defer o.deinit(testing.allocator);
+    try testing.expect(o.contourCount() >= 1);
+    var cubics: usize = 0;
+    for (o.points) |p| cubics += @intFromBool(p.kind == .cubic_control);
+    try testing.expect(cubics > 0);
+    try testing.expect(font.getTextBounds("中文", 24).r > 24);
+
+    var last: VectorFont = try .loadFace(testing.io, testing.allocator, path, font.num_faces - 1);
+    defer last.deinit(testing.allocator);
+    try testing.expectEqual(font.num_glyphs, last.num_glyphs);
+    try testing.expectError(error.InvalidFormat, VectorFont.loadFace(testing.io, testing.allocator, path, font.num_faces));
 }
 
 test "system CFF font, when one is installed" {

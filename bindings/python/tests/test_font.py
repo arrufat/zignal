@@ -20,6 +20,12 @@ SYSTEM_OTF_FONTS = [
     "/usr/share/fonts/OTF/FreeSans.otf",
 ]
 SYSTEM_OTF_FONT = next((p for p in SYSTEM_OTF_FONTS if os.path.exists(p)), None)
+SYSTEM_TTC_FONTS = [
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/OTF/NotoSansCJK-Regular.ttc",
+]
+SYSTEM_TTC_FONT = next((p for p in SYSTEM_TTC_FONTS if os.path.exists(p)), None)
 
 
 def inked(img):
@@ -135,3 +141,24 @@ def test_cff_opentype_font():
     small = render("Hello", font, rows=60, cols=200, size=24, mode=zignal.DrawMode.SOFT)
     big = render("Hello", font, rows=60, cols=200, size=48, mode=zignal.DrawMode.SOFT)
     assert 0 < inked(small) < inked(big)
+
+
+@pytest.mark.skipif(SYSTEM_TTC_FONT is None, reason="no font collection installed")
+def test_font_collection():
+    first = zignal.Font.load(SYSTEM_TTC_FONT)
+    second = zignal.Font.load(SYSTEM_TTC_FONT, face=1)
+    assert first.kind == "vector" and second.kind == "vector"
+    assert first.has_glyph("\u4e2d") and second.has_glyph("\u4e2d")
+    assert inked(render("\u6f22\u5b57", first, rows=60, cols=120, size=40, mode=zignal.DrawMode.SOFT)) > 0
+    with pytest.raises(ValueError):
+        zignal.Font.load(SYSTEM_TTC_FONT, face=1000)
+    with pytest.raises(ValueError):
+        zignal.Font.load(SYSTEM_TTC_FONT, face=-1)
+
+
+def test_face_on_a_bitmap_font(tmp_path):
+    path = str(tmp_path / "f.bdf")
+    zignal.Font.font8x8().save(path)
+    assert zignal.Font.load(path, face=0).kind == "bitmap"
+    with pytest.raises(ValueError):
+        zignal.Font.load(path, face=1)

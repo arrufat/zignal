@@ -60,10 +60,12 @@ const font_load_doc =
     \\Load a font from a file, detecting its format.
     \\
     \\Supports bitmap fonts in BDF and PCF format (optionally gzip-compressed: `.bdf.gz`,
-    \\`.pcf.gz`), TrueType fonts (`.ttf`) and CFF OpenType fonts (`.otf`).
+    \\`.pcf.gz`), TrueType fonts (`.ttf`), CFF OpenType fonts (`.otf`) and collections
+    \\(`.ttc`), whose faces are selected with `face`.
     \\
     \\## Parameters
     \\- `path` (str): Path to the font file
+    \\- `face` (int, optional): Face index inside a collection (default: 0)
     \\
     \\## Examples
     \\```python
@@ -76,12 +78,17 @@ fn font_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
     _ = type_obj;
     const Params = struct {
         path: [*c]const u8,
+        face: c_int = 0,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
     const path = std.mem.span(params.path);
+    if (params.face < 0) {
+        python.setValueError("face must be non-negative, got {d}", .{params.face});
+        return null;
+    }
 
-    const font = Font.load(ctx.io, allocator, path) catch |err| {
+    const font = Font.loadFace(ctx.io, allocator, path, @intCast(params.face)) catch |err| {
         python.setErrorWithPath(err, path);
         return null;
     };
@@ -360,7 +367,7 @@ var font_getset = python.toPyGetSetDefArray(&font_properties_metadata);
 
 const font_class_doc =
     "Font for text rendering: a bitmap font (BDF/PCF, optionally gzip-compressed) or a " ++
-    "vector font (TrueType .ttf, CFF OpenType .otf), detected from the file. Sizes are always " ++
+    "vector font (TrueType .ttf, CFF OpenType .otf, collections .ttc), detected from the file. Sizes are always " ++
     "in pixels: the em height for vector fonts, the character height for bitmap fonts.";
 
 pub var FontType = python.buildTypeObject(.{

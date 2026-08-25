@@ -1,12 +1,12 @@
 //! sfnt parsing for `VectorFont`: TrueType (`glyf` outlines) and CFF-flavored
-//! OpenType (`OTTO`, `CFF ` outlines).
+//! OpenType (`OTTO`, `CFF ` outlines), standalone or inside a `ttcf` collection.
 //!
 //! Supported: table directory, `head`, `maxp`, `hhea`/`hmtx`, `post`, `OS/2`,
 //! `cmap` formats 4 and 12, `loca`/`glyf` simple and composite glyphs, `CFF `
-//! Type 2 charstrings (plain and CID-keyed), kerning from the legacy `kern`
-//! table and from GPOS pair adjustment.
-//! Not supported: collections (`ttcf`), CFF2, `seac` accents, hinting,
-//! variable and color fonts, GSUB, mark attachment.
+//! Type 2 charstrings (plain and CID-keyed, `seac` accents), kerning from the
+//! legacy `kern` table and from GPOS pair adjustment.
+//! CFF2 fonts render their default instance. Not supported: hinting, variation
+//! axes, color fonts, GSUB, mark attachment.
 
 const std = @import("std");
 
@@ -22,14 +22,14 @@ pub const gpos = @import("truetype/gpos.zig");
 pub const cff = @import("truetype/cff.zig");
 
 pub const Error = error{
-    /// Bad sfnt tag, table directory or table record.
+    /// Bad sfnt tag, table directory, table record, or a face index past the collection.
     InvalidFormat,
-    /// A font collection, or CFF charstrings that are not Type 2.
+    /// CFF charstrings that are not Type 2, or a CFF2 table of another major version.
     UnsupportedFontFormat,
     /// A read past the end of the data.
     UnexpectedEof,
     /// A required table (`head`, `maxp`, `hhea`, `hmtx`, `cmap`, and `loca`/`glyf` or
-    /// `CFF ` with its CharStrings and Private DICT) is absent.
+    /// `CFF `/`CFF2` with its CharStrings and Private DICT) is absent.
     MissingTable,
     /// No Unicode `cmap` subtable in format 4 or 12.
     UnsupportedCmap,
@@ -90,16 +90,28 @@ const Tag = struct {
     const kern = tag("kern");
     const gpos = tag("GPOS");
     const cff = tag("CFF ");
+    const cff2 = tag("CFF2");
 };
 
 /// Parses the header tables of `data` and validates the ones `VectorFont` reads later.
-/// Borrows `data`; nothing is allocated.
+/// Borrows `data`; nothing is allocated. Collections yield their first face.
 pub fn parse(data: []const u8) Error!VectorFont {
+    return parseFace(data, 0);
+}
+
+/// `parse` for face `face` of a `ttcf` collection; a single font has only face 0.
+pub fn parseFace(data: []const u8, face: u32) Error!VectorFont {
     const r: Reader = .init(data);
-    const has_cff = switch (try r.u32At(0)) {
+    var num_faces: u32 = 1;
+    var dir: u32 = 0;
+    if (try r.u32At(0) == sfnt_collection) {
+        num_faces = try r.u32At(8);
+        if (face >= num_faces) return error.InvalidFormat;
+        dir = try r.u32At(12 + 4 * @as(usize, face));
+    } else if (face != 0) return error.InvalidFormat;
+    const has_cff = switch (try r.u32At(dir)) {
         sfnt_true_type, sfnt_apple => false,
         sfnt_cff => true,
-        sfnt_collection => return error.UnsupportedFontFormat,
         else => return error.InvalidFormat,
     };
 
@@ -115,11 +127,12 @@ pub fn parse(data: []const u8) Error!VectorFont {
     var kern_table: ?Table = null;
     var gpos_table: ?Table = null;
     var cff_table: ?Table = null;
+    var cff2_table: ?Table = null;
 
-    const num_tables = try r.u16At(4);
+    const num_tables = try r.u16At(dir + 4);
     if (num_tables > max_tables) return error.InvalidFormat;
     for (0..num_tables) |i| {
-        const rec = 12 + i * 16;
+        const rec = dir + 12 + i * 16;
         const table: Table = .{ .offset = try r.u32At(rec + 8), .len = try r.u32At(rec + 12) };
         const end = @as(u64, table.offset) + table.len;
         if (end > data.len) return error.InvalidFormat;
@@ -136,6 +149,7 @@ pub fn parse(data: []const u8) Error!VectorFont {
             Tag.kern => kern_table = table,
             Tag.gpos => gpos_table = table,
             Tag.cff => cff_table = table,
+            Tag.cff2 => cff2_table = table,
             else => {},
         }
     }
@@ -159,7 +173,12 @@ pub fn parse(data: []const u8) Error!VectorFont {
     if (hmtx_t.len < 4 * @as(u32, num_h_metrics) + 2 * @as(u32, num_glyphs - num_h_metrics)) return error.InvalidFormat;
 
     const outlines: Outlines = if (has_cff) .{
-        .cff = try cff.parse(cff_table orelse return error.MissingTable, r, num_glyphs),
+        .cff = if (cff_table) |t|
+            try cff.parse(t, r, num_glyphs)
+        else if (cff2_table) |t|
+            try cff.parse2(t, r, num_glyphs)
+        else
+            return error.MissingTable,
     } else glyf_outlines: {
         const index_to_loc_format: IndexToLocFormat = switch (try head_r.i16At(50)) {
             0 => .short,
@@ -208,6 +227,7 @@ pub fn parse(data: []const u8) Error!VectorFont {
 
     return .{
         .data = data,
+        .num_faces = num_faces,
         .units_per_em = units_per_em,
         .num_glyphs = num_glyphs,
         .num_h_metrics = num_h_metrics,

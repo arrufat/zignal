@@ -14,6 +14,7 @@
 //! | 5   | E    | composite: gid 4 through an identity 2x2 matrix |
 //! | 6   | F    | triangle whose contour starts on an off-curve point |
 //!
+//! `.collection` wraps either flavor in a two-face `ttcf` sharing one directory.
 //! With `.cff`, the same header tables wrap a `CFF ` table instead of `loca`/`glyf`:
 //!
 //! | gid | shape |
@@ -24,7 +25,9 @@
 //! | 3   | diamond of four cubics in one `hvcurveto`, control box (0,0)-(800,700), ending on its start |
 //! | 4   | gid 1 again, drawn by a local subr |
 //! | 5   | triangle (100,0),(700,0),(400,600) behind a width, `hstemhm` and two `hintmask`s |
-//! | 6   | the same triangle from `rlineto`, closed by an explicit line back to the start |
+//! | 6   | the same triangle from `rlineto`, closed by an explicit line back to the start (or a `seac`, see `Options`) |
+//!
+//! The CFF charset names gids 1–6 `A`–`F` (SIDs 34–39).
 
 const std = @import("std");
 
@@ -46,10 +49,25 @@ pub const Options = struct {
     fanout: bool = false,
     /// `OTTO` with a `CFF ` table instead of `loca`/`glyf`.
     cff: bool = false,
+    /// `OTTO` with a `CFF2` table: the CFF glyphs without widths or `endchar`, gid 1 (and the
+    /// subr) placing its first point through `blend`, gid 3 selecting `vsindex 0` first.
+    cff2: bool = false,
+    /// Add a format 4 FDSelect mapping every glyph to Font DICT 0.
+    cff2_fd_select: bool = false,
+    /// Write the variation store; without it `blend` cannot be interpreted.
+    cff2_vstore: bool = true,
+    /// Regions in the variation store; the charstrings carry deltas for one.
+    cff2_regions: u16 = 1,
+    /// Wrap the font in a `ttcf` header whose two faces share the table directory.
+    collection: bool = false,
     /// CharstringType written to the Top DICT; only 2 is supported.
     cff_charstring_type: u8 = 2,
     /// The local subr calls itself, past the depth limit.
     cff_recursive_subr: bool = false,
+    /// What gid 6 draws in the CFF variant: the triangle from lines, the same through a
+    /// CFF2-only `blend`, or `seac` compositions of `A` (gid 1) and an accent `C` (gid 3) at
+    /// (100, 200) — or `F` (itself) / an unencoded code.
+    cff_gid6: enum { lines, blend, seac, seac_nested, seac_unencoded } = .lines,
 };
 
 const Pt = struct { x: i16, y: i16, on: bool = true };
@@ -68,6 +86,8 @@ const Builder = struct {
     pos: usize = 0,
     /// Start of each glyph in `glyf` plus the end offset, for `loca`.
     glyph_offsets: [8]u32 = undefined,
+    /// Positions of the Top DICT operands patched once their targets are written.
+    top_dict: struct { char_strings: usize, private_size: usize, private_offset: usize, charset: usize } = undefined,
 
     fn put(b: *Builder, comptime T: type, v: T) void {
         b.patch(T, b.pos, v);
@@ -257,9 +277,10 @@ const Builder = struct {
         b.put(u8, op);
     }
 
-    /// An INDEX of `n` items with two-byte offsets, each written by `item`.
-    fn cffIndex(b: *Builder, n: u16, item: *const fn (*Builder, usize) void) void {
-        b.put(u16, n);
+    /// An INDEX of `n` items with two-byte offsets, each written by `item`; CFF2 counts
+    /// are four bytes wide.
+    fn cffIndex(b: *Builder, comptime wide: bool, n: u16, item: *const fn (*Builder, usize) void) void {
+        if (wide) b.put(u32, n) else b.put(u16, n);
         if (n == 0) return;
         b.put(u8, 2);
         const offsets = b.pos;
@@ -276,18 +297,21 @@ const Builder = struct {
         b.putAll(u8, "Synth");
     }
 
-    /// Five-byte DICT integer, so offsets can be patched in place.
-    fn dictInt(b: *Builder, v: i32) void {
+    /// Five-byte DICT integer, so it can be patched in place; returns the operand's position.
+    fn dictInt(b: *Builder, v: i32) usize {
         b.put(u8, 29);
-        b.put(i32, v);
+        defer b.put(i32, v);
+        return b.pos;
     }
 
     fn cffTopDict(b: *Builder, _: usize) void {
-        b.dictInt(0); // CharStrings offset, patched
+        b.top_dict.char_strings = b.dictInt(0);
         b.put(u8, 17);
-        b.dictInt(0); // Private size and offset, patched
-        b.dictInt(0);
+        b.top_dict.private_size = b.dictInt(0);
+        b.top_dict.private_offset = b.dictInt(0);
         b.put(u8, 18);
+        b.top_dict.charset = b.dictInt(0);
+        b.put(u8, 15);
         b.cs(&.{b.opts.cff_charstring_type}, 12);
         b.put(u8, 6);
     }
@@ -302,9 +326,17 @@ const Builder = struct {
     const callsubr = 10;
     const cs_return = 11;
     const endchar = 14;
+    const vsindex = 15;
+    const blend = 16;
+
+    /// The first point's default (100, 0) with one delta per value, which `blend` drops.
+    fn blendedMove(b: *Builder) void {
+        b.cs(&.{ 100, 0, 5, 7, 2 }, blend);
+        b.cs(&.{}, rmoveto);
+    }
 
     fn squareWithHole(b: *Builder) void {
-        b.cs(&.{ 100, 0 }, rmoveto);
+        if (b.opts.cff2) b.blendedMove() else b.cs(&.{ 100, 0 }, rmoveto);
         b.cs(&.{700}, vlineto);
         b.cs(&.{600}, hlineto);
         b.cs(&.{-700}, vlineto);
@@ -317,18 +349,21 @@ const Builder = struct {
             0 => {},
             1 => b.squareWithHole(),
             2 => {
-                b.cs(&.{ 500, 100, 100 }, rmoveto);
+                if (!b.opts.cff2) b.csNum(500); // width
+                b.cs(&.{ 100, 100 }, rmoveto);
                 b.cs(&.{ 0, 400, 400, 0, 0, -400 }, rlineto);
                 b.cs(&.{ -200, 200 }, rmoveto);
                 b.cs(&.{ 0, 400, 400, 0, 0, -400 }, rlineto);
             },
             3 => {
+                if (b.opts.cff2) b.cs(&.{0}, vsindex);
                 b.cs(&.{ 400, 0 }, rmoveto);
                 b.cs(&.{ 200, 200, 175, 175, 175, -200, 175, -200, -200, -200, -175, -175, -175, 200, -175, 200 }, hvcurveto);
             },
             4 => b.cs(&.{-107}, callsubr),
             5 => {
-                b.cs(&.{ 500, 20, 100 }, hstemhm);
+                if (!b.opts.cff2) b.csNum(500); // width
+                b.cs(&.{ 20, 100 }, hstemhm);
                 b.cs(&.{ 30, 100 }, hintmask);
                 b.put(u8, 0xC0);
                 b.cs(&.{ 100, 0 }, rmoveto);
@@ -337,13 +372,19 @@ const Builder = struct {
                 b.put(u8, 0x80);
                 b.cs(&.{ -300, 600 }, rlineto);
             },
-            6 => {
-                b.cs(&.{ 100, 0 }, rmoveto);
-                b.cs(&.{ 600, 0, -300, 600, -300, -600 }, rlineto);
+            6 => switch (b.opts.cff_gid6) {
+                .lines, .blend => {
+                    if (b.opts.cff_gid6 == .blend) b.blendedMove() else b.cs(&.{ 100, 0 }, rmoveto);
+                    b.cs(&.{ 600, 0, -300, 600, -300, -600 }, rlineto);
+                },
+                // The operands of the closing `endchar`.
+                .seac => for ([_]i16{ 100, 200, 'A', 'C' }) |v| b.csNum(v),
+                .seac_nested => for ([_]i16{ 100, 200, 'A', 'F' }) |v| b.csNum(v),
+                .seac_unencoded => for ([_]i16{ 100, 200, 'A', 128 }) |v| b.csNum(v),
             },
             else => unreachable,
         }
-        b.cs(&.{}, endchar);
+        if (!b.opts.cff2) b.cs(&.{}, endchar);
     }
 
     fn cffSubr(b: *Builder, _: usize) void {
@@ -354,18 +395,82 @@ const Builder = struct {
     fn cff(b: *Builder) void {
         const base = b.pos;
         b.putAll(u8, &.{ 1, 0, 4, 1 }); // major, minor, hdrSize, offSize
-        b.cffIndex(1, Builder.cffName);
-        const top_dicts = b.pos;
-        b.cffIndex(1, Builder.cffTopDict);
-        const top = top_dicts + 3 + 2 * 2; // count, offSize, two offsets
+        b.cffIndex(false, 1, Builder.cffName);
+        b.cffIndex(false, 1, Builder.cffTopDict);
         b.put(u16, 0); // String INDEX
         b.put(u16, 0); // Global Subr INDEX
-        b.patch(i32, top + 1, @intCast(b.pos - base));
-        b.cffIndex(7, Builder.cffCharString);
-        b.patch(i32, top + 7, 2); // Private DICT size
-        b.patch(i32, top + 12, @intCast(b.pos - base));
+        b.patch(i32, b.top_dict.char_strings, @intCast(b.pos - base));
+        b.cffIndex(false, 7, Builder.cffCharString);
+        b.patch(i32, b.top_dict.private_size, 2);
+        b.patch(i32, b.top_dict.private_offset, @intCast(b.pos - base));
         b.cs(&.{2}, 19); // Subrs right after the Private DICT
-        b.cffIndex(1, Builder.cffSubr);
+        b.cffIndex(false, 1, Builder.cffSubr);
+        b.patch(i32, b.top_dict.charset, @intCast(b.pos - base));
+        b.put(u8, 0); // charset format 0: SIDs of gids 1..6
+        b.putAll(u16, &.{ 34, 35, 36, 37, 38, 39 });
+    }
+
+    fn cff2FontDict(b: *Builder, _: usize) void {
+        b.top_dict.private_size = b.dictInt(0);
+        b.top_dict.private_offset = b.dictInt(0);
+        b.put(u8, 18);
+    }
+
+    fn cff2(b: *Builder) void {
+        const base = b.pos;
+        b.putAll(u8, &.{ 2, 0, 5 }); // major, minor, hdrSize
+        const top_len_at = b.pos;
+        b.put(u16, 0); // topDictLength, patched
+        const top = b.pos;
+        b.top_dict.char_strings = b.dictInt(0);
+        b.put(u8, 17);
+        const fd_array_at = b.dictInt(0);
+        b.putAll(u8, &.{ 12, 36 });
+        var fd_select_at: usize = 0;
+        if (b.opts.cff2_fd_select) {
+            fd_select_at = b.dictInt(0);
+            b.putAll(u8, &.{ 12, 37 });
+        }
+        var vstore_at: usize = 0;
+        if (b.opts.cff2_vstore) {
+            vstore_at = b.dictInt(0);
+            b.put(u8, 24);
+        }
+        b.patch(u16, top_len_at, @intCast(b.pos - top));
+        b.put(u32, 0); // Global Subr INDEX
+        b.patch(i32, b.top_dict.char_strings, @intCast(b.pos - base));
+        b.cffIndex(true, 7, Builder.cffCharString);
+        b.patch(i32, fd_array_at, @intCast(b.pos - base));
+        b.cffIndex(true, 1, Builder.cff2FontDict);
+        b.patch(i32, b.top_dict.private_size, 4);
+        b.patch(i32, b.top_dict.private_offset, @intCast(b.pos - base));
+        b.cs(&.{0}, 22); // vsindex
+        b.cs(&.{4}, 19); // Subrs right after this Private DICT
+        b.cffIndex(true, 1, Builder.cffSubr);
+        if (b.opts.cff2_fd_select) {
+            b.patch(i32, fd_select_at, @intCast(b.pos - base));
+            b.put(u8, 4); // format 4: one range covering every glyph
+            b.putAll(u32, &.{ 1, 0 }); // nRanges, first
+            b.put(u16, 0); // fd
+            b.put(u32, 7); // sentinel
+        }
+        if (b.opts.cff2_vstore) {
+            b.patch(i32, vstore_at, @intCast(b.pos - base));
+            const len_at = b.pos;
+            b.put(u16, 0); // length, patched
+            const store = b.pos;
+            b.put(u16, 1); // format
+            b.put(u32, 0); // variationRegionListOffset, patched
+            b.put(u16, 1); // itemVariationDataCount
+            b.put(u32, 0); // itemVariationDataOffsets[0], patched
+            b.patch(u32, store + 2, @intCast(b.pos - store));
+            b.putAll(u16, &.{ 1, b.opts.cff2_regions }); // axisCount, regionCount
+            for (0..b.opts.cff2_regions) |_| b.putAll(i16, &.{ 0, 16384, 16384 }); // start, peak, end
+            b.patch(u32, store + 8, @intCast(b.pos - store));
+            b.putAll(u16, &.{ 0, 0, b.opts.cff2_regions }); // itemCount, wordDeltaCount, regionIndexCount
+            for (0..b.opts.cff2_regions) |i| b.put(u16, @intCast(i));
+            b.patch(u16, len_at, @intCast(b.pos - store));
+        }
     }
 
     fn kern(b: *Builder) void {
@@ -434,6 +539,7 @@ const tables = [_]Table{
     .{ .tag = "glyf", .write = Builder.glyf },
     .{ .tag = "loca", .write = Builder.loca },
     .{ .tag = "CFF ", .write = Builder.cff },
+    .{ .tag = "CFF2", .write = Builder.cff2 },
     .{ .tag = "kern", .write = Builder.kern },
     .{ .tag = "GPOS", .write = Builder.gpos },
 };
@@ -441,10 +547,18 @@ const tables = [_]Table{
 /// Assembles the font into `buf` (at least `buffer_size` bytes) and returns the used slice.
 pub fn build(buf: []u8, opts: Options) []const u8 {
     var b: Builder = .{ .buf = buf, .opts = opts };
-    // Outlines take two tables as glyf/loca, one as CFF.
-    const num_tables = tables.len - 1 - @intFromBool(opts.cff) - @intFromBool(!opts.with_kern) - @intFromBool(!opts.with_gpos);
+    // Of the four outline tables, glyf/loca take two and CFF/CFF2 one.
+    const postscript = opts.cff or opts.cff2;
+    const num_tables = tables.len - 4 + @as(usize, if (postscript) 1 else 2) - @intFromBool(!opts.with_kern) - @intFromBool(!opts.with_gpos);
 
-    b.put(u32, if (opts.cff) truetype.sfnt_cff else truetype.sfnt_true_type);
+    if (opts.collection) {
+        @memcpy(b.buf[0..4], "ttcf");
+        b.pos = 4;
+        b.putAll(u16, &.{ 1, 0 }); // version 1.0
+        b.put(u32, 2); // numFonts
+        b.putAll(u32, &.{ 20, 20 }); // both faces start right after this header
+    }
+    b.put(u32, if (postscript) truetype.sfnt_cff else truetype.sfnt_true_type);
     b.putAll(u16, &.{ @intCast(num_tables), 0, 0, 0 });
     var record = b.pos;
     b.zeros(16 * num_tables);
@@ -453,8 +567,9 @@ pub fn build(buf: []u8, opts: Options) []const u8 {
         if (std.mem.eql(u8, table.tag, "kern") and !opts.with_kern) continue;
         if (std.mem.eql(u8, table.tag, "GPOS") and !opts.with_gpos) continue;
         const glyf_table = std.mem.eql(u8, table.tag, "glyf") or std.mem.eql(u8, table.tag, "loca");
-        if (glyf_table and opts.cff) continue;
-        if (std.mem.eql(u8, table.tag, "CFF ") and !opts.cff) continue;
+        if (glyf_table and postscript) continue;
+        if (std.mem.eql(u8, table.tag, "CFF ") and (!opts.cff or opts.cff2)) continue;
+        if (std.mem.eql(u8, table.tag, "CFF2") and !opts.cff2) continue;
         const start = b.pos;
         table.write(&b);
         @memcpy(b.buf[record..][0..4], table.tag);
@@ -480,4 +595,6 @@ test "builds within the buffer" {
     try std.testing.expect(big.len < buffer_size);
     const cff = build(&buf, .{ .cff = true });
     try std.testing.expect(cff.len > 512 and cff.len < buffer_size);
+    const cff2 = build(&buf, .{ .cff2 = true, .cff2_fd_select = true, .cff2_regions = 3 });
+    try std.testing.expect(cff2.len > 512 and cff2.len < buffer_size);
 }
