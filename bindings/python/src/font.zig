@@ -60,7 +60,7 @@ const font_load_doc =
     \\Load a font from a file, detecting its format.
     \\
     \\Supports bitmap fonts in BDF and PCF format (optionally gzip-compressed: `.bdf.gz`,
-    \\`.pcf.gz`) and TrueType fonts (`.ttf`).
+    \\`.pcf.gz`), TrueType fonts (`.ttf`) and CFF OpenType fonts (`.otf`).
     \\
     \\## Parameters
     \\- `path` (str): Path to the font file
@@ -92,7 +92,7 @@ const font_save_doc =
     \\Save a bitmap font to a file.
     \\
     \\Supports BDF (`.bdf`, `.bdf.gz`) and PCF (`.pcf`, `.pcf.gz`) formats, chosen by the
-    \\file extension. TrueType fonts cannot be saved.
+    \\file extension. Vector fonts cannot be saved.
     \\
     \\## Parameters
     \\- `path` (str): Path to save the font file
@@ -120,7 +120,7 @@ fn font_save(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
             return null;
         },
         .vector => {
-            python.setValueError("TrueType fonts cannot be saved", .{});
+            python.setValueError("vector fonts cannot be saved", .{});
             return null;
         },
     }
@@ -360,8 +360,8 @@ var font_getset = python.toPyGetSetDefArray(&font_properties_metadata);
 
 const font_class_doc =
     "Font for text rendering: a bitmap font (BDF/PCF, optionally gzip-compressed) or a " ++
-    "TrueType font (.ttf), detected from the file. Sizes are always in pixels: the em height " ++
-    "for TrueType fonts, the character height for bitmap fonts.";
+    "vector font (TrueType .ttf, CFF OpenType .otf), detected from the file. Sizes are always " ++
+    "in pixels: the em height for vector fonts, the character height for bitmap fonts.";
 
 pub var FontType = python.buildTypeObject(.{
     .name = "zignal.Font",

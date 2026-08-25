@@ -1,6 +1,6 @@
-//! Renders a type specimen with any supported font (BDF, PCF, TrueType, optionally
-//! gzipped), detected from the file: `font_demo [font-path]`. Without an argument
-//! it tries a few system TrueType fonts and falls back to the built-in 8x8 font.
+//! Renders a type specimen with any supported font (BDF, PCF, TrueType, CFF OpenType,
+//! optionally gzipped), detected from the file: `font_demo [font-path]`. Without an
+//! argument it tries a few system fonts and falls back to the built-in 8x8 font.
 
 const std = @import("std");
 
@@ -17,6 +17,8 @@ const system_fonts = [_][]const u8{
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
     "/usr/share/fonts/TTF/Roboto-Regular.ttf",
+    "/usr/share/fonts/gnu-free/FreeSans.otf",
+    "/usr/share/fonts/opentype/freefont/FreeSans.otf",
     "/Library/Fonts/Arial.ttf",
     "C:\\Windows\\Fonts\\arial.ttf",
 };

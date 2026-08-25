@@ -35,13 +35,14 @@ const Range = struct { offset: u32, len: u32 };
 /// Byte range of the glyph record in `glyf`; null for an empty glyph.
 fn glyphRange(font: VectorFont, gid: u16) Error!?Range {
     if (gid >= font.num_glyphs) return error.InvalidGlyph;
+    const tables = font.tables.outlines.glyf;
     const r: Reader = .init(font.data);
-    const loca = r.table(font.tables.loca);
-    const start: u32, const end: u32 = switch (font.index_to_loc_format) {
+    const loca = r.table(tables.loca);
+    const start: u32, const end: u32 = switch (tables.index_to_loc_format) {
         .short => .{ 2 * @as(u32, try loca.u16At(2 * @as(usize, gid))), 2 * @as(u32, try loca.u16At(2 * @as(usize, gid) + 2)) },
         .long => .{ try loca.u32At(4 * @as(usize, gid)), try loca.u32At(4 * @as(usize, gid) + 4) },
     };
-    if (end < start or end > font.tables.glyf.len) return error.InvalidGlyph;
+    if (end < start or end > tables.glyf.len) return error.InvalidGlyph;
     if (end == start) return null;
     return .{ .offset = start, .len = end - start };
 }
@@ -59,7 +60,7 @@ pub fn bounds(font: VectorFont, gid: u16) ?VectorFont.Bounds {
 
 fn glyphReader(font: VectorFont, range: Range) Error!Reader {
     const r: Reader = .init(font.data);
-    const glyf = r.table(font.tables.glyf);
+    const glyf = r.table(font.tables.outlines.glyf.glyf);
     return .init(try glyf.slice(range.offset, range.len));
 }
 
@@ -91,7 +92,7 @@ const Sink = struct {
     c: u32 = 0,
 
     fn point(self: *Sink, x: f32, y: f32, on_curve: bool) void {
-        if (self.points) |points| points[self.n] = .{ .x = x, .y = y, .on_curve = on_curve };
+        if (self.points) |points| points[self.n] = .{ .x = x, .y = y, .kind = if (on_curve) .on_curve else .quad_control };
         self.n += 1;
     }
 
@@ -280,7 +281,7 @@ const testing = std.testing;
 fn expectPoint(p: Outline.Point, x: f32, y: f32, on_curve: bool) !void {
     try testing.expectEqual(x, p.x);
     try testing.expectEqual(y, p.y);
-    try testing.expectEqual(on_curve, p.on_curve);
+    try testing.expectEqual(on_curve, p.kind == .on_curve);
 }
 
 test "simple glyph with a hole" {
@@ -316,7 +317,7 @@ test "all off-curve contour" {
     var o = try font.outline(testing.allocator, 3);
     defer o.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 1), o.contourCount());
-    for (o.contour(0)) |p| try testing.expect(!p.on_curve);
+    for (o.contour(0)) |p| try testing.expectEqual(.quad_control, p.kind);
 }
 
 test "composite glyphs" {
@@ -333,7 +334,7 @@ test "composite glyphs" {
     defer e.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 3), e.contourCount());
     try testing.expectEqualSlices(u32, d.contour_ends, e.contour_ends);
-    for (d.points, e.points) |a, b| try expectPoint(b, a.x, a.y, a.on_curve);
+    for (d.points, e.points) |a, b| try expectPoint(b, a.x, a.y, a.kind == .on_curve);
 }
 
 test "composite limits" {
@@ -348,7 +349,7 @@ test "composite limits" {
 test "truncated glyph data" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     var font = synthetic.font(&buf, .{});
-    font.tables.glyf.len = 40;
+    font.tables.outlines.glyf.glyf.len = 40;
     try testing.expectError(error.InvalidGlyph, font.outline(testing.allocator, 2));
     try testing.expectEqual(null, font.glyphBounds(2));
 }

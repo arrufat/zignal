@@ -14,6 +14,12 @@ SYSTEM_FONTS = [
     "/usr/share/fonts/TTF/Roboto-Regular.ttf",
 ]
 SYSTEM_FONT = next((p for p in SYSTEM_FONTS if os.path.exists(p)), None)
+SYSTEM_OTF_FONTS = [
+    "/usr/share/fonts/gnu-free/FreeSans.otf",
+    "/usr/share/fonts/opentype/freefont/FreeSans.otf",
+    "/usr/share/fonts/OTF/FreeSans.otf",
+]
+SYSTEM_OTF_FONT = next((p for p in SYSTEM_OTF_FONTS if os.path.exists(p)), None)
 
 
 def inked(img):
@@ -114,3 +120,18 @@ def test_truetype_font(tmp_path):
 
     with pytest.raises(ValueError):
         font.save(str(tmp_path / "out.bdf"))
+
+
+@pytest.mark.skipif(SYSTEM_OTF_FONT is None, reason="no CFF OpenType font installed")
+def test_cff_opentype_font():
+    font = zignal.Font.load(SYSTEM_OTF_FONT)
+    assert font.kind == "vector"
+    assert font.has_glyph("A")
+    assert font.get_text_bounds("Hello", 24).width > 24
+    assert (
+        font.get_text_bounds("AV", 24).width
+        < font.get_text_bounds("A", 24).width + font.get_text_bounds("V", 24).width
+    )
+    small = render("Hello", font, rows=60, cols=200, size=24, mode=zignal.DrawMode.SOFT)
+    big = render("Hello", font, rows=60, cols=200, size=48, mode=zignal.DrawMode.SOFT)
+    assert 0 < inked(small) < inked(big)

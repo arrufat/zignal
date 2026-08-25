@@ -1,6 +1,6 @@
-//! A scalable font parsed in place from TrueType bytes. Glyph outlines,
-//! advances and kerning are read on demand from the borrowed buffer; nothing is
-//! decoded up front, so loading is allocation-free.
+//! A scalable font parsed in place from TrueType or CFF OpenType bytes. Glyph
+//! outlines, advances and kerning are read on demand from the borrowed buffer;
+//! nothing is decoded up front, so loading is allocation-free.
 //!
 //! Example:
 //! ```zig
@@ -23,7 +23,6 @@ const Outline = @import("Outline.zig");
 const VectorFont = @This();
 
 pub const Error = truetype.Error;
-pub const IndexToLocFormat = enum(u1) { short, long };
 
 pub const GlyphMetrics = struct {
     /// Horizontal advance in font units.
@@ -47,7 +46,6 @@ num_glyphs: u16,
 num_h_metrics: u16,
 /// `head` flags bit 1: outlines are positioned so that x = 0 is the left side bearing.
 lsb_is_at_x_zero: bool,
-index_to_loc_format: IndexToLocFormat,
 /// Vertical metrics in font units (`descent` is negative): `hhea`, or OS/2 typographic
 /// metrics when `hhea` has none.
 ascent: i16,
@@ -68,7 +66,7 @@ pub fn loadFromBytes(data: []const u8) Error!VectorFont {
     return truetype.parse(data);
 }
 
-/// Reads and parses a `.ttf` (optionally gzipped). The font owns the bytes; call `deinit`.
+/// Reads and parses a `.ttf` or `.otf` (optionally gzipped). The font owns the bytes; call `deinit`.
 pub fn load(io: Io, gpa: Allocator, path: []const u8) !VectorFont {
     const data = try font_mod.readFileMaybeGzip(io, gpa, path);
     errdefer gpa.free(data);
@@ -103,15 +101,21 @@ pub fn glyphMetrics(self: VectorFont, gid: u16) GlyphMetrics {
     return .{ .advance = advance, .lsb = lsb };
 }
 
-/// The glyph's bounding box from its header, without parsing the outline; null for
-/// glyphs without contours (spaces, `.notdef`).
+/// The glyph's bounding box: from its `glyf` header, or the control box of its CFF
+/// charstring. Null for glyphs without contours (spaces, `.notdef`).
 pub fn glyphBounds(self: VectorFont, gid: u16) ?Bounds {
-    return truetype.glyf.bounds(self, gid);
+    return switch (self.tables.outlines) {
+        .glyf => truetype.glyf.bounds(self, gid),
+        .cff => truetype.cff.bounds(self, gid),
+    };
 }
 
 /// The glyph's outline in font units, composites resolved. Caller owns the result.
 pub fn outline(self: VectorFont, gpa: Allocator, gid: u16) (Error || Allocator.Error)!Outline {
-    return truetype.glyf.outline(self, gpa, gid);
+    return switch (self.tables.outlines) {
+        .glyf => truetype.glyf.outline(self, gpa, gid),
+        .cff => truetype.cff.outline(self, gpa, gid),
+    };
 }
 
 /// Horizontal kerning to add to `left`'s advance when followed by `right`, in font units.
@@ -247,7 +251,7 @@ test "header metrics" {
     try testing.expectEqual(@as(u16, 7), font.num_glyphs);
     try testing.expectEqual(@as(u16, 3), font.num_h_metrics);
     try testing.expect(font.lsb_is_at_x_zero);
-    try testing.expectEqual(.short, font.index_to_loc_format);
+    try testing.expectEqual(.short, font.tables.outlines.glyf.index_to_loc_format);
     try testing.expectEqual(@as(i16, 900), font.ascent);
     try testing.expectEqual(@as(i16, -250), font.descent);
     try testing.expectEqual(@as(i16, 0), font.line_gap);
@@ -260,7 +264,7 @@ test "header metrics" {
     try testing.expectEqual(@as(f32, 57.5), font.lineHeight(50));
 
     const long = synthetic.font(&buf, .{ .long_loca = true, .lsb_at_x_zero = false });
-    try testing.expectEqual(.long, long.index_to_loc_format);
+    try testing.expectEqual(.long, long.tables.outlines.glyf.index_to_loc_format);
     try testing.expect(!long.lsb_is_at_x_zero);
     // Glyph 1 has lsb 60 but starts at x = 100, so its outline shifts left by 40 units.
     var shifted: Layout = .init(long, "A", 1000);
@@ -301,13 +305,17 @@ test "rejects other formats and truncation without panicking" {
     const full = synthetic.build(&buf, .{});
     var otto: [64]u8 = undefined;
     @memcpy(otto[0..64], full[0..64]);
-    @memcpy(otto[0..4], "OTTO");
-    try testing.expectError(error.UnsupportedFontFormat, VectorFont.loadFromBytes(&otto));
     @memcpy(otto[0..4], "ttcf");
     try testing.expectError(error.UnsupportedFontFormat, VectorFont.loadFromBytes(&otto));
     @memcpy(otto[0..4], "abcd");
     try testing.expectError(error.InvalidFormat, VectorFont.loadFromBytes(&otto));
     try testing.expectError(error.UnexpectedEof, VectorFont.loadFromBytes(""));
+
+    // An OTTO tag on a font without a `CFF ` table.
+    var cff_less: [synthetic.buffer_size]u8 = undefined;
+    @memcpy(cff_less[0..full.len], full);
+    @memcpy(cff_less[0..4], "OTTO");
+    try testing.expectError(error.MissingTable, VectorFont.loadFromBytes(cff_less[0..full.len]));
 
     var len: usize = 0;
     while (len < full.len) : (len += 7) {
@@ -362,6 +370,33 @@ test "system font, when one is installed" {
     var b = try font.outline(testing.allocator, font.glyphIndex('B'));
     defer b.deinit(testing.allocator);
     try testing.expect(b.contourCount() >= 2);
+    try testing.expect(font.kern(a, font.glyphIndex('V')) <= 0);
+    try testing.expect(font.getTextBounds("Hello", 24).r > 24);
+}
+
+test "system CFF font, when one is installed" {
+    const candidates = [_][]const u8{
+        "/usr/share/fonts/gnu-free/FreeSans.otf",
+        "/usr/share/fonts/opentype/freefont/FreeSans.otf",
+        "/usr/share/fonts/OTF/FreeSans.otf",
+    };
+    var font: VectorFont = for (candidates) |path| {
+        break VectorFont.load(testing.io, testing.allocator, path) catch continue;
+    } else return error.SkipZigTest;
+    defer font.deinit(testing.allocator);
+
+    try testing.expect(font.tables.outlines == .cff);
+    const a = font.glyphIndex('A');
+    try testing.expect(a != 0);
+    try testing.expect(font.glyphMetrics(a).advance > 0);
+    var b = try font.outline(testing.allocator, font.glyphIndex('B'));
+    defer b.deinit(testing.allocator);
+    try testing.expect(b.contourCount() >= 2);
+    var cubics: usize = 0;
+    for (b.points) |p| cubics += @intFromBool(p.kind == .cubic_control);
+    try testing.expect(cubics > 0 and cubics % 2 == 0);
+    const bounds = font.glyphBounds(font.glyphIndex('B')).?;
+    try testing.expect(bounds.x_max > bounds.x_min and bounds.y_max > bounds.y_min);
     try testing.expect(font.kern(a, font.glyphIndex('V')) <= 0);
     try testing.expect(font.getTextBounds("Hello", 24).r > 24);
 }
