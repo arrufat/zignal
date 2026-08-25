@@ -1,9 +1,11 @@
-//! TrueType (sfnt with `glyf` outlines) parsing for `VectorFont`.
+//! sfnt parsing for `VectorFont`: TrueType (`glyf` outlines) and CFF-flavored
+//! OpenType (`OTTO`, `CFF ` outlines).
 //!
 //! Supported: table directory, `head`, `maxp`, `hhea`/`hmtx`, `post`, `OS/2`,
-//! `cmap` formats 4 and 12, `loca`/`glyf` simple and composite glyphs, kerning
-//! from the legacy `kern` table and from GPOS pair adjustment.
-//! Not supported: CFF outlines (`OTTO`), collections (`ttcf`), hinting,
+//! `cmap` formats 4 and 12, `loca`/`glyf` simple and composite glyphs, `CFF `
+//! Type 2 charstrings (plain and CID-keyed), kerning from the legacy `kern`
+//! table and from GPOS pair adjustment.
+//! Not supported: collections (`ttcf`), CFF2, `seac` accents, hinting,
 //! variable and color fonts, GSUB, mark attachment.
 
 const std = @import("std");
@@ -17,19 +19,21 @@ pub const cmap = @import("truetype/cmap.zig");
 pub const glyf = @import("truetype/glyf.zig");
 pub const kern = @import("truetype/kern.zig");
 pub const gpos = @import("truetype/gpos.zig");
+pub const cff = @import("truetype/cff.zig");
 
 pub const Error = error{
     /// Bad sfnt tag, table directory or table record.
     InvalidFormat,
-    /// CFF outlines or a font collection.
+    /// A font collection, or CFF charstrings that are not Type 2.
     UnsupportedFontFormat,
     /// A read past the end of the data.
     UnexpectedEof,
-    /// A required table (`head`, `maxp`, `hhea`, `hmtx`, `cmap`, `loca`, `glyf`) is absent.
+    /// A required table (`head`, `maxp`, `hhea`, `hmtx`, `cmap`, and `loca`/`glyf` or
+    /// `CFF ` with its CharStrings and Private DICT) is absent.
     MissingTable,
     /// No Unicode `cmap` subtable in format 4 or 12.
     UnsupportedCmap,
-    /// Bad glyph index or malformed glyph record.
+    /// Bad glyph index, malformed glyph record or charstring.
     InvalidGlyph,
     /// Composite glyph nesting or fan-out beyond the limits.
     CompositeTooDeep,
@@ -39,11 +43,24 @@ pub const Error = error{
 
 const max_tables = 512;
 
+pub const IndexToLocFormat = enum(u1) { short, long };
+
+/// The table(s) holding glyph outlines.
+pub const Outlines = union(enum) {
+    glyf: Glyf,
+    cff: cff.Font,
+
+    pub const Glyf = struct {
+        loca: Table,
+        glyf: Table,
+        index_to_loc_format: IndexToLocFormat,
+    };
+};
+
 /// Where the per-glyph data lives; the fixed-size header tables are folded into
 /// `VectorFont`'s fields at load time.
 pub const Tables = struct {
-    loca: Table,
-    glyf: Table,
+    outlines: Outlines,
     hmtx: Table,
     cmap: Table,
     kern: ?Table = null,
@@ -53,7 +70,7 @@ pub const Tables = struct {
 
 pub const sfnt_true_type: u32 = 0x00010000;
 const sfnt_apple = tag("true");
-const sfnt_cff = tag("OTTO");
+pub const sfnt_cff = tag("OTTO");
 const sfnt_collection = tag("ttcf");
 
 fn tag(comptime name: *const [4]u8) u32 {
@@ -72,17 +89,19 @@ const Tag = struct {
     const os2 = tag("OS/2");
     const kern = tag("kern");
     const gpos = tag("GPOS");
+    const cff = tag("CFF ");
 };
 
 /// Parses the header tables of `data` and validates the ones `VectorFont` reads later.
 /// Borrows `data`; nothing is allocated.
 pub fn parse(data: []const u8) Error!VectorFont {
     const r: Reader = .init(data);
-    switch (try r.u32At(0)) {
-        sfnt_true_type, sfnt_apple => {},
-        sfnt_cff, sfnt_collection => return error.UnsupportedFontFormat,
+    const has_cff = switch (try r.u32At(0)) {
+        sfnt_true_type, sfnt_apple => false,
+        sfnt_cff => true,
+        sfnt_collection => return error.UnsupportedFontFormat,
         else => return error.InvalidFormat,
-    }
+    };
 
     var head: ?Table = null;
     var maxp: ?Table = null;
@@ -95,6 +114,7 @@ pub fn parse(data: []const u8) Error!VectorFont {
     var os2: ?Table = null;
     var kern_table: ?Table = null;
     var gpos_table: ?Table = null;
+    var cff_table: ?Table = null;
 
     const num_tables = try r.u16At(4);
     if (num_tables > max_tables) return error.InvalidFormat;
@@ -115,6 +135,7 @@ pub fn parse(data: []const u8) Error!VectorFont {
             Tag.os2 => os2 = table,
             Tag.kern => kern_table = table,
             Tag.gpos => gpos_table = table,
+            Tag.cff => cff_table = table,
             else => {},
         }
     }
@@ -123,11 +144,6 @@ pub fn parse(data: []const u8) Error!VectorFont {
     const units_per_em = try head_r.u16At(18);
     if (units_per_em == 0) return error.InvalidFormat;
     const flags = try head_r.u16At(16);
-    const index_to_loc_format: VectorFont.IndexToLocFormat = switch (try head_r.i16At(50)) {
-        0 => .short,
-        1 => .long,
-        else => return error.InvalidFormat,
-    };
 
     const num_glyphs = try r.table(maxp orelse return error.MissingTable).u16At(4);
 
@@ -142,12 +158,26 @@ pub fn parse(data: []const u8) Error!VectorFont {
     const hmtx_t = hmtx orelse return error.MissingTable;
     if (hmtx_t.len < 4 * @as(u32, num_h_metrics) + 2 * @as(u32, num_glyphs - num_h_metrics)) return error.InvalidFormat;
 
-    const loca_t = loca orelse return error.MissingTable;
-    const loca_entry: u32 = switch (index_to_loc_format) {
-        .short => 2,
-        .long => 4,
+    const outlines: Outlines = if (has_cff) .{
+        .cff = try cff.parse(cff_table orelse return error.MissingTable, r, num_glyphs),
+    } else glyf_outlines: {
+        const index_to_loc_format: IndexToLocFormat = switch (try head_r.i16At(50)) {
+            0 => .short,
+            1 => .long,
+            else => return error.InvalidFormat,
+        };
+        const loca_t = loca orelse return error.MissingTable;
+        const loca_entry: u32 = switch (index_to_loc_format) {
+            .short => 2,
+            .long => 4,
+        };
+        if (loca_t.len < (@as(u32, num_glyphs) + 1) * loca_entry) return error.InvalidFormat;
+        break :glyf_outlines .{ .glyf = .{
+            .loca = loca_t,
+            .glyf = glyf_table orelse return error.MissingTable,
+            .index_to_loc_format = index_to_loc_format,
+        } };
     };
-    if (loca_t.len < (@as(u32, num_glyphs) + 1) * loca_entry) return error.InvalidFormat;
 
     var underline_position: i16 = 0;
     var underline_thickness: i16 = @intCast(units_per_em / 20);
@@ -182,7 +212,6 @@ pub fn parse(data: []const u8) Error!VectorFont {
         .num_glyphs = num_glyphs,
         .num_h_metrics = num_h_metrics,
         .lsb_is_at_x_zero = flags & 0x2 != 0,
-        .index_to_loc_format = index_to_loc_format,
         .ascent = ascent,
         .descent = descent,
         .line_gap = line_gap,
@@ -192,8 +221,7 @@ pub fn parse(data: []const u8) Error!VectorFont {
         .strikeout_size = strikeout_size,
         .strikeout_position = strikeout_position,
         .tables = .{
-            .loca = loca_t,
-            .glyf = glyf_table orelse return error.MissingTable,
+            .outlines = outlines,
             .hmtx = hmtx_t,
             .cmap = cmap_t,
             .kern = kern_table,
@@ -210,5 +238,6 @@ test {
     _ = glyf;
     _ = kern;
     _ = gpos;
+    _ = cff;
     _ = @import("truetype/synthetic.zig");
 }

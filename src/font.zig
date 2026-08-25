@@ -3,7 +3,7 @@
 //! This module provides font rendering capabilities including:
 //! - Default 8x8 bitmap font
 //! - BDF and PCF bitmap font loading with Unicode support
-//! - TrueType (`.ttf`) vector fonts with kerning
+//! - TrueType (`.ttf`) and CFF OpenType (`.otf`) vector fonts with kerning
 //! - Variable-width font support
 //!
 //! The font system is organized into subdirectories for better modularity.
@@ -40,7 +40,7 @@ pub const Font = union(enum) {
         const format = try FontFormat.detectFromPath(io, path) orelse return error.UnsupportedFontFormat;
         return switch (format) {
             .bdf, .pcf => .{ .bitmap = try BitmapFont.load(io, gpa, path, .all) },
-            .ttf => .{ .vector = try VectorFont.load(io, gpa, path) },
+            .ttf, .otf => .{ .vector = try VectorFont.load(io, gpa, path) },
         };
     }
 
@@ -244,4 +244,13 @@ test "Font.load dispatches on the format" {
     try std.testing.expectEqual(@as(f32, 48), bitmap.getTextBounds("abc", 16).r);
     try std.testing.expectEqual(@as(f32, 16), bitmap.lineHeight(16));
     try std.testing.expect(bitmap.hasGlyph('a'));
+
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "synth.otf", .data = synthetic.build(&buf, .{ .cff = true }) });
+    const otf_path = try tmp.dir.realPathFileAlloc(std.testing.io, "synth.otf", std.testing.allocator);
+    defer std.testing.allocator.free(otf_path);
+    var otf: Font = try .load(std.testing.io, std.testing.allocator, otf_path);
+    defer otf.deinit(std.testing.allocator);
+    try std.testing.expect(otf == .vector and otf.vector.tables.outlines == .cff);
+    try std.testing.expect(otf.hasGlyph('C'));
+    try std.testing.expectError(error.UnsupportedFontFormat, BitmapFont.load(std.testing.io, std.testing.allocator, otf_path, .all));
 }

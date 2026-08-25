@@ -1,6 +1,6 @@
-//! A glyph outline: closed contours of quadratic on/off-curve points in font
-//! units, y up, with composites already resolved. `flatten` turns it into
-//! device-space polygons for `Canvas.fillPolygons`.
+//! A glyph outline: closed contours of quadratic (TrueType) or cubic (CFF)
+//! segments in font units, y up, with composites already resolved. `flatten`
+//! turns it into device-space polygons for `Canvas.fillPolygons`.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -12,7 +12,15 @@ const Outline = @This();
 pub const Point = struct {
     x: f32,
     y: f32,
-    on_curve: bool,
+    kind: Kind,
+
+    pub const Kind = enum(u2) {
+        on_curve,
+        /// One per quadratic segment; two in a row imply an on-curve midpoint.
+        quad_control,
+        /// Always in pairs.
+        cubic_control,
+    };
 };
 
 /// All contours back to back.
@@ -98,7 +106,7 @@ fn walk(self: Outline, t: Transform, sink: *Sink) void {
         // A contour starts on its first on-curve point; with none, on the implied
         // midpoint between the first two control points.
         const on_curve: ?usize = for (pts, 0..) |p, k| {
-            if (p.on_curve) break k;
+            if (p.kind == .on_curve) break k;
         } else null;
         const start_index = on_curve orelse 0;
         const start: Point = if (on_curve != null) pts[start_index] else midpoint(pts[0], pts[1]);
@@ -106,46 +114,88 @@ fn walk(self: Outline, t: Transform, sink: *Sink) void {
 
         sink.emit(t.apply(start.x, start.y));
         var prev_on = start;
-        var prev_off: ?Point = null;
+        var ctrl: [2]Point = undefined;
+        var pending: usize = 0;
         for (1..steps + 1) |k| {
             const p = pts[(start_index + k) % pts.len];
-            if (p.on_curve) {
-                if (prev_off) |c| curve(t, prev_on, c, p, false, sink) else sink.emit(t.apply(p.x, p.y));
-                prev_on = p;
-                prev_off = null;
-            } else {
-                if (prev_off) |c| {
-                    const m = midpoint(c, p);
-                    curve(t, prev_on, c, m, false, sink);
-                    prev_on = m;
-                }
-                prev_off = p;
+            switch (p.kind) {
+                .on_curve => {
+                    segment(t, prev_on, ctrl[0..pending], p, false, sink);
+                    prev_on = p;
+                    pending = 0;
+                },
+                .quad_control => {
+                    if (pending > 0) {
+                        const m = midpoint(ctrl[0], p);
+                        quad(t, prev_on, ctrl[0], m, false, sink);
+                        prev_on = m;
+                    }
+                    ctrl[0] = p;
+                    pending = 1;
+                },
+                // A third control in a row is malformed and dropped.
+                .cubic_control => if (pending < 2) {
+                    ctrl[pending] = p;
+                    pending += 1;
+                },
             }
         }
-        if (prev_off) |c| curve(t, prev_on, c, start, true, sink);
+        segment(t, prev_on, ctrl[0..pending], start, true, sink);
         sink.endContour();
     }
 }
 
 fn midpoint(a: Point, b: Point) Point {
-    return .{ .x = (a.x + b.x) / 2, .y = (a.y + b.y) / 2, .on_curve = true };
+    return .{ .x = (a.x + b.x) / 2, .y = (a.y + b.y) / 2, .kind = .on_curve };
 }
 
-/// Flattens the quadratic p0-c-p1 into uniform chords, skipping the end point when it
-/// closes the contour (the polygon closes implicitly).
-fn curve(t: Transform, p0: Point, c: Point, p1: Point, closing: bool, sink: *Sink) void {
+/// Emits the segment from `p0` to `p1` through the pending controls, skipping the end
+/// point when it closes the contour (the polygon closes implicitly).
+fn segment(t: Transform, p0: Point, ctrl: []const Point, p1: Point, closing: bool, sink: *Sink) void {
+    switch (ctrl.len) {
+        0 => if (!closing) sink.emit(t.apply(p1.x, p1.y)),
+        1 => quad(t, p0, ctrl[0], p1, closing, sink),
+        else => cubic(t, p0, ctrl[0], ctrl[1], p1, closing, sink),
+    }
+}
+
+/// Uniform chords needed so that none deviates from the curve by more than
+/// `flatness_tolerance`, given a bound on |B''| in device pixels: the error of `n`
+/// chords is at most max|B''| / (8n²).
+fn chordCount(second_derivative_max: f32) u32 {
+    const n = @ceil(@sqrt(second_derivative_max / (8 * flatness_tolerance)));
+    return @intFromFloat(@min(@max(n, 1), @as(f32, max_curve_segments)));
+}
+
+fn chordLimit(n: u32, closing: bool) u32 {
+    return if (closing) n - 1 else n;
+}
+
+fn quad(t: Transform, p0: Point, c: Point, p1: Point, closing: bool, sink: *Sink) void {
     const d0 = t.apply(p0.x, p0.y);
     const d1 = t.apply(c.x, c.y);
     const d2 = t.apply(p1.x, p1.y);
-    // The second derivative is constant, so n chords deviate by at most |p0 - 2c + p1| / (4n²).
-    const dx = d0.x() - 2 * d1.x() + d2.x();
-    const dy = d0.y() - 2 * d1.y() + d2.y();
-    const chords = @min(@max(@ceil(@sqrt(@sqrt(dx * dx + dy * dy) / (4 * flatness_tolerance))), 1), @as(f32, max_curve_segments));
-    const n: u32 = @trunc(chords);
-    const last = if (closing) n - 1 else n;
-    for (1..last + 1) |s| {
-        const u: f32 = @as(f32, @floatFromInt(s)) / @as(f32, @floatFromInt(n));
+    // B'' is the constant 2(p0 - 2c + p1).
+    const n = chordCount(2 * d0.sub(d1.scale(2)).add(d2).norm());
+    for (1..chordLimit(n, closing) + 1) |s| {
+        const u = @as(f32, @floatFromInt(s)) / @as(f32, @floatFromInt(n));
         sink.emit(d0.lerp(d1, u).lerp(d1.lerp(d2, u), u));
+    }
+}
+
+fn cubic(t: Transform, p0: Point, c1: Point, c2: Point, p1: Point, closing: bool, sink: *Sink) void {
+    const d0 = t.apply(p0.x, p0.y);
+    const d1 = t.apply(c1.x, c1.y);
+    const d2 = t.apply(c2.x, c2.y);
+    const d3 = t.apply(p1.x, p1.y);
+    // B'' interpolates 6(p0 - 2c1 + c2) and 6(c1 - 2c2 + p1).
+    const n = chordCount(6 * @max(d0.sub(d1.scale(2)).add(d2).norm(), d1.sub(d2.scale(2)).add(d3).norm()));
+    for (1..chordLimit(n, closing) + 1) |s| {
+        const u = @as(f32, @floatFromInt(s)) / @as(f32, @floatFromInt(n));
+        const a = d0.lerp(d1, u);
+        const b = d1.lerp(d2, u);
+        const c = d2.lerp(d3, u);
+        sink.emit(a.lerp(b, u).lerp(b.lerp(c, u), u));
     }
 }
 
@@ -202,6 +252,34 @@ test "flatten curves: count matches, grows with size, stays closed" {
         }
     }
     // 4 curves * 32 chords is the ceiling.
+    try testing.expect(prev <= 4 * max_curve_segments);
+}
+
+test "flatten cubics: count matches, grows with size, stays closed" {
+    var buf: [synthetic.buffer_size]u8 = undefined;
+    const font = synthetic.font(&buf, .{ .cff = true });
+    var o = try font.outline(testing.allocator, 3);
+    defer o.deinit(testing.allocator);
+    var prev: usize = 0;
+    for ([_]f32{ 8, 64, 512 }) |size| {
+        const t: Transform = .{ .scale = size / 1000, .origin = .init(.{ 0, size }) };
+        const count = o.flattenedPointCount(t);
+        try testing.expect(count > prev);
+        prev = count;
+        const points = try testing.allocator.alloc(Point2, count);
+        defer testing.allocator.free(points);
+        var contours: [1][]const Point2 = undefined;
+        const polys = o.flatten(t, points, &contours);
+        try testing.expectEqual(count, polys[0].len);
+        // The start point appears once: the closing curve stops short of it.
+        try testing.expectEqual(Point2.init(.{ 0.4 * size, size }), polys[0][0]);
+        for (polys[0][1..]) |p| try testing.expect(p.x() != polys[0][0].x() or p.y() != polys[0][0].y());
+        // Convex, so every point lies within the control polygon's box.
+        for (polys[0]) |p| {
+            try testing.expect(p.x() >= 0 and p.x() <= 0.8 * size + 0.01);
+            try testing.expect(p.y() >= 0.3 * size - 0.01 and p.y() <= size + 0.01);
+        }
+    }
     try testing.expect(prev <= 4 * max_curve_segments);
 }
 
