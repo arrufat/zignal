@@ -15,10 +15,10 @@ const Io = std.Io;
 
 const Rectangle = @import("geometry.zig").Rectangle;
 
-/// Maximum file size for font files (50MB)
-/// This limit prevents DoS attacks and accidental memory exhaustion
-/// while being large enough for all known font files
-pub const max_file_size = 50 * 1024 * 1024;
+/// Largest font file `load` reads, a guard against runaway allocation on a bad path or
+/// gzip stream. The biggest fonts in the wild are the pan-CJK super collections (Noto/Source
+/// Han Sans and Serif with every weight and language), which run 100–200 MB.
+pub const max_file_size = 256 * 1024 * 1024;
 
 // Core font types
 pub const BitmapFont = @import("font/BitmapFont.zig");
