@@ -196,7 +196,7 @@ pub fn MotionBlurOps(comptime T: type) type {
 
                                 const result = if (count > 0) sum / count else as(f32, image.at(r, c).*);
                                 out.at(r, c).* = switch (@typeInfo(T)) {
-                                    .int => @trunc(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(result)))),
+                                    .int => @round(std.math.clamp(result, std.math.minInt(T), std.math.maxInt(T))),
                                     .float => as(T, result),
                                     else => unreachable,
                                 };
@@ -232,7 +232,7 @@ pub fn MotionBlurOps(comptime T: type) type {
                                 inline for (fields, 0..) |field, i| {
                                     const channel_result = if (count > 0) sums[i] / count else as(f32, @field(image.at(r, c).*, field.name));
                                     @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
-                                        .int => @trunc(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(channel_result)))),
+                                        .int => @round(std.math.clamp(channel_result, std.math.minInt(field.type), std.math.maxInt(field.type))),
                                         .float => as(field.type, channel_result),
                                         else => @compileError("Unsupported field type"),
                                     };
@@ -348,7 +348,7 @@ pub fn MotionBlurOps(comptime T: type) type {
 
                             const result = if (count > 0) sum / @as(f32, @floatFromInt(count)) else as(f32, image.at(r, c).*);
                             out.at(r, c).* = switch (@typeInfo(T)) {
-                                .int => @trunc(@max(std.math.minInt(T), @min(std.math.maxInt(T), @round(result)))),
+                                .int => @round(std.math.clamp(result, std.math.minInt(T), std.math.maxInt(T))),
                                 .float => as(T, result),
                                 else => unreachable,
                             };
@@ -408,7 +408,7 @@ pub fn MotionBlurOps(comptime T: type) type {
                             inline for (fields, 0..) |field, i| {
                                 const channel_result = if (count > 0) sums[i] / @as(f32, @floatFromInt(count)) else as(f32, @field(image.at(r, c).*, field.name));
                                 @field(result_pixel, field.name) = switch (@typeInfo(field.type)) {
-                                    .int => @trunc(@max(std.math.minInt(field.type), @min(std.math.maxInt(field.type), @round(channel_result)))),
+                                    .int => @round(std.math.clamp(channel_result, std.math.minInt(field.type), std.math.maxInt(field.type))),
                                     .float => as(field.type, channel_result),
                                     else => @compileError("Unsupported field type"),
                                 };

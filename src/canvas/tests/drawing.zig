@@ -505,6 +505,12 @@ test "drawLine with soft mode handles out-of-bounds endpoints" {
 
     // Verify that the visible part of the line was drawn.
     try expect(img.at(200, 200).* > 0);
+
+    // Diagonals whose band leaves the image on either side: rows with no columns in reach.
+    canvas.drawLine(.init(.{ -200, 0 }), .init(.{ 200, 400 }), @as(u8, 255), 3, .soft);
+    canvas.drawLine(.init(.{ 200, 0 }), .init(.{ 600, 400 }), @as(u8, 255), 3, .soft);
+    try expect(img.at(300, 100).* > 0);
+    try expect(img.at(100, 300).* > 0);
 }
 
 test "fillPolygon soft antialiases near-horizontal edges" {

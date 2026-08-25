@@ -163,8 +163,8 @@ fn segment(t: Transform, p0: Point, ctrl: []const Point, p1: Point, closing: boo
 /// `flatness_tolerance`, given a bound on |B''| in device pixels: the error of `n`
 /// chords is at most max|B''| / (8n²).
 fn chordCount(second_derivative_max: f32) u32 {
-    const n = @ceil(@sqrt(second_derivative_max / (8 * flatness_tolerance)));
-    return @intFromFloat(@min(@max(n, 1), @as(f32, max_curve_segments)));
+    const n = @sqrt(second_derivative_max / (8 * flatness_tolerance));
+    return @ceil(std.math.clamp(n, 1, @as(f32, max_curve_segments)));
 }
 
 fn chordLimit(n: u32, closing: bool) u32 {
