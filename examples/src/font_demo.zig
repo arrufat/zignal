@@ -1,6 +1,8 @@
 //! Renders a type specimen with any supported font (BDF, PCF, TrueType, CFF OpenType,
 //! collections, optionally gzipped), detected from the file: `font_demo [font-path]`.
 //! Without an argument it tries a few system fonts and falls back to the built-in 8x8 font.
+//! Below the size ladder it shows the layout features: a wrapped, centered paragraph in
+//! a box, right-aligned lines with tight tracking, and outlined text.
 
 const std = @import("std");
 
@@ -10,6 +12,7 @@ const Image = zignal.Image;
 const Rgb = zignal.Rgb(u8);
 const Canvas = zignal.Canvas;
 const Font = zignal.Font;
+const Rectangle = zignal.Rectangle(f32);
 const p = zignal.Point(2, f32).init;
 
 const system_fonts = [_][]const u8{
@@ -26,6 +29,8 @@ const system_fonts = [_][]const u8{
 
 const sample = "The quick brown fox jumps over the lazy dog";
 const kerning_pairs = "AVAWATo LTYa f. 1234567890";
+const paragraph = "Text boxes wrap at spaces, align each line and place the whole block, " ++
+    "so a caption can be centered in its frame without measuring anything by hand.";
 
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
@@ -52,10 +57,13 @@ pub fn main(init: std.process.Init) !void {
     var height: f32 = 16;
     for (sizes) |size| height += font.lineHeight(size) + 6;
     height += 2 * font.lineHeight(24) + 16;
+    const box_height = 4.5 * font.lineHeight(20);
+    height += box_height + font.lineHeight(48) + 32;
 
     var image: Image(Rgb) = try .init(gpa, @ceil(height), 1000);
     defer image.deinit(gpa);
-    image.fill(.{ .r = 255, .g = 255, .b = 255 });
+    const paper: Rgb = .{ .r = 255, .g = 255, .b = 255 };
+    image.fill(paper);
     const canvas: Canvas(Rgb) = .init(gpa, image);
     const ink: Rgb = .{ .r = 24, .g = 24, .b = 24 };
     const accent: Rgb = .{ .r = 190, .g = 40, .b = 40 };
@@ -76,6 +84,26 @@ pub fn main(init: std.process.Init) !void {
     const bounds = font.getTextBounds(sample, sizes[sizes.len - 1]);
     const baseline = last_top + font.ascent(sizes[sizes.len - 1]);
     canvas.drawLine(p(.{ 8, baseline + 4 }), p(.{ 8 + bounds.r, baseline + 4 }), accent, 1, .soft);
+    y += font.lineHeight(24) + 16;
+
+    // A wrapped paragraph centered in its box, next to right-aligned lines with tight
+    // tracking anchored at the box's bottom.
+    const frame: Rgb = .{ .r = 120, .g = 140, .b = 200 };
+    const left: Rectangle = .{ .l = 8, .t = y, .r = 600, .b = y + box_height };
+    canvas.drawRectangle(left, frame, 1, .soft);
+    try canvas.drawTextBox(paragraph, left.shrink(8), ink, font, 20, .{ .wrap = true, .halign = .center, .valign = .middle, .line_spacing = 1.15 }, .soft);
+    const right: Rectangle = .{ .l = 612, .t = y, .r = 992, .b = y + box_height };
+    canvas.drawRectangle(right, frame, 1, .soft);
+    try canvas.drawTextBox("right aligned\nbottom anchored\ntight tracking", right.shrink(8), ink, font, 20, .{ .halign = .right, .valign = .bottom, .letter_spacing = -1 }, .soft);
+    y += box_height + 12;
+
+    // Outlined text: a stroke under a fill, then a hollow stroke on its own. Bitmap fonts
+    // get a halo instead of an outline.
+    const outline: Rgb = .{ .r = 30, .g = 80, .b = 180 };
+    try canvas.drawTextOutline("Outlined", p(.{ 8, y }), outline, font, 48, 5, .soft);
+    try canvas.drawText("Outlined", p(.{ 8, y }), paper, font, 48, .soft);
+    const measured = font.measureText("Outlined", 48, null, .default);
+    try canvas.drawTextOutline("& hollow", p(.{ 8 + measured.r + 24, y }), accent, font, 48, 2, .soft);
 
     try image.save(io, gpa, "font_demo.png");
     std.debug.print("{f}\n", .{image.display(io, .{ .auto = .{} })});

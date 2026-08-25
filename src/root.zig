@@ -111,6 +111,9 @@ pub const font = @import("font.zig");
 pub const BitmapFont = font.BitmapFont;
 pub const VectorFont = font.VectorFont;
 pub const Font = font.Font;
+pub const TextLayout = font.TextLayout;
+pub const TextAlign = font.TextAlign;
+pub const VerticalAlign = font.VerticalAlign;
 pub const Outline = font.Outline;
 
 // PCA (Principal Component Analysis) system

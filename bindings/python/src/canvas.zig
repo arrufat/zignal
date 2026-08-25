@@ -168,6 +168,24 @@ pub const PyCanvas = struct {
         }
     }
 
+    pub fn drawTextBox(self: *Self, text: []const u8, box: zignal.Rectangle(f32), color: Rgba, font: Font, size: ?f32, layout: zignal.TextLayout, opts: DrawOptions) !void {
+        switch (self.data) {
+            inline else => |*canvas| try canvas.drawTextBox(text, box, color, font, size, layout, opts),
+        }
+    }
+
+    pub fn drawTextOutline(self: *Self, text: []const u8, position: anytype, color: Rgba, font: Font, size: ?f32, width: f32, opts: DrawOptions) !void {
+        switch (self.data) {
+            inline else => |*canvas| try canvas.drawTextOutline(text, position, color, font, size, width, opts),
+        }
+    }
+
+    pub fn drawTextBoxOutline(self: *Self, text: []const u8, box: zignal.Rectangle(f32), color: Rgba, font: Font, size: ?f32, width: f32, layout: zignal.TextLayout, opts: DrawOptions) !void {
+        switch (self.data) {
+            inline else => |*canvas| try canvas.drawTextBoxOutline(text, box, color, font, size, width, layout, opts),
+        }
+    }
+
     /// Draw another image.
     pub fn drawImage(self: *Self, source: *PyImage, position: anytype, source_rect: ?Rectangle(u32), blend_mode: Blending) void {
         switch (self.data) {
@@ -205,6 +223,36 @@ pub const draw_mode_doc =
 pub const draw_mode_values = [_]stub_metadata.EnumValueDoc{
     .{ .name = "FAST", .doc = "Fast rendering with hard edges" },
     .{ .name = "SOFT", .doc = "Antialiased rendering with smooth edges" },
+};
+
+pub const text_align_doc =
+    \\Horizontal alignment of each line inside a text box.
+    \\
+    \\## Attributes
+    \\- `LEFT` (int): Lines start at the box's left edge (value: 0)
+    \\- `CENTER` (int): Lines are centered in the box (value: 1)
+    \\- `RIGHT` (int): Lines end at the box's right edge (value: 2)
+;
+
+pub const text_align_values = [_]stub_metadata.EnumValueDoc{
+    .{ .name = "LEFT", .doc = "Lines start at the left edge" },
+    .{ .name = "CENTER", .doc = "Lines are centered" },
+    .{ .name = "RIGHT", .doc = "Lines end at the right edge" },
+};
+
+pub const vertical_align_doc =
+    \\Vertical placement of the block of lines inside a text box.
+    \\
+    \\## Attributes
+    \\- `TOP` (int): The block starts at the box's top edge (value: 0)
+    \\- `MIDDLE` (int): The block is centered in the box (value: 1)
+    \\- `BOTTOM` (int): The block ends at the box's bottom edge (value: 2)
+;
+
+pub const vertical_align_values = [_]stub_metadata.EnumValueDoc{
+    .{ .name = "TOP", .doc = "The block starts at the top edge" },
+    .{ .name = "MIDDLE", .doc = "The block is centered" },
+    .{ .name = "BOTTOM", .doc = "The block ends at the bottom edge" },
 };
 
 /// Parses the shared `mode` + `blending` kwargs into a DrawOptions (`blending=None` disables blending).
@@ -822,12 +870,47 @@ fn canvas_fill_arc(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     return python.none();
 }
 
+/// The arguments every text method shares, parsed from their Python objects.
+const TextArgs = struct {
+    text: []const u8,
+    rgba: Rgba,
+    font: *zignal.Font,
+    size: ?f32,
+    opts: DrawOptions,
+
+    /// `params` is the method's parsed `Params` struct; only the shared fields are read.
+    fn parse(params: anytype) ?TextArgs {
+        const rgba = color_utils.parseColor(Rgba, @ptrCast(params.color)) catch return null;
+        const opts = parseDrawOptions(params.mode, params.blending) catch return null;
+
+        const font_module = @import("font.zig");
+        const font_obj = if (params.font == null or params.font == c.Py_None()) font_module.font8x8Object() orelse return null else params.font;
+        if (c.PyObject_IsInstance(font_obj, @ptrCast(&font_module.FontType)) <= 0) {
+            python.setTypeError("Font instance or None", font_obj);
+            return null;
+        }
+        const font = python.unwrap(font_module.FontObject, "font", font_obj, "Font") orelse return null;
+        const size: ?f32 = if (params.size == null or params.size == c.Py_None()) null else python.parse(f32, params.size) catch return null;
+        return .{ .text = std.mem.span(params.text), .rgba = rgba, .font = font, .size = size, .opts = opts };
+    }
+};
+
+/// A `TextLayout` from the keyword arguments of the box methods.
+fn parseTextLayout(params: anytype) !zignal.TextLayout {
+    return .{
+        .halign = try enum_utils.longToEnum(zignal.TextAlign, params.halign),
+        .valign = try enum_utils.longToEnum(zignal.VerticalAlign, params.valign),
+        .wrap = params.wrap != 0,
+        .line_spacing = @floatCast(params.line_spacing),
+        .letter_spacing = @floatCast(params.letter_spacing),
+    };
+}
+
 fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const canvas = python.unwrap(CanvasObject, "py_canvas", self_obj, "Canvas") orelse return null;
 
-    // Parse arguments using struct-based parseArgs
     const Params = struct {
-        text: ?*c.PyObject,
+        text: [*c]const u8,
         position: ?*c.PyObject,
         color: ?*c.PyObject,
         font: ?*c.PyObject = null,
@@ -838,28 +921,104 @@ fn canvas_draw_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const text_cstr = c.PyUnicode_AsUTF8(params.text) orelse {
-        python.setTypeError("string", params.text);
+    const position = python.parse(zignal.Point(2, f32), params.position) catch return null;
+    const t = TextArgs.parse(params) orelse return null;
+
+    canvas.drawText(t.text, position, t.rgba, t.font.*, t.size, t.opts) catch {
+        python.setRuntimeError("Failed to draw text", .{});
         return null;
     };
-    const text = std.mem.span(text_cstr);
+
+    return python.none();
+}
+
+fn canvas_draw_text_box(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const canvas = python.unwrap(CanvasObject, "py_canvas", self_obj, "Canvas") orelse return null;
+
+    const Params = struct {
+        text: [*c]const u8,
+        rect: ?*c.PyObject,
+        color: ?*c.PyObject,
+        font: ?*c.PyObject = null,
+        size: ?*c.PyObject = null,
+        halign: c_long = 0,
+        valign: c_long = 0,
+        wrap: c_int = 0,
+        line_spacing: f64 = 1,
+        letter_spacing: f64 = 0,
+        mode: c_long = 0,
+        blending: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const rect = python.parse(zignal.Rectangle(f32), params.rect) catch return null;
+    const t = TextArgs.parse(params) orelse return null;
+    const layout = parseTextLayout(params) catch return null;
+
+    canvas.drawTextBox(t.text, rect, t.rgba, t.font.*, t.size, layout, t.opts) catch {
+        python.setRuntimeError("Failed to draw text", .{});
+        return null;
+    };
+
+    return python.none();
+}
+
+fn canvas_draw_text_outline(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const canvas = python.unwrap(CanvasObject, "py_canvas", self_obj, "Canvas") orelse return null;
+
+    const Params = struct {
+        text: [*c]const u8,
+        position: ?*c.PyObject,
+        color: ?*c.PyObject,
+        width: f64,
+        font: ?*c.PyObject = null,
+        size: ?*c.PyObject = null,
+        mode: c_long = 0,
+        blending: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const position = python.parse(zignal.Point(2, f32), params.position) catch return null;
-    const rgba = color_utils.parseColor(Rgba, @ptrCast(params.color)) catch return null;
+    const width = python.validateNonNegative(f32, params.width, "Width") catch return null;
+    const t = TextArgs.parse(params) orelse return null;
 
-    const opts = parseDrawOptions(params.mode, params.blending) catch return null;
-
-    const font_module = @import("font.zig");
-    const font_obj = if (params.font == null or params.font == c.Py_None()) font_module.font8x8Object() orelse return null else params.font;
-    if (c.PyObject_IsInstance(font_obj, @ptrCast(&font_module.FontType)) <= 0) {
-        python.setTypeError("Font instance or None", font_obj);
+    canvas.drawTextOutline(t.text, position, t.rgba, t.font.*, t.size, width, t.opts) catch {
+        python.setRuntimeError("Failed to draw text", .{});
         return null;
-    }
-    const font = python.unwrap(font_module.FontObject, "font", font_obj, "Font") orelse return null;
+    };
 
-    const size: ?f32 = if (params.size == null or params.size == c.Py_None()) null else python.parse(f32, params.size) catch return null;
+    return python.none();
+}
 
-    canvas.drawText(text, position, rgba, font.*, size, opts) catch {
+fn canvas_draw_text_box_outline(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const canvas = python.unwrap(CanvasObject, "py_canvas", self_obj, "Canvas") orelse return null;
+
+    const Params = struct {
+        text: [*c]const u8,
+        rect: ?*c.PyObject,
+        color: ?*c.PyObject,
+        width: f64,
+        font: ?*c.PyObject = null,
+        size: ?*c.PyObject = null,
+        halign: c_long = 0,
+        valign: c_long = 0,
+        wrap: c_int = 0,
+        line_spacing: f64 = 1,
+        letter_spacing: f64 = 0,
+        mode: c_long = 0,
+        blending: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const rect = python.parse(zignal.Rectangle(f32), params.rect) catch return null;
+    const width = python.validateNonNegative(f32, params.width, "Width") catch return null;
+    const t = TextArgs.parse(params) orelse return null;
+    const layout = parseTextLayout(params) catch return null;
+
+    canvas.drawTextBoxOutline(t.text, rect, t.rgba, t.font.*, t.size, width, layout, t.opts) catch {
         python.setRuntimeError("Failed to draw text", .{});
         return null;
     };
@@ -992,6 +1151,60 @@ const canvas_draw_text_doc =
     \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
 ;
 
+const canvas_draw_text_box_doc =
+    \\Draw text laid out inside `rect`: wrapped to its width when `wrap` is set, each line
+    \\aligned horizontally with `halign` and the block vertically with `valign`. Text that
+    \\does not fit is clipped by the image only, not the rectangle.
+    \\
+    \\## Parameters
+    \\- `text` (str): Text to draw; `\n` always starts a new line
+    \\- `rect` (Rectangle | tuple[float, float, float, float]): The box, as (left, top, right, bottom)
+    \\- `color` (int, tuple or color object): Text color.
+    \\- `font` (Font, optional): Font to render with. If `None`, uses `Font.font8x8()`
+    \\- `size` (float, optional): Font size in pixels, as in `draw_text`
+    \\- `halign` (`TextAlign`, optional): Horizontal alignment of each line (default: `TextAlign.LEFT`)
+    \\- `valign` (`VerticalAlign`, optional): Vertical placement of the block (default: `VerticalAlign.TOP`)
+    \\- `wrap` (bool, optional): Break lines at spaces to fit the width; words wider than the box break
+    \\  between characters (default: False)
+    \\- `line_spacing` (float, optional): Multiplier on the font's line height (default: 1.0)
+    \\- `letter_spacing` (float, optional): Extra pixels between glyphs; negative tightens (default: 0.0)
+    \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
+    \\
+    \\## Examples
+    \\```python
+    \\canvas.draw_text_box(caption, (10, 10, 310, 90), (255, 255, 255), font, size=18,
+    \\                     halign=TextAlign.CENTER, valign=VerticalAlign.MIDDLE, wrap=True)
+    \\```
+;
+
+const canvas_draw_text_outline_doc =
+    \\Draw text as outlines: each glyph's contour stroked `width` pixels wide with round joins,
+    \\instead of filled. Bitmap fonts have no outlines and get a halo of that diameter; draw
+    \\the text over it with `draw_text` for a readable label.
+    \\
+    \\## Parameters
+    \\- `text` (str): Text to draw; `\n` starts a new line
+    \\- `position` (tuple[float, float]): Position coordinates (x, y) of the top-left corner
+    \\- `color` (int, tuple or color object): Stroke color.
+    \\- `width` (float): Stroke width in pixels
+    \\- `font` (Font, optional): Font to render with. If `None`, uses `Font.font8x8()`
+    \\- `size` (float, optional): Font size in pixels, as in `draw_text`
+    \\- `mode` (`DrawMode`, optional): Drawing mode (default: `DrawMode.FAST`)
+    \\- `blending` (`Blending` | None, optional): Blend mode for compositing (default: `Blending.NORMAL`; `None` disables blending)
+;
+
+const canvas_draw_text_box_outline_doc =
+    \\`draw_text_box` stroking the glyphs as `draw_text_outline` does.
+    \\
+    \\## Parameters
+    \\- `text` (str): Text to draw
+    \\- `rect` (Rectangle | tuple[float, float, float, float]): The box, as (left, top, right, bottom)
+    \\- `color` (int, tuple or color object): Stroke color.
+    \\- `width` (float): Stroke width in pixels
+    \\- `font`, `size`, `halign`, `valign`, `wrap`, `line_spacing`, `letter_spacing`, `mode`, `blending`: as in `draw_text_box`
+;
+
 pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
     .{
         .name = "fill",
@@ -1119,6 +1332,30 @@ pub const canvas_methods_metadata = [_]python.MethodWithMetadata{
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = canvas_draw_text_doc,
         .params = "self, text: str, position: tuple[float, float], color: Color, font: Font | None = None, size: float | None = None, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
+        .returns = "None",
+    },
+    .{
+        .name = "draw_text_box",
+        .meth = @ptrCast(&canvas_draw_text_box),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = canvas_draw_text_box_doc,
+        .params = "self, text: str, rect: Rectangle | tuple[float, float, float, float], color: Color, font: Font | None = None, size: float | None = None, halign: TextAlign = TextAlign.LEFT, valign: VerticalAlign = VerticalAlign.TOP, wrap: bool = False, line_spacing: float = 1.0, letter_spacing: float = 0.0, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
+        .returns = "None",
+    },
+    .{
+        .name = "draw_text_outline",
+        .meth = @ptrCast(&canvas_draw_text_outline),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = canvas_draw_text_outline_doc,
+        .params = "self, text: str, position: tuple[float, float], color: Color, width: float, font: Font | None = None, size: float | None = None, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
+        .returns = "None",
+    },
+    .{
+        .name = "draw_text_box_outline",
+        .meth = @ptrCast(&canvas_draw_text_box_outline),
+        .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+        .doc = canvas_draw_text_box_outline_doc,
+        .params = "self, text: str, rect: Rectangle | tuple[float, float, float, float], color: Color, width: float, font: Font | None = None, size: float | None = None, halign: TextAlign = TextAlign.LEFT, valign: VerticalAlign = VerticalAlign.TOP, wrap: bool = False, line_spacing: float = 1.0, letter_spacing: float = 0.0, mode: DrawMode = DrawMode.FAST, blending: Blending | None = Blending.NORMAL",
         .returns = "None",
     },
 };

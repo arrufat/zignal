@@ -6,6 +6,7 @@
 - **TrueType fonts**: `Font.load(path)` detects BDF, PCF (optionally gzipped) and TrueType (`.ttf`) files, and `Canvas.draw_text` renders TrueType text with antialiased outlines and kerning. New `Font` members: `ascent(size)`, `line_height(size)`, `has_glyph(char)`, `get_text_bounds(text, size)`, `get_text_bounds_tight(text, size)` and the `kind` (`"bitmap"` / `"vector"`), `name` and `height` properties.
 - **CFF OpenType fonts**: `Font.load(path)` also accepts `.otf` files with PostScript (CFF) outlines, rendered like TrueType fonts, including `seac` accents and the default instance of CFF2 variable fonts.
 - **Font collections**: `Font.load(path, face=0)` opens `.ttc`/`.otc` collections; `face` selects the face.
+- **Text layout**: `Canvas.draw_text_box(text, rect, color, ..., halign, valign, wrap, line_spacing, letter_spacing)` with the new `TextAlign` and `VerticalAlign` enums, `Font.measure_text`, and outlined text through `Canvas.draw_text_outline` / `draw_text_box_outline` (bitmap fonts get a halo).
 
 ### Changed
 - **`BitmapFont` is now `Font`** (breaking): one class for every font format; `save` still writes BDF/PCF and raises `ValueError` for TrueType fonts; the `width` property was removed.

@@ -171,6 +171,11 @@ pub const Layout = struct {
     x: f32 = 0,
     baseline: f32,
     prev: ?u16 = null,
+    /// Extra device pixels after every glyph's advance.
+    letter_spacing: f32 = 0,
+    /// Whether items carry glyph bounds. Measuring turns this off, which spares CFF fonts
+    /// an interpretation per glyph; the bearing shift still reads them when it needs to.
+    with_bounds: bool = true,
 
     pub fn init(font: VectorFont, text: []const u8, size: f32) Layout {
         const scale = font.scaleFor(size);
@@ -194,7 +199,7 @@ pub const Layout = struct {
             const gid = self.font.glyphIndex(codepoint);
             if (self.prev) |p| self.x += as(f32, self.font.kern(p, gid)) * self.scale;
             const metrics = self.font.glyphMetrics(gid);
-            const bounds = self.font.glyphBounds(gid);
+            const bounds = if (self.with_bounds or !self.font.lsb_is_at_x_zero) self.font.glyphBounds(gid) else null;
             // Unless head says the outline already starts at its bearing, shift it there.
             const shift: f32 = if (self.font.lsb_is_at_x_zero or bounds == null) 0 else as(f32, @as(i32, metrics.lsb) - bounds.?.x_min);
             const item: Item = .{
@@ -202,7 +207,7 @@ pub const Layout = struct {
                 .origin = .init(.{ self.x + shift * self.scale, self.baseline }),
                 .bounds = bounds,
             };
-            self.x += as(f32, metrics.advance) * self.scale;
+            self.x += as(f32, metrics.advance) * self.scale + self.letter_spacing;
             self.prev = gid;
             return item;
         }
@@ -230,6 +235,7 @@ pub const Layout = struct {
 /// the widest line's advance by the number of lines times the line height.
 pub fn getTextBounds(self: VectorFont, text: []const u8, size: f32) Rectangle(f32) {
     var layout: Layout = .init(self, text, size);
+    layout.with_bounds = false;
     var width: f32 = 0;
     while (layout.next()) |_| width = @max(width, layout.x);
     const lines = 1 + std.mem.count(u8, text, "\n");

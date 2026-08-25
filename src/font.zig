@@ -25,6 +25,10 @@ pub const BitmapFont = @import("font/BitmapFont.zig");
 pub const VectorFont = @import("font/VectorFont.zig");
 pub const Outline = @import("font/Outline.zig");
 pub const truetype = @import("font/truetype.zig");
+pub const layout = @import("font/layout.zig");
+pub const TextLayout = layout.TextLayout;
+pub const TextAlign = layout.TextAlign;
+pub const VerticalAlign = layout.VerticalAlign;
 
 /// A font of either kind, so text APIs can take one transparently. `size` is always
 /// the pixel size: the em height for vector fonts, the character height for bitmap fonts.
@@ -103,6 +107,12 @@ pub const Font = union(enum) {
             .bitmap => |b| b.getTextBoundsTight(text, b.scaleFor(size)),
             .vector => |v| v.getTextBoundsTight(text, size),
         };
+    }
+
+    /// Box `Canvas.drawTextBox` fills with `text` under `layout`, relative to its top-left
+    /// corner: wrapped to `max_width` when the layout wraps, with its line and letter spacing.
+    pub fn measureText(self: Font, text: []const u8, size: f32, max_width: ?f32, text_layout: TextLayout) Rectangle(f32) {
+        return layout.measure(self, text, size, max_width, text_layout);
     }
 };
 
@@ -223,6 +233,7 @@ test {
     _ = VectorFont;
     _ = Outline;
     _ = truetype;
+    _ = layout;
 }
 
 test "Font.load dispatches on the format" {
