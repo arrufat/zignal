@@ -103,6 +103,10 @@ pub fn Canvas(comptime T: type) type {
         const polygon_subscanlines = 8;
         /// Cells per touched-block flag in the area rasterizer.
         const area_block = 8;
+        /// Widest rectangle outline whose wall coverage profile is precomputed.
+        const max_ring_profile = 64;
+        /// Below this many edges the fast fill tests them all per row instead of bucketing.
+        const few_edges = 64;
         /// Stack scratch (bytes) for polygon fills: edges and crossings for 256 vertices, a
         /// 1024-pixel coverage row and a 12k-cell area accumulator (a 110x110 shape); larger
         /// inputs spill to the heap.
@@ -506,12 +510,32 @@ pub fn Canvas(comptime T: type) type {
             };
             const bbox = self.clampRectToImage(line_rect) orelse return;
 
+            // Per row, only the pixels within reach: the band around the line (its horizontal
+            // cross-section widens as the line flattens) plus the two end caps.
+            const reach = half_width + antialias_edge_offset;
+            const band_half = reach * @sqrt(length_sq) / @abs(dy);
+            const seg_lo = @min(p1.x(), p2.x()) - reach;
+            const seg_hi = @max(p1.x(), p2.x()) + reach;
             for (bbox.t..bbox.b) |r| {
                 const py = as(f32, r);
-                for (bbox.l..bbox.r) |c| {
+                const dpy = py - p1.y();
+                const x_on_line = p1.x() + dpy * dx / dy;
+                var lo = @max(x_on_line - band_half, seg_lo);
+                var hi = @min(x_on_line + band_half, seg_hi);
+                inline for (.{ p1, p2 }) |cap| {
+                    const dcy = py - cap.y();
+                    if (@abs(dcy) <= reach) {
+                        const half = @sqrt(reach * reach - dcy * dcy);
+                        lo = @min(lo, cap.x() - half);
+                        hi = @max(hi, cap.x() + half);
+                    }
+                }
+                if (hi < lo) continue;
+                const col_lo: u32 = @trunc(@max(@ceil(lo), as(f32, bbox.l)));
+                const col_hi: u32 = @trunc(@min(@floor(hi) + 1, as(f32, bbox.r)));
+                for (col_lo..col_hi) |c| {
                     const px = as(f32, c);
                     const dpx = px - p1.x();
-                    const dpy = py - p1.y();
                     const t = clamp((dpx * dx + dpy * dy) * inv_length_sq, 0, 1);
                     const dist_x = dpx - t * dx;
                     const dist_y = dpy - t * dy;
@@ -666,18 +690,126 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Draws the outline of a rectangle on the given image.
+        /// Draws the outline of a rectangle, `width` pixels centered on its edges (the last
+        /// covered row and column, since `r` and `b` are exclusive), with square corners.
+        /// Width 1 draws pixel lines; wider outlines are rasterized as the ring between two
+        /// axis-aligned rectangles, exact and in one pass.
         pub fn drawRectangle(self: Self, rect: Rectangle(f32), color: anytype, width: u32, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
-            // Rectangle has exclusive r,b bounds, but drawPolygon needs inclusive points
-            // So we subtract 1 from r and b to get the actual corner positions
-            const points: []const Point(2, f32) = &.{
-                .init(.{ rect.l, rect.t }),
-                .init(.{ rect.r - 1, rect.t }),
-                .init(.{ rect.r - 1, rect.b - 1 }),
-                .init(.{ rect.l, rect.b - 1 }),
-            };
-            self.drawPolygon(points, color, width, opts);
+            if (width == 0) return;
+            const l = rect.l;
+            const t = rect.t;
+            const r = rect.r - 1;
+            const b = rect.b - 1;
+            if (r < l or b < t) return;
+            if (width == 1) {
+                const points: []const Point(2, f32) = &.{ .init(.{ l, t }), .init(.{ r, t }), .init(.{ r, b }), .init(.{ l, b }) };
+                return self.drawPolygon(points, color, width, opts);
+            }
+            const half = as(f32, width) / 2;
+            const edges: Rectangle(f32) = .{ .l = l, .t = t, .r = r, .b = b };
+            const outer = edges.grow(half);
+            const inner = edges.shrink(half);
+            const paint: Paint = .init(color, opts.blending);
+            switch (opts.mode) {
+                .fast => self.fillRingFast(outer, inner, paint),
+                .soft => self.fillRingSoft(outer, inner, paint),
+            }
+        }
+
+        /// Length of the overlap between the unit pixel span centered on `c` and `[a, b]`.
+        inline fn pixelOverlap(a: f32, b: f32, c: f32) f32 {
+            return @max(0, @min(b, c + 0.5) - @max(a, c - 0.5));
+        }
+
+        /// Hard-edged ring between `outer` and `inner`: pixels whose centers lie in the outer
+        /// rectangle but not the inner one. An inverted `inner` means a filled rectangle.
+        fn fillRingFast(self: Self, outer: Rectangle(f32), inner: Rectangle(f32), paint: Paint) void {
+            const frows: f32 = @floatFromInt(self.image.rows);
+            const has_inner = inner.r >= inner.l and inner.b >= inner.t;
+            var y = @max(@ceil(outer.t), 0);
+            const y_end = @min(@floor(outer.b), frows - 1);
+            while (y <= y_end) : (y += 1) {
+                if (has_inner and y >= inner.t and y <= inner.b) {
+                    self.fillSpan(@ceil(outer.l), @ceil(inner.l) - 1, y, paint);
+                    self.fillSpan(@floor(inner.r) + 1, @floor(outer.r), y, paint);
+                } else {
+                    self.fillSpan(@ceil(outer.l), @floor(outer.r), y, paint);
+                }
+            }
+        }
+
+        /// Antialiased ring between `outer` and `inner`: a pixel's coverage is its overlap with
+        /// the outer rectangle less its overlap with the inner one, each the product of two 1-D
+        /// overlaps, so the ring is exact without seams. Rows entirely outside the inner
+        /// rectangle paint their uniform core with a span.
+        fn fillRingSoft(self: Self, outer: Rectangle(f32), inner: Rectangle(f32), paint: Paint) void {
+            const frows: f32 = @floatFromInt(self.image.rows);
+            const has_inner = !inner.isEmpty();
+            // Down a wall the horizontal coverage profile repeats, so it is computed once.
+            var left_buf: [max_ring_profile]f32 = undefined;
+            var right_buf: [max_ring_profile]f32 = undefined;
+            const left = self.ringProfile(&left_buf, outer.l - 0.5, inner.l + 0.5, outer, inner);
+            const right = self.ringProfile(&right_buf, inner.r - 0.5, outer.r + 0.5, outer, inner);
+            var y = @max(@ceil(outer.t - 0.5), 0);
+            const y_end = @min(@floor(outer.b + 0.5), frows - 1);
+            while (y <= y_end) : (y += 1) {
+                const vy_o = pixelOverlap(outer.t, outer.b, y);
+                if (vy_o <= 0) continue;
+                const vy_i = if (has_inner) pixelOverlap(inner.t, inner.b, y) else 0;
+                const row: u32 = @trunc(y);
+                const row_px = self.image.data[row * self.image.stride ..][0..self.image.cols];
+                if (vy_o >= 1 and vy_i <= 0) {
+                    // A band row: fringe cells by formula, the core with a span.
+                    const core_lo = @ceil(outer.l + 0.5);
+                    const core_hi = @floor(outer.r - 0.5);
+                    ringCells(row_px, outer.l - 0.5, core_lo - 1, vy_o, 0, outer, inner, paint);
+                    self.fillSpan(core_lo, core_hi, y, paint);
+                    ringCells(row_px, core_hi + 1, outer.r + 0.5, vy_o, 0, outer, inner, paint);
+                } else if (vy_i < 1) {
+                    // An edge row of either rectangle: every cell by formula.
+                    ringCells(row_px, outer.l - 0.5, outer.r + 0.5, vy_o, vy_i, outer, inner, paint);
+                } else if (left != null and right != null) {
+                    // A full wall row: paint the profiles.
+                    inline for (.{ left.?, right.? }) |wall| {
+                        for (wall.coverage, row_px[wall.first..][0..wall.coverage.len]) |coverage, *px| {
+                            if (coverage > 0) paint.cover(px, coverage);
+                        }
+                    }
+                } else {
+                    ringCells(row_px, outer.l - 0.5, inner.l + 0.5, vy_o, vy_i, outer, inner, paint);
+                    ringCells(row_px, inner.r - 0.5, outer.r + 0.5, vy_o, vy_i, outer, inner, paint);
+                }
+            }
+        }
+
+        const RingWall = struct { first: usize, coverage: []const f32 };
+
+        /// The wall coverage of the cells whose centers lie in `[lo, hi]` for a row inside
+        /// both rectangles, written to `buf`; null when the wall is empty or wider than `buf`.
+        fn ringProfile(self: Self, buf: []f32, lo: f32, hi: f32, outer: Rectangle(f32), inner: Rectangle(f32)) ?RingWall {
+            const fcols: f32 = @floatFromInt(self.image.cols);
+            const c0 = @max(@ceil(lo), 0);
+            const c1 = @min(@floor(hi), fcols - 1);
+            if (c1 < c0) return null;
+            const len: usize = @trunc(c1 - c0 + 1);
+            if (len > buf.len) return null;
+            for (buf[0..len], 0..) |*coverage, i| {
+                const c = c0 + as(f32, i);
+                coverage.* = pixelOverlap(outer.l, outer.r, c) - pixelOverlap(inner.l, inner.r, c);
+            }
+            return .{ .first = @trunc(c0), .coverage = buf[0..len] };
+        }
+
+        /// Coverage-paints the cells of `row_px` whose centers lie in `[lo, hi]`.
+        fn ringCells(row_px: []T, lo: f32, hi: f32, vy_o: f32, vy_i: f32, outer: Rectangle(f32), inner: Rectangle(f32), paint: Paint) void {
+            const fcols: f32 = @floatFromInt(row_px.len);
+            var c = @max(@ceil(lo), 0);
+            const c_end = @min(@floor(hi), fcols - 1);
+            while (c <= c_end) : (c += 1) {
+                const coverage = vy_o * pixelOverlap(outer.l, outer.r, c) - vy_i * pixelOverlap(inner.l, inner.r, c);
+                if (coverage > 0) paint.cover(&row_px[@trunc(c)], coverage);
+            }
         }
 
         /// Fills a rectangle on the given image.
@@ -1082,13 +1214,18 @@ pub fn Canvas(comptime T: type) type {
                 return p.add(perpendicular(dir).scale(side * b.radius));
             }
 
-            /// Points on the circle around `center` from angle `from`, sweeping `sweep`
-            /// radians: the end included, the start not.
-            fn arc(b: *StrokeBuilder, center: Point(2, f32), from: f32, sweep: f32) void {
+            /// Points on the circle around `center` from the unit direction `start`, sweeping
+            /// `sweep` radians: the end included, the start not. The radius vector is rotated
+            /// step by step, so an arc costs one sine and cosine.
+            fn arc(b: *StrokeBuilder, center: Point(2, f32), start: Point(2, f32), sweep: f32) void {
                 const steps: usize = @intFromFloat(@max(1, @ceil(@abs(sweep) / b.step)));
-                for (1..steps + 1) |i| {
-                    const angle = from + sweep * as(f32, i) / as(f32, steps);
-                    b.emit(.init(.{ center.x() + b.radius * @cos(angle), center.y() + b.radius * @sin(angle) }));
+                const angle = sweep / as(f32, steps);
+                const c = @cos(angle);
+                const sn = @sin(angle);
+                var v = start.scale(b.radius);
+                for (0..steps) |_| {
+                    v = .init(.{ v.x() * c - v.y() * sn, v.x() * sn + v.y() * c });
+                    b.emit(center.add(v));
                 }
             }
 
@@ -1101,8 +1238,7 @@ pub fn Canvas(comptime T: type) type {
                 const outer = if (side > 0) cross < 0 or (cross == 0 and dot < 0) else cross > 0;
                 b.emit(b.offset(v, in_dir, side));
                 if (outer) {
-                    const start = perpendicular(in_dir).scale(side);
-                    b.arc(v, std.math.atan2(start.y(), start.x()), std.math.atan2(cross, dot));
+                    b.arc(v, perpendicular(in_dir).scale(side), std.math.atan2(cross, dot));
                 } else if (cross != 0 or dot < 0) {
                     // The inner offsets cross each other; the loop they close is invisible
                     // below the flatness tolerance, otherwise detouring through the vertex
@@ -1120,7 +1256,7 @@ pub fn Canvas(comptime T: type) type {
                 } else {
                     // Every point coincides: a dot.
                     b.emit(input[0].add(.init(.{ b.radius, 0 })));
-                    b.arc(input[0], 0, 2 * std.math.pi);
+                    b.arc(input[0], .init(.{ 1, 0 }), 2 * std.math.pi);
                     return;
                 };
                 // Direction of each segment, degenerate ones borrowing their predecessor's.
@@ -1134,8 +1270,7 @@ pub fn Canvas(comptime T: type) type {
                 const last = input[(m - 1) % input.len];
                 b.emit(b.offset(last, dir, 1));
                 // End cap: from the left offset around the tip to the right one.
-                const tip = perpendicular(dir);
-                b.arc(last, std.math.atan2(tip.y(), tip.x()), -std.math.pi);
+                b.arc(last, perpendicular(dir), -std.math.pi);
                 // Back along the right side; the incoming direction is now the later segment's.
                 var i = m - 1;
                 while (i > 1) : (i -= 1) {
@@ -1144,8 +1279,7 @@ pub fn Canvas(comptime T: type) type {
                     dir = prev;
                 }
                 b.emit(b.offset(input[0], dir, -1));
-                const tail = perpendicular(dir).scale(-1);
-                b.arc(input[0], std.math.atan2(tail.y(), tail.x()), -std.math.pi);
+                b.arc(input[0], perpendicular(dir).scale(-1), -std.math.pi);
             }
         };
 
@@ -1210,6 +1344,14 @@ pub fn Canvas(comptime T: type) type {
                     if (first_row > end_y) return;
                     const num_rows: usize = @intFromFloat(end_y - first_row + 1);
 
+                    if (edges.len < few_edges) {
+                        var y = first_row;
+                        while (y <= end_y) : (y += 1) {
+                            var spans: SpanIter = .{ .crossings = scanlineCrossings(edges, y, crossings_buf), .rule = fill_rule };
+                            while (spans.next()) |span| self.fillSpan(span[0], span[1], y, sink);
+                        }
+                        return;
+                    }
                     // Bucket the edges by the row they start on (counting sort), then sweep:
                     // a row only tests the edges spanning it.
                     const starts = try scratch.alloc(u32, num_rows + 1);
@@ -1453,10 +1595,11 @@ pub fn Canvas(comptime T: type) type {
             }
         };
 
-        /// Where an edge crosses a scanline, with its winding direction.
+        /// Where an edge crosses a scanline, with its winding direction. `dir` is a full
+        /// word so that sorting's whole-struct copies never read a byte-wide store.
         const Crossing = struct {
             x: f32,
-            dir: i8,
+            dir: i32,
 
             fn lessThan(_: void, a: Crossing, b: Crossing) bool {
                 return a.x < b.x;
@@ -2217,6 +2360,30 @@ pub fn Canvas(comptime T: type) type {
         fn drawTextBitmap(self: Self, text: []const u8, position: Point(2, f32), paint: Paint, font: BitmapFont, scale: f32, letter_spacing: f32, style: GlyphStyle, mode: DrawMode) !void {
             const radius: u32 = @intFromFloat(@ceil(style.reach()));
             if (radius == 0) return self.blitBitmapLine(text, position, paint, font, scale, letter_spacing, mode);
+            // A few overwriting stamps of the unscaled (hard-edged) glyphs cannot double-blend
+            // and beat the mask. Stamping per glyph, not per line, keeps the text walk to one.
+            if (paint.overwrite and scale == 1 and radius <= 2) {
+                const r: i32 = @intCast(radius);
+                var x = position.x();
+                var utf8_iter = std.unicode.Utf8Iterator{ .bytes = text, .i = 0 };
+                while (utf8_iter.nextCodepoint()) |codepoint| {
+                    if (font.getGlyph(codepoint)) |glyph| {
+                        var dy: i32 = -r;
+                        while (dy <= r) : (dy += 1) {
+                            var dx: i32 = -r;
+                            while (dx <= r) : (dx += 1) {
+                                if (dx * dx + dy * dy > r * r) continue;
+                                self.renderGlyphUnscaled(glyph.info, glyph.data, font, x + as(f32, dx), position.y() + as(f32, dy), paint);
+                            }
+                        }
+                        x += as(f32, glyph.info.advanceWidth());
+                    } else {
+                        x += as(f32, font.char_width);
+                    }
+                    x += letter_spacing;
+                }
+                return;
+            }
 
             // The line's box grown by the radius, clipped to the image, in whole pixels.
             const glyphs = std.unicode.utf8CountCodepoints(text) catch text.len;
