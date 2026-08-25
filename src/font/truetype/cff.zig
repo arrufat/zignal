@@ -315,7 +315,7 @@ const standard_encoding: [256]u8 = blk: {
 /// SID of the glyph at Standard Encoding `code`, as a `seac` operand names it.
 fn standardSid(code: f32) Error!u16 {
     if (!(code >= 0 and code <= 255)) return error.InvalidGlyph;
-    const sid = standard_encoding[@intFromFloat(code)];
+    const sid = standard_encoding[@trunc(code)];
     return if (sid == 0) error.InvalidGlyph else sid;
 }
 
@@ -511,7 +511,7 @@ const Vm = struct {
         vm.sp -= 1;
         const v = vm.stack[vm.sp];
         if (!(v >= 0 and v <= 65535)) return error.InvalidGlyph;
-        return @intFromFloat(v);
+        return @trunc(v);
     }
 
     /// `blend`: keeps the `n` default values and drops their `n * regions` deltas.
@@ -582,7 +582,7 @@ const Vm = struct {
         const bias: i32 = if (subrs.count < 1240) 107 else if (subrs.count < 33900) 1131 else 32768;
         const operand = vm.stack[vm.sp];
         if (!(@abs(operand) <= 65536)) return error.InvalidGlyph;
-        const index = @as(i32, @intFromFloat(operand)) + bias;
+        const index = @as(i32, @trunc(operand)) + bias;
         if (index < 0 or index >= subrs.count) return error.InvalidGlyph;
         return vm.run(try subrs.item(vm.r, @intCast(index)), depth + 1);
     }
@@ -803,7 +803,7 @@ pub fn bounds(font: VectorFont, gid: u16) ?VectorFont.Bounds {
 }
 
 fn saturate(v: f32) i16 {
-    return @intFromFloat(@min(@max(v, -32768.0), 32767.0));
+    return @trunc(@min(@max(v, -32768.0), 32767.0));
 }
 
 /// Decodes `gid` into an owned `Outline`: one run to count, one to fill, so exactly

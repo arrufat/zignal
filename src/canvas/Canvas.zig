@@ -198,8 +198,8 @@ pub fn Canvas(comptime T: type) type {
             if (x2 < 0 or x1 >= fcols) return null;
 
             const row: u32 = @trunc(y);
-            const start: u32 = @trunc(@max(0, @floor(x1)));
-            const end: u32 = @trunc(@min(fcols - 1, @ceil(x2)));
+            const start: u32 = @floor(@max(0, x1));
+            const end: u32 = @ceil(@min(fcols - 1, x2));
 
             if (start > end) return null;
 
@@ -516,6 +516,8 @@ pub fn Canvas(comptime T: type) type {
             const band_half = reach * @sqrt(length_sq) / @abs(dy);
             const seg_lo = @min(p1.x(), p2.x()) - reach;
             const seg_hi = @max(p1.x(), p2.x()) + reach;
+            const col_min = as(f32, bbox.l);
+            const col_max = as(f32, bbox.r - 1);
             for (bbox.t..bbox.b) |r| {
                 const py = as(f32, r);
                 const dpy = py - p1.y();
@@ -530,9 +532,11 @@ pub fn Canvas(comptime T: type) type {
                         hi = @max(hi, cap.x() + half);
                     }
                 }
+                lo = @max(lo, col_min);
+                hi = @min(hi, col_max);
                 if (hi < lo) continue;
-                const col_lo: u32 = @trunc(@max(@ceil(lo), as(f32, bbox.l)));
-                const col_hi: u32 = @trunc(@min(@floor(hi) + 1, as(f32, bbox.r)));
+                const col_lo: u32 = @ceil(lo);
+                const col_hi: u32 = @as(u32, @floor(hi)) + 1;
                 for (col_lo..col_hi) |c| {
                     const px = as(f32, c);
                     const dpx = px - p1.x();
@@ -1173,7 +1177,7 @@ pub fn Canvas(comptime T: type) type {
             const radius = @max(width, 0.5) / 2;
             // Chords of an arc stay within the flatness tolerance at this angular step.
             const step: f32 = if (radius <= Outline.flatness_tolerance) std.math.pi else 2 * std.math.acos(1 - Outline.flatness_tolerance / radius);
-            const arc_points: usize = @intFromFloat(@ceil(std.math.pi / step) + 1);
+            const arc_points: usize = @as(usize, @ceil(std.math.pi / step)) + 1;
 
             var total: usize = 0;
             for (polys) |poly| total += (poly.len + 1) * 2 * (arc_points + 3) + 2 * arc_points + 4;
@@ -1218,7 +1222,7 @@ pub fn Canvas(comptime T: type) type {
             /// `sweep` radians: the end included, the start not. The radius vector is rotated
             /// step by step, so an arc costs one sine and cosine.
             fn arc(b: *StrokeBuilder, center: Point(2, f32), start: Point(2, f32), sweep: f32) void {
-                const steps: usize = @intFromFloat(@max(1, @ceil(@abs(sweep) / b.step)));
+                const steps: usize = @ceil(@max(1, @abs(sweep) / b.step));
                 const angle = sweep / as(f32, steps);
                 const c = @cos(angle);
                 const sn = @sin(angle);
@@ -1342,7 +1346,7 @@ pub fn Canvas(comptime T: type) type {
                     const first_row = @max(0, @floor(shape_bounds.t));
                     const end_y = @min(frows - 1, @ceil(shape_bounds.b));
                     if (first_row > end_y) return;
-                    const num_rows: usize = @intFromFloat(end_y - first_row + 1);
+                    const num_rows: usize = @trunc(end_y - first_row + 1);
 
                     if (edges.len < few_edges) {
                         var y = first_row;
@@ -1360,7 +1364,7 @@ pub fn Canvas(comptime T: type) type {
                     const bucket = try scratch.alloc(u32, edges.len);
                     defer scratch.free(bucket);
                     for (edges, 0..) |e, i| {
-                        bucket[i] = @intFromFloat(@min(@max(@floor(e.y_min) - first_row, 0), as(f32, num_rows - 1)));
+                        bucket[i] = @floor(clamp(e.y_min - first_row, 0, as(f32, num_rows - 1)));
                         starts[bucket[i] + 1] += 1;
                     }
                     for (1..num_rows + 1) |r| starts[r] += starts[r - 1];
@@ -1420,12 +1424,12 @@ pub fn Canvas(comptime T: type) type {
             // Pixel (r, c) spans [c - 0.5, c + 0.5) x [r - 0.5, r + 0.5); in accumulation space
             // it is the unit cell at (r - row_start, c - col_start).
             const frows: f32 = @floatFromInt(self.image.rows);
-            const row_start: usize = @intFromFloat(@max(0, @floor(bounds.t + 0.5)));
-            const row_end: usize = @intFromFloat(@min(frows, @ceil(bounds.b + 0.5)));
+            const row_start: usize = @floor(@max(0, bounds.t + 0.5));
+            const row_end: usize = @ceil(@min(frows, bounds.b + 0.5));
             if (row_start >= row_end) return;
             const height = row_end - row_start;
-            const col_start: i64 = @intFromFloat(@floor(bounds.l + 0.5));
-            const col_end: i64 = @intFromFloat(@ceil(bounds.r + 0.5));
+            const col_start: i64 = @floor(bounds.l + 0.5);
+            const col_end: i64 = @ceil(bounds.r + 0.5);
             // One spare cell on the right for the last contribution.
             const width: usize = @intCast(col_end - col_start + 2);
 
@@ -1500,19 +1504,19 @@ pub fn Canvas(comptime T: type) type {
             var x = top.x();
             var y: usize = 0;
             if (top.y() >= 0) {
-                y = @intFromFloat(@floor(top.y()));
+                y = @floor(top.y());
             } else {
                 x -= top.y() * dxdy;
             }
-            const y_end: usize = @intFromFloat(@min(as(f32, height), @ceil(bottom.y())));
+            const y_end: usize = @min(height, @as(usize, @ceil(bottom.y())));
             if (dxdy == 0) {
                 // Vertical: the same two cells in every row, fully crossed except at the ends.
                 const xc = @max(0, @min(x, x_max));
                 const x_floor = @floor(xc);
-                const xi: usize = @intFromFloat(x_floor);
+                const xi: usize = @trunc(x_floor);
                 const xmf = xc - x_floor;
-                const full_start: usize = @intFromFloat(@min(@ceil(@max(top.y(), 0)), as(f32, height)));
-                const full_end: usize = @intFromFloat(@max(@floor(@min(bottom.y(), as(f32, height))), 0));
+                const full_start: usize = @ceil(clamp(top.y(), 0, as(f32, height)));
+                const full_end: usize = @floor(clamp(bottom.y(), 0, as(f32, height)));
                 const b0 = xi / area_block;
                 const b1 = (xi + 1) / area_block;
                 const full_lo = dir - dir * xmf;
@@ -1549,9 +1553,9 @@ pub fn Canvas(comptime T: type) type {
                 const x0 = @max(0, @min(@min(x, x_next), x_max));
                 const x1 = @max(0, @min(@max(x, x_next), x_max));
                 const x0_floor = @floor(x0);
-                const x0i: usize = @intFromFloat(x0_floor);
+                const x0i: usize = @trunc(x0_floor);
                 const x1_ceil = @ceil(x1);
-                const x1i: usize = @intFromFloat(x1_ceil);
+                const x1i: usize = @trunc(x1_ceil);
                 touchBlocks(row, touched[y * blocks ..][0..blocks], x0i, x1i);
                 if (x1i <= x0i + 1) {
                     // Within one cell: split by the midpoint.
@@ -2358,7 +2362,7 @@ pub fn Canvas(comptime T: type) type {
         /// coverage mask, dilates it by the stroke radius and paints it once, so the halo
         /// composites like any other shape.
         fn drawTextBitmap(self: Self, text: []const u8, position: Point(2, f32), paint: Paint, font: BitmapFont, scale: f32, letter_spacing: f32, style: GlyphStyle, mode: DrawMode) !void {
-            const radius: u32 = @intFromFloat(@ceil(style.reach()));
+            const radius: u32 = @ceil(style.reach());
             if (radius == 0) return self.blitBitmapLine(text, position, paint, font, scale, letter_spacing, mode);
             // A few overwriting stamps of the unscaled (hard-edged) glyphs cannot double-blend
             // and beat the mask. Stamping per glyph, not per line, keeps the text walk to one.
@@ -2395,10 +2399,10 @@ pub fn Canvas(comptime T: type) type {
                 .b = position.y() + bounds.b,
             };
             const area = line_rect.grow(as(f32, radius)).intersect(self.imageRect()) orelse return;
-            const left: u32 = @intFromFloat(@floor(area.l));
-            const top: u32 = @intFromFloat(@floor(area.t));
-            const width = @as(u32, @intFromFloat(@ceil(area.r))) - left;
-            const height = @as(u32, @intFromFloat(@ceil(area.b))) - top;
+            const left: u32 = @floor(area.l);
+            const top: u32 = @floor(area.t);
+            const width = @as(u32, @ceil(area.r)) - left;
+            const height = @as(u32, @ceil(area.b)) - top;
             if (height == 0 or width == 0) return;
 
             // Source coverage plus the dilated result, then per-row scratch for the running max.
@@ -2424,7 +2428,7 @@ pub fn Canvas(comptime T: type) type {
                 if (std.mem.allEqual(u8, source, 0)) continue;
                 var dy: usize = 0;
                 while (dy <= radius_px) : (dy += 1) {
-                    const half: usize = @intFromFloat(@sqrt(as(f32, radius_px * radius_px - dy * dy)));
+                    const half: usize = @trunc(@sqrt(as(f32, radius_px * radius_px - dy * dy)));
                     runningMax(source, half, row_max, prefix, suffix, widened[0..width]);
                     for ([_]bool{ false, true }) |up| {
                         if (up and dy == 0) continue;
