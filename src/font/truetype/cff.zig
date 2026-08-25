@@ -1,8 +1,10 @@
-//! `CFF ` table parsing for OpenType fonts with PostScript outlines: the INDEX and
-//! DICT containers, then a Type 2 charstring interpreter that turns a glyph into
-//! cubic contours in font units. Everything is read in place; nothing is decoded
-//! at load time beyond locating the CharStrings, Subrs and (for CID-keyed fonts)
-//! the FDArray/FDSelect.
+//! `CFF ` and `CFF2` table parsing for OpenType fonts with PostScript outlines: the
+//! INDEX and DICT containers, then a Type 2 charstring interpreter that turns a
+//! glyph into cubic contours in font units. Everything is read in place; nothing is
+//! decoded at load time beyond locating the CharStrings, Subrs and (for CID-keyed
+//! fonts) the FDArray/FDSelect. Accent composition (`seac`) resolves its two glyphs
+//! through the charset and Standard Encoding. CFF2 fonts render their default
+//! instance: `blend` keeps the default values and drops the deltas.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -15,15 +17,18 @@ const VectorFont = @import("../VectorFont.zig");
 const Outline = @import("../Outline.zig");
 
 pub const max_subr_depth = 10;
-pub const max_stack = 48;
+/// The CFF2 limit; CFF allows 48 and merely gets the extra room.
+pub const max_stack = 513;
 /// Operators executed per glyph, subrs included; bounds hostile subr fan-out.
 pub const max_ops = 1 << 16;
 pub const max_outline_points = 0xFFFF;
-const max_dict_operands = 48;
+/// CFF2 Private DICTs blend their hint values, so their operand stacks are as deep as
+/// charstring stacks.
+const max_dict_operands = max_stack;
 
 /// An INDEX: `count` items addressed through 1-based offsets of `off_size` bytes each.
 pub const Index = struct {
-    count: u16,
+    count: u32,
     off_size: u8,
     /// Position of the offset array.
     offsets: u32,
@@ -34,13 +39,15 @@ pub const Index = struct {
 
     const Parsed = struct { index: Index, end: u32 };
 
-    /// Parses the INDEX at `pos`; `end` is the position just past it.
-    fn parse(r: Reader, pos: u32) Error!Parsed {
-        const count = try r.u16At(pos);
-        if (count == 0) return .{ .index = .empty, .end = pos + 2 };
-        const off_size = try r.u8At(pos + 2);
+    /// Parses the INDEX at `pos`; `end` is the position just past it. CFF2 counts are
+    /// four bytes wide.
+    fn parse(r: Reader, pos: u32, comptime version: Version) Error!Parsed {
+        const count_size: u32 = if (version == .cff2) 4 else 2;
+        const count: u32 = if (version == .cff2) try r.u32At(pos) else try r.u16At(pos);
+        if (count == 0) return .{ .index = .empty, .end = pos + count_size };
+        const off_size = try r.u8At(pos + count_size);
         if (off_size == 0 or off_size > 4) return error.InvalidFormat;
-        const offsets: u64 = pos + 3;
+        const offsets: u64 = pos + count_size + 1;
         const data = offsets + (@as(u64, count) + 1) * off_size - 1;
         if (data > r.data.len) return error.UnexpectedEof;
         const index: Index = .{ .count = count, .off_size = off_size, .offsets = @intCast(offsets), .data = @intCast(data) };
@@ -50,8 +57,9 @@ pub const Index = struct {
     }
 
     fn offset(self: Index, r: Reader, i: u32) Error!u32 {
+        const at = std.math.add(u32, self.offsets, i * self.off_size) catch return error.UnexpectedEof;
         var v: u32 = 0;
-        for (try r.slice(self.offsets + i * self.off_size, self.off_size)) |b| v = (v << 8) | b;
+        for (try r.slice(at, self.off_size)) |b| v = (v << 8) | b;
         return v;
     }
 
@@ -65,11 +73,16 @@ pub const Index = struct {
     }
 };
 
+pub const Version = enum { cff, cff2 };
+
 /// DICT operators; two-byte ones are `0x0c00 | second byte`.
 const Op = struct {
+    const charset = 15;
     const char_strings = 17;
     const private = 18;
     const subrs = 19;
+    const vsindex = 22;
+    const vstore = 24;
     const charstring_type = 0x0c06;
     const ros = 0x0c1e;
     const fd_array = 0x0c24;
@@ -86,7 +99,8 @@ fn dictGet(dict: []const u8, comptime op: u16, comptime n: usize) Error!?[n]i32 
         const b0 = dict[i];
         i += 1;
         const v: i32 = switch (b0) {
-            0...21 => {
+            // Operators; 22–27 are reserved in CFF and CFF2's vsindex, blend and vstore.
+            0...27 => {
                 var found: u16 = b0;
                 if (b0 == 12) {
                     if (i >= dict.len) return error.UnexpectedEof;
@@ -144,103 +158,247 @@ fn toOffset(v: i32) Error!u32 {
     return if (v < 0) error.InvalidFormat else @intCast(v);
 }
 
-/// The Subrs INDEX of the Private DICT described by `size, offset`; empty when it has none.
-fn privateSubrs(r: Reader, private: [2]i32) Error!Index {
-    const size = try toOffset(private[0]);
-    const offset = try toOffset(private[1]);
-    const dict = try r.slice(offset, size);
-    const subrs = try dictGet(dict, Op.subrs, 1) orelse return .empty;
-    const at = std.math.add(u32, offset, try toOffset(subrs[0])) catch return error.UnexpectedEof;
-    return (try Index.parse(r, at)).index;
-}
+/// What a glyph needs from its Private DICT.
+const Private = struct {
+    subrs: Index = .empty,
+    /// CFF2: the default ItemVariationData index for `blend`.
+    vsindex: u32 = 0,
+
+    /// Reads the Private DICT described by `size, offset`.
+    fn parse(r: Reader, at: [2]i32, version: Version) Error!Private {
+        const size = try toOffset(at[0]);
+        const offset = try toOffset(at[1]);
+        const dict = try r.slice(offset, size);
+        var private: Private = .{};
+        if (try dictGet(dict, Op.vsindex, 1)) |v| private.vsindex = try toOffset(v[0]);
+        const subrs = try dictGet(dict, Op.subrs, 1) orelse return private;
+        const subrs_at = std.math.add(u32, offset, try toOffset(subrs[0])) catch return error.UnexpectedEof;
+        private.subrs = switch (version) {
+            .cff => (try Index.parse(r, subrs_at, .cff)).index,
+            .cff2 => (try Index.parse(r, subrs_at, .cff2)).index,
+        };
+        return private;
+    }
+};
 
 pub const Font = struct {
-    /// The `CFF ` table; every position in this struct is relative to it.
+    /// The `CFF ` or `CFF2` table; every position in this struct is relative to it.
     table: Table,
+    version: Version,
     char_strings: Index,
     global_subrs: Index,
-    /// Subrs of the single Private DICT; unused by CID-keyed fonts.
-    local_subrs: Index,
-    /// CID-keyed fonts select a Font DICT per glyph, each with its own Private DICT and Subrs.
+    /// The single Private DICT; unused by CID-keyed and CFF2 fonts.
+    private: Private,
+    /// CID-keyed (and all CFF2) fonts select a Font DICT per glyph, each with its own
+    /// Private DICT and Subrs.
     cid: ?Cid,
+    /// Position of the charset (glyph → SID), or 0/1/2 for the predefined ones; only `seac`
+    /// reads it.
+    charset: u32,
+    /// CFF2: position of the ItemVariationStore, which `blend` consults for region counts.
+    vstore: ?u32,
 
     pub const Cid = struct {
         fd_array: Index,
-        /// Position of the FDSelect table, validated for its format at load time.
-        fd_select: u32,
+        /// Position of the FDSelect table, validated for its format at load time; CFF2 may
+        /// omit it, in which case every glyph uses Font DICT 0.
+        fd_select: ?u32,
     };
 
-    /// Font DICT index for `gid` from FDSelect formats 0 and 3.
-    fn fdIndex(self: Font, r: Reader, gid: u16) Error!u8 {
+    /// Font DICT index for `gid` from FDSelect formats 0, 3 and 4.
+    fn fdIndex(self: Font, r: Reader, gid: u16) Error!u16 {
         const cid = self.cid orelse return error.InvalidFormat;
-        const pos = cid.fd_select;
+        const pos = cid.fd_select orelse return 0;
         switch (try r.u8At(pos)) {
-            0 => return r.u8At(pos + 1 + gid),
-            3 => {
-                // Ranges of (first gid, fd), sorted by first gid, then a sentinel gid.
-                const num_ranges = try r.u16At(pos + 1);
-                var lo: u32 = 0;
-                var hi: u32 = num_ranges;
-                while (hi - lo > 1) {
-                    const mid = (lo + hi) / 2;
-                    if (try r.u16At(pos + 3 + mid * 3) <= gid) lo = mid else hi = mid;
-                }
-                if (num_ranges == 0 or try r.u16At(pos + 3 + lo * 3) > gid or gid >= try r.u16At(pos + 3 + hi * 3)) return error.InvalidGlyph;
-                return r.u8At(pos + 5 + lo * 3);
-            },
+            0 => return try r.u8At(pos + 1 + gid),
+            3 => return rangeLookup(r, pos + 1, gid, .u16),
+            4 => return rangeLookup(r, pos + 1, gid, .u32),
             else => return error.InvalidFormat,
         }
     }
 
-    fn localSubrs(self: Font, r: Reader, gid: u16) Error!Index {
-        const cid = self.cid orelse return self.local_subrs;
+    /// Binary search over `n` ranges of (first gid, fd) sorted by first gid, followed by a
+    /// sentinel gid; format 3 stores `u16 first, u8 fd`, format 4 `u32 first, u16 fd`.
+    fn rangeLookup(r: Reader, pos: u32, gid: u16, comptime width: enum { u16, u32 }) Error!u16 {
+        const wide = width == .u32;
+        const stride: u32 = if (wide) 6 else 3;
+        const num_ranges: u32 = if (wide) try r.u32At(pos) else try r.u16At(pos);
+        const ranges = pos + @as(u32, if (wide) 4 else 2);
+        const first = struct {
+            fn at(rr: Reader, base: u32, i: u32) Error!u32 {
+                return if (wide) try rr.u32At(base + i * stride) else try rr.u16At(base + i * stride);
+            }
+        }.at;
+        var lo: u32 = 0;
+        var hi: u32 = num_ranges;
+        while (hi - lo > 1) {
+            const mid = (lo + hi) / 2;
+            if (try first(r, ranges, mid) <= gid) lo = mid else hi = mid;
+        }
+        if (num_ranges == 0 or try first(r, ranges, lo) > gid or gid >= try first(r, ranges, hi)) return error.InvalidGlyph;
+        return if (wide) try r.u16At(ranges + lo * stride + 4) else try r.u8At(ranges + lo * stride + 2);
+    }
+
+    fn glyphPrivate(self: Font, r: Reader, gid: u16) Error!Private {
+        const cid = self.cid orelse return self.private;
         const fd = try cid.fd_array.item(r, try self.fdIndex(r, gid));
-        const private = try dictGet(fd, Op.private, 2) orelse return .empty;
-        return privateSubrs(r, private);
+        const private = try dictGet(fd, Op.private, 2) orelse return .{};
+        return Private.parse(r, private, self.version);
+    }
+
+    /// Regions blended by ItemVariationData `vsindex` of the CFF2 variation store, i.e. the
+    /// number of deltas per value that `blend` drops.
+    fn regionCount(self: Font, r: Reader, vsindex: u32) Error!u32 {
+        const vstore = self.vstore orelse return error.InvalidGlyph;
+        const store = vstore + 2; // past the u16 length
+        if (try r.u16At(store) != 1) return error.InvalidFormat;
+        if (vsindex >= try r.u16At(store + 6)) return error.InvalidGlyph;
+        const data = std.math.add(u32, store, try r.u32At(store + 8 + 4 * vsindex)) catch return error.UnexpectedEof;
+        return try r.u16At(data + 4);
+    }
+
+    /// The glyph named by standard string `sid`: a walk over charset formats 0, 1 and 2.
+    /// Only ISOAdobe (identity) is supported among the predefined charsets.
+    fn glyphForSid(self: Font, r: Reader, sid: u16) Error!u16 {
+        const count = self.char_strings.count;
+        switch (self.charset) {
+            0 => return if (sid < count) sid else error.InvalidGlyph,
+            1, 2 => return error.InvalidGlyph,
+            else => {},
+        }
+        const format = try r.u8At(self.charset);
+        var at = self.charset + 1;
+        var gid: u32 = 1; // .notdef is implicit
+        while (gid < count) {
+            switch (format) {
+                0 => {
+                    if (try r.u16At(at) == sid) return @intCast(gid);
+                    at += 2;
+                    gid += 1;
+                },
+                1, 2 => {
+                    const first = try r.u16At(at);
+                    const n_left: u32 = if (format == 1) try r.u8At(at + 2) else try r.u16At(at + 2);
+                    at += if (format == 1) 3 else 4;
+                    if (sid >= first and sid - first <= n_left) {
+                        const found = gid + (sid - first);
+                        return if (found < count) @intCast(found) else error.InvalidGlyph;
+                    }
+                    gid += n_left + 1;
+                },
+                else => return error.InvalidFormat,
+            }
+        }
+        return error.InvalidGlyph;
     }
 };
+
+/// Standard Encoding: character code → standard string SID (CFF spec, Appendix B); 0 for
+/// unencoded codes.
+const standard_encoding: [256]u8 = blk: {
+    var table: [256]u8 = @splat(0);
+    // Codes 32–126 hold SIDs 1–95 in order.
+    for (32..127) |code| table[code] = code - 31;
+    const upper = [_]struct { u8, u8 }{
+        .{ 161, 96 },  .{ 162, 97 },  .{ 163, 98 },  .{ 164, 99 },  .{ 165, 100 }, .{ 166, 101 }, .{ 167, 102 }, .{ 168, 103 },
+        .{ 169, 104 }, .{ 170, 105 }, .{ 171, 106 }, .{ 172, 107 }, .{ 173, 108 }, .{ 174, 109 }, .{ 175, 110 }, .{ 177, 111 },
+        .{ 178, 112 }, .{ 179, 113 }, .{ 180, 114 }, .{ 182, 115 }, .{ 183, 116 }, .{ 184, 117 }, .{ 185, 118 }, .{ 186, 119 },
+        .{ 187, 120 }, .{ 188, 121 }, .{ 189, 122 }, .{ 191, 123 }, .{ 193, 124 }, .{ 194, 125 }, .{ 195, 126 }, .{ 196, 127 },
+        .{ 197, 128 }, .{ 198, 129 }, .{ 199, 130 }, .{ 200, 131 }, .{ 202, 132 }, .{ 203, 133 }, .{ 205, 134 }, .{ 206, 135 },
+        .{ 207, 136 }, .{ 208, 137 }, .{ 225, 138 }, .{ 227, 139 }, .{ 232, 140 }, .{ 233, 141 }, .{ 234, 142 }, .{ 235, 143 },
+        .{ 241, 144 }, .{ 245, 145 }, .{ 248, 146 }, .{ 249, 147 }, .{ 250, 148 }, .{ 251, 149 },
+    };
+    for (upper) |entry| table[entry[0]] = entry[1];
+    break :blk table;
+};
+
+/// SID of the glyph at Standard Encoding `code`, as a `seac` operand names it.
+fn standardSid(code: f32) Error!u16 {
+    if (!(code >= 0 and code <= 255)) return error.InvalidGlyph;
+    const sid = standard_encoding[@intFromFloat(code)];
+    return if (sid == 0) error.InvalidGlyph else sid;
+}
 
 /// Locates the CharStrings, Subrs and CID structures of the `CFF ` table `t` of the
 /// font `font_reader` covers. Only Type 2 charstrings are accepted.
 pub fn parse(t: Table, font_reader: Reader, num_glyphs: u16) Error!Font {
     const r = font_reader.table(t);
     const header_size = try r.u8At(2);
-    const names = try Index.parse(r, header_size);
-    const top_dicts = try Index.parse(r, names.end);
-    const strings = try Index.parse(r, top_dicts.end);
-    const global_subrs = try Index.parse(r, strings.end);
+    const names = try Index.parse(r, header_size, .cff);
+    const top_dicts = try Index.parse(r, names.end, .cff);
+    const strings = try Index.parse(r, top_dicts.end, .cff);
+    const global_subrs = try Index.parse(r, strings.end, .cff);
     const top = try top_dicts.index.item(r, 0);
 
     if (try dictGet(top, Op.charstring_type, 1)) |v| if (v[0] != 2) return error.UnsupportedFontFormat;
     const char_strings_at = try dictGet(top, Op.char_strings, 1) orelse return error.MissingTable;
-    const char_strings = (try Index.parse(r, try toOffset(char_strings_at[0]))).index;
+    const char_strings = (try Index.parse(r, try toOffset(char_strings_at[0]), .cff)).index;
     if (char_strings.count != num_glyphs) return error.InvalidFormat;
 
     var font: Font = .{
         .table = t,
+        .version = .cff,
         .char_strings = char_strings,
         .global_subrs = global_subrs.index,
-        .local_subrs = .empty,
+        .private = .{},
         .cid = null,
+        .charset = if (try dictGet(top, Op.charset, 1)) |v| try toOffset(v[0]) else 0,
+        .vstore = null,
     };
     if (try dictGet(top, Op.ros, 3) != null) {
         const fd_array_at = try dictGet(top, Op.fd_array, 1) orelse return error.MissingTable;
         const fd_select_at = try dictGet(top, Op.fd_select, 1) orelse return error.MissingTable;
-        const fd_select = try toOffset(fd_select_at[0]);
-        switch (try r.u8At(fd_select)) {
-            0 => _ = try r.slice(fd_select + 1, num_glyphs),
-            3 => _ = try r.slice(fd_select + 3, 3 * @as(usize, try r.u16At(fd_select + 1)) + 2),
-            else => return error.InvalidFormat,
-        }
         font.cid = .{
-            .fd_array = (try Index.parse(r, try toOffset(fd_array_at[0]))).index,
-            .fd_select = fd_select,
+            .fd_array = (try Index.parse(r, try toOffset(fd_array_at[0]), .cff)).index,
+            .fd_select = try validateFdSelect(r, try toOffset(fd_select_at[0]), num_glyphs),
         };
     } else {
         const private = try dictGet(top, Op.private, 2) orelse return error.MissingTable;
-        font.local_subrs = try privateSubrs(r, private);
+        font.private = try Private.parse(r, private, .cff);
     }
     return font;
+}
+
+/// `parse` for a `CFF2` table: no Name/String INDEX or charset, the Top DICT inline
+/// after the header, wide INDEX counts, and Font DICTs for every glyph.
+pub fn parse2(t: Table, font_reader: Reader, num_glyphs: u16) Error!Font {
+    const r = font_reader.table(t);
+    if (try r.u8At(0) != 2) return error.UnsupportedFontFormat;
+    const header_size = try r.u8At(2);
+    const top_len = try r.u16At(3);
+    const top = try r.slice(header_size, top_len);
+    const global_subrs = try Index.parse(r, header_size + top_len, .cff2);
+
+    const char_strings_at = try dictGet(top, Op.char_strings, 1) orelse return error.MissingTable;
+    const char_strings = (try Index.parse(r, try toOffset(char_strings_at[0]), .cff2)).index;
+    if (char_strings.count != num_glyphs) return error.InvalidFormat;
+    const fd_array_at = try dictGet(top, Op.fd_array, 1) orelse return error.MissingTable;
+    const fd_select: ?u32 = if (try dictGet(top, Op.fd_select, 1)) |v| try validateFdSelect(r, try toOffset(v[0]), num_glyphs) else null;
+
+    return .{
+        .table = t,
+        .version = .cff2,
+        .char_strings = char_strings,
+        .global_subrs = global_subrs.index,
+        .private = .{},
+        .cid = .{
+            .fd_array = (try Index.parse(r, try toOffset(fd_array_at[0]), .cff2)).index,
+            .fd_select = fd_select,
+        },
+        .charset = 0,
+        .vstore = if (try dictGet(top, Op.vstore, 1)) |v| try toOffset(v[0]) else null,
+    };
+}
+
+/// Checks that the FDSelect at `pos` has a known format and fits the table.
+fn validateFdSelect(r: Reader, pos: u32, num_glyphs: u16) Error!u32 {
+    switch (try r.u8At(pos)) {
+        0 => _ = try r.slice(pos + 1, num_glyphs),
+        3 => _ = try r.slice(pos + 3, 3 * @as(usize, try r.u16At(pos + 1)) + 2),
+        4 => _ = try r.slice(pos + 5, 6 * @as(usize, try r.u32At(pos + 1)) + 4),
+        else => return error.InvalidFormat,
+    }
+    return pos;
 }
 
 /// Receives the decoded path; counts only when the output slices are absent, and
@@ -308,17 +466,23 @@ const Sink = struct {
 /// Type 2 charstring interpreter state for one glyph.
 const Vm = struct {
     r: Reader,
-    global_subrs: Index,
+    cff: Font,
     local_subrs: Index,
     sink: *Sink,
+    /// Set while drawing the components of a `seac`, which may not nest.
+    in_seac: bool = false,
     stack: [max_stack]f32 = undefined,
-    sp: u8 = 0,
+    sp: u16 = 0,
     x: f32 = 0,
     y: f32 = 0,
     num_stems: u32 = 0,
+    /// CFF2 charstrings carry no width, so it starts out true for them.
     width_parsed: bool = false,
     open: bool = false,
     ops: u32 = 0,
+    /// CFF2: the ItemVariationData `blend` uses, from the Private DICT until `vsindex`.
+    vsindex: u32 = 0,
+    region_count: ?u32 = null,
 
     fn push(vm: *Vm, v: f32) Error!void {
         if (vm.sp == max_stack) return error.InvalidGlyph;
@@ -336,9 +500,32 @@ const Vm = struct {
 
     /// Operands of a stem operator: pairs, with the width in front when the count is odd.
     fn pairArgs(vm: *Vm) []const f32 {
-        const skip: u8 = if (!vm.width_parsed and vm.sp % 2 == 1) 1 else 0;
+        const skip: u16 = if (!vm.width_parsed and vm.sp % 2 == 1) 1 else 0;
         vm.width_parsed = true;
         return vm.stack[skip..vm.sp];
+    }
+
+    /// A small non-negative integer operand, popped.
+    fn popIndex(vm: *Vm) Error!u32 {
+        if (vm.sp == 0) return error.InvalidGlyph;
+        vm.sp -= 1;
+        const v = vm.stack[vm.sp];
+        if (!(v >= 0 and v <= 65535)) return error.InvalidGlyph;
+        return @intFromFloat(v);
+    }
+
+    /// `blend`: keeps the `n` default values and drops their `n * regions` deltas.
+    fn blend(vm: *Vm) Error!void {
+        if (vm.cff.version != .cff2) return error.InvalidGlyph;
+        const n = try vm.popIndex();
+        const regions = vm.region_count orelse blk: {
+            const k = try vm.cff.regionCount(vm.r, vm.vsindex);
+            vm.region_count = k;
+            break :blk k;
+        };
+        const deltas = n * regions;
+        if (vm.sp < n + deltas) return error.InvalidGlyph;
+        vm.sp -= @intCast(deltas);
     }
 
     fn moveTo(vm: *Vm, dx: f32, dy: f32) void {
@@ -363,6 +550,30 @@ const Vm = struct {
         vm.x = c2[0] + dx3;
         vm.y = c2[1] + dy3;
         vm.sink.curveTo(c1, c2, vm.x, vm.y);
+    }
+
+    /// Draws the base glyph at the origin and the accent with its origin at (adx, ady);
+    /// both are Standard Encoding codes resolved through the charset.
+    fn seac(vm: *Vm, adx: f32, ady: f32, bchar: f32, achar: f32) Error!void {
+        if (vm.in_seac or vm.cff.cid != null) return error.InvalidGlyph;
+        const base = try vm.cff.glyphForSid(vm.r, try standardSid(bchar));
+        const accent = try vm.cff.glyphForSid(vm.r, try standardSid(achar));
+        var ops = vm.ops;
+        for ([_]struct { u16, f32, f32 }{ .{ base, 0, 0 }, .{ accent, adx, ady } }) |component| {
+            var part: Vm = .{
+                .r = vm.r,
+                .cff = vm.cff,
+                .local_subrs = vm.local_subrs,
+                .sink = vm.sink,
+                .in_seac = true,
+                .x = component[1],
+                .y = component[2],
+                .ops = ops,
+            };
+            if (!try part.run(try vm.cff.char_strings.item(vm.r, component[0]), 0)) vm.sink.close();
+            ops = part.ops;
+        }
+        vm.ops = ops;
     }
 
     fn callSubr(vm: *Vm, subrs: Index, depth: u8) Error!bool {
@@ -420,6 +631,16 @@ const Vm = struct {
             switch (b0) {
                 // hstem, vstem, hstemhm, vstemhm
                 1, 3, 18, 23 => vm.num_stems += @intCast(vm.pairArgs().len / 2),
+                // CFF2 only: vsindex selects the variation data, blend keeps the defaults.
+                15 => {
+                    if (vm.cff.version != .cff2) return error.InvalidGlyph;
+                    vm.vsindex = try vm.popIndex();
+                    vm.region_count = null;
+                },
+                16 => {
+                    try vm.blend();
+                    continue;
+                },
                 // hintmask, cntrmask: an implicit vstem list may precede the first one.
                 19, 20 => {
                     vm.num_stems += @intCast(vm.pairArgs().len / 2);
@@ -491,14 +712,14 @@ const Vm = struct {
                     continue;
                 },
                 29 => {
-                    if (try vm.callSubr(vm.global_subrs, depth)) return true;
+                    if (try vm.callSubr(vm.cff.global_subrs, depth)) return true;
                     continue;
                 },
                 11 => return false,
                 14 => {
-                    // Four operands (plus the width) would be a seac accent composition.
-                    const n: u8 = if (vm.sp >= 4) 4 else 0;
-                    if ((try vm.args(n)).len != 0) return error.InvalidGlyph;
+                    // Four operands (plus the width) make it an accent composition.
+                    const a = try vm.args(if (vm.sp >= 4) 4 else 0);
+                    if (a.len == 4) try vm.seac(a[0], a[1], a[2], a[3]);
                     vm.sink.close();
                     return true;
                 },
@@ -556,11 +777,14 @@ fn interpret(font: VectorFont, gid: u16, sink: *Sink) Error!void {
     const cff = font.tables.outlines.cff;
     if (gid >= cff.char_strings.count) return error.InvalidGlyph;
     const r = Reader.init(font.data).table(cff.table);
+    const private = try cff.glyphPrivate(r, gid);
     var vm: Vm = .{
         .r = r,
-        .global_subrs = cff.global_subrs,
-        .local_subrs = try cff.localSubrs(r, gid),
+        .cff = cff,
+        .local_subrs = private.subrs,
         .sink = sink,
+        .width_parsed = cff.version == .cff2,
+        .vsindex = private.vsindex,
     };
     if (!try vm.run(try cff.char_strings.item(r, gid), 0)) sink.close();
 }
@@ -672,6 +896,75 @@ test "cubic contour closing on its start" {
     try testing.expectEqual(VectorFont.Bounds{ .x_min = 0, .y_min = 0, .x_max = 800, .y_max = 700 }, font.glyphBounds(3).?);
 }
 
+test "seac composes a base and an accent" {
+    var buf: [synthetic.buffer_size]u8 = undefined;
+    const font = synthetic.font(&buf, .{ .cff = true, .cff_gid6 = .seac });
+    var o = try font.outline(testing.allocator, 6);
+    defer o.deinit(testing.allocator);
+    var base = try font.outline(testing.allocator, 1);
+    defer base.deinit(testing.allocator);
+    var accent = try font.outline(testing.allocator, 3);
+    defer accent.deinit(testing.allocator);
+    try testing.expectEqual(base.contourCount() + accent.contourCount(), o.contourCount());
+    try testing.expectEqual(base.points.len + accent.points.len, o.points.len);
+    for (o.points[0..base.points.len], base.points) |p, q| try expectPoint(p, q.x, q.y, q.kind);
+    for (o.points[base.points.len..], accent.points) |p, q| try expectPoint(p, q.x + 100, q.y + 200, q.kind);
+    try testing.expectEqual(VectorFont.Bounds{ .x_min = 100, .y_min = 0, .x_max = 900, .y_max = 900 }, font.glyphBounds(6).?);
+
+    const nested = synthetic.font(&buf, .{ .cff = true, .cff_gid6 = .seac_nested });
+    try testing.expectError(error.InvalidGlyph, nested.outline(testing.allocator, 6));
+    const unencoded = synthetic.font(&buf, .{ .cff = true, .cff_gid6 = .seac_unencoded });
+    try testing.expectError(error.InvalidGlyph, unencoded.outline(testing.allocator, 6));
+    try testing.expectEqual(null, unencoded.glyphBounds(6));
+}
+
+test "CFF2 default instance matches the CFF outlines" {
+    var buf: [synthetic.buffer_size]u8 = undefined;
+    var cff_buf: [synthetic.buffer_size]u8 = undefined;
+    const reference = synthetic.font(&cff_buf, .{ .cff = true });
+    for ([_]bool{ false, true }) |fd_select| {
+        const font = synthetic.font(&buf, .{ .cff2 = true, .cff2_fd_select = fd_select });
+        try testing.expectEqual(.cff2, font.tables.outlines.cff.version);
+        try testing.expect(font.tables.outlines.cff.cid != null);
+        for (0..7) |gid| {
+            var a = try font.outline(testing.allocator, @intCast(gid));
+            defer a.deinit(testing.allocator);
+            var b = try reference.outline(testing.allocator, @intCast(gid));
+            defer b.deinit(testing.allocator);
+            try testing.expectEqualSlices(u32, b.contour_ends, a.contour_ends);
+            for (a.points, b.points) |p, q| try expectPoint(p, q.x, q.y, q.kind);
+            try testing.expectEqual(reference.glyphBounds(@intCast(gid)), font.glyphBounds(@intCast(gid)));
+        }
+    }
+
+    // `blend` without a variation store, and a wrong region count (too few operands).
+    const no_store = synthetic.font(&buf, .{ .cff2 = true, .cff2_vstore = false });
+    try testing.expectError(error.InvalidGlyph, no_store.outline(testing.allocator, 1));
+    try testing.expectError(error.InvalidGlyph, no_store.outline(testing.allocator, 4));
+    var plain = try no_store.outline(testing.allocator, 6);
+    plain.deinit(testing.allocator);
+    const two_regions = synthetic.font(&buf, .{ .cff2 = true, .cff2_regions = 2 });
+    try testing.expectError(error.InvalidGlyph, two_regions.outline(testing.allocator, 1));
+
+    // CFF charstrings may not use the CFF2 operators.
+    const blend_in_cff = synthetic.font(&buf, .{ .cff = true, .cff_gid6 = .blend });
+    try testing.expectError(error.InvalidGlyph, blend_in_cff.outline(testing.allocator, 6));
+
+    const full = synthetic.build(&buf, .{ .cff2 = true, .cff2_fd_select = true });
+    var len: usize = 0;
+    while (len < full.len) : (len += 7) {
+        if (VectorFont.loadFromBytes(full[0..len])) |font| {
+            for (0..7) |gid| {
+                _ = font.glyphBounds(@intCast(gid));
+                if (font.outline(testing.allocator, @intCast(gid))) |o| {
+                    var owned = o;
+                    owned.deinit(testing.allocator);
+                } else |_| {}
+            }
+        } else |_| {}
+    }
+}
+
 test "rejects bad charstrings and truncation without panicking" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     try testing.expectError(error.UnsupportedFontFormat, VectorFont.loadFromBytes(synthetic.build(&buf, .{ .cff = true, .cff_charstring_type = 1 })));
@@ -680,7 +973,7 @@ test "rejects bad charstrings and truncation without panicking" {
     try testing.expectError(error.InvalidGlyph, looping.outline(testing.allocator, 4));
     try testing.expectEqual(null, looping.glyphBounds(4));
 
-    const full = synthetic.build(&buf, .{ .cff = true });
+    const full = synthetic.build(&buf, .{ .cff = true, .cff_gid6 = .seac });
     var len: usize = 0;
     while (len < full.len) : (len += 7) {
         if (VectorFont.loadFromBytes(full[0..len])) |font| {

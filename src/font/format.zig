@@ -9,6 +9,7 @@ pub const FontFormat = enum {
     pcf, // Portable Compiled Format (X11)
     ttf, // TrueType (sfnt with glyf outlines)
     otf, // OpenType (sfnt with CFF outlines)
+    ttc, // TrueType/OpenType collection (`ttcf`)
 
     /// BDF format signature
     const bdf_signature = "STARTFONT";
@@ -16,10 +17,11 @@ pub const FontFormat = enum {
     /// PCF format signature
     const pcf_signature = "\x01fcp";
 
-    /// sfnt version tags; `ttcf` collections are not supported
+    /// sfnt version tags
     const ttf_signature = "\x00\x01\x00\x00";
     const ttf_apple_signature = "true";
     const otf_signature = "OTTO";
+    const ttc_signature = "ttcf";
 
     /// Detect font format from the first few bytes of data
     pub fn detectFromBytes(data: []const u8) ?FontFormat {
@@ -28,6 +30,7 @@ pub const FontFormat = enum {
         if (std.mem.startsWith(u8, data, ttf_signature)) return .ttf;
         if (std.mem.startsWith(u8, data, ttf_apple_signature)) return .ttf;
         if (std.mem.startsWith(u8, data, otf_signature)) return .otf;
+        if (std.mem.startsWith(u8, data, ttc_signature)) return .ttc;
         return null;
     }
 
@@ -38,6 +41,7 @@ pub const FontFormat = enum {
         if (std.ascii.endsWithIgnoreCase(stem, ".pcf")) return .pcf;
         if (std.ascii.endsWithIgnoreCase(stem, ".ttf")) return .ttf;
         if (std.ascii.endsWithIgnoreCase(stem, ".otf")) return .otf;
+        if (std.ascii.endsWithIgnoreCase(stem, ".ttc") or std.ascii.endsWithIgnoreCase(stem, ".otc")) return .ttc;
         return null;
     }
 

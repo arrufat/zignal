@@ -3,7 +3,7 @@
 //! This module provides font rendering capabilities including:
 //! - Default 8x8 bitmap font
 //! - BDF and PCF bitmap font loading with Unicode support
-//! - TrueType (`.ttf`) and CFF OpenType (`.otf`) vector fonts with kerning
+//! - TrueType (`.ttf`), CFF OpenType (`.otf`) and collection (`.ttc`) vector fonts with kerning
 //! - Variable-width font support
 //!
 //! The font system is organized into subdirectories for better modularity.
@@ -35,12 +35,18 @@ pub const Font = union(enum) {
     /// Size a vector font is drawn at when none is given; bitmap fonts use their own.
     pub const default_vector_size: f32 = 16;
 
-    /// Loads any supported format by sniffing the file; bitmap fonts load all characters.
+    /// Loads any supported format by sniffing the file; bitmap fonts load all characters
+    /// and collections yield their first face.
     pub fn load(io: Io, gpa: Allocator, path: []const u8) !Font {
+        return loadFace(io, gpa, path, 0);
+    }
+
+    /// `load` for face `face` of a `.ttc` collection. Only face 0 exists otherwise.
+    pub fn loadFace(io: Io, gpa: Allocator, path: []const u8, face: u32) !Font {
         const format = try FontFormat.detectFromPath(io, path) orelse return error.UnsupportedFontFormat;
         return switch (format) {
-            .bdf, .pcf => .{ .bitmap = try BitmapFont.load(io, gpa, path, .all) },
-            .ttf, .otf => .{ .vector = try VectorFont.load(io, gpa, path) },
+            .bdf, .pcf => if (face == 0) .{ .bitmap = try BitmapFont.load(io, gpa, path, .all) } else error.InvalidFormat,
+            .ttf, .otf, .ttc => .{ .vector = try VectorFont.loadFace(io, gpa, path, face) },
         };
     }
 
@@ -253,4 +259,13 @@ test "Font.load dispatches on the format" {
     try std.testing.expect(otf == .vector and otf.vector.tables.outlines == .cff);
     try std.testing.expect(otf.hasGlyph('C'));
     try std.testing.expectError(error.UnsupportedFontFormat, BitmapFont.load(std.testing.io, std.testing.allocator, otf_path, .all));
+
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "synth.ttc", .data = synthetic.build(&buf, .{ .collection = true }) });
+    const ttc_path = try tmp.dir.realPathFileAlloc(std.testing.io, "synth.ttc", std.testing.allocator);
+    defer std.testing.allocator.free(ttc_path);
+    var face: Font = try .loadFace(std.testing.io, std.testing.allocator, ttc_path, 1);
+    defer face.deinit(std.testing.allocator);
+    try std.testing.expectEqual(2, face.vector.num_faces);
+    try std.testing.expectError(error.InvalidFormat, Font.loadFace(std.testing.io, std.testing.allocator, ttc_path, 2));
+    try std.testing.expectError(error.InvalidFormat, Font.loadFace(std.testing.io, std.testing.allocator, path, 1));
 }
