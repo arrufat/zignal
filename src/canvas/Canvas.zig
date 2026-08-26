@@ -1010,8 +1010,9 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Renders a thick ring outline (or arc segment) by scanning its bounding box;
-        /// `.fast` uses binary coverage.
+        /// Renders a thick ring outline (or arc segment); `.fast` uses binary coverage. Each
+        /// row visits only the columns within reach of the outer edge and outside the inner
+        /// one (a pixel of margin either side), then tests every pixel as before.
         inline fn renderRing(
             self: Self,
             center: Point(2, f32),
@@ -1023,16 +1024,39 @@ pub fn Canvas(comptime T: type) type {
         ) void {
             const bbox = self.ringBoundingBox(center, outer_radius) orelse return;
             const paint: Paint = .init(color, opts.blending);
+            const edge: f32 = if (opts.mode == .soft) antialias_edge_offset else 0;
+            const reach_outer = outer_radius + edge;
+            const reach_inner = if (inner_radius > 0) inner_radius - edge else 0;
+            const col_min = as(f32, bbox.l);
+            const col_max = as(f32, bbox.r - 1);
             for (bbox.t..bbox.b) |r| {
                 const y = as(f32, r) - center.y();
-                for (bbox.l..bbox.r) |c| {
-                    const x = as(f32, c) - center.x();
-                    const coverage = ringCoverage(x, y, inner_radius, outer_radius, opts.mode);
-                    if (coverage <= 0) continue;
-                    if (!arc.isFull()) {
-                        if (!arc.contains(std.math.atan2(y, x))) continue;
+                const half_outer_sq = reach_outer * reach_outer - y * y;
+                if (half_outer_sq < 0) continue;
+                const half_outer = @sqrt(half_outer_sq) + 1;
+                const half_inner_sq = reach_inner * reach_inner - y * y;
+                const half_inner = if (reach_inner > 0 and half_inner_sq > 0) @max(@sqrt(half_inner_sq) - 1, 0) else 0;
+                // Two runs around the inner gap, or one across when the gap closes.
+                const runs = [2][2]f32{
+                    .{ center.x() - half_outer, if (half_inner > 0) center.x() - half_inner else center.x() + half_outer },
+                    .{ center.x() + half_inner, center.x() + half_outer },
+                };
+                for (runs, 0..) |run, i| {
+                    if (i == 1 and half_inner == 0) break;
+                    const lo = @max(@ceil(run[0]), col_min);
+                    const hi = @min(@floor(run[1]), col_max);
+                    if (hi < lo) continue;
+                    const c_lo: usize = @trunc(lo);
+                    const c_hi: usize = @trunc(hi);
+                    for (c_lo..c_hi + 1) |c| {
+                        const x = as(f32, c) - center.x();
+                        const coverage = ringCoverage(x, y, inner_radius, outer_radius, opts.mode);
+                        if (coverage <= 0) continue;
+                        if (!arc.isFull()) {
+                            if (!arc.contains(std.math.atan2(y, x))) continue;
+                        }
+                        paint.cover(&self.image.data[r * self.image.stride + c], coverage);
                     }
-                    paint.cover(&self.image.data[r * self.image.stride + c], coverage);
                 }
             }
         }
