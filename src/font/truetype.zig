@@ -66,7 +66,7 @@ pub const Tables = struct {
     cmap: Table,
     kern: ?Table = null,
     /// Present only when it holds pair adjustment; it then takes precedence over `kern`.
-    gpos: ?Table = null,
+    gpos: ?gpos.PairPos = null,
 };
 
 pub const sfnt_true_type: u32 = 0x00010000;
@@ -247,7 +247,7 @@ pub fn parseFace(data: []const u8, face: u32) Error!VectorFont {
             .cmap = cmap_t,
             .kern = kern_table,
             // A GPOS without pair adjustment has nothing this parser reads.
-            .gpos = if (gpos_table) |t| (if (gpos.hasPairPos(r.table(t))) t else null) else null,
+            .gpos = if (gpos_table) |t| try gpos.findPairPos(r.table(t), t) else null,
         },
         .cmap = cmap_subtable,
     };

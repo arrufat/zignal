@@ -114,6 +114,8 @@ pub const Lines = struct {
     letter_spacing: f32,
     /// Runs one past the end once the last line is out.
     pos: usize = 0,
+    /// Where the paragraph being wrapped ends, found once rather than once per line.
+    paragraph_end: ?usize = null,
 
     pub fn init(font: Font, text: []const u8, size: f32, max_width: ?f32, letter_spacing: f32) Lines {
         return .{ .font = font, .text = text, .size = size, .max_width = max_width, .letter_spacing = letter_spacing };
@@ -121,9 +123,10 @@ pub const Lines = struct {
 
     pub fn next(self: *Lines) ?Line {
         if (self.pos > self.text.len) return null;
-        const rest = self.text[self.pos..];
-        const newline = std.mem.indexOfScalar(u8, rest, '\n');
-        const paragraph = if (newline) |n| rest[0..n] else rest;
+        if (self.paragraph_end == null or self.pos > self.paragraph_end.?) {
+            self.paragraph_end = std.mem.indexOfScalarPos(u8, self.text, self.pos, '\n') orelse self.text.len;
+        }
+        const paragraph = self.text[self.pos..self.paragraph_end.?];
         // Past the paragraph lies its newline or the end of the text.
         var consumed = paragraph.len + 1;
         var line: Line = undefined;
