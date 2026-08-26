@@ -22,7 +22,6 @@ pub const max_subr_depth = 10;
 pub const max_stack = 513;
 /// Operators executed per glyph, subrs included; bounds hostile subr fan-out.
 pub const max_ops = 1 << 16;
-pub const max_outline_points = 0xFFFF;
 /// CFF2 Private DICTs blend their hint values, so their operand stacks are as deep as
 /// charstring stacks.
 const max_dict_operands = max_stack;
@@ -42,7 +41,7 @@ pub const Index = struct {
 
     /// Parses the INDEX at `pos`; `end` is the position just past it. CFF2 counts are
     /// four bytes wide.
-    fn parse(r: Reader, pos: u32, comptime version: Version) Error!Parsed {
+    fn parse(r: Reader, pos: u32, version: Version) Error!Parsed {
         const count_size: u32 = if (version == .cff2) 4 else 2;
         const count: u32 = if (version == .cff2) try r.u32At(pos) else try r.u16At(pos);
         if (count == 0) return .{ .index = .empty, .end = pos + count_size };
@@ -174,10 +173,7 @@ const Private = struct {
         if (try dictGet(dict, Op.vsindex, 1)) |v| private.vsindex = try toOffset(v[0]);
         const subrs = try dictGet(dict, Op.subrs, 1) orelse return private;
         const subrs_at = std.math.add(u32, offset, try toOffset(subrs[0])) catch return error.UnexpectedEof;
-        private.subrs = switch (version) {
-            .cff => (try Index.parse(r, subrs_at, .cff)).index,
-            .cff2 => (try Index.parse(r, subrs_at, .cff2)).index,
-        };
+        private.subrs = (try Index.parse(r, subrs_at, version)).index;
         return private;
     }
 };
@@ -402,13 +398,9 @@ fn validateFdSelect(r: Reader, pos: u32, num_glyphs: u16) Error!u32 {
     return pos;
 }
 
-/// Receives the decoded path; counts only when the output slices are absent, and
-/// tracks the control box either way.
+/// Turns the decoded path into outline points, tracking the control box on the way.
 const Sink = struct {
-    points: ?[]Outline.Point = null,
-    contour_ends: ?[]u32 = null,
-    n: u32 = 0,
-    c: u32 = 0,
+    out: *Outline.Builder,
     contour_start: u32 = 0,
     start: [2]f32 = .{ 0, 0 },
     /// The latest on-curve point, held back until the next segment or `close` shows
@@ -418,8 +410,7 @@ const Sink = struct {
     max: [2]f32 = .{ -std.math.inf(f32), -std.math.inf(f32) },
 
     fn write(self: *Sink, x: f32, y: f32, kind: Outline.Point.Kind) void {
-        if (self.points) |points| points[self.n] = .{ .x = x, .y = y, .kind = kind };
-        self.n += 1;
+        self.out.emit(x, y, kind);
         self.min = .{ @min(self.min[0], x), @min(self.min[1], y) };
         self.max = .{ @max(self.max[0], x), @max(self.max[1], y) };
     }
@@ -431,7 +422,7 @@ const Sink = struct {
 
     fn moveTo(self: *Sink, x: f32, y: f32) void {
         self.close();
-        self.contour_start = self.n;
+        self.contour_start = self.out.n;
         self.start = .{ x, y };
         self.write(x, y, .on_curve);
     }
@@ -457,10 +448,9 @@ const Sink = struct {
             if (p[0] != self.start[0] or p[1] != self.start[1]) self.write(p[0], p[1], .on_curve);
             self.pending = null;
         }
-        if (self.n == self.contour_start) return;
-        if (self.contour_ends) |ends| ends[self.c] = self.n;
-        self.c += 1;
-        self.contour_start = self.n;
+        if (self.out.n == self.contour_start) return;
+        self.out.endContour();
+        self.contour_start = self.out.n;
     }
 };
 
@@ -792,36 +782,30 @@ fn interpret(font: VectorFont, gid: u16, sink: *Sink) Error!void {
 
 /// Control box of the charstring's points; null for glyphs without contours.
 pub fn bounds(font: VectorFont, gid: u16) ?VectorFont.Bounds {
-    var sink: Sink = .{};
+    var counting: Outline.Builder = .{};
+    var sink: Sink = .{ .out = &counting };
     interpret(font, gid, &sink) catch return null;
-    if (sink.n == 0) return null;
+    if (counting.n == 0) return null;
     return .{
-        .x_min = saturate(@floor(sink.min[0])),
-        .y_min = saturate(@floor(sink.min[1])),
-        .x_max = saturate(@ceil(sink.max[0])),
-        .y_max = saturate(@ceil(sink.max[1])),
+        .x_min = std.math.lossyCast(i16, @floor(sink.min[0])),
+        .y_min = std.math.lossyCast(i16, @floor(sink.min[1])),
+        .x_max = std.math.lossyCast(i16, @ceil(sink.max[0])),
+        .y_max = std.math.lossyCast(i16, @ceil(sink.max[1])),
     };
 }
 
-fn saturate(v: f32) i16 {
-    return @trunc(@min(@max(v, -32768.0), 32767.0));
-}
-
-/// Decodes `gid` into an owned `Outline`: one run to count, one to fill, so exactly
-/// two allocations.
+/// Decodes `gid` into an owned `Outline`.
 pub fn outline(font: VectorFont, gpa: Allocator, gid: u16) (Error || Allocator.Error)!Outline {
-    var sink: Sink = .{};
-    try interpret(font, gid, &sink);
-    if (sink.n > max_outline_points or sink.c > max_outline_points) return error.TooManyPoints;
+    const Glyph = struct {
+        font: VectorFont,
+        gid: u16,
 
-    const points = try gpa.alloc(Outline.Point, sink.n);
-    errdefer gpa.free(points);
-    const contour_ends = try gpa.alloc(u32, sink.c);
-    errdefer gpa.free(contour_ends);
-
-    sink = .{ .points = points, .contour_ends = contour_ends };
-    try interpret(font, gid, &sink);
-    return .{ .points = points, .contour_ends = contour_ends };
+        fn walk(self: @This(), out: *Outline.Builder) Error!void {
+            var sink: Sink = .{ .out = out };
+            try interpret(self.font, self.gid, &sink);
+        }
+    };
+    return Outline.Builder.build(gpa, Glyph{ .font = font, .gid = gid }, Glyph.walk);
 }
 
 const synthetic = @import("synthetic.zig");

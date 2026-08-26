@@ -49,8 +49,10 @@ pub const Font = union(enum) {
     /// `load` for face `face` of a `.ttc` collection. Only face 0 exists otherwise.
     pub fn loadFace(io: Io, gpa: Allocator, path: []const u8, face: u32) !Font {
         const format = try FontFormat.detectFromPath(io, path) orelse return error.UnsupportedFontFormat;
+        if (face != 0 and format != .ttc) return error.InvalidFormat;
         return switch (format) {
-            .bdf, .pcf => if (face == 0) .{ .bitmap = try BitmapFont.load(io, gpa, path, .all) } else error.InvalidFormat,
+            .bdf => .{ .bitmap = try bdf.load(io, gpa, path, .all) },
+            .pcf => .{ .bitmap = try pcf.load(io, gpa, path, .all) },
             .ttf, .otf, .ttc => .{ .vector = try VectorFont.loadFace(io, gpa, path, face) },
         };
     }
@@ -167,37 +169,20 @@ pub fn readFileMaybeGzip(io: Io, gpa: Allocator, path: []const u8) ![]u8 {
     defer gpa.free(raw);
 
     var reader: Io.Reader = .fixed(raw);
-
     const buffer = try gpa.alloc(u8, flate.max_window_len);
     defer gpa.free(buffer);
-
     var decompressor: flate.Decompress = .init(&reader, .gzip, buffer);
 
-    var aw: Io.Writer.Allocating = .init(gpa);
-    defer aw.deinit();
-
-    var remaining = Io.Limit.limited(max_file_size);
-    while (remaining.nonzero()) {
-        const n = decompressor.reader.stream(&aw.writer, remaining) catch |err| switch (err) {
-            error.EndOfStream => break,
-            error.ReadFailed => return error.InvalidCompression,
-            else => return err,
-        };
-        remaining = remaining.subtract(n).?;
-    } else {
-        // Reject streams that would exceed max_file_size by probing for one more byte
-        var one_byte_buf: [1]u8 = undefined;
-        var dummy_writer = Io.Writer.fixed(&one_byte_buf);
-        if (decompressor.reader.stream(&dummy_writer, .limited(1))) |n| {
-            if (n > 0) return error.InvalidCompression;
-        } else |err| switch (err) {
-            error.EndOfStream => {},
-            error.ReadFailed => return error.InvalidCompression,
-            else => return err,
-        }
-    }
-
-    return aw.toOwnedSlice();
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(gpa);
+    // The gzip trailer ends with the uncompressed size modulo 2^32: a sizing hint only, the
+    // limit below still applies.
+    if (raw.len >= 4) try out.ensureTotalCapacity(gpa, @min(std.mem.readInt(u32, raw[raw.len - 4 ..][0..4], .little), max_file_size));
+    decompressor.reader.appendRemaining(gpa, &out, .limited(max_file_size)) catch |err| switch (err) {
+        error.StreamTooLong, error.ReadFailed => return error.InvalidCompression,
+        else => |e| return e,
+    };
+    return out.toOwnedSlice(gpa);
 }
 
 /// Writes `bytes` to `path`, gzip-compressing when the path ends in `.gz`.

@@ -137,9 +137,14 @@ fn lookupGlyphIndex(self: VectorFont, codepoint: u21) u16 {
 /// Advance and left side bearing; the widest advance for an invalid index.
 pub fn glyphMetrics(self: VectorFont, gid: u16) GlyphMetrics {
     if (gid >= self.num_glyphs) return .{ .advance = self.advance_width_max, .lsb = 0 };
-    const g = self.cachedGlyph(gid) orelse return self.readMetrics(gid);
-    if (g.metrics == null) g.metrics = self.readMetrics(gid);
-    return g.metrics.?;
+    return self.metricsOf(self.cachedGlyph(gid), gid);
+}
+
+/// `glyphMetrics` through the cache entry `g` of a valid `gid`, when there is one.
+fn metricsOf(self: VectorFont, g: ?*GlyphCache.Glyph, gid: u16) GlyphMetrics {
+    const entry = g orelse return self.readMetrics(gid);
+    if (entry.metrics == null) entry.metrics = self.readMetrics(gid);
+    return entry.metrics.?;
 }
 
 /// The cache entry for `gid`; null without a cache, for an invalid id or when out of memory.
@@ -165,9 +170,14 @@ fn readMetrics(self: VectorFont, gid: u16) GlyphMetrics {
 /// The glyph's bounding box: from its `glyf` header, or the control box of its CFF
 /// charstring. Null for glyphs without contours (spaces, `.notdef`).
 pub fn glyphBounds(self: VectorFont, gid: u16) ?Bounds {
-    const g = self.cachedGlyph(gid) orelse return self.readBounds(gid);
-    if (g.bounds == null) g.bounds = self.readBounds(gid);
-    return g.bounds.?;
+    return self.boundsOf(self.cachedGlyph(gid), gid);
+}
+
+/// `glyphBounds` through the cache entry `g`, when there is one.
+fn boundsOf(self: VectorFont, g: ?*GlyphCache.Glyph, gid: u16) ?Bounds {
+    const entry = g orelse return self.readBounds(gid);
+    if (entry.bounds == null) entry.bounds = self.readBounds(gid);
+    return entry.bounds.?;
 }
 
 fn readBounds(self: VectorFont, gid: u16) ?Bounds {
@@ -211,6 +221,7 @@ pub fn outlineRef(self: VectorFont, gpa: Allocator, gid: u16) (Error || Allocato
 
 /// Horizontal kerning to add to `left`'s advance when followed by `right`, in font units.
 pub fn kern(self: VectorFont, left: u16, right: u16) i16 {
+    if (self.tables.gpos == null and self.tables.kern == null) return 0;
     const cache = self.cache orelse return self.lookupKern(left, right);
     const slot = cache.kerns.getOrPut(cache.gpa, @as(u32, left) << 16 | right) catch return self.lookupKern(left, right);
     if (!slot.found_existing) slot.value_ptr.* = self.lookupKern(left, right);
@@ -288,8 +299,10 @@ pub const Layout = struct {
         }
         const gid = self.font.glyphIndex(codepoint);
         if (self.prev) |p| self.x += as(f32, self.font.kern(p, gid)) * self.scale;
-        const metrics = self.font.glyphMetrics(gid);
-        const bounds = if (self.with_bounds or !self.font.lsb_is_at_x_zero) self.font.glyphBounds(gid) else null;
+        // One cache lookup serves both reads; `glyphIndex` keeps gid valid.
+        const cached = self.font.cachedGlyph(gid);
+        const metrics = self.font.metricsOf(cached, gid);
+        const bounds = if (self.with_bounds or !self.font.lsb_is_at_x_zero) self.font.boundsOf(cached, gid) else null;
         // Unless head says the outline already starts at its bearing, shift it there.
         const shift: f32 = if (self.font.lsb_is_at_x_zero or bounds == null) 0 else as(f32, @as(i32, metrics.lsb) - bounds.?.x_min);
         const item: Item = .{

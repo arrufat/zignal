@@ -18,9 +18,14 @@ device_width: i16,
 /// Offset into the bitmap data array where this glyph's bitmap starts
 bitmap_offset: usize = 0,
 
+/// Bytes per bitmap row for a glyph `width` pixels wide.
+pub fn bytesForWidth(width: u32) u32 {
+    return (width + 7) / 8;
+}
+
 /// Number of bytes per bitmap row for this glyph
 pub fn bytesPerRow(self: GlyphData) u32 {
-    return (@as(u32, self.width) + 7) / 8;
+    return bytesForWidth(self.width);
 }
 
 /// Total size in bytes of this glyph's bitmap

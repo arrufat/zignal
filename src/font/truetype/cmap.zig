@@ -81,12 +81,7 @@ fn lookup4(r: Reader, st: Subtable, codepoint: u21) Error!u16 {
     const id_range_offsets = id_deltas + 2 * st.count;
 
     // First segment whose endCode >= cp.
-    var lo: u32 = 0;
-    var hi: u32 = st.count;
-    while (lo < hi) {
-        const mid = lo + (hi - lo) / 2;
-        if (try r.u16At(end_codes + 2 * mid) < cp) lo = mid + 1 else hi = mid;
-    }
+    const lo = try r.lowerBound(u16, end_codes, 2, st.count, 0, cp);
     if (lo == st.count) return 0;
     const start = try r.u16At(start_codes + 2 * lo);
     if (start > cp) return 0;
@@ -100,12 +95,8 @@ fn lookup4(r: Reader, st: Subtable, codepoint: u21) Error!u16 {
 
 fn lookup12(r: Reader, st: Subtable, codepoint: u21) Error!u16 {
     const groups = st.offset + 16;
-    var lo: u32 = 0;
-    var hi: u32 = st.count;
-    while (lo < hi) {
-        const mid = lo + (hi - lo) / 2;
-        if (try r.u32At(groups + 12 * mid + 4) < codepoint) lo = mid + 1 else hi = mid;
-    }
+    // First group whose end >= codepoint.
+    const lo = try r.lowerBound(u32, groups, 12, st.count, 4, codepoint);
     if (lo == st.count) return 0;
     const start = try r.u32At(groups + 12 * lo);
     if (start > codepoint) return 0;

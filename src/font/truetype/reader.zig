@@ -32,20 +32,36 @@ pub const Reader = struct {
         return r.data[off..end];
     }
 
+    pub fn intAt(r: Reader, comptime T: type, off: usize) Error!T {
+        return std.mem.readInt(T, (try r.slice(off, @sizeOf(T)))[0..@sizeOf(T)], .big);
+    }
+
     pub fn u8At(r: Reader, off: usize) Error!u8 {
-        return (try r.slice(off, 1))[0];
+        return r.intAt(u8, off);
     }
 
     pub fn u16At(r: Reader, off: usize) Error!u16 {
-        return std.mem.readInt(u16, (try r.slice(off, 2))[0..2], .big);
+        return r.intAt(u16, off);
     }
 
     pub fn i16At(r: Reader, off: usize) Error!i16 {
-        return std.mem.readInt(i16, (try r.slice(off, 2))[0..2], .big);
+        return r.intAt(i16, off);
     }
 
     pub fn u32At(r: Reader, off: usize) Error!u32 {
-        return std.mem.readInt(u32, (try r.slice(off, 4))[0..4], .big);
+        return r.intAt(u32, off);
+    }
+
+    /// Index of the first of `count` records, `stride` bytes apart from `base`, whose `T`
+    /// key at `key_off` is not below `target`; `count` when none is. Keys must be sorted.
+    pub fn lowerBound(r: Reader, comptime T: type, base: usize, stride: usize, count: usize, key_off: usize, target: T) Error!usize {
+        var lo: usize = 0;
+        var hi: usize = count;
+        while (lo < hi) {
+            const mid = lo + (hi - lo) / 2;
+            if (try r.intAt(T, base + mid * stride + key_off) < target) lo = mid + 1 else hi = mid;
+        }
+        return lo;
     }
 
     /// 2.14 fixed point, used by composite glyph transforms.
@@ -64,4 +80,15 @@ test "reads are bounds checked" {
     try std.testing.expectError(error.UnexpectedEof, r.u16At(7));
     try std.testing.expectError(error.UnexpectedEof, r.u32At(std.math.maxInt(usize) - 1));
     try std.testing.expectError(error.UnexpectedEof, r.slice(4, std.math.maxInt(usize)));
+}
+
+test "lower bound over sorted records" {
+    // Three 4-byte records keyed by their second u16: 5, 9, 9.
+    const bytes = [_]u8{ 0, 1, 0, 5, 0, 2, 0, 9, 0, 3, 0, 9 };
+    const r: Reader = .init(&bytes);
+    try std.testing.expectEqual(0, try r.lowerBound(u16, 0, 4, 3, 2, 5));
+    try std.testing.expectEqual(1, try r.lowerBound(u16, 0, 4, 3, 2, 6));
+    try std.testing.expectEqual(1, try r.lowerBound(u16, 0, 4, 3, 2, 9));
+    try std.testing.expectEqual(3, try r.lowerBound(u16, 0, 4, 3, 2, 10));
+    try std.testing.expectError(error.UnexpectedEof, r.lowerBound(u16, 0, 4, 4, 2, 10));
 }

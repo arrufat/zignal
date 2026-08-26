@@ -27,8 +27,6 @@ pub const basic = BitmapFont{
     .first_char = 0x20, // Space
     .last_char = 0x7E, // Tilde
     .data = font_data.basic_latin[0x20 * 8 .. 0x7F * 8], // Slice from 0x20 to 0x7E (inclusive)
-    .glyph_map = null,
-    .glyph_data = null,
 };
 
 /// Create an extended Latin font (ASCII + Latin-1 Supplement)
@@ -45,97 +43,30 @@ pub fn extended(allocator: std.mem.Allocator) !BitmapFont {
 /// This requires allocation and can fail
 /// The returned font must be freed with deinit()
 pub fn create(gpa: std.mem.Allocator, filter: LoadFilter) !BitmapFont {
-    // Build list of characters to include
-    var char_list: std.ArrayList(u21) = .empty;
-    defer char_list.deinit(gpa);
+    var glyphs: std.AutoHashMap(u32, GlyphData) = .init(gpa);
+    errdefer glyphs.deinit();
+    var data: std.ArrayList(u8) = .empty;
+    errdefer data.deinit(gpa);
 
-    switch (filter) {
-        .all => {
-            // Add all available characters from all ranges
-            for (font_data.ranges) |range| {
-                var code = range.start;
-                while (code <= range.end) : (code += 1) {
-                    try char_list.append(gpa, code);
-                }
-            }
-        },
-        .ranges => |ranges| {
-            // Add characters from specified ranges
-            for (ranges) |req_range| {
-                // Find overlapping ranges in our data
-                for (font_data.ranges) |data_range| {
-                    const start = @max(req_range.start, data_range.start);
-                    const end = @min(req_range.end, data_range.end);
-                    if (start <= end) {
-                        var code = start;
-                        while (code <= end) : (code += 1) {
-                            try char_list.append(gpa, code);
-                        }
-                    }
-                }
-            }
-        },
-    }
-
-    if (char_list.items.len == 0) {
-        return error.NoCharactersFound;
-    }
-
-    // Sort characters for consistent output
-    std.mem.sort(u21, char_list.items, {}, std.sort.asc(u21));
-
-    // Remove duplicates
-    var unique_chars: std.ArrayList(u21) = .empty;
-    defer unique_chars.deinit(gpa);
-
-    for (char_list.items, 0..) |code, i| {
-        if (i == 0 or code != char_list.items[i - 1]) {
-            try unique_chars.append(gpa, code);
+    // The data ranges are ascending and disjoint, so one pass yields the glyphs in order.
+    for (font_data.ranges) |range| {
+        var code = range.start;
+        while (code <= range.end) : (code += 1) {
+            if (!filter.matches(code)) continue;
+            try glyphs.putNoClobber(code, .{ .width = 8, .height = 8, .x_offset = 0, .y_offset = 0, .device_width = 8, .bitmap_offset = data.items.len });
+            try data.appendSlice(gpa, range.data[(code - range.start) * 8 ..][0..8]);
         }
     }
+    if (glyphs.count() == 0) return error.NoCharactersFound;
 
-    // Build glyph map and data
-    var glyph_map: std.AutoHashMap(u32, usize) = .init(gpa);
-    errdefer glyph_map.deinit();
-
-    var glyph_data_list = try gpa.alloc(GlyphData, unique_chars.items.len);
-    errdefer gpa.free(glyph_data_list);
-
-    // Calculate total bitmap size needed
-    const total_size = unique_chars.items.len * 8; // 8 bytes per character
-    var bitmap_data = try gpa.alloc(u8, total_size);
-    errdefer gpa.free(bitmap_data);
-
-    // Copy character data; every candidate came from font_data.ranges, so lookup can't fail
-    for (unique_chars.items, 0..) |code, idx| {
-        const char_data = font_data.findCharData(code).?;
-
-        try glyph_map.put(code, idx);
-
-        glyph_data_list[idx] = GlyphData{
-            .width = 8,
-            .height = 8,
-            .x_offset = 0,
-            .y_offset = 0,
-            .device_width = 8,
-            .bitmap_offset = idx * 8,
-        };
-
-        @memcpy(bitmap_data[idx * 8 .. (idx + 1) * 8], char_data);
-    }
-
-    const font_name = try gpa.dupe(u8, "8x8 Unicode");
-    errdefer gpa.free(font_name);
-
-    return BitmapFont{
-        .name = font_name,
+    const name = try gpa.dupe(u8, "8x8 Unicode");
+    errdefer gpa.free(name);
+    return .{
+        .name = name,
         .char_width = 8,
         .char_height = 8,
-        .first_char = 0, // Not used with glyph_map
-        .last_char = 0, // Not used with glyph_map
-        .data = bitmap_data,
-        .glyph_map = glyph_map,
-        .glyph_data = glyph_data_list,
+        .data = try data.toOwnedSlice(gpa),
+        .glyphs = glyphs,
     };
 }
 
@@ -164,8 +95,7 @@ test "create ASCII font dynamically" {
     try testing.expectEqual(@as(u8, 8), dynamic_font.char_height);
 
     // Should have glyph map since it's dynamically created
-    try testing.expect(dynamic_font.glyph_map != null);
-    try testing.expect(dynamic_font.glyph_data != null);
+    try testing.expect(dynamic_font.glyphs != null);
 
     // Test getting character data through glyph map
     const char_data = dynamic_font.getCharData('A');
@@ -220,7 +150,7 @@ test "create font with all available ranges" {
     defer all_font.deinit(testing.allocator);
 
     // Should have many characters available
-    try testing.expect(all_font.glyph_map.?.count() > 200);
+    try testing.expect(all_font.glyphs.?.count() > 200);
 
     // Test various ranges are included
     try testing.expect(all_font.getCharData('A') != null); // ASCII

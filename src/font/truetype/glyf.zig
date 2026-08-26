@@ -14,7 +14,6 @@ const Outline = @import("../Outline.zig");
 pub const max_composite_depth = 8;
 /// Component visits allowed per top-level glyph; bounds the fan-out of nested composites.
 pub const max_composite_components = 1024;
-pub const max_outline_points = 0xFFFF;
 
 pub const flag_on_curve: u8 = 0x01;
 const flag_x_short: u8 = 0x02;
@@ -64,43 +63,22 @@ fn glyphReader(font: VectorFont, range: Range) Error!Reader {
     return .init(try glyf.slice(range.offset, range.len));
 }
 
-/// Resolves `gid` (composites included) into an owned `Outline`: one walk to count,
-/// one to fill, so exactly two allocations.
+/// Resolves `gid` (composites included) into an owned `Outline`.
 pub fn outline(font: VectorFont, gpa: Allocator, gid: u16) (Error || Allocator.Error)!Outline {
-    var sink: Sink = .{};
-    var budget: u32 = max_composite_components;
-    try walk(font, gid, .identity, 0, &budget, &sink);
-    if (sink.n > max_outline_points or sink.c > max_outline_points) return error.TooManyPoints;
+    const Glyph = struct {
+        font: VectorFont,
+        gid: u16,
 
-    const points = try gpa.alloc(Outline.Point, sink.n);
-    errdefer gpa.free(points);
-    const contour_ends = try gpa.alloc(u32, sink.c);
-    errdefer gpa.free(contour_ends);
-
-    sink = .{ .points = points, .contour_ends = contour_ends };
-    budget = max_composite_components;
-    try walk(font, gid, .identity, 0, &budget, &sink);
-    return .{ .points = points, .contour_ends = contour_ends };
+        fn walkGlyph(self: @This(), sink: *Sink) Error!void {
+            var budget: u32 = max_composite_components;
+            try walk(self.font, self.gid, .identity, 0, &budget, sink);
+        }
+    };
+    return Outline.Builder.build(gpa, Glyph{ .font = font, .gid = gid }, Glyph.walkGlyph);
 }
 
-/// Receives decoded points; counts only when the output slices are absent, which lets
-/// simple glyphs be sized from their header without decoding.
-const Sink = struct {
-    points: ?[]Outline.Point = null,
-    contour_ends: ?[]u32 = null,
-    n: u32 = 0,
-    c: u32 = 0,
-
-    fn point(self: *Sink, x: f32, y: f32, on_curve: bool) void {
-        if (self.points) |points| points[self.n] = .{ .x = x, .y = y, .kind = if (on_curve) .on_curve else .quad_control };
-        self.n += 1;
-    }
-
-    fn endContour(self: *Sink) void {
-        if (self.contour_ends) |ends| ends[self.c] = self.n;
-        self.c += 1;
-    }
-};
+/// Simple glyphs are sized from their header, so a counting pass never decodes them.
+const Sink = Outline.Builder;
 
 /// Component transform: x' = a·x + c·y + dx, y' = b·x + d·y + dy.
 const Affine = struct {
@@ -219,7 +197,7 @@ fn simple(r: Reader, num_contours: u16, transform: Affine, sink: *Sink) Error!vo
         x += try coordDelta(r, &x_off, flag, flag_x_short, flag_x_same_or_positive);
         y += try coordDelta(r, &y_off, flag, flag_y_short, flag_y_same_or_positive);
         const p = transform.apply(@floatFromInt(x), @floatFromInt(y));
-        sink.point(p[0], p[1], flag & flag_on_curve != 0);
+        sink.emit(p[0], p[1], if (flag & flag_on_curve != 0) .on_curve else .quad_control);
         if (i == contour_end) {
             sink.endContour();
             contour += 1;

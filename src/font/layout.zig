@@ -8,7 +8,6 @@ const Font = @import("../font.zig").Font;
 const BitmapFont = @import("BitmapFont.zig");
 const VectorFont = @import("VectorFont.zig");
 const Rectangle = @import("../geometry.zig").Rectangle;
-const as = @import("../meta.zig").as;
 
 pub const TextAlign = enum { left, center, right };
 pub const VerticalAlign = enum { top, middle, bottom };
@@ -32,9 +31,7 @@ pub const TextLayout = struct {
 /// `letter_spacing` after every glyph for either kind. Wrapping and measuring walk the
 /// text once through it.
 pub const Pen = struct {
-    const Bitmap = struct { font: BitmapFont, scale: f32, x: f32 = 0 };
-
-    inner: union(enum) { bitmap: Bitmap, vector: VectorFont.Layout },
+    inner: union(enum) { bitmap: BitmapFont.Layout, vector: VectorFont.Layout },
     iter: std.unicode.Utf8Iterator,
     letter_spacing: f32,
     glyphs: usize = 0,
@@ -42,7 +39,11 @@ pub const Pen = struct {
     pub fn init(font: Font, text: []const u8, size: f32, letter_spacing: f32) Pen {
         return .{
             .inner = switch (font) {
-                .bitmap => |b| .{ .bitmap = .{ .font = b, .scale = b.scaleFor(size) } },
+                .bitmap => |b| blk: {
+                    var layout: BitmapFont.Layout = .init(b, text, b.scaleFor(size));
+                    layout.letter_spacing = letter_spacing;
+                    break :blk .{ .bitmap = layout };
+                },
                 .vector => |v| blk: {
                     var layout: VectorFont.Layout = .init(v, text, size);
                     layout.letter_spacing = letter_spacing;
@@ -65,8 +66,7 @@ pub const Pen = struct {
     pub fn next(self: *Pen) ?Glyph {
         const codepoint = self.iter.nextCodepoint() orelse return null;
         switch (self.inner) {
-            .bitmap => |*b| b.x += as(f32, b.font.getCharAdvanceWidth(codepoint)) * b.scale + self.letter_spacing,
-            .vector => |*v| _ = v.place(codepoint),
+            inline else => |*layout| _ = layout.place(codepoint),
         }
         self.glyphs += 1;
         return .{ .codepoint = codepoint, .end = self.iter.i };
@@ -77,8 +77,7 @@ pub const Pen = struct {
     pub fn width(self: Pen) f32 {
         if (self.glyphs == 0) return 0;
         const x = switch (self.inner) {
-            .bitmap => |b| b.x,
-            .vector => |v| v.x,
+            inline else => |layout| layout.x,
         };
         return @max(0, x - self.letter_spacing);
     }
