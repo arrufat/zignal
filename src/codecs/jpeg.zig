@@ -294,10 +294,7 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
     const bytes = try encode(T, allocator, image, .{ .subsampling = .yuv420 });
     defer allocator.free(bytes);
 
-    const file = if (Io.Dir.path.isAbsolute(file_path))
-        try Io.Dir.createFileAbsolute(io, file_path, .{})
-    else
-        try Io.Dir.cwd().createFile(io, file_path, .{});
+    const file = try Io.Dir.cwd().createFile(io, file_path, .{});
     defer file.close(io);
     try file.writeStreamingAll(io, bytes);
 }
