@@ -39,6 +39,7 @@
 - **iTerm2 Inline Image Protocol**: Added `terminal.iterm2` — PNG-encodes and base64-wraps an image into the iTerm2 `OSC 1337` inline-image sequence, with the same aspect-preserving scaling as the kitty/sixel encoders. Wired into `DisplayFormat` (new `.iterm2` variant) and the `.auto` degradation chain (now kitty → iterm2 → sixel → sgr → braille), the CLI `--protocol iterm2`, and terminal detection (`terminal.isIterm2Supported`, via an XTVERSION probe matching iTerm2/WezTerm).
 
 ### Improvements
+- **Text blocks lay out once**: `drawTextBox` keeps the wrapped lines from a single pass instead of measuring the block first, and unwrapped lines are only measured when the alignment needs their width (`Lines.Line.width` is now optional, `Lines.width` measures on demand), so `drawText` no longer walks every line twice. Cached text draws ~20% faster, uncached ~9%.
 - **Direction-independent polygon antialiasing**: `Canvas.fillPolygon` in `.soft` mode previously only ramped alpha at the left/right ends of each scanline span, so near-horizontal edges rendered with hard stair-steps. It now samples each pixel row at 8 sub-scanlines with exact horizontal coverage, giving smooth edges in every direction. Affects `fillPolygon`, `fillSplinePolygon`, and thick `drawArc` in `.soft` mode; `.fast` output is unchanged.
 - **Single-Threaded Build Robustness**: Sixel's palette LUT cache skips its atomic spinlock under `builtin.single_threaded` (avoids a latent panic on `wasm32-freestanding`).
 

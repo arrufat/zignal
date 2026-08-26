@@ -108,6 +108,9 @@ pub fn Canvas(comptime T: type) type {
         const max_ring_profile = 64;
         /// Below this many edges the fast fill tests them all per row instead of bucketing.
         const few_edges = 64;
+        /// Stack scratch (bytes) for the lines of a text block: 64 lines, longer texts spill
+        /// to the heap.
+        const lines_scratch_size = 64 * @sizeOf(text_layout.Lines.Line);
         /// Stack scratch (bytes) for polygon fills: edges and crossings for 256 vertices, a
         /// 1024-pixel coverage row and a 12k-cell area accumulator (a 110x110 shape); larger
         /// inputs spill to the heap.
@@ -2320,24 +2323,33 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Shared by every text entry point: breaks `text` into lines, places the block and
-        /// each line inside `box` per `layout`, and draws the lines.
+        /// each line inside `box` per `layout`, and draws the lines. The lines are kept from
+        /// the one wrapping pass, since placing the block needs their count first.
         fn renderText(self: Self, text: []const u8, box: Rectangle(f32), paint: Paint, font: Font, font_size: ?f32, layout: TextLayout, style: GlyphStyle, mode: DrawMode) !void {
             const px = font_size orelse font.defaultSize();
             if (px <= 0) return;
             const max_width: ?f32 = if (layout.wrap) box.width() else null;
-            const advance = text_layout.lineAdvance(font, px, layout);
-            var y = box.t;
-            if (layout.valign != .top) {
-                const block = text_layout.measure(font, text, px, max_width, layout).b;
-                y = if (layout.valign == .middle) box.t + (box.height() - block) / 2 else box.b - block;
-            }
-
             var lines: text_layout.Lines = .init(font, text, px, max_width, layout.letter_spacing);
-            while (lines.next()) |line| : (y += advance) {
+            var stack: [lines_scratch_size]u8 align(16) = undefined;
+            var buffer_first: std.heap.BufferFirstAllocator = .init(&stack, self.allocator);
+            const scratch = buffer_first.allocator();
+            var kept: std.ArrayList(text_layout.Lines.Line) = .empty;
+            defer kept.deinit(scratch);
+            while (lines.next()) |line| try kept.append(scratch, line);
+
+            const advance = text_layout.lineAdvance(font, px, layout);
+            const block = as(f32, kept.items.len) * advance;
+            const top: f32 = switch (layout.valign) {
+                .top => box.t,
+                .middle => box.t + (box.height() - block) / 2,
+                .bottom => box.b - block,
+            };
+            for (kept.items, 0..) |line, i| {
+                const y = top + as(f32, i) * advance;
                 const x: f32 = switch (layout.halign) {
                     .left => box.l,
-                    .center => box.l + (box.width() - line.width) / 2,
-                    .right => box.r - line.width,
+                    .center => box.l + (box.width() - lines.width(line)) / 2,
+                    .right => box.r - lines.width(line),
                 };
                 const position: Point(2, f32) = .init(.{ x, y });
                 switch (font) {
