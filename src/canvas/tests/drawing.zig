@@ -653,6 +653,7 @@ test "glyph coverage into a caller-sized mask" {
 
 const Font = @import("../../font.zig").Font;
 const TextLayout = @import("../../font.zig").TextLayout;
+const as = @import("../../meta.zig").as;
 const font8x8 = @import("../../font/font8x8.zig");
 
 fn blankImage(allocator: std.mem.Allocator) !Image(Rgba) {
@@ -685,7 +686,10 @@ test "drawTextBox places lines where drawText would" {
     const canvas: Canvas(Rgba) = .init(allocator, actual);
 
     var buf: [synthetic.buffer_size]u8 = undefined;
-    const fonts = [_]Font{ .{ .bitmap = font8x8.basic }, .{ .vector = synthetic.font(&buf, .{}) } };
+    var cached_buf: [synthetic.buffer_size]u8 = undefined;
+    var cached = try cachedFont(&cached_buf, .{});
+    defer cached.disableCache();
+    const fonts = [_]Font{ .{ .bitmap = font8x8.basic }, .{ .vector = synthetic.font(&buf, .{}) }, cached };
     for (fonts) |font| {
         const size: f32 = 10;
         const box: Rectangle(f32) = .{ .l = 10, .t = 10, .r = 90, .b = 50 };
@@ -724,6 +728,146 @@ test "drawTextBox places lines where drawText would" {
         // The vector font kerns A→B, which the two-call reference lacks.
         if (font == .bitmap) try expect(samePixels(expected, actual)) else try expect(inkCount(actual) > 0);
     }
+}
+
+/// A synthetic vector font with its glyph cache enabled; `disableCache` it when done.
+fn cachedFont(buf: *[synthetic.buffer_size]u8, opts: synthetic.Options) !Font {
+    var vector = synthetic.font(buf, opts);
+    try vector.enableCache(testing.allocator);
+    return .{ .vector = vector };
+}
+
+fn absDiff(a: usize, b: usize) usize {
+    return @max(a, b) - @min(a, b);
+}
+
+fn maxChannelDiff(a: Image(Rgba), b: Image(Rgba)) u8 {
+    var worst: u8 = 0;
+    for (std.mem.sliceAsBytes(a.data), std.mem.sliceAsBytes(b.data)) |x, y| worst = @max(worst, @max(x, y) - @min(x, y));
+    return worst;
+}
+
+fn inkBox(img: Image(Rgba)) Rectangle(usize) {
+    var box: Rectangle(usize) = .{ .l = img.cols, .t = img.rows, .r = 0, .b = 0 };
+    for (0..img.rows) |r| for (0..img.cols) |c| if (!isWhite(img, r, c)) {
+        box.l = @min(box.l, c);
+        box.t = @min(box.t, r);
+        box.r = @max(box.r, c + 1);
+        box.b = @max(box.b, r + 1);
+    };
+    return box;
+}
+
+test "cached text matches uncached" {
+    const allocator = testing.allocator;
+    var expected = try blankImage(allocator);
+    defer expected.deinit(allocator);
+    var actual = try blankImage(allocator);
+    defer actual.deinit(allocator);
+    const reference: Canvas(Rgba) = .init(allocator, expected);
+    const canvas: Canvas(Rgba) = .init(allocator, actual);
+
+    for ([_]synthetic.Options{ .{}, .{ .cff = true } }) |opts| {
+        var plain_buf: [synthetic.buffer_size]u8 = undefined;
+        const plain: Font = .{ .vector = synthetic.font(&plain_buf, opts) };
+        var buf: [synthetic.buffer_size]u8 = undefined;
+        var cached = try cachedFont(&buf, opts);
+        defer cached.disableCache();
+        const cache = cached.vector.cache.?;
+
+        // A glyph at an integer origin differs only by the 8-bit mask rounding: at 40 px the
+        // baseline sits at 36 px. (Later glyphs in a string sit at fractional advances, and
+        // most sizes at a fractional baseline, so they get the quarter-pixel snap.)
+        expected.fill(Rgba.white);
+        actual.fill(Rgba.white);
+        try reference.drawText("A", .init(.{ 4, 20 }), Rgba.black, plain, 40, .soft);
+        try canvas.drawText("A", .init(.{ 4, 20 }), Rgba.black, cached, 40, .soft);
+        try expect(inkCount(actual) > 100);
+        try expect(maxChannelDiff(expected, actual) <= 2);
+        try expect(cache.mask_stats.misses == 1 and cache.mask_stats.hits == 0);
+
+        // A fractional origin is snapped to a quarter pixel: same ink, edges within a phase.
+        expected.fill(Rgba.white);
+        actual.fill(Rgba.white);
+        try reference.drawText("ABCDEF", .init(.{ 4.3, 20.7 }), Rgba.black, plain, 36, .soft);
+        try canvas.drawText("ABCDEF", .init(.{ 4.3, 20.7 }), Rgba.black, cached, 36, .soft);
+        try expect(maxChannelDiff(expected, actual) <= 128);
+        try expect(absDiff(inkCount(expected), inkCount(actual)) <= inkCount(expected) / 20);
+        const box_expected = inkBox(expected);
+        const box_actual = inkBox(actual);
+        inline for (.{ "l", "t", "r", "b" }) |edge| {
+            try expect(absDiff(@field(box_expected, edge), @field(box_actual, edge)) <= 1);
+        }
+
+        // Masks are deterministic: drawing again reproduces the cached image exactly.
+        expected.fill(Rgba.white);
+        try reference.drawText("ABCDEF", .init(.{ 4.3, 20.7 }), Rgba.black, cached, 36, .soft);
+        try expect(samePixels(expected, actual));
+
+        // Hard-edged and outlined text never use masks and stay byte-identical.
+        expected.fill(Rgba.white);
+        actual.fill(Rgba.white);
+        try reference.drawText("ABC", .init(.{ 4.3, 20.7 }), Rgba.black, plain, 36, .fast);
+        try canvas.drawText("ABC", .init(.{ 4.3, 20.7 }), Rgba.black, cached, 36, .fast);
+        try expect(inkCount(actual) > 100);
+        try expect(samePixels(expected, actual));
+        expected.fill(Rgba.white);
+        actual.fill(Rgba.white);
+        try reference.drawTextOutline("ABC", .init(.{ 4.3, 20.7 }), Rgba.black, plain, 36, 2, .soft);
+        try canvas.drawTextOutline("ABC", .init(.{ 4.3, 20.7 }), Rgba.black, cached, 36, 2, .soft);
+        try expect(inkCount(actual) > 100);
+        try expect(samePixels(expected, actual));
+    }
+}
+
+test "the cache is hit on the second draw" {
+    const allocator = testing.allocator;
+    var img = try blankImage(allocator);
+    defer img.deinit(allocator);
+    const canvas: Canvas(Rgba) = .init(allocator, img);
+    var buf: [synthetic.buffer_size]u8 = undefined;
+    var font = try cachedFont(&buf, .{});
+    defer font.disableCache();
+    const cache = font.vector.cache.?;
+    const Stats = @import("../../font.zig").GlyphCache.Stats;
+
+    try canvas.drawText("AB", .init(.{ 4, 20 }), Rgba.black, font, 36, .soft);
+    try expectEqual(Stats{ .hits = 0, .misses = 2 }, cache.mask_stats);
+    try expectEqual(Stats{ .hits = 0, .misses = 2 }, cache.outline_stats);
+    try canvas.drawText("AB", .init(.{ 4, 20 }), Rgba.black, font, 36, .soft);
+    try expectEqual(Stats{ .hits = 2, .misses = 2 }, cache.mask_stats);
+    try expectEqual(Stats{ .hits = 0, .misses = 2 }, cache.outline_stats);
+    // A new phase needs new masks, but the outlines are reused.
+    try canvas.drawText("AB", .init(.{ 4.5, 20 }), Rgba.black, font, 36, .soft);
+    try expectEqual(Stats{ .hits = 2, .misses = 4 }, cache.mask_stats);
+    try expectEqual(Stats{ .hits = 2, .misses = 2 }, cache.outline_stats);
+    try expectEqual(@as(usize, 4), cache.masks.count());
+}
+
+test "mask budget eviction while drawing" {
+    const allocator = testing.allocator;
+    var img = try blankImage(allocator);
+    defer img.deinit(allocator);
+    const canvas: Canvas(Rgba) = .init(allocator, img);
+    var buf: [synthetic.buffer_size]u8 = undefined;
+    var font = try cachedFont(&buf, .{});
+    defer font.disableCache();
+    const cache = font.vector.cache.?;
+
+    // Sixteen phases of six glyphs at ~700 bytes each overflow a 16 KB budget.
+    cache.max_mask_bytes = 16 * 1024;
+    for (0..4) |px| for (0..4) |py| {
+        try canvas.drawText("ABCDEF", .init(.{ 4 + as(f32, px) / 4, 20 + as(f32, py) / 4 }), Rgba.black, font, 36, .soft);
+    };
+    try expect(inkCount(img) > 100);
+    try expect(cache.evictions >= 1);
+    try expect(cache.mask_bytes <= 16 * 1024);
+    // A glyph over a sixteenth of the budget (72x84 px here) is drawn directly, not stored.
+    const before = cache.masks.count();
+    img.fill(Rgba.white);
+    try canvas.drawText("A", .init(.{ 0, 0 }), Rgba.black, font, 120, .soft);
+    try expect(inkCount(img) > 100);
+    try expectEqual(before, cache.masks.count());
 }
 
 test "outlined glyphs are hollow, halos dilate bitmaps" {

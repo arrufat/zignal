@@ -13,6 +13,7 @@ const BitmapFont = @import("../font.zig").BitmapFont;
 const Font = @import("../font.zig").Font;
 const VectorFont = @import("../font.zig").VectorFont;
 const Outline = @import("../font.zig").Outline;
+const GlyphCache = @import("../font.zig").GlyphCache;
 const TextLayout = @import("../font.zig").TextLayout;
 const text_layout = @import("../font.zig").layout;
 const Rectangle = @import("../geometry.zig").Rectangle;
@@ -241,10 +242,23 @@ pub fn Canvas(comptime T: type) type {
             inline fn cover(p: Paint, dest: *T, alpha: f32) void {
                 if (alpha >= 1) return p.put(dest);
                 if (alpha <= 0) return;
-                if (comptime T == Rgb or T == Rgba) {
-                    if (p.blending == .normal and p.rgba.a == 255 and (T == Rgb or dest.a == 255)) return p.coverOpaque(dest, alpha);
-                }
+                if (p.opaqueOver(dest)) return p.coverOpaque(dest, alpha);
                 assignPixel(dest, p.rgba.fade(alpha), p.blending);
+            }
+
+            /// `cover` with 8-bit coverage, as stored in masks; the byte is used as is rather
+            /// than round-tripped through a float.
+            inline fn coverByte(p: Paint, dest: *T, value: u8) void {
+                if (value == 255) return p.put(dest);
+                if (value == 0) return;
+                if (p.opaqueOver(dest)) return p.mixOpaque(dest, value);
+                assignPixel(dest, p.rgba.fade(as(f32, value) / 255), p.blending);
+            }
+
+            /// Whether normal blending of this paint over `dest` reduces to `mixOpaque`.
+            inline fn opaqueOver(p: Paint, dest: *const T) bool {
+                if (comptime T != Rgb and T != Rgba) return false;
+                return p.blending == .normal and p.rgba.a == 255 and (T == Rgb or dest.a == 255);
             }
 
             /// Normal blending of the opaque paint over an opaque pixel: `blendColors`'
@@ -253,6 +267,10 @@ pub fn Canvas(comptime T: type) type {
                 const a8: u8 = @trunc(255 * @min(alpha, 1));
                 if (a8 == 0) return;
                 if (a8 == 255) return p.put(dest);
+                p.mixOpaque(dest, a8);
+            }
+
+            inline fn mixOpaque(p: Paint, dest: *T, a8: u8) void {
                 const t: u32 = a8;
                 const w: u32 = 255 - t;
                 inline for (.{ "r", "g", "b" }) |channel| {
@@ -2331,23 +2349,27 @@ pub fn Canvas(comptime T: type) type {
 
         /// Lays out one line with `VectorFont.Layout`, then fills or strokes each glyph's
         /// outline. Glyphs that fail to parse are skipped; only allocation errors propagate.
+        /// With a glyph cache, antialiased fills come from cached coverage masks.
         fn drawTextVector(self: Self, text: []const u8, position: Point(2, f32), paint: Paint, font: VectorFont, font_size: f32, letter_spacing: f32, style: GlyphStyle, mode: DrawMode) !void {
             const canvas_rect = self.imageRect();
             const margin = style.reach() + 1;
             var layout: VectorFont.Layout = .init(font, text, font_size);
             layout.letter_spacing = letter_spacing;
+            const use_masks = font.cache != null and mode == .soft and style == .fill;
             while (layout.next()) |item| {
                 const ink = layout.inkBounds(item) orelse continue;
                 if (ink.translate(position.x(), position.y()).grow(margin).intersect(canvas_rect) == null) continue;
-                var outline = font.outline(self.allocator, item.gid) catch |err| switch (err) {
+                const transform = layout.transform(item, position);
+                if (use_masks and try self.drawCachedGlyph(font, item, ink, transform, paint)) continue;
+                var ref = font.outlineRef(self.allocator, item.gid) catch |err| switch (err) {
                     error.OutOfMemory => return error.OutOfMemory,
                     else => continue,
                 };
-                defer outline.deinit(self.allocator);
+                defer ref.deinit(self.allocator);
                 var stack: [glyph_scratch_size]u8 align(16) = undefined;
                 var buffer_first: std.heap.BufferFirstAllocator = .init(&stack, self.allocator);
                 const scratch = buffer_first.allocator();
-                const flat = try FlatGlyph.init(scratch, outline, layout.transform(item, position));
+                const flat = try FlatGlyph.init(scratch, ref.outline, transform);
                 defer flat.deinit(scratch);
                 switch (mode) {
                     inline else => |m| switch (style) {
@@ -2355,6 +2377,57 @@ pub fn Canvas(comptime T: type) type {
                         .outline => |width| try self.strokePolylines(scratch, flat.polys, true, width, m, paint),
                     },
                 }
+            }
+        }
+
+        /// Paints `item` from its cached coverage mask, rasterizing one on a miss with the pen
+        /// origin snapped to a quarter pixel. False when the mask is over the cache's size
+        /// limit or cannot be allocated, so the caller draws the glyph directly.
+        fn drawCachedGlyph(self: Self, font: VectorFont, item: VectorFont.Layout.Item, ink: Rectangle(f32), transform: Outline.Transform, paint: Paint) !bool {
+            assert(transform.shear == 0);
+            const cache = font.cache.?;
+            const placed = GlyphCache.place(item.gid, transform);
+            const mask = cache.getMask(placed.key) orelse blk: {
+                // The snapped glyph's box relative to the integer pen position, with a pixel
+                // of antialiasing margin.
+                const box = ink.translate(placed.phase.x() - item.origin.x(), placed.phase.y() - item.origin.y()).grow(1);
+                const left = @floor(box.l);
+                const top = @floor(box.t);
+                const width = @ceil(box.r) - left;
+                const height = @ceil(box.b) - top;
+                if (!cache.fits(width, height)) return false;
+                var ref = font.outlineRef(self.allocator, item.gid) catch |err| switch (err) {
+                    error.OutOfMemory => return error.OutOfMemory,
+                    else => return true,
+                };
+                defer ref.deinit(self.allocator);
+                const mask = cache.reserve(placed.key, @trunc(left), @trunc(top), @trunc(width), @trunc(height)) catch return false;
+                errdefer cache.drop(placed.key);
+                const mask_canvas: Canvas(u8) = .init(self.allocator, .initFromSlice(mask.height, mask.width, mask.data));
+                const origin: Point(2, f32) = .init(.{ placed.phase.x() - left, placed.phase.y() - top });
+                try mask_canvas.rasterizeGlyph(ref.outline, .{ .scale = transform.scale, .origin = origin });
+                break :blk mask;
+            };
+            self.blitMask(.initFromSlice(mask.height, mask.width, mask.data), placed.x + mask.left, placed.y + mask.top, paint);
+            return true;
+        }
+
+        /// Paints an 8-bit coverage mask with its top-left corner at (`left`, `top`), clipped
+        /// to the image.
+        fn blitMask(self: Self, mask: Image(u8), left: i32, top: i32, paint: Paint) void {
+            const box: Rectangle(i32) = .{ .l = left, .t = top, .r = left + @as(i32, @intCast(mask.cols)), .b = top + @as(i32, @intCast(mask.rows)) };
+            const clip = box.intersect(self.image.getRectangle().as(i32)) orelse return;
+            // Whether every pixel takes the integer blend, decided once rather than per pixel.
+            const opaque_normal = T == Rgb and paint.blending == .normal and paint.rgba.a == 255;
+            var y = clip.t;
+            while (y < clip.b) : (y += 1) {
+                const src = mask.data[@as(usize, @intCast(y - top)) * mask.stride ..][@intCast(clip.l - left)..@intCast(clip.r - left)];
+                const dst = self.image.data[@as(usize, @intCast(y)) * self.image.stride ..][@intCast(clip.l)..@intCast(clip.r)];
+                if (opaque_normal) {
+                    for (src, dst) |value, *px| {
+                        if (value == 255) px.* = paint.solid else if (value != 0) paint.mixOpaque(px, value);
+                    }
+                } else for (src, dst) |value, *px| paint.coverByte(px, value);
             }
         }
 

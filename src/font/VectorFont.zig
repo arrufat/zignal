@@ -1,7 +1,9 @@
 //! A scalable font parsed in place from TrueType or CFF OpenType bytes, standalone
 //! or one face of a `.ttc` collection. Glyph outlines, advances and kerning are read
 //! on demand from the borrowed buffer; nothing is decoded up front, so loading is
-//! allocation-free.
+//! allocation-free. `enableCache` attaches an optional `GlyphCache` that remembers what
+//! was read and, when drawing, the rasterized glyphs; copies of the font share it, so
+//! enable it before copying the font into a `Font` or a `Layout`, and free it once.
 //!
 //! Example:
 //! ```zig
@@ -20,6 +22,7 @@ const as = @import("../meta.zig").as;
 const font_mod = @import("../font.zig");
 const truetype = @import("truetype.zig");
 const Outline = @import("Outline.zig");
+const GlyphCache = @import("GlyphCache.zig");
 
 const VectorFont = @This();
 
@@ -63,6 +66,9 @@ strikeout_size: i16,
 strikeout_position: i16,
 tables: truetype.Tables,
 cmap: truetype.cmap.Subtable,
+/// Memo of parsed glyphs and rasterized masks; null until `enableCache`. Shared by every
+/// copy of the font, freed by `deinit` or `disableCache`.
+cache: ?*GlyphCache = null,
 
 /// Parses the header tables of `data`, which must outlive the font. No allocation, no I/O.
 /// A collection yields its first face; see `loadFromBytesFace`.
@@ -89,14 +95,40 @@ pub fn loadFace(io: Io, gpa: Allocator, path: []const u8, face: u32) !VectorFont
     return loadFromBytesFace(data, face);
 }
 
-/// Frees the bytes of a font from `load`. Not for fonts from `loadFromBytes`.
+/// Frees the bytes of a font from `load`, and its cache. Not for fonts from
+/// `loadFromBytes`, which only need `disableCache`.
 pub fn deinit(self: *VectorFont, gpa: Allocator) void {
+    self.disableCache();
     gpa.free(self.data);
     self.* = undefined;
 }
 
+/// Attaches a glyph cache allocated from `gpa`; a second call keeps the existing one.
+pub fn enableCache(self: *VectorFont, gpa: Allocator) Allocator.Error!void {
+    if (self.cache != null) return;
+    const cache = try gpa.create(GlyphCache);
+    cache.* = .init(gpa);
+    self.cache = cache;
+}
+
+/// Frees the cache, if any; other copies of the font must not use it afterwards.
+pub fn disableCache(self: *VectorFont) void {
+    const cache = self.cache orelse return;
+    const gpa = cache.gpa;
+    cache.deinit();
+    gpa.destroy(cache);
+    self.cache = null;
+}
+
 /// Glyph index for `codepoint`; 0 (`.notdef`) when unmapped.
 pub fn glyphIndex(self: VectorFont, codepoint: u21) u16 {
+    const cache = self.cache orelse return self.lookupGlyphIndex(codepoint);
+    const slot = cache.codepoints.getOrPut(cache.gpa, codepoint) catch return self.lookupGlyphIndex(codepoint);
+    if (!slot.found_existing) slot.value_ptr.* = self.lookupGlyphIndex(codepoint);
+    return slot.value_ptr.*;
+}
+
+fn lookupGlyphIndex(self: VectorFont, codepoint: u21) u16 {
     const r: truetype.Reader = .init(self.data);
     const gid = truetype.cmap.lookup(r.table(self.tables.cmap), self.cmap, codepoint);
     return if (gid < self.num_glyphs) gid else 0;
@@ -105,6 +137,19 @@ pub fn glyphIndex(self: VectorFont, codepoint: u21) u16 {
 /// Advance and left side bearing; the widest advance for an invalid index.
 pub fn glyphMetrics(self: VectorFont, gid: u16) GlyphMetrics {
     if (gid >= self.num_glyphs) return .{ .advance = self.advance_width_max, .lsb = 0 };
+    const g = self.cachedGlyph(gid) orelse return self.readMetrics(gid);
+    if (g.metrics == null) g.metrics = self.readMetrics(gid);
+    return g.metrics.?;
+}
+
+/// The cache entry for `gid`; null without a cache, for an invalid id or when out of memory.
+fn cachedGlyph(self: VectorFont, gid: u16) ?*GlyphCache.Glyph {
+    const cache = self.cache orelse return null;
+    if (gid >= self.num_glyphs) return null;
+    return cache.glyph(gid);
+}
+
+fn readMetrics(self: VectorFont, gid: u16) GlyphMetrics {
     const r: truetype.Reader = .init(self.data);
     const hmtx = r.table(self.tables.hmtx);
     const last = self.num_h_metrics - 1;
@@ -120,13 +165,20 @@ pub fn glyphMetrics(self: VectorFont, gid: u16) GlyphMetrics {
 /// The glyph's bounding box: from its `glyf` header, or the control box of its CFF
 /// charstring. Null for glyphs without contours (spaces, `.notdef`).
 pub fn glyphBounds(self: VectorFont, gid: u16) ?Bounds {
+    const g = self.cachedGlyph(gid) orelse return self.readBounds(gid);
+    if (g.bounds == null) g.bounds = self.readBounds(gid);
+    return g.bounds.?;
+}
+
+fn readBounds(self: VectorFont, gid: u16) ?Bounds {
     return switch (self.tables.outlines) {
         .glyf => truetype.glyf.bounds(self, gid),
         .cff => truetype.cff.bounds(self, gid),
     };
 }
 
-/// The glyph's outline in font units, composites resolved. Caller owns the result.
+/// The glyph's outline in font units, composites resolved. Caller owns the result; the
+/// cache is bypassed, see `outlineRef`.
 pub fn outline(self: VectorFont, gpa: Allocator, gid: u16) (Error || Allocator.Error)!Outline {
     return switch (self.tables.outlines) {
         .glyf => truetype.glyf.outline(self, gpa, gid),
@@ -134,8 +186,38 @@ pub fn outline(self: VectorFont, gpa: Allocator, gid: u16) (Error || Allocator.E
     };
 }
 
+/// An outline that may be borrowed from the cache; `deinit` frees it only when owned.
+pub const OutlineRef = struct {
+    outline: Outline,
+    owned: bool,
+
+    pub fn deinit(self: *OutlineRef, gpa: Allocator) void {
+        if (self.owned) self.outline.deinit(gpa);
+        self.* = undefined;
+    }
+};
+
+/// `outline` through the cache: parsed once and borrowed when one is enabled, owned by the
+/// caller otherwise. Parse failures are not remembered.
+pub fn outlineRef(self: VectorFont, gpa: Allocator, gid: u16) (Error || Allocator.Error)!OutlineRef {
+    const g = self.cachedGlyph(gid) orelse return .{ .outline = try self.outline(gpa, gid), .owned = true };
+    const cache = self.cache.?;
+    if (g.outline == null) {
+        cache.outline_stats.misses += 1;
+        g.outline = try self.outline(cache.gpa, gid);
+    } else cache.outline_stats.hits += 1;
+    return .{ .outline = g.outline.?, .owned = false };
+}
+
 /// Horizontal kerning to add to `left`'s advance when followed by `right`, in font units.
 pub fn kern(self: VectorFont, left: u16, right: u16) i16 {
+    const cache = self.cache orelse return self.lookupKern(left, right);
+    const slot = cache.kerns.getOrPut(cache.gpa, @as(u32, left) << 16 | right) catch return self.lookupKern(left, right);
+    if (!slot.found_existing) slot.value_ptr.* = self.lookupKern(left, right);
+    return slot.value_ptr.*;
+}
+
+fn lookupKern(self: VectorFont, left: u16, right: u16) i16 {
     const r: truetype.Reader = .init(self.data);
     if (self.tables.gpos) |t| return truetype.gpos.pairAdjust(r.table(t), left, right);
     if (self.tables.kern) |t| return truetype.kern.lookup(r.table(t), left, right);

@@ -128,6 +128,18 @@ def test_truetype_font(tmp_path):
         font.save(str(tmp_path / "out.bdf"))
 
 
+@pytest.mark.skipif(SYSTEM_FONT is None, reason="no TrueType font installed")
+def test_vector_font_glyph_cache():
+    # Vector fonts draw through a glyph cache: repeated draws are deterministic, at every
+    # size and position, and the cached image is a real rendering of the text.
+    font = zignal.Font.load(SYSTEM_FONT)
+    first = render("Hello", font, size=24)
+    assert inked(first) > 0
+    assert render("Hello", font, size=24) == first
+    assert render("Hello", font, size=25) != first
+    assert render("Hello", font, size=24) == first
+
+
 @pytest.mark.skipif(SYSTEM_OTF_FONT is None, reason="no CFF OpenType font installed")
 def test_cff_opentype_font():
     font = zignal.Font.load(SYSTEM_OTF_FONT)
