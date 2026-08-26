@@ -2444,7 +2444,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Draws one line of bitmap glyphs. An `.outline` style renders the line into a
-        /// coverage mask, dilates it by the stroke radius and paints it once, so the halo
+        /// coverage mask, dilates it by the stroke radius and blits it once, so the halo
         /// composites like any other shape.
         fn drawTextBitmap(self: Self, text: []const u8, position: Point(2, f32), paint: Paint, font: BitmapFont, scale: f32, letter_spacing: f32, style: GlyphStyle, mode: DrawMode) !void {
             const radius: u32 = @ceil(style.reach());
@@ -2524,11 +2524,7 @@ pub fn Canvas(comptime T: type) type {
                     }
                 }
             }
-            for (0..height) |row| {
-                for (dilated[row * width ..][0..width], 0..) |value, col| {
-                    if (value > 0) paint.cover(&self.image.data[(top + row) * self.image.stride + left + col], as(f32, value) / 255);
-                }
-            }
+            self.blitMask(.initFromSlice(height, width, dilated), @intCast(left), @intCast(top), paint);
         }
 
         /// `out[i] = max(src[i - half ..= i + half])`, clipped to the row, in O(n) (van Herk):
