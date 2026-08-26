@@ -22,18 +22,14 @@ name: []const u8,
 char_width: u8,
 /// Height of each character in pixels
 char_height: u8,
-/// First ASCII character code in the font
-first_char: u8,
-/// Last ASCII character code in the font
-last_char: u8,
-/// Raw bitmap data for all characters
-/// For fonts wider than 8 pixels, multiple bytes are used per row
-/// Data layout: [char_index][row][byte_in_row]
+/// Fixed-layout fonts (no `glyphs`) store this ASCII range contiguously in `data`, one
+/// `char_height` by `bytesPerRow` bitmap per character.
+first_char: u8 = 0,
+last_char: u8 = 0,
+/// Raw bitmap data for all characters, LSB-first within each row byte.
 data: []const u8,
-/// Optional: Map from character code to glyph data index (for variable-width fonts)
-glyph_map: ?std.AutoHashMap(u32, usize) = null,
-/// Optional: Per-character glyph data (width, offsets, etc.)
-glyph_data: ?[]const GlyphData = null,
+/// Per-codepoint glyphs of a variable-width font, each locating its bitmap in `data`.
+glyphs: ?std.AutoHashMap(u32, GlyphData) = null,
 /// Optional: Original font ascent from the source font file (for accurate save)
 font_ascent: ?i16 = null,
 
@@ -60,7 +56,7 @@ pub fn load(io: Io, allocator: Allocator, file_path: []const u8, filter: LoadFil
 
 /// Get number of bytes per row for this font
 pub fn bytesPerRow(self: BitmapFont) u32 {
-    return (@as(u32, self.char_width) + 7) / 8;
+    return GlyphData.bytesForWidth(self.char_width);
 }
 
 /// Font ascent, falling back to the character height when the source file didn't record one
@@ -73,46 +69,69 @@ pub fn scaleFor(self: BitmapFont, size: f32) f32 {
     return size / @as(f32, @floatFromInt(self.char_height));
 }
 
-/// Glyph data from the glyph map, if this codepoint has an entry
-fn mappedGlyph(self: BitmapFont, codepoint: u21) ?GlyphData {
-    const map = self.glyph_map orelse return null;
-    const idx = map.get(codepoint) orelse return null;
-    const data = self.glyph_data orelse return null;
-    if (idx >= data.len) return null;
-    return data[idx];
+/// Glyphs in the font.
+pub fn glyphCount(self: BitmapFont) u32 {
+    if (self.glyphs) |map| return map.count();
+    return if (self.first_char <= self.last_char) @as(u32, self.last_char) - self.first_char + 1 else 0;
 }
 
 /// A glyph resolved to its metadata and bitmap in a single lookup
 pub const Glyph = struct {
     info: GlyphData,
     data: []const u8,
+
+    /// The pixel at (`row`, `col`) of the bitmap: rows are `info.bytesPerRow()` bytes, LSB
+    /// first; 0 past the data.
+    pub inline fn bit(self: Glyph, row: usize, col: usize) u1 {
+        const at = row * self.info.bytesPerRow() + col / 8;
+        if (at >= self.data.len) return 0;
+        return @intCast((self.data[at] >> @intCast(col % 8)) & 1);
+    }
+
+    /// Box of the set pixels in bitmap coordinates (`r`/`b` exclusive), null for a blank glyph.
+    pub fn inkBounds(self: Glyph) ?Rectangle(u8) {
+        const bytes_per_row = self.info.bytesPerRow();
+        // Bits beyond the glyph width in the last byte may contain garbage; mask them off
+        const last_bits: u3 = @intCast(self.info.width % 8);
+        const last_mask: u8 = if (last_bits == 0) 0xFF else (@as(u8, 1) << last_bits) - 1;
+        var bounds: ?Rectangle(u8) = null;
+        for (0..self.info.height) |row| {
+            const row_data = self.data[row * bytes_per_row ..][0..bytes_per_row];
+            for (row_data, 0..) |raw, byte_idx| {
+                const byte = if (byte_idx == bytes_per_row - 1) raw & last_mask else raw;
+                if (byte == 0) continue;
+                // Pixels are LSB-first: lowest set bit is the leftmost pixel
+                const base: u8 = @intCast(byte_idx * 8);
+                const box: Rectangle(u8) = .{ .l = base + @ctz(byte), .t = @intCast(row), .r = base + 8 - @clz(byte), .b = @intCast(row + 1) };
+                bounds = if (bounds) |acc| acc.merge(box) else box;
+            }
+        }
+        return bounds;
+    }
 };
 
 /// Resolve a codepoint to its glyph info and bitmap data with a single map lookup.
 /// Returns null if the character is not in the font.
 pub fn getGlyph(self: BitmapFont, codepoint: u21) ?Glyph {
-    if (self.mappedGlyph(codepoint)) |glyph| {
-        return .{ .info = glyph, .data = self.data[glyph.bitmap_offset..][0..glyph.bitmapSize()] };
+    if (self.glyphs) |map| {
+        const info = map.get(codepoint) orelse return null;
+        return .{ .info = info, .data = self.data[info.bitmap_offset..][0..info.bitmapSize()] };
     }
-
-    // For ASCII fonts WITHOUT glyph_map, use the standard fixed-size layout
-    if (self.glyph_map == null and codepoint <= 255 and codepoint >= self.first_char and codepoint <= self.last_char) {
-        const index: u32 = @as(u8, @intCast(codepoint)) - self.first_char;
-        const bytes_per_char = @as(u32, self.char_height) * self.bytesPerRow();
-        return .{
-            .info = .{
-                .width = self.char_width,
-                .height = self.char_height,
-                .x_offset = 0,
-                .y_offset = 0,
-                .device_width = @intCast(self.char_width),
-                .bitmap_offset = index * bytes_per_char,
-            },
-            .data = self.data[index * bytes_per_char ..][0..bytes_per_char],
-        };
-    }
-
-    return null;
+    // Fixed layout: the ASCII range, one bitmap after another.
+    if (codepoint > 255 or codepoint < self.first_char or codepoint > self.last_char) return null;
+    const index: u32 = @as(u8, @intCast(codepoint)) - self.first_char;
+    const bytes_per_char = @as(u32, self.char_height) * self.bytesPerRow();
+    return .{
+        .info = .{
+            .width = self.char_width,
+            .height = self.char_height,
+            .x_offset = 0,
+            .y_offset = 0,
+            .device_width = @intCast(self.char_width),
+            .bitmap_offset = index * bytes_per_char,
+        },
+        .data = self.data[index * bytes_per_char ..][0..bytes_per_char],
+    };
 }
 
 /// Get the bitmap data for a specific character
@@ -122,175 +141,101 @@ pub fn getCharData(self: BitmapFont, codepoint: u21) ?[]const u8 {
     return glyph.data;
 }
 
-/// Get bitmap data for a specific row of a character
-/// Returns null if the character is not in the font
-pub fn getCharRow(self: BitmapFont, codepoint: u21, row: u32) ?[]const u8 {
-    const glyph = self.getGlyph(codepoint) orelse return null;
-    if (row >= glyph.info.height) return null;
-    const bytes_per_row = glyph.info.bytesPerRow();
-    return glyph.data[row * bytes_per_row ..][0..bytes_per_row];
-}
-
 /// Get the advance width for a character (how much to move the cursor)
 /// Returns per-character width if available, otherwise the default char_width
 pub fn getCharAdvanceWidth(self: BitmapFont, codepoint: u21) u16 {
-    if (self.mappedGlyph(codepoint)) |glyph| {
-        return glyph.advanceWidth();
-    }
-    return self.char_width;
+    const map = self.glyphs orelse return self.char_width;
+    const info = map.get(codepoint) orelse return self.char_width;
+    return info.advanceWidth();
 }
+
+/// Lays out one line of text at `scale`, yielding each glyph with its pen position: the
+/// bitmap counterpart of `VectorFont.Layout`. Codepoints the font lacks only advance the
+/// pen, by the character width.
+pub const Layout = struct {
+    pub const Item = struct {
+        glyph: Glyph,
+        /// Pen position of the glyph, before its advance.
+        x: f32,
+    };
+
+    font: BitmapFont,
+    scale: f32,
+    iter: std.unicode.Utf8Iterator,
+    /// The pen; set it before the first glyph to lay out from elsewhere than 0.
+    x: f32 = 0,
+    /// Extra device pixels after every glyph's advance.
+    letter_spacing: f32 = 0,
+
+    pub fn init(font: BitmapFont, text: []const u8, scale: f32) Layout {
+        return .{ .font = font, .scale = scale, .iter = .{ .bytes = text, .i = 0 } };
+    }
+
+    pub fn next(self: *Layout) ?Item {
+        while (self.iter.nextCodepoint()) |codepoint| {
+            const x = self.x;
+            if (self.place(codepoint)) |glyph| return .{ .glyph = glyph, .x = x };
+        }
+        return null;
+    }
+
+    /// Places `codepoint` at the pen and advances past it. Kept out of line: inlined into
+    /// the canvas's glyph loops it measured 40% slower.
+    pub fn place(self: *Layout, codepoint: u21) ?Glyph {
+        const glyph = self.font.getGlyph(codepoint);
+        const advance = if (glyph) |g| g.info.advanceWidth() else self.font.char_width;
+        self.x += @as(f32, advance) * self.scale;
+        self.x += self.letter_spacing;
+        return glyph;
+    }
+};
 
 /// Calculate the bounding rectangle for rendering text
 /// Returns bounds where l,t are inclusive and r,b are exclusive
 /// For example, an 8x8 character has pixels at positions 0-7, so bounds are (0,0) to (8,8)
 pub fn getTextBounds(self: BitmapFont, text: []const u8, scale: f32) Rectangle(f32) {
     var width: f32 = 0;
-    var current_line_width: f32 = 0;
+    var x: f32 = 0;
     var lines: f32 = 1;
-
-    const char_height_scaled = @as(f32, self.char_height) * scale;
-
-    var utf8_iter = std.unicode.Utf8Iterator{ .bytes = text, .i = 0 };
-    while (utf8_iter.nextCodepoint()) |codepoint| {
-        if (codepoint == '\n') {
-            width = @max(width, current_line_width);
-            current_line_width = 0;
-            lines += 1;
-        } else {
-            const char_advance = self.getCharAdvanceWidth(codepoint);
-            current_line_width += @as(f32, char_advance) * scale;
+    var iter: std.unicode.Utf8Iterator = .{ .bytes = text, .i = 0 };
+    while (iter.nextCodepoint()) |codepoint| {
+        if (codepoint != '\n') {
+            x += @as(f32, self.getCharAdvanceWidth(codepoint)) * scale;
+            continue;
         }
+        width = @max(width, x);
+        x = 0;
+        lines += 1;
     }
-    width = @max(width, current_line_width);
-    const height = lines * char_height_scaled;
-
-    // Return bounds where l,t are inclusive and r,b are exclusive
-    // For an 8x8 character, bounds should be (0,0) to (8,8)
-    // This follows the standard rectangle convention
-    return .{ .l = 0, .t = 0, .r = width, .b = height };
+    width = @max(width, x);
+    return .{ .l = 0, .t = 0, .r = width, .b = lines * (@as(f32, self.char_height) * scale) };
 }
 
 /// Calculate the tight bounding rectangle for rendering text
 /// Returns bounds that exactly encompass the visible pixels
 /// Unlike getTextBounds, this excludes character padding
 pub fn getTextBoundsTight(self: BitmapFont, text: []const u8, scale: f32) Rectangle(f32) {
-    if (text.len == 0) {
-        return Rectangle(f32){ .l = 0, .t = 0, .r = 0, .b = 0 };
-    }
-
-    var min_x: f32 = std.math.floatMax(f32);
-    var max_x: f32 = std.math.floatMin(f32);
-    var min_y: f32 = std.math.floatMax(f32);
-    var max_y: f32 = std.math.floatMin(f32);
-    var has_any_pixels = false;
-
-    var x: f32 = 0;
+    var layout: Layout = .init(self, text, scale);
     var y: f32 = 0;
-    const char_height_scaled = @as(f32, self.char_height) * scale;
-
-    var utf8_iter = std.unicode.Utf8Iterator{ .bytes = text, .i = 0 };
-    while (utf8_iter.nextCodepoint()) |codepoint| {
+    var bounds: ?Rectangle(f32) = null;
+    while (layout.iter.nextCodepoint()) |codepoint| {
         if (codepoint == '\n') {
-            x = 0;
-            y += char_height_scaled;
+            layout.x = 0;
+            y += @as(f32, self.char_height) * scale;
             continue;
         }
-
-        // Get tight bounds for this character
-        const tight = self.getCharTightBounds(codepoint);
-
-        if (tight.has_pixels) {
-            has_any_pixels = true;
-            const left = x + @as(f32, tight.bounds.l) * scale;
-            const top = y + @as(f32, tight.bounds.t) * scale;
-            const right = x + @as(f32, tight.bounds.r) * scale;
-            const bottom = y + @as(f32, tight.bounds.b) * scale;
-
-            min_x = @min(min_x, left);
-            max_x = @max(max_x, right);
-            min_y = @min(min_y, top);
-            max_y = @max(max_y, bottom);
-        }
-
-        const char_advance = self.getCharAdvanceWidth(codepoint);
-        x += @as(f32, char_advance) * scale;
-    }
-
-    if (!has_any_pixels) {
-        return Rectangle(f32){ .l = 0, .t = 0, .r = 0, .b = 0 };
-    }
-
-    return .{ .l = min_x, .t = min_y, .r = max_x, .b = max_y };
-}
-
-/// Get glyph information for a character
-pub fn getGlyphInfo(self: BitmapFont, codepoint: u21) ?GlyphData {
-    if (self.mappedGlyph(codepoint)) |glyph| {
-        return glyph;
-    }
-    // For ASCII fonts without glyph data, return default
-    if (codepoint <= 255 and codepoint >= self.first_char and codepoint <= self.last_char) {
-        return GlyphData{
-            .width = self.char_width,
-            .height = self.char_height,
-            .x_offset = 0,
-            .y_offset = 0,
-            .device_width = @intCast(self.char_width),
-            .bitmap_offset = 0,
+        const x = layout.x;
+        const glyph = layout.place(codepoint) orelse continue;
+        const ink = glyph.inkBounds() orelse continue;
+        const box: Rectangle(f32) = .{
+            .l = x + @as(f32, ink.l) * scale,
+            .t = y + @as(f32, ink.t) * scale,
+            .r = x + @as(f32, ink.r) * scale,
+            .b = y + @as(f32, ink.b) * scale,
         };
+        bounds = if (bounds) |acc| acc.merge(box) else box;
     }
-    return null;
-}
-
-const TightBounds = struct { bounds: Rectangle(u8), has_pixels: bool };
-const no_pixels: TightBounds = .{ .bounds = .{ .l = 0, .t = 0, .r = 0, .b = 0 }, .has_pixels = false };
-
-/// Get the visible bounds of a character (excluding padding)
-fn getCharTightBounds(self: BitmapFont, codepoint: u21) TightBounds {
-    const glyph = self.getGlyph(codepoint) orelse return no_pixels;
-    const glyph_info = glyph.info;
-    const char_data = glyph.data;
-
-    const bytes_per_row = glyph_info.bytesPerRow();
-    // Bits beyond the glyph width in the last byte may contain garbage; mask them off
-    const last_bits: u3 = @intCast(glyph_info.width % 8);
-    const last_mask: u8 = if (last_bits == 0) 0xFF else (@as(u8, 1) << last_bits) - 1;
-
-    var min_x: u8 = 255;
-    var max_x: u8 = 0;
-    var min_y: u8 = 255;
-    var max_y: u8 = 0;
-    var has_pixels = false;
-
-    for (0..glyph_info.height) |row| {
-        const row_data = char_data[row * bytes_per_row ..][0..bytes_per_row];
-        for (row_data, 0..) |raw, byte_idx| {
-            const byte = if (byte_idx == bytes_per_row - 1) raw & last_mask else raw;
-            if (byte == 0) continue;
-
-            // Pixels are LSB-first: lowest set bit is the leftmost pixel
-            has_pixels = true;
-            const base: u8 = @intCast(byte_idx * 8);
-            min_x = @min(min_x, base + @ctz(byte));
-            max_x = @max(max_x, base + 7 - @clz(byte));
-            min_y = @min(min_y, @as(u8, @intCast(row)));
-            max_y = @max(max_y, @as(u8, @intCast(row)));
-        }
-    }
-
-    if (!has_pixels) {
-        return no_pixels;
-    }
-
-    return .{
-        .bounds = .{
-            .l = min_x,
-            .t = min_y,
-            .r = max_x + 1, // Exclusive bound
-            .b = max_y + 1, // Exclusive bound
-        },
-        .has_pixels = true,
-    };
+    return bounds orelse .{ .l = 0, .t = 0, .r = 0, .b = 0 };
 }
 
 /// Saves the font to a file.
@@ -307,61 +252,49 @@ pub fn save(self: BitmapFont, io: Io, allocator: Allocator, file_path: []const u
 
 /// Returns the sorted list of codepoints present in this font. Caller owns the slice.
 pub fn collectCodepoints(self: BitmapFont, gpa: Allocator) ![]u21 {
-    if (self.glyph_map) |map| {
-        const keys = try gpa.alloc(u21, map.count());
-        var iter = map.iterator();
-        var idx: usize = 0;
-        while (iter.next()) |entry| : (idx += 1) {
-            keys[idx] = @intCast(entry.key_ptr.*);
-        }
+    const keys = try gpa.alloc(u21, self.glyphCount());
+    if (self.glyphs) |map| {
+        var iter = map.keyIterator();
+        for (keys) |*cp| cp.* = @intCast(iter.next().?.*);
         std.mem.sort(u21, keys, {}, std.sort.asc(u21));
-        return keys;
-    }
-
-    if (self.last_char < self.first_char) {
-        return gpa.alloc(u21, 0);
-    }
-
-    const keys = try gpa.alloc(u21, self.last_char - self.first_char + 1);
-    for (keys, 0..) |*cp, idx| {
-        cp.* = @as(u21, self.first_char) + @as(u21, @intCast(idx));
+    } else for (keys, self.first_char..) |*cp, codepoint| {
+        cp.* = @intCast(codepoint);
     }
     return keys;
 }
 
 /// Displays the font information: name, dimensions, and character range.
 pub fn format(self: BitmapFont, writer: *Io.Writer) Io.Writer.Error!void {
-    // Count total glyphs if using glyph map
-    const glyph_count: u32 = if (self.glyph_map) |map|
-        map.count()
-    else if (self.first_char <= self.last_char)
-        @as(u32, self.last_char) - self.first_char + 1
-    else
-        0;
-
-    // Determine font type
-    const font_type = if (self.glyph_map != null) "variable" else "fixed";
-
     try writer.print("BitmapFont{{ .name = \"{s}\", .char_width = {d}, .char_height = {d}, .glyphs = {d}, .type = {s} }}", .{
         self.name,
         self.char_width,
         self.char_height,
-        glyph_count,
-        font_type,
+        self.glyphCount(),
+        if (self.glyphs != null) "variable" else "fixed",
     });
 }
 
 /// Free resources (if owned)
 pub fn deinit(self: *BitmapFont, allocator: std.mem.Allocator) void {
     allocator.free(self.name);
-    if (self.glyph_map) |*map| {
-        map.deinit();
-    }
-    if (self.glyph_data) |data| {
-        allocator.free(data);
-    }
+    if (self.glyphs) |*map| map.deinit();
     allocator.free(self.data);
 }
+
+/// A three-glyph (`A`–`C`) 8x8 font for tests; static, so never `deinit` it.
+pub const test_font: BitmapFont = .{
+    .name = "TestFont",
+    .char_width = 8,
+    .char_height = 8,
+    .first_char = 'A',
+    .last_char = 'C',
+    .data = &.{
+        0x18, 0x24, 0x42, 0x42, 0x7E, 0x42, 0x42, 0x00,
+        0x7C, 0x42, 0x42, 0x7C, 0x42, 0x42, 0x7C, 0x00,
+        0x3C, 0x42, 0x40, 0x40, 0x40, 0x42, 0x3C, 0x00,
+    },
+    .font_ascent = 7,
+};
 
 test "getTextBounds with Unicode" {
     const testing = std.testing;

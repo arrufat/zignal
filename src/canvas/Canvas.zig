@@ -2156,16 +2156,6 @@ pub fn Canvas(comptime T: type) type {
             };
         }
 
-        /// Helper function to get a bit value from glyph bitmap data.
-        /// Returns 1 if the bit is set, 0 otherwise.
-        inline fn getGlyphBit(char_data: []const u8, row: usize, col: usize, bytes_per_row: u32) u1 {
-            const byte_idx = col / 8;
-            const bit_idx = col % 8;
-            const row_byte_offset = row * bytes_per_row + byte_idx;
-            if (row_byte_offset >= char_data.len) return 0;
-            return @intCast((char_data[row_byte_offset] >> @intCast(bit_idx)) & 1);
-        }
-
         /// Draws `text` with its top-left corner at `position`, at `font_size` pixels: the em height
         /// for vector fonts, the character height for bitmap fonts. `null` draws at
         /// `font.defaultSize()`, a bitmap font's native size. `\n` starts a new line.
@@ -2333,7 +2323,9 @@ pub fn Canvas(comptime T: type) type {
             // and beat the mask. Stamping per glyph, not per line, keeps the text walk to one.
             if (paint.overwrite and scale == 1 and radius <= 2) {
                 const r: i32 = @intCast(radius);
-                var glyphs: BitmapGlyphs = .init(font, text, position.x(), 1, letter_spacing);
+                var glyphs: BitmapFont.Layout = .init(font, text, 1);
+                glyphs.x = position.x();
+                glyphs.letter_spacing = letter_spacing;
                 while (glyphs.next()) |placed| {
                     var dy: i32 = -r;
                     while (dy <= r) : (dy += 1) {
@@ -2422,41 +2414,15 @@ pub fn Canvas(comptime T: type) type {
             return extent;
         }
 
-        /// The glyphs of one line of bitmap text with their pen positions; codepoints the
-        /// font lacks only advance the pen, by the font's character width.
-        const BitmapGlyphs = struct {
-            font: BitmapFont,
-            scale: f32,
-            letter_spacing: f32,
-            iter: std.unicode.Utf8Iterator,
-            x: f32,
-
-            const Placed = struct { glyph: BitmapFont.Glyph, x: f32 };
-
-            fn init(font: BitmapFont, text: []const u8, x: f32, scale: f32, letter_spacing: f32) BitmapGlyphs {
-                return .{ .font = font, .scale = scale, .letter_spacing = letter_spacing, .iter = .{ .bytes = text, .i = 0 }, .x = x };
-            }
-
-            inline fn next(it: *BitmapGlyphs) ?Placed {
-                while (it.iter.nextCodepoint()) |codepoint| {
-                    const glyph = it.font.getGlyph(codepoint);
-                    const placed: ?Placed = if (glyph) |g| .{ .glyph = g, .x = it.x } else null;
-                    const advance = if (glyph) |g| g.info.advanceWidth() else it.font.char_width;
-                    it.x += as(f32, advance) * it.scale;
-                    it.x += it.letter_spacing;
-                    if (placed) |p| return p;
-                }
-                return null;
-            }
-        };
-
         /// Blits one line of bitmap glyphs at `position`.
         fn blitBitmapLine(self: Self, text: []const u8, position: Point(2, f32), paint: Paint, font: BitmapFont, scale: f32, letter_spacing: f32, mode: DrawMode) void {
             const text_rect = bitmapLineExtent(text, font, scale, letter_spacing).translate(position.x(), position.y());
             const clip_rect = text_rect.intersect(self.imageRect()) orelse return;
 
             const y = position.y();
-            var glyphs: BitmapGlyphs = .init(font, text, position.x(), scale, letter_spacing);
+            var glyphs: BitmapFont.Layout = .init(font, text, scale);
+            glyphs.x = position.x();
+            glyphs.letter_spacing = letter_spacing;
             while (glyphs.next()) |placed| {
                 if (scale == 1.0) {
                     self.renderGlyphUnscaled(placed.glyph, placed.x, y, paint);
@@ -2471,9 +2437,6 @@ pub fn Canvas(comptime T: type) type {
         /// integer bit positions and offsets.
         fn renderGlyphUnscaled(self: Self, glyph: BitmapFont.Glyph, x: f32, y: f32, paint: Paint) void {
             const glyph_info = glyph.info;
-            const char_data = glyph.data;
-            const bytes_per_row = glyph_info.bytesPerRow();
-
             const fx: i32 = @floor(x);
             const fy: i32 = @floor(y);
             const base_col = fx + as(i32, glyph_info.x_offset);
@@ -2486,7 +2449,7 @@ pub fn Canvas(comptime T: type) type {
                 if (py < 0 or py >= rows_i32) continue;
                 const row_offset: usize = @as(usize, @intCast(py)) * self.image.stride;
                 for (0..glyph_info.width) |col| {
-                    if (getGlyphBit(char_data, row, col, bytes_per_row) == 0) continue;
+                    if (glyph.bit(row, col) == 0) continue;
                     const px = base_col + as(i32, col);
                     if (px < 0 or px >= cols_i32) continue;
                     paint.put(&self.image.data[row_offset + @as(usize, @intCast(px))]);
@@ -2498,11 +2461,9 @@ pub fn Canvas(comptime T: type) type {
         /// identical pixels, clipped to the precomputed text rect.
         fn renderGlyphFastScaled(self: Self, glyph: BitmapFont.Glyph, x: f32, y: f32, scale: f32, clip_rect: Rectangle(f32), paint: Paint) void {
             const glyph_info = glyph.info;
-            const char_data = glyph.data;
-            const bytes_per_row = glyph_info.bytesPerRow();
             for (0..glyph_info.height) |row| {
                 for (0..glyph_info.width) |col| {
-                    if (getGlyphBit(char_data, row, col, bytes_per_row) == 0) continue;
+                    if (glyph.bit(row, col) == 0) continue;
                     const base_x = x + (as(f32, col) + as(f32, glyph_info.x_offset)) * scale;
                     const base_y = y + (as(f32, row) + as(f32, glyph_info.y_offset)) * scale;
                     const x_start: u32 = @trunc(@max(@floor(base_x), clip_rect.l));
@@ -2526,8 +2487,6 @@ pub fn Canvas(comptime T: type) type {
         /// box of the source bitmap and writes the area-weighted coverage as alpha.
         fn renderGlyphSoftScaled(self: Self, glyph: BitmapFont.Glyph, x: f32, y: f32, scale: f32, paint: Paint) void {
             const glyph_info = glyph.info;
-            const char_data = glyph.data;
-            const bytes_per_row = glyph_info.bytesPerRow();
             const glyph_width_f = as(f32, glyph_info.width);
             const glyph_height_f = as(f32, glyph_info.height);
             const dest_width = @ceil(glyph_width_f * scale);
@@ -2561,7 +2520,7 @@ pub fn Canvas(comptime T: type) type {
                         while (col_f <= col_end_f) : (col_f += 1) {
                             const row_idx: u32 = @trunc(row_f);
                             const col_idx: u32 = @trunc(col_f);
-                            if (getGlyphBit(char_data, row_idx, col_idx, bytes_per_row) == 0) continue;
+                            if (glyph.bit(row_idx, col_idx) == 0) continue;
                             const overlap_x = clamp(@min(x1, col_f + 1) - @max(x0, col_f), 0, 1);
                             const overlap_y = clamp(@min(y1, row_f + 1) - @max(y0, row_f), 0, 1);
                             total_coverage += overlap_x * overlap_y;

@@ -37,17 +37,11 @@ fn lookupInner(r: Reader, left: u16, right: u16) Error!i16 {
 fn lookupFormat0(r: Reader, off: usize, left: u16, right: u16) Error!i16 {
     const num_pairs = try r.u16At(off);
     const pairs = off + 8;
+    // Each record starts with the pair as one big-endian u32, sorted.
     const key = (@as(u32, left) << 16) | right;
-    var lo: usize = 0;
-    var hi: usize = num_pairs;
-    while (lo < hi) {
-        const mid = lo + (hi - lo) / 2;
-        const rec = pairs + mid * 6;
-        const pair = (@as(u32, try r.u16At(rec)) << 16) | try r.u16At(rec + 2);
-        if (pair == key) return try r.i16At(rec + 4);
-        if (pair < key) lo = mid + 1 else hi = mid;
-    }
-    return 0;
+    const i = try r.lowerBound(u32, pairs, 6, num_pairs, 0, key);
+    if (i == num_pairs or try r.u32At(pairs + i * 6) != key) return 0;
+    return r.i16At(pairs + i * 6 + 4);
 }
 
 const synthetic = @import("synthetic.zig");

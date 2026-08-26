@@ -79,16 +79,10 @@ fn pairSubtable(r: Reader, sub: usize, left: u16, right: u16) Error!?i16 {
             const pair_set = sub + try r.u16At(sub + 10 + 2 * @as(usize, coverage_index));
             const pair_count = try r.u16At(pair_set);
             const pair_size = 2 + record_size;
-            var lo: usize = 0;
-            var hi: usize = pair_count;
-            while (lo < hi) {
-                const mid = lo + (hi - lo) / 2;
-                const rec = pair_set + 2 + mid * pair_size;
-                const second = try r.u16At(rec);
-                if (second == right) return try valueAt(r, rec + 2, x_advance);
-                if (second < right) lo = mid + 1 else hi = mid;
-            }
-            return null;
+            const i = try r.lowerBound(u16, pair_set + 2, pair_size, pair_count, 0, right);
+            const rec = pair_set + 2 + i * pair_size;
+            if (i == pair_count or try r.u16At(rec) != right) return null;
+            return try valueAt(r, rec + 2, x_advance);
         },
         2 => {
             const class1 = try classOf(r, sub + try r.u16At(sub + 8), left);
@@ -112,15 +106,9 @@ fn coverageIndex(r: Reader, cov: usize, gid: u16) Error!?u16 {
     switch (try r.u16At(cov)) {
         1 => {
             const count = try r.u16At(cov + 2);
-            var lo: usize = 0;
-            var hi: usize = count;
-            while (lo < hi) {
-                const mid = lo + (hi - lo) / 2;
-                const g = try r.u16At(cov + 4 + 2 * mid);
-                if (g == gid) return @intCast(mid);
-                if (g < gid) lo = mid + 1 else hi = mid;
-            }
-            return null;
+            const i = try r.lowerBound(u16, cov + 4, 2, count, 0, gid);
+            if (i == count or try r.u16At(cov + 4 + 2 * i) != gid) return null;
+            return @intCast(i);
         },
         2 => {
             const rec = try rangeRecord(r, cov + 4, try r.u16At(cov + 2), gid) orelse return null;
@@ -132,22 +120,13 @@ fn coverageIndex(r: Reader, cov: usize, gid: u16) Error!?u16 {
 
 /// The `{start, end, value}` range record containing `gid`, or null.
 fn rangeRecord(r: Reader, base: usize, count: u16, gid: u16) Error!?struct { start: u16, value: u16 } {
-    var lo: usize = 0;
-    var hi: usize = count;
-    while (lo < hi) {
-        const mid = lo + (hi - lo) / 2;
-        const rec = base + 6 * mid;
-        const start = try r.u16At(rec);
-        const end = try r.u16At(rec + 2);
-        if (gid < start) {
-            hi = mid;
-        } else if (gid > end) {
-            lo = mid + 1;
-        } else {
-            return .{ .start = start, .value = try r.u16At(rec + 4) };
-        }
-    }
-    return null;
+    // The ranges are sorted and disjoint: the first whose end reaches gid is the candidate.
+    const i = try r.lowerBound(u16, base, 6, count, 2, gid);
+    if (i == count) return null;
+    const rec = base + 6 * i;
+    const start = try r.u16At(rec);
+    if (gid < start) return null;
+    return .{ .start = start, .value = try r.u16At(rec + 4) };
 }
 
 /// Class of `gid` in a class definition table; 0 when unlisted.

@@ -6,6 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Point2 = @import("../geometry/Point.zig").Point(2, f32);
+const Error = @import("truetype.zig").Error;
 
 const Outline = @This();
 
@@ -29,6 +30,45 @@ points: []Point,
 contour_ends: []u32,
 
 pub const empty: Outline = .{ .points = &.{}, .contour_ends = &.{} };
+
+/// Most points or contours an outline may hold.
+pub const max_points: u32 = 0xFFFF;
+
+/// Receives the points of an outline being decoded: it counts them, and stores them when
+/// given slices, so a decoder sizes its output with one pass and fills it with another.
+pub const Builder = struct {
+    points: ?[]Point = null,
+    contour_ends: ?[]u32 = null,
+    n: u32 = 0,
+    c: u32 = 0,
+
+    pub inline fn emit(self: *Builder, x: f32, y: f32, kind: Point.Kind) void {
+        if (self.points) |points| points[self.n] = .{ .x = x, .y = y, .kind = kind };
+        self.n += 1;
+    }
+
+    pub inline fn endContour(self: *Builder) void {
+        if (self.contour_ends) |ends| ends[self.c] = self.n;
+        self.c += 1;
+    }
+
+    /// Decodes an outline through `decode(ctx, *Builder)`: one pass to count, one to fill,
+    /// so exactly two allocations.
+    pub fn build(gpa: Allocator, ctx: anytype, comptime decode: anytype) (Error || Allocator.Error)!Outline {
+        var counting: Builder = .{};
+        try decode(ctx, &counting);
+        if (counting.n > max_points or counting.c > max_points) return error.TooManyPoints;
+
+        const points = try gpa.alloc(Point, counting.n);
+        errdefer gpa.free(points);
+        const contour_ends = try gpa.alloc(u32, counting.c);
+        errdefer gpa.free(contour_ends);
+
+        var filling: Builder = .{ .points = points, .contour_ends = contour_ends };
+        try decode(ctx, &filling);
+        return .{ .points = points, .contour_ends = contour_ends };
+    }
+};
 
 /// Chord deviation allowed when flattening curves, in device pixels.
 pub const flatness_tolerance: f32 = 0.1;
@@ -116,8 +156,10 @@ fn walk(self: Outline, t: Transform, sink: *Sink) void {
         var prev_on = start;
         var ctrl: [2]Point = undefined;
         var pending: usize = 0;
-        for (1..steps + 1) |k| {
-            const p = pts[(start_index + k) % pts.len];
+        var index = start_index;
+        for (0..steps) |_| {
+            index = if (index + 1 == pts.len) 0 else index + 1;
+            const p = pts[index];
             switch (p.kind) {
                 .on_curve => {
                     segment(t, prev_on, ctrl[0..pending], p, false, sink);
