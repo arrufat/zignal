@@ -927,10 +927,7 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
 }
 
 fn writeFile(io: Io, file_path: []const u8, data: []const u8) !void {
-    const file = if (Io.Dir.path.isAbsolute(file_path))
-        try Io.Dir.createFileAbsolute(io, file_path, .{})
-    else
-        try Io.Dir.cwd().createFile(io, file_path, .{});
+    const file = try Io.Dir.cwd().createFile(io, file_path, .{});
     defer file.close(io);
     try file.writeStreamingAll(io, data);
 }

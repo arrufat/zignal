@@ -1428,10 +1428,7 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
     const png_data = try encode(T, allocator, image, .default);
     defer allocator.free(png_data);
 
-    const file = if (Io.Dir.path.isAbsolute(file_path))
-        try Io.Dir.createFileAbsolute(io, file_path, .{})
-    else
-        try Io.Dir.cwd().createFile(io, file_path, .{});
+    const file = try Io.Dir.cwd().createFile(io, file_path, .{});
     defer file.close(io);
 
     try file.writeStreamingAll(io, png_data);

@@ -187,10 +187,7 @@ pub fn readFileMaybeGzip(io: Io, gpa: Allocator, path: []const u8) ![]u8 {
 
 /// Writes `bytes` to `path`, gzip-compressing when the path ends in `.gz`.
 pub fn writeFileMaybeGzip(io: Io, gpa: Allocator, path: []const u8, bytes: []const u8) !void {
-    const file = if (Io.Dir.path.isAbsolute(path))
-        try Io.Dir.createFileAbsolute(io, path, .{})
-    else
-        try Io.Dir.cwd().createFile(io, path, .{});
+    const file = try Io.Dir.cwd().createFile(io, path, .{});
     defer file.close(io);
 
     if (!isGzipPath(path)) {
