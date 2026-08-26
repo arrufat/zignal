@@ -103,8 +103,9 @@ pub fn lineAdvance(font: Font, size: f32, layout: TextLayout) f32 {
 pub const Lines = struct {
     pub const Line = struct {
         text: []const u8,
-        /// `lineWidth` of the text without trailing spaces.
-        width: f32,
+        /// `lineWidth` of the text without trailing spaces, known from wrapping; `Lines.width`
+        /// measures an unwrapped line on demand.
+        width: ?f32,
     };
 
     font: Font,
@@ -132,14 +133,15 @@ pub const Lines = struct {
             if (fitted.len < paragraph.len) consumed = fitted.consumed;
             line = .{ .text = paragraph[0..fitted.len], .width = fitted.width };
         } else {
-            line = .{ .text = paragraph, .width = self.width(std.mem.trimEnd(u8, paragraph, " ")) };
+            line = .{ .text = paragraph, .width = null };
         }
         self.pos += consumed;
         return line;
     }
 
-    fn width(self: Lines, slice: []const u8) f32 {
-        return lineWidth(self.font, slice, self.size, self.letter_spacing);
+    /// The line's width, measured now unless wrapping already did.
+    pub fn width(self: Lines, line: Line) f32 {
+        return line.width orelse lineWidth(self.font, std.mem.trimEnd(u8, line.text, " "), self.size, self.letter_spacing);
     }
 
     const Fit = struct { len: usize, consumed: usize, width: f32 };
@@ -198,7 +200,7 @@ pub fn measure(font: Font, text: []const u8, size: f32, max_width: ?f32, layout:
     var width: f32 = 0;
     var count: usize = 0;
     while (lines.next()) |line| {
-        width = @max(width, line.width);
+        width = @max(width, lines.width(line));
         count += 1;
     }
     return .{ .l = 0, .t = 0, .r = width, .b = @as(f32, @floatFromInt(count)) * lineAdvance(font, size, layout) };
@@ -213,7 +215,7 @@ fn expectLines(font: Font, text: []const u8, max_width: ?f32, expected: []const 
     for (expected) |want| {
         const line = lines.next() orelse return error.TestExpectedMoreLines;
         try testing.expectEqualStrings(want, line.text);
-        try testing.expectEqual(lineWidth(font, std.mem.trimEnd(u8, want, " "), 8, 0), line.width);
+        try testing.expectEqual(lineWidth(font, std.mem.trimEnd(u8, want, " "), 8, 0), lines.width(line));
     }
     try testing.expectEqual(null, lines.next());
 }
