@@ -102,19 +102,20 @@ pub fn Canvas(comptime T: type) type {
         const antialias_edge_offset = 0.5;
         /// Vertical samples per pixel row for antialiased polygon fills
         const polygon_subscanlines = 8;
+        /// Below this many edges the fast fill tests them all on every row; the sweep's
+        /// setup only pays off above it.
+        const few_edges = 64;
         /// Cells per touched-block flag in the area rasterizer.
         const area_block = 8;
         /// Widest rectangle outline whose wall coverage profile is precomputed.
         const max_ring_profile = 64;
-        /// Below this many edges the fast fill tests them all per row instead of bucketing.
-        const few_edges = 64;
         /// Stack scratch (bytes) for the lines of a text block: 64 lines, longer texts spill
         /// to the heap.
         const lines_scratch_size = 64 * @sizeOf(text_layout.Lines.Line);
-        /// Stack scratch (bytes) for polygon fills: edges and crossings for 256 vertices, a
-        /// 1024-pixel coverage row and a 12k-cell area accumulator (a 110x110 shape); larger
-        /// inputs spill to the heap.
-        const polygon_scratch_size = 256 * (@sizeOf(Edge) + @sizeOf(Crossing)) + 1024 * @sizeOf(CoverageCell) + 12 * 1024 * (@sizeOf(f32) + 1);
+        /// Stack scratch (bytes) for polygon fills: edges, crossings and sweep order for 256
+        /// vertices, 1024 sweep rows, a 1024-pixel coverage row and a 12k-cell area
+        /// accumulator (a 110x110 shape); larger inputs spill to the heap.
+        const polygon_scratch_size = 256 * (@sizeOf(Edge) + @sizeOf(Crossing) + 2 * @sizeOf(u32)) + 1024 * (@sizeOf(u32) + @sizeOf(CoverageCell)) + 12 * 1024 * (@sizeOf(f32) + 1);
         /// Stack scratch (bytes) for flattening a glyph outline; spills to heap beyond
         const glyph_scratch_size = 1024 * @sizeOf(Point(2, f32)) + 64 * @sizeOf([]const Point(2, f32));
         /// Stack scratch (points) for spline polygon tessellation; spills to heap beyond
@@ -1367,65 +1368,20 @@ pub fn Canvas(comptime T: type) type {
                     const first_row = @max(0, @floor(shape_bounds.t));
                     const end_y = @min(frows - 1, @ceil(shape_bounds.b));
                     if (first_row > end_y) return;
-                    const num_rows: usize = @trunc(end_y - first_row + 1);
-
+                    const row_count: usize = @trunc(end_y - first_row + 1);
                     if (edges.len < few_edges) {
-                        var y = first_row;
-                        while (y <= end_y) : (y += 1) {
+                        for (0..row_count) |row| {
+                            const y = first_row + as(f32, row);
                             var spans: SpanIter = .{ .crossings = scanlineCrossings(edges, y, crossings_buf), .rule = fill_rule };
                             while (spans.next()) |span| self.fillSpan(span[0], span[1], y, sink);
                         }
                         return;
                     }
-                    // Bucket the edges by the row they start on (counting sort), then sweep:
-                    // a row only tests the edges spanning it.
-                    const starts = try scratch.alloc(u32, num_rows + 1);
-                    defer scratch.free(starts);
-                    @memset(starts, 0);
-                    const bucket = try scratch.alloc(u32, edges.len);
-                    defer scratch.free(bucket);
-                    for (edges, 0..) |e, i| {
-                        bucket[i] = @floor(clamp(e.y_min - first_row, 0, as(f32, num_rows - 1)));
-                        starts[bucket[i] + 1] += 1;
-                    }
-                    for (1..num_rows + 1) |r| starts[r] += starts[r - 1];
-                    const order = try scratch.alloc(u32, edges.len);
-                    defer scratch.free(order);
-                    for (bucket, 0..) |b, i| {
-                        order[starts[b]] = @intCast(i);
-                        starts[b] += 1;
-                    }
-                    const active = try scratch.alloc(u32, edges.len);
-                    defer scratch.free(active);
-
-                    var next: usize = 0;
-                    var count: usize = 0;
-                    var y = first_row;
-                    var row: usize = 0;
-                    while (row < num_rows) : ({
-                        row += 1;
-                        y += 1;
-                    }) {
-                        while (next < starts[row]) : (next += 1) {
-                            active[count] = order[next];
-                            count += 1;
-                        }
-                        var crossings: usize = 0;
-                        var i: usize = 0;
-                        while (i < count) {
-                            const e = edges[active[i]];
-                            if (e.y_max <= y) {
-                                count -= 1;
-                                active[i] = active[count];
-                                continue;
-                            }
-                            if (y >= e.y_min) {
-                                crossings_buf[crossings] = .{ .x = e.xAt(y), .dir = e.dir };
-                                crossings += 1;
-                            }
-                            i += 1;
-                        }
-                        var spans: SpanIter = .{ .crossings = sortCrossings(crossings_buf[0..crossings]), .rule = fill_rule };
+                    var sweep: EdgeSweep = try .init(scratch, edges, first_row, row_count, 0);
+                    defer sweep.deinit(scratch);
+                    for (0..row_count) |row| {
+                        const y = first_row + as(f32, row);
+                        var spans: SpanIter = .{ .crossings = sweep.crossingsAt(row, y, crossings_buf), .rule = fill_rule };
                         while (spans.next()) |span| self.fillSpan(span[0], span[1], y, sink);
                     }
                 },
@@ -1653,7 +1609,75 @@ pub fn Canvas(comptime T: type) type {
             return buf[0..count];
         }
 
-        /// Crossings of `edges` with the horizontal line at `y`, sorted by x.
+        /// The edges bucketed by the row they start on (a counting sort) and swept downward
+        /// once: `crossingsAt` activates the edges of each row as it comes and forgets those
+        /// passed, so a scanline only tests the edges spanning it. Scanlines must not move
+        /// back up.
+        const EdgeSweep = struct {
+            edges: []const Edge,
+            /// Edge indices grouped by starting row; row `r`'s group ends at `ends[r]`.
+            order: []u32,
+            ends: []u32,
+            /// Edges started but not yet passed.
+            active: []u32,
+            slab: []u32,
+            next: usize = 0,
+            count: usize = 0,
+
+            /// Sweeps `row_count` rows from `first_row`. An edge starts on the row of
+            /// `y_min + shift`: 0.5 when rows are the bands around pixel centers.
+            fn init(scratch: std.mem.Allocator, edges: []const Edge, first_row: f32, row_count: usize, shift: f32) !EdgeSweep {
+                const slab = try scratch.alloc(u32, 2 * edges.len + row_count + 1);
+                const order = slab[0..edges.len];
+                const active = slab[edges.len..][0..edges.len];
+                const ends = slab[2 * edges.len ..];
+                @memset(ends, 0);
+                for (edges) |e| ends[rowOf(e, first_row, row_count, shift) + 1] += 1;
+                for (1..row_count + 1) |r| ends[r] += ends[r - 1];
+                // Placing each edge at its row's cursor leaves the cursor at the row's end.
+                for (edges, 0..) |e, i| {
+                    const row = rowOf(e, first_row, row_count, shift);
+                    order[ends[row]] = @intCast(i);
+                    ends[row] += 1;
+                }
+                return .{ .edges = edges, .order = order, .ends = ends, .active = active, .slab = slab };
+            }
+
+            fn rowOf(e: Edge, first_row: f32, row_count: usize, shift: f32) usize {
+                return @floor(clamp(e.y_min + shift - first_row, 0, as(f32, row_count - 1)));
+            }
+
+            fn deinit(self: EdgeSweep, scratch: std.mem.Allocator) void {
+                scratch.free(self.slab);
+            }
+
+            /// Crossings with the scanline at `y`, on row `row` (counted from `first_row`),
+            /// sorted by x. Edges ending at or above `y` are dropped on the way.
+            fn crossingsAt(self: *EdgeSweep, row: usize, y: f32, buf: []Crossing) []Crossing {
+                while (self.next < self.ends[row]) : (self.next += 1) {
+                    self.active[self.count] = self.order[self.next];
+                    self.count += 1;
+                }
+                var count: usize = 0;
+                var i: usize = 0;
+                while (i < self.count) {
+                    const e = self.edges[self.active[i]];
+                    if (e.y_max <= y) {
+                        self.count -= 1;
+                        self.active[i] = self.active[self.count];
+                        continue;
+                    }
+                    if (y >= e.y_min) {
+                        buf[count] = .{ .x = e.xAt(y), .dir = e.dir };
+                        count += 1;
+                    }
+                    i += 1;
+                }
+                return sortCrossings(buf[0..count]);
+            }
+        };
+
+        /// Crossings of all `edges` with the horizontal line at `y`, sorted by x.
         fn scanlineCrossings(edges: []const Edge, y: f32, buf: []Crossing) []Crossing {
             var count: usize = 0;
             for (edges) |e| {
@@ -1719,7 +1743,7 @@ pub fn Canvas(comptime T: type) type {
         /// through a difference array, so per-row cost does not scale with the sample count.
         /// Polygons have no closed-form distance field, hence supersampling rather than the
         /// analytic coverage used for rings and lines.
-        fn fillPolygonSoft(self: Self, edges: []Edge, bounds: Rectangle(f32), crossings_buf: []Crossing, rule: FillRule, sink: anytype, scratch: std.mem.Allocator) !void {
+        fn fillPolygonSoft(self: Self, edges: []const Edge, bounds: Rectangle(f32), crossings_buf: []Crossing, rule: FillRule, sink: anytype, scratch: std.mem.Allocator) !void {
             const frows: f32 = @floatFromInt(self.image.rows);
             const end_y = @min(frows - 1, @ceil(bounds.b));
             const col_start = clampToImageBounds(@floor(bounds.l - 0.5), self.image.cols);
@@ -1735,24 +1759,19 @@ pub fn Canvas(comptime T: type) type {
             const x_lo = as(f32, col_start) - 0.5;
             const x_hi = as(f32, col_end) - 0.5;
             const weight = 1.0 / as(f32, polygon_subscanlines);
+            const first_row = @max(0, @floor(bounds.t));
+            if (first_row > end_y) return;
+            const row_count: usize = @trunc(end_y - first_row + 1);
+            var sweep: EdgeSweep = try .init(scratch, edges, first_row, row_count, 0.5);
+            defer sweep.deinit(scratch);
 
-            var y = @max(0, @floor(bounds.t));
-            while (y <= end_y) : (y += 1) {
-                // Partition the edges overlapping this row's band to the front so the
-                // sub-scanline passes only test those.
-                var active: usize = 0;
-                for (edges, 0..) |e, i| {
-                    if (e.y_min < y + 0.5 and e.y_max > y - 0.5) {
-                        std.mem.swap(Edge, &edges[active], &edges[i]);
-                        active += 1;
-                    }
-                }
-
+            for (0..row_count) |row_index| {
+                const y = first_row + as(f32, row_index);
                 var touched_lo: usize = width;
                 var touched_hi: usize = 0;
                 for (0..polygon_subscanlines) |k| {
                     const sy = y - 0.5 + (as(f32, k) + 0.5) * weight;
-                    var spans: SpanIter = .{ .crossings = scanlineCrossings(edges[0..active], sy, crossings_buf), .rule = rule };
+                    var spans: SpanIter = .{ .crossings = sweep.crossingsAt(row_index, sy, crossings_buf), .rule = rule };
                     while (spans.next()) |span| {
                         const left = @max(span[0], x_lo) - x_lo;
                         const right = @min(span[1], x_hi) - x_lo;
