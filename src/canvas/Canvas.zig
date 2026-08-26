@@ -576,58 +576,25 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Specialized renderer for horizontal/vertical thick lines. Computes the perpendicular
-        /// coverage once per row (or column) — uniform across the body — and uses
-        /// `fillSpan` for fully-covered interior rows of horizontal lines.
-        /// End-cap AA is handled by the `fillCircle` calls at the bottom.
+        /// Horizontal and vertical thick lines: the body is an axis-aligned box whose ends fall
+        /// on pixel boundaries (the round caps cover the rest), so only its long edges are
+        /// antialiased. The caps are drawn separately to avoid double-blending them.
         fn drawAxisAlignedThickLine(self: Self, p1: Point(2, f32), p2: Point(2, f32), half_width: f32, color: anytype, opts: DrawOptions) void {
-            const is_horizontal = p1.y() == p2.y();
             const paint: Paint = .init(color, opts.blending);
-
-            // Body bbox is tight to the line's endpoints — end caps are drawn separately,
-            // so excluding their region here avoids double-blend over-saturation.
-            const body_rect: Rectangle(f32) = if (is_horizontal) .{
-                .l = @min(p1.x(), p2.x()),
+            const body: Rectangle(f32) = if (p1.y() == p2.y()) .{
+                .l = @floor(@min(p1.x(), p2.x())) - 0.5,
                 .t = p1.y() - half_width,
-                .r = @max(p1.x(), p2.x()) + 1,
-                .b = p1.y() + half_width + 1,
+                .r = @floor(@max(p1.x(), p2.x())) + 0.5,
+                .b = p1.y() + half_width,
             } else .{
                 .l = p1.x() - half_width,
-                .t = @min(p1.y(), p2.y()),
-                .r = p1.x() + half_width + 1,
-                .b = @max(p1.y(), p2.y()) + 1,
+                .t = @floor(@min(p1.y(), p2.y())) - 0.5,
+                .r = p1.x() + half_width,
+                .b = @floor(@max(p1.y(), p2.y())) + 0.5,
             };
-
-            if (self.clampRectToImage(body_rect)) |bbox| {
-                const perp_center = if (is_horizontal) p1.y() else p1.x();
-                if (is_horizontal) {
-                    for (bbox.t..bbox.b) |r| {
-                        const alpha = perpendicularAlpha(as(f32, r), perp_center, half_width);
-                        if (alpha >= 1.0) {
-                            self.fillSpan(as(f32, bbox.l), as(f32, bbox.r - 1), as(f32, r), paint);
-                        } else {
-                            for (bbox.l..bbox.r) |c| paint.cover(&self.image.data[r * self.image.stride + c], alpha);
-                        }
-                    }
-                } else {
-                    for (bbox.l..bbox.r) |c| {
-                        const alpha = perpendicularAlpha(as(f32, c), perp_center, half_width);
-                        for (bbox.t..bbox.b) |r| paint.cover(&self.image.data[r * self.image.stride + c], alpha);
-                    }
-                }
-            }
-
+            self.fillBoxSoft(body, paint);
             self.fillCircle(p1, half_width, color, opts);
             self.fillCircle(p2, half_width, color, opts);
-        }
-
-        /// Coverage of a single perpendicular sample at distance |sample - center| from a
-        /// band's centerline (half-width `half_width`). Same edge ramp as `ringCoverage`.
-        inline fn perpendicularAlpha(sample: f32, center: f32, half_width: f32) f32 {
-            const dist = @abs(sample - center);
-            if (dist > half_width + antialias_edge_offset) return 0;
-            if (dist > half_width - antialias_edge_offset) return half_width + antialias_edge_offset - dist;
-            return 1.0;
         }
 
         /// True when the write is a plain overwrite (`.normal` + opaque degenerates to the overlay).
@@ -737,9 +704,10 @@ pub fn Canvas(comptime T: type) type {
             const outer = edges.grow(half);
             const inner = edges.shrink(half);
             const paint: Paint = .init(color, opts.blending);
+            // Widths past the rectangle's own size leave nothing to cut out.
             switch (opts.mode) {
-                .fast => self.fillRingFast(outer, inner, paint),
-                .soft => self.fillRingSoft(outer, inner, paint),
+                .fast => if (inner.isEmpty()) self.fillBoxFast(outer, paint) else self.fillRingFast(outer, inner, paint),
+                .soft => if (inner.isEmpty()) self.fillBoxSoft(outer, paint) else self.fillRingSoft(outer, inner, paint),
             }
         }
 
@@ -748,15 +716,23 @@ pub fn Canvas(comptime T: type) type {
             return @max(0, @min(b, c + 0.5) - @max(a, c - 0.5));
         }
 
-        /// Hard-edged ring between `outer` and `inner`: pixels whose centers lie in the outer
-        /// rectangle but not the inner one. An inverted `inner` means a filled rectangle.
-        fn fillRingFast(self: Self, outer: Rectangle(f32), inner: Rectangle(f32), paint: Paint) void {
+        /// Hard-edged axis-aligned box: the pixels whose centers lie inside it.
+        fn fillBoxFast(self: Self, box: Rectangle(f32), paint: Paint) void {
             const frows: f32 = @floatFromInt(self.image.rows);
-            const has_inner = inner.r >= inner.l and inner.b >= inner.t;
+            var y = @max(@ceil(box.t), 0);
+            const y_end = @min(@floor(box.b), frows - 1);
+            while (y <= y_end) : (y += 1) self.fillSpan(@ceil(box.l), @floor(box.r), y, paint);
+        }
+
+        /// Hard-edged ring between `outer` and a non-empty `inner`: pixels whose centers lie
+        /// in the outer rectangle but not the inner one.
+        fn fillRingFast(self: Self, outer: Rectangle(f32), inner: Rectangle(f32), paint: Paint) void {
+            assert(!inner.isEmpty());
+            const frows: f32 = @floatFromInt(self.image.rows);
             var y = @max(@ceil(outer.t), 0);
             const y_end = @min(@floor(outer.b), frows - 1);
             while (y <= y_end) : (y += 1) {
-                if (has_inner and y >= inner.t and y <= inner.b) {
+                if (y >= inner.t and y <= inner.b) {
                     self.fillSpan(@ceil(outer.l), @ceil(inner.l) - 1, y, paint);
                     self.fillSpan(@floor(inner.r) + 1, @floor(outer.r), y, paint);
                 } else {
@@ -765,13 +741,77 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Antialiased ring between `outer` and `inner`: a pixel's coverage is its overlap with
-        /// the outer rectangle less its overlap with the inner one, each the product of two 1-D
-        /// overlaps, so the ring is exact without seams. Rows entirely outside the inner
-        /// rectangle paint their uniform core with a span.
-        fn fillRingSoft(self: Self, outer: Rectangle(f32), inner: Rectangle(f32), paint: Paint) void {
+        /// Antialiased axis-aligned box: a pixel's coverage is the product of its overlaps
+        /// with the box's row and column spans, so fractional edges are exact. A wide box
+        /// spans the core of each row; a narrow one (a vertical line, a wall) walks each
+        /// column instead, its coverage fixed down the column except on the fringe rows.
+        fn fillBoxSoft(self: Self, box: Rectangle(f32), paint: Paint) void {
             const frows: f32 = @floatFromInt(self.image.rows);
-            const has_inner = !inner.isEmpty();
+            const y_start = @max(@ceil(box.t - 0.5), 0);
+            const y_end = @min(@floor(box.b + 0.5), frows - 1);
+            if (y_end < y_start) return;
+            var buf: [max_ring_profile]f32 = undefined;
+            const columns = self.ringProfile(&buf, box.l - 0.5, box.r + 0.5, box, null) orelse {
+                var y = y_start;
+                while (y <= y_end) : (y += 1) {
+                    const vy = pixelOverlap(box.t, box.b, y);
+                    if (vy > 0) self.boxRow(box, y, vy, paint);
+                }
+                return;
+            };
+            // Rows fully inside the box, between the fringe rows.
+            const core_t = @max(@ceil(box.t + 0.5), y_start);
+            const core_b = @min(@floor(box.b - 0.5), y_end);
+            const first: usize = @trunc(y_start);
+            const end: usize = @as(usize, @trunc(y_end)) + 1;
+            const core_first: usize = @trunc(core_t);
+            const core_end: usize = if (core_b >= core_t) @as(usize, @trunc(core_b)) + 1 else core_first;
+            for (columns.coverage, columns.first..) |cx, c| {
+                if (cx <= 0) continue;
+                for (first..core_first) |r| self.coverCell(r, c, pixelOverlap(box.t, box.b, as(f32, r)) * cx, paint);
+                for (core_first..core_end) |r| paint.cover(&self.image.data[r * self.image.stride + c], cx);
+                for (core_end..end) |r| self.coverCell(r, c, pixelOverlap(box.t, box.b, as(f32, r)) * cx, paint);
+            }
+        }
+
+        inline fn coverCell(self: Self, row: usize, col: usize, coverage: f32, paint: Paint) void {
+            if (coverage > 0) paint.cover(&self.image.data[row * self.image.stride + col], coverage);
+        }
+
+        /// One row of an antialiased box, `vy` being the row's vertical overlap with it: a
+        /// row fully inside paints its uniform core with a span and only the fringe by formula.
+        inline fn boxRow(self: Self, box: Rectangle(f32), y: f32, vy: f32, paint: Paint) void {
+            const row: u32 = @trunc(y);
+            const row_px = self.image.data[row * self.image.stride ..][0..self.image.cols];
+            if (vy >= 1) {
+                const core_lo = @ceil(box.l + 0.5);
+                const core_hi = @floor(box.r - 0.5);
+                boxCells(row_px, box.l - 0.5, core_lo - 1, vy, box, paint);
+                self.fillSpan(core_lo, core_hi, y, paint);
+                boxCells(row_px, core_hi + 1, box.r + 0.5, vy, box, paint);
+            } else {
+                boxCells(row_px, box.l - 0.5, box.r + 0.5, vy, box, paint);
+            }
+        }
+
+        /// Coverage-paints the cells of `row_px` whose centers lie in `[lo, hi]`.
+        inline fn boxCells(row_px: []T, lo: f32, hi: f32, vy: f32, box: Rectangle(f32), paint: Paint) void {
+            const fcols: f32 = @floatFromInt(row_px.len);
+            var c = @max(@ceil(lo), 0);
+            const c_end = @min(@floor(hi), fcols - 1);
+            while (c <= c_end) : (c += 1) {
+                const coverage = vy * pixelOverlap(box.l, box.r, c);
+                if (coverage > 0) paint.cover(&row_px[@trunc(c)], coverage);
+            }
+        }
+
+        /// Antialiased ring between `outer` and a non-empty `inner`: a pixel's coverage is its
+        /// overlap with the outer rectangle less its overlap with the inner one, each the
+        /// product of two 1-D overlaps, so the ring is exact without seams. Rows outside the
+        /// inner rectangle are box rows.
+        fn fillRingSoft(self: Self, outer: Rectangle(f32), inner: Rectangle(f32), paint: Paint) void {
+            assert(!inner.isEmpty());
+            const frows: f32 = @floatFromInt(self.image.rows);
             // Down a wall the horizontal coverage profile repeats, so it is computed once.
             var left_buf: [max_ring_profile]f32 = undefined;
             var right_buf: [max_ring_profile]f32 = undefined;
@@ -782,18 +822,15 @@ pub fn Canvas(comptime T: type) type {
             while (y <= y_end) : (y += 1) {
                 const vy_o = pixelOverlap(outer.t, outer.b, y);
                 if (vy_o <= 0) continue;
-                const vy_i = if (has_inner) pixelOverlap(inner.t, inner.b, y) else 0;
+                const vy_i = pixelOverlap(inner.t, inner.b, y);
+                if (vy_i <= 0) {
+                    self.boxRow(outer, y, vy_o, paint);
+                    continue;
+                }
                 const row: u32 = @trunc(y);
                 const row_px = self.image.data[row * self.image.stride ..][0..self.image.cols];
-                if (vy_o >= 1 and vy_i <= 0) {
-                    // A band row: fringe cells by formula, the core with a span.
-                    const core_lo = @ceil(outer.l + 0.5);
-                    const core_hi = @floor(outer.r - 0.5);
-                    ringCells(row_px, outer.l - 0.5, core_lo - 1, vy_o, 0, outer, inner, paint);
-                    self.fillSpan(core_lo, core_hi, y, paint);
-                    ringCells(row_px, core_hi + 1, outer.r + 0.5, vy_o, 0, outer, inner, paint);
-                } else if (vy_i < 1) {
-                    // An edge row of either rectangle: every cell by formula.
+                if (vy_i < 1) {
+                    // The inner rectangle's own edge row: every cell by formula.
                     ringCells(row_px, outer.l - 0.5, outer.r + 0.5, vy_o, vy_i, outer, inner, paint);
                 } else if (left != null and right != null) {
                     // A full wall row: paint the profiles.
@@ -811,9 +848,10 @@ pub fn Canvas(comptime T: type) type {
 
         const RingWall = struct { first: usize, coverage: []const f32 };
 
-        /// The wall coverage of the cells whose centers lie in `[lo, hi]` for a row inside
-        /// both rectangles, written to `buf`; null when the wall is empty or wider than `buf`.
-        fn ringProfile(self: Self, buf: []f32, lo: f32, hi: f32, outer: Rectangle(f32), inner: Rectangle(f32)) ?RingWall {
+        /// The horizontal coverage of the cells whose centers lie in `[lo, hi]` for a row
+        /// inside `outer` (and `inner`, when there is one), written to `buf`; null when the
+        /// range is empty or wider than `buf`.
+        fn ringProfile(self: Self, buf: []f32, lo: f32, hi: f32, outer: Rectangle(f32), inner: ?Rectangle(f32)) ?RingWall {
             const fcols: f32 = @floatFromInt(self.image.cols);
             const c0 = @max(@ceil(lo), 0);
             const c1 = @min(@floor(hi), fcols - 1);
@@ -822,7 +860,8 @@ pub fn Canvas(comptime T: type) type {
             if (len > buf.len) return null;
             for (buf[0..len], 0..) |*coverage, i| {
                 const c = c0 + as(f32, i);
-                coverage.* = pixelOverlap(outer.l, outer.r, c) - pixelOverlap(inner.l, inner.r, c);
+                coverage.* = pixelOverlap(outer.l, outer.r, c);
+                if (inner) |hole| coverage.* -= pixelOverlap(hole.l, hole.r, c);
             }
             return .{ .first = @trunc(c0), .coverage = buf[0..len] };
         }
