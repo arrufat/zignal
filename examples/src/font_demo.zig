@@ -46,6 +46,8 @@ pub fn main(init: std.process.Init) !void {
         break Font.load(io, gpa, path) catch continue;
     } else null;
     defer if (loaded) |*f| f.deinit(gpa);
+    // Cache parsed glyphs and rasterized masks; the copy below shares the cache.
+    if (loaded) |*f| try f.enableCache(gpa);
     const font: Font = loaded orelse .{ .bitmap = zignal.font.font8x8.basic };
 
     switch (font) {

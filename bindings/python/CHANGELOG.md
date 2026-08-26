@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- **Glyph cache**: vector `Font` objects cache parsed glyphs, metrics and kerning, plus the rasterized glyph images per size and quarter-pixel position, so `draw_text`/`draw_text_box` with antialiasing run several times faster on repeated text (glyphs land within a quarter pixel of the uncached rendering; `DrawMode.FAST` and outlined text are unchanged).
 - **TrueType fonts**: `Font.load(path)` detects BDF, PCF (optionally gzipped) and TrueType (`.ttf`) files, and `Canvas.draw_text` renders TrueType text with antialiased outlines and kerning. New `Font` members: `ascent(size)`, `line_height(size)`, `has_glyph(char)`, `get_text_bounds(text, size)`, `get_text_bounds_tight(text, size)` and the `kind` (`"bitmap"` / `"vector"`), `name` and `height` properties.
 - **CFF OpenType fonts**: `Font.load(path)` also accepts `.otf` files with PostScript (CFF) outlines, rendered like TrueType fonts, including `seac` accents and the default instance of CFF2 variable fonts.
 - **Font collections**: `Font.load(path, face=0)` opens `.ttc`/`.otc` collections; `face` selects the face.

@@ -42,6 +42,9 @@ fn wrap(font: Font) ?*c.PyObject {
         return null;
     };
     self.font.?.* = owned;
+    // A Python font lives as long as its object, so it always carries a glyph cache; the
+    // GIL serializes every draw. Without memory for one, text still renders uncached.
+    self.font.?.enableCache(allocator) catch {};
     return instance;
 }
 
@@ -61,7 +64,9 @@ const font_load_doc =
     \\
     \\Supports bitmap fonts in BDF and PCF format (optionally gzip-compressed: `.bdf.gz`,
     \\`.pcf.gz`), TrueType fonts (`.ttf`), CFF OpenType fonts (`.otf`) and collections
-    \\(`.ttc`), whose faces are selected with `face`.
+    \\(`.ttc`), whose faces are selected with `face`. Vector fonts cache their parsed glyphs
+    \\and, for antialiased text, the rasterized glyph images per size and quarter-pixel
+    \\position, so repeated text is drawn from the cache.
     \\
     \\## Parameters
     \\- `path` (str): Path to the font file

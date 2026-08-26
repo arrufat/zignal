@@ -24,6 +24,7 @@ pub const max_file_size = 256 * 1024 * 1024;
 pub const BitmapFont = @import("font/BitmapFont.zig");
 pub const VectorFont = @import("font/VectorFont.zig");
 pub const Outline = @import("font/Outline.zig");
+pub const GlyphCache = @import("font/GlyphCache.zig");
 pub const truetype = @import("font/truetype.zig");
 pub const layout = @import("font/layout.zig");
 pub const TextLayout = layout.TextLayout;
@@ -58,6 +59,22 @@ pub const Font = union(enum) {
         switch (self.*) {
             .bitmap => |*b| b.deinit(gpa),
             .vector => |*v| v.deinit(gpa),
+        }
+    }
+
+    /// Attaches a `GlyphCache` to a vector font (see `VectorFont.enableCache`); bitmap
+    /// fonts have nothing to cache.
+    pub fn enableCache(self: *Font, gpa: Allocator) Allocator.Error!void {
+        switch (self.*) {
+            .bitmap => {},
+            .vector => |*v| try v.enableCache(gpa),
+        }
+    }
+
+    pub fn disableCache(self: *Font) void {
+        switch (self.*) {
+            .bitmap => {},
+            .vector => |*v| v.disableCache(),
         }
     }
 
@@ -232,6 +249,7 @@ test {
     _ = pcf;
     _ = VectorFont;
     _ = Outline;
+    _ = GlyphCache;
     _ = truetype;
     _ = layout;
 }
@@ -252,6 +270,10 @@ test "Font.load dispatches on the format" {
     try std.testing.expect(!font.hasGlyph('Z'));
     try std.testing.expectEqual(@as(f32, 45), font.ascent(50));
     try std.testing.expectEqual(@as(f32, 57.5), font.lineHeight(50));
+    // The cache is freed by `deinit`.
+    try font.enableCache(std.testing.allocator);
+    try std.testing.expect(font.vector.cache != null);
+    try std.testing.expect(font.hasGlyph('A'));
     try std.testing.expectError(error.UnsupportedFontFormat, BitmapFont.load(std.testing.io, std.testing.allocator, path, .all));
 
     try std.testing.expectEqual(@as(f32, 16), font.defaultSize());
@@ -279,4 +301,11 @@ test "Font.load dispatches on the format" {
     try std.testing.expectEqual(2, face.vector.num_faces);
     try std.testing.expectError(error.InvalidFormat, Font.loadFace(std.testing.io, std.testing.allocator, ttc_path, 2));
     try std.testing.expectError(error.InvalidFormat, Font.loadFace(std.testing.io, std.testing.allocator, path, 1));
+}
+
+test "Font.enableCache is a no-op for bitmap fonts" {
+    var font: Font = .{ .bitmap = font8x8.basic };
+    try font.enableCache(std.testing.allocator);
+    font.disableCache();
+    try std.testing.expect(font == .bitmap);
 }
