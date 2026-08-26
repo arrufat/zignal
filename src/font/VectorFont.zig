@@ -176,8 +176,34 @@ pub fn glyphBounds(self: VectorFont, gid: u16) ?Bounds {
 /// `glyphBounds` through the cache entry `g`, when there is one.
 fn boundsOf(self: VectorFont, g: ?*GlyphCache.Glyph, gid: u16) ?Bounds {
     const entry = g orelse return self.readBounds(gid);
-    if (entry.bounds == null) entry.bounds = self.readBounds(gid);
+    if (entry.bounds == null) {
+        // A CFF box is the charstring interpreted, as its outline is: parse the outline
+        // once into the cache and read the box off it.
+        if (self.tables.outlines == .cff and entry.outline == null) {
+            const cache = self.cache.?;
+            cache.outline_stats.misses += 1;
+            entry.outline = self.outline(cache.gpa, gid) catch null;
+        }
+        entry.bounds = if (entry.outline) |o| controlBox(o) else self.readBounds(gid);
+    }
     return entry.bounds.?;
+}
+
+/// Box of an outline's points, controls included, as `cff.bounds` computes it.
+fn controlBox(o: Outline) ?Bounds {
+    if (o.points.len == 0) return null;
+    var min: [2]f32 = .{ std.math.inf(f32), std.math.inf(f32) };
+    var max: [2]f32 = .{ -std.math.inf(f32), -std.math.inf(f32) };
+    for (o.points) |p| {
+        min = .{ @min(min[0], p.x), @min(min[1], p.y) };
+        max = .{ @max(max[0], p.x), @max(max[1], p.y) };
+    }
+    return .{
+        .x_min = std.math.lossyCast(i16, @floor(min[0])),
+        .y_min = std.math.lossyCast(i16, @floor(min[1])),
+        .x_max = std.math.lossyCast(i16, @ceil(max[0])),
+        .y_max = std.math.lossyCast(i16, @ceil(max[1])),
+    };
 }
 
 fn readBounds(self: VectorFont, gid: u16) ?Bounds {
@@ -230,7 +256,7 @@ pub fn kern(self: VectorFont, left: u16, right: u16) i16 {
 
 fn lookupKern(self: VectorFont, left: u16, right: u16) i16 {
     const r: truetype.Reader = .init(self.data);
-    if (self.tables.gpos) |t| return truetype.gpos.pairAdjust(r.table(t), left, right);
+    if (self.tables.gpos) |pairs| return truetype.gpos.pairAdjust(r.table(pairs.table), pairs, left, right);
     if (self.tables.kern) |t| return truetype.kern.lookup(r.table(t), left, right);
     return 0;
 }

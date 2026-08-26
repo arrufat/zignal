@@ -7,19 +7,31 @@ const std = @import("std");
 const truetype = @import("../truetype.zig");
 const Error = truetype.Error;
 const Reader = truetype.Reader;
+const Table = truetype.Table;
 
 const lookup_type_pair = 2;
 const lookup_type_extension = 9;
 const value_x_advance: u16 = 0x0004;
 
-/// Whether the font has any pair-positioning lookup; without one the table is useless here.
-pub fn hasPairPos(r: Reader) bool {
-    return hasPairPosInner(r) catch false;
-}
+/// The pair-positioning lookups of a GPOS table, located once at load so a kerning query
+/// visits only them.
+pub const PairPos = struct {
+    table: Table,
+    /// Positions of the pair adjustment lookups (extension ones included) in the table.
+    lookups: [max_lookups]u32,
+    count: u8,
 
-fn hasPairPosInner(r: Reader) Error!bool {
+    /// Lookups remembered per font; a table with more falls back to scanning them all.
+    pub const max_lookups = 8;
+};
+
+/// The pair-positioning lookups of the GPOS table `t` read through `r`; null without any,
+/// so a table with nothing this parser reads costs nothing later.
+pub fn findPairPos(r: Reader, t: Table) Error!?PairPos {
+    var pairs: PairPos = .{ .table = t, .lookups = undefined, .count = 0 };
     const lookup_list: usize = try r.u16At(8);
     const count = try r.u16At(lookup_list);
+    var found: usize = 0;
     for (0..count) |i| {
         const lookup = lookup_list + try r.u16At(lookup_list + 2 + 2 * i);
         var kind = try r.u16At(lookup);
@@ -27,23 +39,28 @@ fn hasPairPosInner(r: Reader) Error!bool {
             if (try r.u16At(lookup + 4) == 0) continue;
             kind = try r.u16At(lookup + try r.u16At(lookup + 6) + 2);
         }
-        if (kind == lookup_type_pair) return true;
+        if (kind != lookup_type_pair) continue;
+        if (found < PairPos.max_lookups) pairs.lookups[found] = @intCast(lookup);
+        found += 1;
     }
-    return false;
+    if (found == 0) return null;
+    // Past the limit every lookup is scanned, as `count == 0` says.
+    pairs.count = if (found <= PairPos.max_lookups) @intCast(found) else 0;
+    return pairs;
 }
 
 /// Horizontal advance adjustment for the pair, summed over lookups; within a lookup the
 /// first subtable that covers the pair wins. 0 when nothing applies or the table is malformed.
-pub fn pairAdjust(r: Reader, left: u16, right: u16) i16 {
-    return pairAdjustInner(r, left, right) catch 0;
+pub fn pairAdjust(r: Reader, pairs: PairPos, left: u16, right: u16) i16 {
+    return pairAdjustInner(r, pairs, left, right) catch 0;
 }
 
-fn pairAdjustInner(r: Reader, left: u16, right: u16) Error!i16 {
+fn pairAdjustInner(r: Reader, pairs: PairPos, left: u16, right: u16) Error!i16 {
     const lookup_list: usize = try r.u16At(8);
-    const count = try r.u16At(lookup_list);
+    const count: usize = if (pairs.count > 0) pairs.count else try r.u16At(lookup_list);
     var total: i32 = 0;
     for (0..count) |i| {
-        const lookup = lookup_list + try r.u16At(lookup_list + 2 + 2 * i);
+        const lookup = if (pairs.count > 0) pairs.lookups[i] else lookup_list + try r.u16At(lookup_list + 2 + 2 * i);
         const kind = try r.u16At(lookup);
         if (kind != lookup_type_pair and kind != lookup_type_extension) continue;
         const subtable_count = try r.u16At(lookup + 4);
@@ -166,6 +183,11 @@ test "pair adjustment: format 1, format 2 via extension, GPOS over kern" {
 test "truncated GPOS reads as no kerning" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     var font = synthetic.font(&buf, .{});
-    font.tables.gpos.?.len = 12;
+    font.tables.gpos.?.table.len = 12;
     try std.testing.expectEqual(@as(i16, 0), font.kern(1, 3));
+    // Scanning every lookup finds the same pairs as the remembered ones.
+    var scanning = synthetic.font(&buf, .{});
+    scanning.tables.gpos.?.count = 0;
+    try std.testing.expectEqual(@as(i16, -80), scanning.kern(1, 3));
+    try std.testing.expectEqual(@as(i16, -30), scanning.kern(1, 2));
 }

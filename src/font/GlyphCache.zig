@@ -215,7 +215,10 @@ test "level 1 matches the uncached font" {
             try testing.expectEqualSlices(u32, expected.contour_ends, second.outline.contour_ends);
         }
         try testing.expectEqual(@as(usize, plain.num_glyphs), cache.glyphs.count());
-        try testing.expectEqual(Stats{ .hits = plain.num_glyphs, .misses = plain.num_glyphs }, cache.outline_stats);
+        // Every outline was parsed once; for CFF the bounds read above parsed it, so both
+        // `outlineRef` calls were hits.
+        const hits: usize = if (opts.cff) 2 * @as(usize, plain.num_glyphs) else plain.num_glyphs;
+        try testing.expectEqual(Stats{ .hits = hits, .misses = plain.num_glyphs }, cache.outline_stats);
 
         // An invalid id gets the fallback values and no entry.
         const invalid = plain.num_glyphs;

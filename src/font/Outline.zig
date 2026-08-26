@@ -34,38 +34,55 @@ pub const empty: Outline = .{ .points = &.{}, .contour_ends = &.{} };
 /// Most points or contours an outline may hold.
 pub const max_points: u32 = 0xFFFF;
 
-/// Receives the points of an outline being decoded: it counts them, and stores them when
-/// given slices, so a decoder sizes its output with one pass and fills it with another.
+/// Receives the points of an outline being decoded: it always counts them, and stores
+/// as many as its slices hold.
 pub const Builder = struct {
     points: ?[]Point = null,
     contour_ends: ?[]u32 = null,
     n: u32 = 0,
     c: u32 = 0,
 
+    /// Points `build` decodes into stack scratch before allocating; a glyph with more is
+    /// decoded a second time into its exact allocation.
+    const scratch_points = 1024;
+    const scratch_contours = 64;
+
     pub inline fn emit(self: *Builder, x: f32, y: f32, kind: Point.Kind) void {
-        if (self.points) |points| points[self.n] = .{ .x = x, .y = y, .kind = kind };
+        if (self.points) |points| if (self.n < points.len) {
+            points[self.n] = .{ .x = x, .y = y, .kind = kind };
+        };
         self.n += 1;
     }
 
     pub inline fn endContour(self: *Builder) void {
-        if (self.contour_ends) |ends| ends[self.c] = self.n;
+        if (self.contour_ends) |ends| if (self.c < ends.len) {
+            ends[self.c] = self.n;
+        };
         self.c += 1;
     }
 
-    /// Decodes an outline through `decode(ctx, *Builder)`: one pass to count, one to fill,
-    /// so exactly two allocations.
+    /// Decodes an outline through `decode(ctx, *Builder)` into exactly two allocations:
+    /// one pass into stack scratch that also counts, then a copy, or a second pass when the
+    /// glyph outgrows the scratch.
     pub fn build(gpa: Allocator, ctx: anytype, comptime decode: anytype) (Error || Allocator.Error)!Outline {
-        var counting: Builder = .{};
-        try decode(ctx, &counting);
-        if (counting.n > max_points or counting.c > max_points) return error.TooManyPoints;
+        var scratch: [scratch_points]Point = undefined;
+        var scratch_ends: [scratch_contours]u32 = undefined;
+        var b: Builder = .{ .points = &scratch, .contour_ends = &scratch_ends };
+        try decode(ctx, &b);
+        if (b.n > max_points or b.c > max_points) return error.TooManyPoints;
 
-        const points = try gpa.alloc(Point, counting.n);
+        const points = try gpa.alloc(Point, b.n);
         errdefer gpa.free(points);
-        const contour_ends = try gpa.alloc(u32, counting.c);
+        const contour_ends = try gpa.alloc(u32, b.c);
         errdefer gpa.free(contour_ends);
 
-        var filling: Builder = .{ .points = points, .contour_ends = contour_ends };
-        try decode(ctx, &filling);
+        if (b.n <= scratch.len and b.c <= scratch_ends.len) {
+            @memcpy(points, scratch[0..b.n]);
+            @memcpy(contour_ends, scratch_ends[0..b.c]);
+        } else {
+            b = .{ .points = points, .contour_ends = contour_ends };
+            try decode(ctx, &b);
+        }
         return .{ .points = points, .contour_ends = contour_ends };
     }
 };
