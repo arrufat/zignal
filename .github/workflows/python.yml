@@ -180,7 +180,9 @@ jobs:
     name: Upload to TestPyPI
     needs: [build_wheels]
     runs-on: ubuntu-latest
-    if: (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    # Releases and manual runs only: pull requests keep their wheels as run artifacts, and
+    # publishing every PR's 20 dev wheels filled TestPyPI's 10 GB project quota.
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     environment:
       name: test-pypi
       url: https://test.pypi.org/p/zignal-processing
