@@ -5,8 +5,9 @@
 //! `cmap` formats 4 and 12, `loca`/`glyf` simple and composite glyphs, `CFF `
 //! Type 2 charstrings (plain and CID-keyed, `seac` accents), kerning from the
 //! legacy `kern` table and from GPOS pair adjustment.
-//! CFF2 fonts render their default instance. Not supported: hinting, variation
-//! axes, color fonts, GSUB, mark attachment.
+//! Variable fonts render their default instance; for another weight or width, make a
+//! static instance (`fonttools varLib.instancer`) and load that. Not supported: hinting,
+//! variation axes, color fonts, GSUB, mark attachment.
 
 const std = @import("std");
 

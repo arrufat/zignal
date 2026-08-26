@@ -66,7 +66,9 @@ const font_load_doc =
     \\`.pcf.gz`), TrueType fonts (`.ttf`), CFF OpenType fonts (`.otf`) and collections
     \\(`.ttc`), whose faces are selected with `face`. Vector fonts cache their parsed glyphs
     \\and, for antialiased text, the rasterized glyph images per size and quarter-pixel
-    \\position, so repeated text is drawn from the cache.
+    \\position, so repeated text is drawn from the cache. Variable fonts render their
+    \\default instance; for another weight or width, load a static instance, e.g. one made
+    \\with `fonttools varLib.instancer`.
     \\
     \\## Parameters
     \\- `path` (str): Path to the font file

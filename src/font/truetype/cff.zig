@@ -4,7 +4,8 @@
 //! decoded at load time beyond locating the CharStrings, Subrs and (for CID-keyed
 //! fonts) the FDArray/FDSelect. Accent composition (`seac`) resolves its two glyphs
 //! through the charset and Standard Encoding. CFF2 fonts render their default
-//! instance: `blend` keeps the default values and drops the deltas.
+//! instance: `blend` keeps the default values and drops the deltas; for another axis
+//! position, load a static instance (`fonttools varLib.instancer`).
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
