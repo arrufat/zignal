@@ -7,6 +7,7 @@ const Image = @import("../../image.zig").Image;
 const Rgb = @import("../../color.zig").Rgb(u8);
 const Rgba = @import("../../color.zig").Rgba(u8);
 const Point = @import("../../geometry/Point.zig").Point;
+const as = @import("../../meta.zig").as;
 
 test "arc drawing - basic angles" {
     const allocator = testing.allocator;
@@ -277,4 +278,70 @@ test "arc drawing - NaN and Inf angles" {
     for (img.data) |pixel| {
         try expect(pixel.r == 255 and pixel.g == 255 and pixel.b == 255);
     }
+}
+
+test "arc drawing - soft arcs match soft circles away from the rays" {
+    const allocator = testing.allocator;
+    var img_circle: Image(Rgb) = try .init(allocator, 200, 200);
+    defer img_circle.deinit(allocator);
+    var img_arc: Image(Rgb) = try .init(allocator, 200, 200);
+    defer img_arc.deinit(allocator);
+    img_circle.fill(Rgb.white);
+    img_arc.fill(Rgb.white);
+
+    const center: Point(2, f32) = .init(.{ 100, 100 });
+    const radius: f32 = 40;
+    const start: f32 = 0.4;
+    const end: f32 = 0.4 + 3.0 * std.math.pi / 2.0;
+    Canvas(Rgb).init(allocator, img_circle).drawCircle(center, radius, Rgb.black, 1, .soft);
+    try Canvas(Rgb).init(allocator, img_arc).drawArc(center, radius, start, end, Rgb.black, 1, .soft);
+
+    // Inside the sweep (a few pixels clear of either ray) the arc is the circle; outside it
+    // the arc must be untouched.
+    var compared: usize = 0;
+    for (0..200) |r| {
+        for (0..200) |c| {
+            const x = as(f32, c) - center.x();
+            const y = as(f32, r) - center.y();
+            var angle = std.math.atan2(y, x);
+            if (angle < start) angle += 2 * std.math.pi;
+            const margin = 3.0 / radius;
+            const inside = angle > start + margin and angle < end - margin;
+            const outside = angle > end + margin and angle < start + 2 * std.math.pi - margin;
+            if (inside) {
+                try testing.expectEqual(img_circle.at(r, c).*, img_arc.at(r, c).*);
+                compared += 1;
+            } else if (outside) {
+                try testing.expectEqual(Rgb.white, img_arc.at(r, c).*);
+            }
+        }
+    }
+    try expect(compared > 0);
+}
+
+test "fillArc - soft rays are antialiased and stop at the center" {
+    const allocator = testing.allocator;
+    var img: Image(Rgb) = try .init(allocator, 200, 200);
+    defer img.deinit(allocator);
+    img.fill(Rgb.white);
+
+    const center: Point(2, f32) = .init(.{ 100, 100 });
+    const radius: f32 = 50;
+    const start: f32 = 0.4;
+    try Canvas(Rgb).init(allocator, img).fillArc(center, radius, start, start + std.math.pi / 2.0, Rgb.black, .soft);
+
+    // Walk the start ray: pixels straddling it are partially covered, and nothing bleeds
+    // onto its extension past the center.
+    var partial: usize = 0;
+    var t: f32 = 8;
+    while (t < radius - 4) : (t += 1) {
+        const r: usize = @round(center.y() + t * @sin(start));
+        const c: usize = @round(center.x() + t * @cos(start));
+        const px = img.at(r, c).*;
+        if (px.r > 0 and px.r < 255) partial += 1;
+        const rb: usize = @round(center.y() - t * @sin(start));
+        const cb: usize = @round(center.x() - t * @cos(start));
+        try testing.expectEqual(Rgb.white, img.at(rb, cb).*);
+    }
+    try expect(partial > 10);
 }
