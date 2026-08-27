@@ -54,6 +54,9 @@
 - **`RunningStats` now takes a config argument** (breaking): `RunningStats(T)` → `RunningStats(T, config)`, where `RunningStatsConfig` (`.all` / `.variance` / `.summary`) selects which quantities are tracked. Use `.all` for the previous behavior.
 - **Terminal graphics encoders grouped under `terminal`** (breaking): the sixel, kitty, and iterm2 encoders moved out of the top-level namespace into `terminal.*` (`zignal.sixel` → `zignal.terminal.sixel`, `zignal.kitty` → `zignal.terminal.kitty`, `zignal.iterm2` → `zignal.terminal.iterm2`). The source files now live in `src/terminal/`. Detection helpers (`terminal.isSixelSupported`, `terminal.aspectScale`, …) and the `DisplayFormat` tags are unchanged.
 
+### Bug Fixes
+- **Antialiased fills could read a previous fill's coverage**: the nonzero area rasterizer zeroes its accumulator lazily, block by block, but resolved a row by reading every block once the running coverage was nonzero — untouched interior blocks included. Its scratch is reused between fills, so in release builds a shape whose interior crossed a block the previous fill had deposited into could inherit that coverage. Untouched blocks now carry the coverage across without being read.
+
 ## [0.10.0] - 2026-04-15
 
 ### Major Changes

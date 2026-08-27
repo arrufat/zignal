@@ -931,3 +931,27 @@ test "text boxes on a grayscale canvas" {
     for (img.data) |px| lit += @intFromBool(px > 0);
     try expect(lit > 0);
 }
+
+test "a soft fill is unaffected by the fill before it" {
+    // The area accumulator is stack scratch reused across fills; a shape whose interior
+    // crosses a block the previous fill deposited into must not read those cells.
+    const allocator = testing.allocator;
+    var alone: Image(Rgba) = try .init(allocator, 120, 120);
+    defer alone.deinit(allocator);
+    var after: Image(Rgba) = try .init(allocator, 120, 120);
+    defer after.deinit(allocator);
+    alone.fill(Rgba.white);
+    after.fill(Rgba.white);
+    const canvas_alone: Canvas(Rgba) = .init(allocator, alone);
+    const canvas_after: Canvas(Rgba) = .init(allocator, after);
+
+    // A tall triangle whose slanted edge sweeps every block of its rows, then a wide quad
+    // whose interior spans untouched blocks on the same rows.
+    const triangle = [_]Point(2, f32){ .init(.{ 5, 5 }), .init(.{ 110, 8 }), .init(.{ 7, 112 }) };
+    const quad = [_]Point(2, f32){ .init(.{ 10, 20 }), .init(.{ 100, 24 }), .init(.{ 104, 96 }), .init(.{ 12, 100 }) };
+    try canvas_after.fillPolygons(&.{&triangle}, Rgba.black, .nonzero, .soft);
+    after.fill(Rgba.white);
+    try canvas_after.fillPolygons(&.{&quad}, Rgba.black, .nonzero, .soft);
+    try canvas_alone.fillPolygons(&.{&quad}, Rgba.black, .nonzero, .soft);
+    try testing.expectEqualSlices(Rgba, alone.data, after.data);
+}
