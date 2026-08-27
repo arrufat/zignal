@@ -387,7 +387,8 @@ fn parseEncodings(allocator: std.mem.Allocator, data: []const u8, table: TableEn
     const rows: u32 = encoding.max_byte1 - encoding.min_byte1 + 1;
     const encodings_count = cols * rows;
 
-    if (encodings_count > max_glyph_count) {
+    // Both halves are bytes, so codepoints fit u16 and ascend with the table index.
+    if (encodings_count > max_glyph_count or encoding.max_byte1 > 0xFF or encoding.max_char_or_byte2 > 0xFF) {
         return PcfError.InvalidEncodingRange;
     }
 
@@ -486,7 +487,7 @@ fn convertToBitmapFont(
 ) !BitmapFont {
     // Determine which glyphs to include
     var glyph_list: std.ArrayList(struct {
-        codepoint: u32,
+        codepoint: u21,
         glyph_index: u32,
         metric: Metric,
     }) = .empty;
@@ -501,7 +502,7 @@ fn convertToBitmapFont(
 
         const row = encoding_index / chars_per_row;
         const col = encoding_index % chars_per_row;
-        const codepoint: u32 = @intCast(((encoding.min_byte1 + row) << 8) | (encoding.min_char_or_byte2 + col));
+        const codepoint: u21 = @intCast(((encoding.min_byte1 + row) << 8) | (encoding.min_char_or_byte2 + col));
 
         if (!filter.matches(codepoint)) continue;
         if (glyph_index >= metrics.len) continue;
@@ -519,11 +520,11 @@ fn convertToBitmapFont(
     defer converted_bitmaps.deinit(gpa);
     try converted_bitmaps.ensureTotalCapacity(gpa, total_bitmap_size);
 
-    var glyphs: std.AutoHashMap(u32, GlyphData) = .init(gpa);
-    errdefer glyphs.deinit();
-    try glyphs.ensureTotalCapacity(@intCast(glyph_list.items.len));
+    // The encoding table walks codepoints in ascending order, so the table comes out sorted.
+    const glyphs = try gpa.alloc(BitmapFont.Entry, glyph_list.items.len);
+    errdefer gpa.free(glyphs);
 
-    for (glyph_list.items) |glyph_info| {
+    for (glyph_list.items, glyphs) |glyph_info, *entry| {
         const metric = glyph_info.metric;
         const converted_offset = converted_bitmaps.items.len;
 
@@ -536,15 +537,18 @@ fn convertToBitmapFont(
         }
         convertGlyphBitmap(bitmap_info.bitmap_data, bitmap_offset, metric.width(), metric.height(), bitmap_info.flags, &converted_bitmaps);
 
-        glyphs.putAssumeCapacity(glyph_info.codepoint, .{
-            .width = @intCast(metric.width()),
-            .height = @intCast(metric.height()),
-            .x_offset = metric.left_sided_bearing,
-            // Adjust y_offset to account for font baseline
-            .y_offset = ascent - metric.ascent,
-            .device_width = metric.character_width,
-            .bitmap_offset = converted_offset,
-        });
+        entry.* = .{
+            .codepoint = glyph_info.codepoint,
+            .info = .{
+                .width = @intCast(metric.width()),
+                .height = @intCast(metric.height()),
+                .x_offset = metric.left_sided_bearing,
+                // Adjust y_offset to account for font baseline
+                .y_offset = ascent - metric.ascent,
+                .device_width = metric.character_width,
+                .bitmap_offset = converted_offset,
+            },
+        };
     }
 
     return .{
@@ -574,13 +578,12 @@ const GlyphEntry = struct {
 fn buildGlyphEntries(
     allocator: Allocator,
     font: BitmapFont,
-    codepoints: []const u21,
 ) !struct {
     entries: []GlyphEntry,
     bitmap_data: []u8,
     pad_sizes: [4]u32,
 } {
-    var entries = try allocator.alloc(GlyphEntry, codepoints.len);
+    const entries = try allocator.alloc(GlyphEntry, font.glyphs.len);
     errdefer allocator.free(entries);
 
     var bitmap_buffer: std.ArrayList(u8) = .empty;
@@ -590,8 +593,7 @@ fn buildGlyphEntries(
 
     const font_ascent = font.ascent();
 
-    for (codepoints, 0..) |cp, idx| {
-        const glyph = font.getGlyph(cp) orelse return PcfError.MissingRequired;
+    for (font.glyphs, entries) |glyph, *entry| {
         const glyph_info = glyph.info;
         const width = glyph_info.width;
         const height = glyph_info.height;
@@ -600,7 +602,7 @@ fn buildGlyphEntries(
         const glyph_ascent = font_ascent - glyph_info.y_offset;
 
         const bitmap_offset: u32 = @intCast(bitmap_buffer.items.len);
-        try bitmap_buffer.appendSlice(allocator, glyph.data);
+        try bitmap_buffer.appendSlice(allocator, font.bitmap(glyph_info));
 
         // Accumulate table sizes for each PCF padding option (1, 2, 4, 8 bytes)
         for (&pad_sizes, 0..) |*size, pad_idx| {
@@ -608,8 +610,8 @@ fn buildGlyphEntries(
             size.* += padded_row * height;
         }
 
-        entries[idx] = GlyphEntry{
-            .codepoint = cp,
+        entry.* = .{
+            .codepoint = glyph.codepoint,
             .metrics = .{
                 .left_sided_bearing = left,
                 .right_sided_bearing = @as(i16, width) + left,
@@ -747,7 +749,7 @@ fn writePropertiesTable(allocator: Allocator, font: BitmapFont) ![]u8 {
     try props.append(allocator, .{ .name = "POINT_SIZE", .value = .{ .integer = @as(i32, font.char_height) * 10 } });
     try props.append(allocator, .{ .name = "RESOLUTION_X", .value = .{ .integer = 75 } });
     try props.append(allocator, .{ .name = "RESOLUTION_Y", .value = .{ .integer = 75 } });
-    try props.append(allocator, .{ .name = "SPACING", .value = .{ .string = if (font.glyphs != null) "P" else "C" } });
+    try props.append(allocator, .{ .name = "SPACING", .value = .{ .string = if (font.isMonospace()) "C" else "P" } });
 
     if (font.font_ascent) |asc| {
         try props.append(allocator, .{ .name = "FONT_ASCENT", .value = .{ .integer = asc } });
@@ -838,10 +840,7 @@ fn writeAcceleratorsTable(allocator: Allocator, glyphs: []const GlyphEntry, font
 
 /// Save a BitmapFont to a PCF file
 pub fn save(io: Io, gpa: Allocator, font: BitmapFont, path: []const u8) !void {
-    const codepoints = try font.collectCodepoints(gpa);
-    defer gpa.free(codepoints);
-
-    const glyph_data = try buildGlyphEntries(gpa, font, codepoints);
+    const glyph_data = try buildGlyphEntries(gpa, font);
     defer gpa.free(glyph_data.entries);
     defer gpa.free(glyph_data.bitmap_data);
 
@@ -1044,8 +1043,8 @@ fn expectRoundtrip(file_name: []const u8) !void {
     try testing.expectEqual(font.char_width, loaded.char_width);
     try testing.expectEqual(font.char_height, loaded.char_height);
     try testing.expectEqual(font.glyphCount(), loaded.glyphCount());
-    for (font.first_char..font.last_char + 1) |codepoint| {
-        try testing.expectEqualSlices(u8, font.getCharData(@intCast(codepoint)).?, loaded.getCharData(@intCast(codepoint)).?);
+    for (font.glyphs) |entry| {
+        try testing.expectEqualSlices(u8, font.getCharData(entry.codepoint).?, loaded.getCharData(entry.codepoint).?);
     }
 }
 

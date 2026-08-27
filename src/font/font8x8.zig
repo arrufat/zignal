@@ -14,19 +14,23 @@ const std = @import("std");
 const LoadFilter = @import("../font.zig").LoadFilter;
 const BitmapFont = @import("BitmapFont.zig");
 const font_data = @import("font8x8_data.zig");
-const GlyphData = @import("GlyphData.zig");
 const unicode = @import("unicode.zig");
 
 /// Basic ASCII font (0x20-0x7E)
 /// This font is always available and requires no allocation
-/// Uses a slice of basic_latin starting at character 0x20
-pub const basic = BitmapFont{
+pub const basic: BitmapFont = .{
     .name = "8x8 Basic",
     .char_width = 8,
     .char_height = 8,
-    .first_char = 0x20, // Space
-    .last_char = 0x7E, // Tilde
-    .data = font_data.basic_latin[0x20 * 8 .. 0x7F * 8], // Slice from 0x20 to 0x7E (inclusive)
+    .glyphs = &basic_glyphs,
+    .data = font_data.basic_latin[0x20 * 8 .. 0x7F * 8],
+};
+
+/// One cell per printable ASCII character, in order over `basic`'s data.
+const basic_glyphs: [0x7F - 0x20]BitmapFont.Entry = blk: {
+    var table: [0x7F - 0x20]BitmapFont.Entry = undefined;
+    for (&table, 0..) |*entry, i| entry.* = .cell(0x20 + i, 8, 8, i * 8);
+    break :blk table;
 };
 
 /// Create an extended Latin font (ASCII + Latin-1 Supplement)
@@ -43,30 +47,32 @@ pub fn extended(allocator: std.mem.Allocator) !BitmapFont {
 /// This requires allocation and can fail
 /// The returned font must be freed with deinit()
 pub fn create(gpa: std.mem.Allocator, filter: LoadFilter) !BitmapFont {
-    var glyphs: std.AutoHashMap(u32, GlyphData) = .init(gpa);
-    errdefer glyphs.deinit();
+    var glyphs: std.ArrayList(BitmapFont.Entry) = .empty;
+    errdefer glyphs.deinit(gpa);
     var data: std.ArrayList(u8) = .empty;
     errdefer data.deinit(gpa);
 
-    // The data ranges are ascending and disjoint, so one pass yields the glyphs in order.
+    // The data ranges are ascending and disjoint, so one pass yields the table in order.
     for (font_data.ranges) |range| {
         var code = range.start;
         while (code <= range.end) : (code += 1) {
             if (!filter.matches(code)) continue;
-            try glyphs.putNoClobber(code, .{ .width = 8, .height = 8, .x_offset = 0, .y_offset = 0, .device_width = 8, .bitmap_offset = data.items.len });
+            try glyphs.append(gpa, .cell(code, 8, 8, data.items.len));
             try data.appendSlice(gpa, range.data[(code - range.start) * 8 ..][0..8]);
         }
     }
-    if (glyphs.count() == 0) return error.NoCharactersFound;
+    if (glyphs.items.len == 0) return error.NoCharactersFound;
 
     const name = try gpa.dupe(u8, "8x8 Unicode");
     errdefer gpa.free(name);
+    const table = try glyphs.toOwnedSlice(gpa);
+    errdefer gpa.free(table);
     return .{
         .name = name,
         .char_width = 8,
         .char_height = 8,
         .data = try data.toOwnedSlice(gpa),
-        .glyphs = glyphs,
+        .glyphs = table,
     };
 }
 
@@ -76,13 +82,16 @@ test "static font is available" {
     // Static font should be directly usable without allocation
     try testing.expectEqual(@as(u8, 8), basic.char_width);
     try testing.expectEqual(@as(u8, 8), basic.char_height);
-    try testing.expectEqual(@as(u8, 0x20), basic.first_char);
-    try testing.expectEqual(@as(u8, 0x7E), basic.last_char);
+    try testing.expectEqual(95, basic.glyphs.len);
+    try testing.expectEqual(0x20, basic.glyphs[0].codepoint);
+    try testing.expectEqual(0x7E, basic.glyphs[94].codepoint);
 
     // Test getting character data
     const char_data = basic.getCharData('A');
     try testing.expect(char_data != null);
     try testing.expectEqual(@as(u32, 8), char_data.?.len);
+    try testing.expectEqualSlices(u8, font_data.basic_latin['A' * 8 ..][0..8], char_data.?);
+    try testing.expectEqual(null, basic.getCharData(0x7F));
 }
 
 test "create ASCII font dynamically" {
@@ -94,10 +103,7 @@ test "create ASCII font dynamically" {
     try testing.expectEqual(@as(u8, 8), dynamic_font.char_width);
     try testing.expectEqual(@as(u8, 8), dynamic_font.char_height);
 
-    // Should have glyph map since it's dynamically created
-    try testing.expect(dynamic_font.glyphs != null);
-
-    // Test getting character data through glyph map
+    // Test getting character data through the glyph table
     const char_data = dynamic_font.getCharData('A');
     try testing.expect(char_data != null);
     try testing.expectEqual(@as(u32, 8), char_data.?.len);
@@ -150,7 +156,7 @@ test "create font with all available ranges" {
     defer all_font.deinit(testing.allocator);
 
     // Should have many characters available
-    try testing.expect(all_font.glyphs.?.count() > 200);
+    try testing.expect(all_font.glyphs.len > 200);
 
     // Test various ranges are included
     try testing.expect(all_font.getCharData('A') != null); // ASCII

@@ -66,10 +66,17 @@ pub const Pen = struct {
     pub fn next(self: *Pen) ?Glyph {
         const codepoint = self.iter.nextCodepoint() orelse return null;
         switch (self.inner) {
-            inline else => |*layout| _ = layout.place(codepoint),
+            .bitmap => |*b| placeBitmap(b, codepoint),
+            .vector => |*v| _ = v.place(codepoint),
         }
         self.glyphs += 1;
         return .{ .codepoint = codepoint, .end = self.iter.i };
+    }
+
+    /// Out of line: inlined here, the bitmap lookup's size stopped the codepoint decoding
+    /// in `next` from being inlined and cost vector measuring 5%.
+    noinline fn placeBitmap(layout: *BitmapFont.Layout, codepoint: u21) void {
+        _ = layout.place(codepoint);
     }
 
     /// Width of what has been placed: the pen position less the trailing letter spacing,
@@ -340,15 +347,15 @@ test "getTextBoundsTight is the ink of every line" {
     // A 16 px wide glyph with one pixel set at (10, 2), in the second byte of its row.
     var wide: [2 * 8]u8 = @splat(0);
     wide[2 * 2 + 1] = 1 << 2;
-    const wide_font: Font = .{ .bitmap = .{ .name = "Wide", .char_width = 16, .char_height = 8, .first_char = 'A', .last_char = 'A', .data = &wide } };
+    const wide_font: Font = .{ .bitmap = .{ .name = "Wide", .char_width = 16, .char_height = 8, .glyphs = &.{.cell('A', 16, 8, 0)}, .data = &wide } };
     try testing.expectEqual(Rectangle(f32){ .l = 10, .t = 2, .r = 11, .b = 3 }, wide_font.getTextBoundsTight("A", 8));
     try testing.expectEqual(Rectangle(f32){ .l = 20, .t = 4, .r = 22, .b = 6 }, wide_font.getTextBoundsTight("A", 16));
     try testing.expectEqual(Rectangle(f32){ .l = 10, .t = 2, .r = 27, .b = 11 }, wide_font.getTextBoundsTight("A\nAA", 8));
 
     // A blank 'A' followed by a '©' (two UTF-8 bytes) inked at x = 3..5 of row 2.
-    var data: [256 * 8]u8 = @splat(0);
-    data[0xA9 * 8 + 2] = 0x18;
-    const latin: Font = .{ .bitmap = .{ .name = "Latin", .char_width = 8, .char_height = 8, .first_char = 0, .last_char = 255, .data = &data } };
+    var data: [2 * 8]u8 = @splat(0);
+    data[8 + 2] = 0x18;
+    const latin: Font = .{ .bitmap = .{ .name = "Latin", .char_width = 8, .char_height = 8, .glyphs = &.{ .cell('A', 8, 8, 0), .cell(0xA9, 8, 8, 8) }, .data = &data } };
     try testing.expectEqual(Rectangle(f32){ .l = 11, .t = 2, .r = 13, .b = 3 }, latin.getTextBoundsTight("A©", 8));
     try testing.expectEqual(Rectangle(f32){ .l = 0, .t = 0, .r = 0, .b = 0 }, latin.getTextBoundsTight("A", 8));
 }

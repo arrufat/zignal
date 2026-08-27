@@ -34,19 +34,12 @@ const BdfFont = struct {
     glyph_count: u32,
 };
 
-/// A parsed glyph: its metadata in the font's own layout (`y_offset` counted down from
-/// the top of the line) and its encoding.
-const BdfGlyph = struct {
-    encoding: u32,
-    info: GlyphData,
-};
-
-/// Single-pass BDF parser state
+/// Single-pass BDF parser state: the glyphs in file order, `y_offset` already counted down
+/// from the top of the line.
 const BdfParseState = struct {
     font: BdfFont,
-    glyphs: std.ArrayList(BdfGlyph),
+    glyphs: std.ArrayList(BitmapFont.Entry),
     bitmap_data: std.ArrayList(u8),
-    all_ascii: bool = true,
     fn deinit(self: *BdfParseState, gpa: Allocator) void {
         self.glyphs.deinit(gpa);
         self.bitmap_data.deinit(gpa);
@@ -78,9 +71,32 @@ pub fn parse(gpa: Allocator, bytes: []const u8, filter: LoadFilter) !BitmapFont 
         if (parsed_glyphs >= state.font.glyph_count) break;
     }
 
+    // Codepoint order, a later duplicate of an encoding replacing the earlier one.
+    std.mem.sort(BitmapFont.Entry, state.glyphs.items, {}, byCodepoint);
+    var kept: usize = 0;
+    for (state.glyphs.items) |entry| {
+        if (kept > 0 and state.glyphs.items[kept - 1].codepoint == entry.codepoint) kept -= 1;
+        state.glyphs.items[kept] = entry;
+        kept += 1;
+    }
+    state.glyphs.shrinkRetainingCapacity(kept);
+
     const bitmap_data = try state.bitmap_data.toOwnedSlice(gpa);
     errdefer gpa.free(bitmap_data);
-    return convertToBitmapFont(gpa, state.font, state.glyphs.items, bitmap_data, state.all_ascii);
+    const glyphs = try state.glyphs.toOwnedSlice(gpa);
+    errdefer gpa.free(glyphs);
+    return .{
+        .name = state.font.name,
+        .char_width = @intCast(@abs(state.font.bbox_width)),
+        .char_height = @intCast(@abs(state.font.bbox_height)),
+        .data = bitmap_data,
+        .glyphs = glyphs,
+        .font_ascent = state.font.ascent,
+    };
+}
+
+fn byCodepoint(_: void, a: BitmapFont.Entry, b: BitmapFont.Entry) bool {
+    return a.codepoint < b.codepoint;
 }
 
 /// The family of an XLFD name (`-foundry-family-weight-...`); any other name as is.
@@ -169,7 +185,7 @@ fn skipToEndChar(lines: *std.mem.TokenIterator(u8, .any)) void {
 /// Parses one glyph after its `STARTCHAR`; true when it was kept.
 fn parseGlyph(gpa: Allocator, lines: *std.mem.TokenIterator(u8, .any), state: *BdfParseState, filter: LoadFilter) !bool {
     var info: GlyphData = .{ .width = 0, .height = 0, .x_offset = 0, .y_offset = 0, .device_width = 0, .bitmap_offset = state.bitmap_data.items.len };
-    var encoding: ?u32 = null;
+    var encoding: ?u21 = null;
     // BDF's y offset: the bitmap's bottom edge relative to the baseline.
     var bbx_y: ?i16 = null;
 
@@ -183,7 +199,7 @@ fn parseGlyph(gpa: Allocator, lines: *std.mem.TokenIterator(u8, .any), state: *B
                 skipToEndChar(lines);
                 return false;
             }
-            encoding = try std.fmt.parseInt(u32, enc_str, 10);
+            encoding = try std.fmt.parseInt(u21, enc_str, 10);
         } else if (std.mem.startsWith(u8, trimmed, "DWIDTH ")) {
             var parts = std.mem.tokenizeAny(u8, trimmed[7..], " \t");
             info.device_width = try std.fmt.parseInt(i16, parts.next() orelse "0", 10);
@@ -228,8 +244,7 @@ fn parseGlyph(gpa: Allocator, lines: *std.mem.TokenIterator(u8, .any), state: *B
                 }
             }
 
-            try state.glyphs.append(gpa, .{ .encoding = codepoint, .info = info });
-            if (codepoint > 127) state.all_ascii = false;
+            try state.glyphs.append(gpa, .{ .codepoint = codepoint, .info = info });
             skipToEndChar(lines);
             return true;
         } else if (std.mem.eql(u8, trimmed, "ENDCHAR")) {
@@ -239,60 +254,6 @@ fn parseGlyph(gpa: Allocator, lines: *std.mem.TokenIterator(u8, .any), state: *B
     }
 
     return false;
-}
-
-/// A variable-width font from the parsed glyphs, taking `font.name` and `bitmap_data`.
-fn buildSparseFont(allocator: Allocator, font: BdfFont, glyphs: []const BdfGlyph, bitmap_data: []u8) !BitmapFont {
-    var map: std.AutoHashMap(u32, GlyphData) = .init(allocator);
-    errdefer map.deinit();
-    try map.ensureTotalCapacity(@intCast(glyphs.len));
-    for (glyphs) |glyph| map.putAssumeCapacity(glyph.encoding, glyph.info);
-    return .{
-        .name = font.name,
-        .char_width = @intCast(@abs(font.bbox_width)),
-        .char_height = @intCast(@abs(font.bbox_height)),
-        .data = bitmap_data,
-        .glyphs = map,
-        .font_ascent = font.ascent,
-    };
-}
-
-/// Convert parsed glyphs to BitmapFont format
-fn convertToBitmapFont(allocator: Allocator, font: BdfFont, glyphs: []const BdfGlyph, bitmap_data: []u8, all_ascii: bool) !BitmapFont {
-    // Unicode fonts and variable-width ASCII ones use the sparse layout.
-    if (!all_ascii or glyphs.len == 0) return buildSparseFont(allocator, font, glyphs, bitmap_data);
-    const char_width: u32 = @abs(font.bbox_width);
-    const char_height: u32 = @abs(font.bbox_height);
-    var min_char: u8 = 255;
-    var max_char: u8 = 0;
-    for (glyphs) |glyph| {
-        if (glyph.info.width != char_width) return buildSparseFont(allocator, font, glyphs, bitmap_data);
-        min_char = @min(min_char, @as(u8, @intCast(glyph.encoding)));
-        max_char = @max(max_char, @as(u8, @intCast(glyph.encoding)));
-    }
-
-    // Fixed-width ASCII font: one bitmap after another in encoding order.
-    const bytes_per_row = GlyphData.bytesForWidth(char_width);
-    const char_bitmap_size = char_height * bytes_per_row;
-    const contiguous_data = try allocator.alloc(u8, (max_char - min_char + 1) * char_bitmap_size);
-    @memset(contiguous_data, 0);
-    for (glyphs) |glyph| {
-        const dest = contiguous_data[(glyph.encoding - min_char) * char_bitmap_size ..];
-        // A glyph shorter than the font leaves its remaining rows blank.
-        const copy_bytes = @min(glyph.info.height, char_height) * bytes_per_row;
-        @memcpy(dest[0..copy_bytes], bitmap_data[glyph.info.bitmap_offset..][0..copy_bytes]);
-    }
-    allocator.free(bitmap_data);
-
-    return .{
-        .name = font.name,
-        .char_width = @intCast(char_width),
-        .char_height = @intCast(char_height),
-        .first_char = min_char,
-        .last_char = max_char,
-        .data = contiguous_data,
-        .font_ascent = font.ascent,
-    };
 }
 
 test "BDF to BitmapFont conversion" {
@@ -325,8 +286,8 @@ test "BDF to BitmapFont conversion" {
 
     // Test converted font
     try testing.expectEqual(@as(u8, 8), font.char_height);
-    try testing.expectEqual(@as(u8, 65), font.first_char);
-    try testing.expectEqual(@as(u8, 65), font.last_char);
+    try testing.expectEqual(1, font.glyphs.len);
+    try testing.expectEqual('A', font.glyphs[0].codepoint);
 
     // Test that 'A' was converted correctly
     const char_data = font.getCharData('A');
@@ -336,6 +297,42 @@ test "BDF to BitmapFont conversion" {
     // Check bitmap conversion
     try testing.expectEqual(@as(u8, 0x18), char_data.?[0]);
     try testing.expectEqual(@as(u8, 0x24), char_data.?[1]);
+}
+
+test "BDF sorts glyphs by encoding, the last duplicate winning" {
+    const unsorted_bdf =
+        \\STARTFONT 2.1
+        \\FONTBOUNDINGBOX 8 1 0 0
+        \\CHARS 3
+        \\STARTCHAR B
+        \\ENCODING 66
+        \\BBX 8 1 0 0
+        \\BITMAP
+        \\02
+        \\ENDCHAR
+        \\STARTCHAR A
+        \\ENCODING 65
+        \\BBX 8 1 0 0
+        \\BITMAP
+        \\01
+        \\ENDCHAR
+        \\STARTCHAR A2
+        \\ENCODING 65
+        \\BBX 8 1 0 0
+        \\BITMAP
+        \\03
+        \\ENDCHAR
+        \\ENDFONT
+    ;
+
+    var font = try parse(testing.allocator, unsorted_bdf, .all);
+    defer font.deinit(testing.allocator);
+
+    try testing.expectEqual(2, font.glyphs.len);
+    try testing.expectEqual('A', font.glyphs[0].codepoint);
+    try testing.expectEqual('B', font.glyphs[1].codepoint);
+    try testing.expectEqualSlices(u8, &.{@bitReverse(@as(u8, 0x03))}, font.getCharData('A').?);
+    try testing.expectEqualSlices(u8, &.{@bitReverse(@as(u8, 0x02))}, font.getCharData('B').?);
 }
 
 test "BDF parses glyph rows wider than 32 bits" {
@@ -404,10 +401,9 @@ fn expectRoundtrip(file_name: []const u8) !void {
     defer loaded.deinit(testing.allocator);
     try testing.expectEqual(font.char_width, loaded.char_width);
     try testing.expectEqual(font.char_height, loaded.char_height);
-    try testing.expectEqual(font.first_char, loaded.first_char);
-    try testing.expectEqual(font.last_char, loaded.last_char);
-    for (font.first_char..font.last_char + 1) |codepoint| {
-        try testing.expectEqualSlices(u8, font.getCharData(@intCast(codepoint)).?, loaded.getCharData(@intCast(codepoint)).?);
+    try testing.expectEqual(font.glyphs.len, loaded.glyphs.len);
+    for (font.glyphs) |entry| {
+        try testing.expectEqualSlices(u8, font.getCharData(entry.codepoint).?, loaded.getCharData(entry.codepoint).?);
     }
 }
 
@@ -427,11 +423,7 @@ pub fn save(io: Io, gpa: Allocator, font: BitmapFont, path: []const u8) !void {
 
     try writeBdfHeader(gpa, &bdf_content, font);
 
-    const codepoints = try font.collectCodepoints(gpa);
-    defer gpa.free(codepoints);
-    for (codepoints) |encoding| {
-        try writeBdfGlyph(gpa, &bdf_content, font, encoding);
-    }
+    for (font.glyphs) |entry| try writeBdfGlyph(gpa, &bdf_content, font, entry);
 
     try bdf_content.appendSlice(gpa, "ENDFONT\n");
 
@@ -468,17 +460,15 @@ fn writeBdfHeader(allocator: Allocator, list: *std.ArrayList(u8), font: BitmapFo
     // Use stored font_ascent if available, otherwise estimate from the defaulted height
     const font_ascent = font.font_ascent orelse @as(i16, height);
 
-    if (font.glyphs) |glyphs| {
-        var iter = glyphs.valueIterator();
-        while (iter.next()) |glyph| {
-            max_width = @max(max_width, glyph.width);
-            max_height = @max(max_height, glyph.height);
+    for (font.glyphs) |entry| {
+        const glyph = entry.info;
+        max_width = @max(max_width, glyph.width);
+        max_height = @max(max_height, glyph.height);
 
-            // Reverse the transformation: bdf_y_offset = font_ascent - (internal_y_offset + height)
-            const bdf_y_offset = font_ascent - (glyph.y_offset + @as(i16, glyph.height));
-            min_y_offset = @min(min_y_offset, bdf_y_offset);
-            min_x_offset = @min(min_x_offset, glyph.x_offset);
-        }
+        // Reverse the transformation: bdf_y_offset = font_ascent - (internal_y_offset + height)
+        const bdf_y_offset = font_ascent - (glyph.y_offset + @as(i16, glyph.height));
+        min_y_offset = @min(min_y_offset, bdf_y_offset);
+        min_x_offset = @min(min_x_offset, glyph.x_offset);
     }
 
     const font_descent = -min_y_offset;
@@ -495,10 +485,10 @@ fn writeBdfHeader(allocator: Allocator, list: *std.ArrayList(u8), font: BitmapFo
 }
 
 /// Write a single glyph
-fn writeBdfGlyph(allocator: Allocator, list: *std.ArrayList(u8), font: BitmapFont, encoding: u21) !void {
-    const glyph = font.getGlyph(encoding) orelse return BdfError.MissingRequired;
-    const glyph_info = glyph.info;
-    const glyph_data = glyph.data;
+fn writeBdfGlyph(allocator: Allocator, list: *std.ArrayList(u8), font: BitmapFont, entry: BitmapFont.Entry) !void {
+    const encoding = entry.codepoint;
+    const glyph_info = entry.info;
+    const glyph_data = font.bitmap(glyph_info);
 
     try list.print(allocator, "STARTCHAR U+{X:0>4}\n", .{encoding});
     try list.print(allocator, "ENCODING {d}\n", .{encoding});
