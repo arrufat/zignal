@@ -112,20 +112,15 @@ pub const Font = union(enum) {
         };
     }
 
-    /// Box occupied by `text` relative to its top-left corner.
+    /// Box occupied by `text` relative to its top-left corner: `measureText` under the
+    /// default layout, so trailing spaces are left out of the width.
     pub fn getTextBounds(self: Font, text: []const u8, size: f32) Rectangle(f32) {
-        return switch (self) {
-            .bitmap => |b| b.getTextBounds(text, b.scaleFor(size)),
-            .vector => |v| v.getTextBounds(text, size),
-        };
+        return layout.measure(self, text, size, null, .default);
     }
 
     /// Box of the inked pixels of `text` relative to its top-left corner.
     pub fn getTextBoundsTight(self: Font, text: []const u8, size: f32) Rectangle(f32) {
-        return switch (self) {
-            .bitmap => |b| b.getTextBoundsTight(text, b.scaleFor(size)),
-            .vector => |v| v.getTextBoundsTight(text, size),
-        };
+        return layout.measureTight(self, text, size);
     }
 
     /// Box `Canvas.drawTextBox` fills with `text` under `layout`, relative to its top-left
@@ -261,7 +256,7 @@ test "Font.load dispatches on the format" {
     try std.testing.expectEqual(@as(f32, 16), font.defaultSize());
     const bitmap: Font = .{ .bitmap = font8x8.basic };
     try std.testing.expectEqual(@as(f32, 8), bitmap.defaultSize());
-    try std.testing.expectEqual(@as(f32, 24), font8x8.basic.getTextBounds("abc", 1).r);
+    try std.testing.expectEqual(@as(f32, 24), bitmap.getTextBounds("abc", 8).r);
     try std.testing.expectEqual(@as(f32, 48), bitmap.getTextBounds("abc", 16).r);
     try std.testing.expectEqual(@as(f32, 16), bitmap.lineHeight(16));
     try std.testing.expect(bitmap.hasGlyph('a'));
