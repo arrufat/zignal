@@ -57,6 +57,10 @@ const CoverageMax = struct {
         const coverage: u8 = @round(@min(alpha, 1) * 255);
         dest.* = @max(dest.*, coverage);
     }
+
+    inline fn coverRun(sink: CoverageMax, dest: []u8, alpha: f32) void {
+        for (dest) |*px| sink.cover(px, alpha);
+    }
 };
 
 /// How text glyphs are painted.
@@ -253,6 +257,11 @@ pub fn Canvas(comptime T: type) type {
                 if (alpha <= 0) return;
                 if (p.opaqueOver(dest)) return p.mixOpaque(dest, @trunc(255 * alpha));
                 assignPixel(dest, p.rgba.fade(alpha), p.blending);
+            }
+
+            /// `cover` over a run of pixels at one coverage; a full opaque run is a memset.
+            inline fn coverRun(p: Paint, dest: []T, alpha: f32) void {
+                if (alpha >= 1 and p.overwrite) @memset(dest, p.solid) else for (dest) |*px| p.cover(px, alpha);
             }
 
             /// `cover` with 8-bit coverage, as stored in masks; the byte is used as is rather
@@ -1397,11 +1406,20 @@ pub fn Canvas(comptime T: type) type {
                 const row_px = self.image.data[(row_start + r) * self.image.stride ..];
                 var sum: f32 = 0;
                 for (row_touched, 0..) |flag, b| {
-                    if (flag == 0 and @abs(sum) <= threshold) continue;
+                    const held = @abs(sum);
+                    if (flag == 0 and held <= threshold) continue;
                     // Cells before the visible range only feed the sum.
                     const lo = b * area_block;
                     const hi = @min(lo + area_block, visible_hi);
-                    const paint_from = @max(lo, visible_lo);
+                    const paint_from = clamp(visible_lo, lo, lo + area_block);
+                    if (flag == 0) {
+                        // An untouched block was never zeroed, so its cells are not read: it
+                        // holds no deposits and the coverage carries across it unchanged.
+                        if (paint_from >= hi) continue;
+                        const px_base: usize = @intCast(col_start + @as(i64, @intCast(paint_from)));
+                        sink.coverRun(row_px[px_base..][0 .. hi - paint_from], if (held >= 1 - threshold) 1 else held);
+                        continue;
+                    }
                     for (row_acc[lo..paint_from]) |a| sum += a;
                     if (paint_from >= hi) continue;
                     const px_base: usize = @intCast(col_start + @as(i64, @intCast(paint_from)));
