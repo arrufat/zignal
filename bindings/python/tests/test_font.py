@@ -54,7 +54,10 @@ def test_font8x8_metrics_and_draw():
 
     small = render("Hi", font)
     assert inked(small) > 0
-    assert inked(render("Hi", font, size=16)) == 4 * inked(small)
+    # Only FAST scales bitmap glyphs pixel-for-pixel; the default SOFT mode smooths them
+    fast = zignal.DrawMode.FAST
+    assert inked(render("Hi", font, size=16, mode=fast)) == 4 * inked(render("Hi", font, mode=fast))
+    assert inked(render("Hi", font, size=16)) > inked(small)
     assert render("Hi") == small
 
 

@@ -86,10 +86,28 @@ class TestCanvas:
         px = img[10, 10].item()
         assert px.r == 0 and px.a == 128
 
-        # Default NORMAL blending composites translucent colors in either mode
+        # A missing blending follows the mode: SOFT (the default) composites, FAST overwrites
         img2 = zignal.Image(20, 20, (255, 255, 255, 255), dtype=zignal.Rgba)
         canvas2 = img2.canvas()
-        for mode in (zignal.DrawMode.FAST, zignal.DrawMode.SOFT):
-            canvas2.fill((255, 255, 255, 255))
-            canvas2.fill_rectangle((5, 5, 15, 15), (0, 0, 0, 128), mode=mode)
-            assert 120 < img2[10, 10].item().r < 135
+        canvas2.fill_rectangle((5, 5, 15, 15), (0, 0, 0, 128))
+        assert 120 < img2[10, 10].item().r < 135
+        canvas2.fill((255, 255, 255, 255))
+        canvas2.fill_rectangle((5, 5, 15, 15), (0, 0, 0, 128), mode=zignal.DrawMode.FAST)
+        px = img2[10, 10].item()
+        assert px.r == 0 and px.a == 128
+        canvas2.fill((255, 255, 255, 255))
+        canvas2.fill_rectangle(
+            (5, 5, 15, 15), (0, 0, 0, 128), mode=zignal.DrawMode.FAST, blending=zignal.Blending.NORMAL
+        )
+        assert 120 < img2[10, 10].item().r < 135
+
+    def test_default_mode_is_antialiased(self):
+        def values(**kwargs):
+            img = zignal.Image(20, 20, 0)
+            img.canvas().draw_line((2, 3), (17, 11), 255, **kwargs)
+            return {int(v) for v in img.to_numpy().ravel()}
+
+        # A diagonal line has partial coverage only when antialiased
+        assert values() == values(mode=zignal.DrawMode.SOFT)
+        assert values() - {0, 255}
+        assert values(mode=zignal.DrawMode.FAST) == {0, 255}

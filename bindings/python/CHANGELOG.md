@@ -10,6 +10,7 @@
 - **Text layout**: `Canvas.draw_text_box(text, rect, color, ..., halign, valign, wrap, line_spacing, letter_spacing)` with the new `TextAlign` and `VerticalAlign` enums, `Font.measure_text`, and outlined text through `Canvas.draw_text_outline` / `draw_text_box_outline` (bitmap fonts get a halo).
 
 ### Changed
+- **Canvas draws antialiased by default** (breaking): every `Canvas` draw/fill method now defaults to `mode=DrawMode.SOFT`, and an omitted `blending` follows the mode like the Zig presets (`Blending.NORMAL` for `SOFT`, `Blending.NONE` for `FAST`). Previously the default was `DrawMode.FAST` with `Blending.NORMAL`; pass `mode=DrawMode.FAST, blending=Blending.NORMAL` to get that back. `draw_image` still blends with `Blending.NORMAL`.
 - **`BitmapFont` is now `Font`** (breaking): one class for every font format; `save` still writes BDF/PCF and raises `ValueError` for TrueType fonts; the `width` property was removed.
 - **`Canvas.draw_text` takes `size=` in pixels instead of `scale=`** (breaking): the em height for TrueType fonts, the character height for bitmap fonts. Omitted, it is the bitmap font's natural size (the old `scale=1.0`) or 16 px for TrueType fonts; `font=None` selects the built-in font.
 - **iTerm2 inline images**: `f"{img:iterm2}"` (and `iterm2:WIDTHxHEIGHT` / `iterm2:WIDTHx` / `iterm2:xHEIGHT`) renders via the iTerm2 inline image protocol. `f"{img:auto}"` now prefers kitty → iterm2 → sixel → sgr.
