@@ -848,7 +848,6 @@ pub fn Canvas(comptime T: type) type {
             comptime assert(isColor(@TypeOf(color)));
             if (radius <= 0 or width == 0) return;
             const arc = ArcRange.fromAngles(start_angle, end_angle) orelse return;
-            if (opts.mode == .soft and !arc.isFull()) return self.drawArcSoft(center, radius, arc, width, color, opts);
             self.strokeRing(center, radius, arc, width, color, opts);
         }
 
@@ -860,9 +859,8 @@ pub fn Canvas(comptime T: type) type {
             self.renderRing(center, radius - half, radius + half, color, arc, opts);
         }
 
-        /// Angular range for arc filtering. `start`/`end` are
-        /// normalized to [0, 2π] with `end` shifted by +2π when the arc wraps past 0,
-        /// so that per-pixel `contains` checks need no `@mod`.
+        /// Angular range for arc filtering: `start`/`end` normalized to [0, 2π], `end` shifted
+        /// by +2π when the arc wraps past 0 so that `end - start` is the sweep.
         const ArcRange = struct {
             start: f32,
             end: f32,
@@ -880,33 +878,16 @@ pub fn Canvas(comptime T: type) type {
                 return .{ .start = ns, .end = ne };
             }
 
-            /// Normalizes an angle to the [0, 2π] range. Use only when the input range is unknown;
-            /// for atan2 outputs (already in [-π, π]) prefer the cheaper inline form in `contains`.
+            /// Normalizes an angle to the [0, 2π] range.
             fn normalize(angle: f32) f32 {
                 var normalized = @mod(angle, 2 * std.math.pi);
                 if (normalized < 0) normalized += 2 * std.math.pi;
                 return normalized;
             }
 
-            /// Tests whether an `atan2`-produced angle lies within the precomputed arc range.
-            /// Caller must pass a value in [-π, π] (i.e., the output of `std.math.atan2`); other
-            /// inputs require a prior `normalize` call.
-            inline fn contains(self: ArcRange, angle: f32) bool {
-                // atan2 ∈ [-π, π] — one conditional add suffices to reach [0, 2π].
-                const norm_angle = if (angle < 0) angle + 2 * std.math.pi else angle;
-                if (norm_angle >= self.start and norm_angle <= self.end) return true;
-                const shifted = norm_angle + 2 * std.math.pi;
-                return shifted >= self.start and shifted <= self.end;
-            }
-
             /// Returns the absolute angular span of the arc.
             inline fn span(self: ArcRange) f32 {
                 return self.end - self.start;
-            }
-
-            /// Returns the absolute geometric length of the arc along the specified radius.
-            inline fn length(self: ArcRange, radius: f32) f32 {
-                return self.span() * radius;
             }
 
             /// Returns true if the arc spans more than half a circle (π radians).
@@ -934,6 +915,19 @@ pub fn Canvas(comptime T: type) type {
                 const a = start_cross <= 0;
                 const b = end_cross >= 0;
                 return if (self.isLong()) (a or b) else (a and b);
+            }
+
+            /// Angular coverage of the pixel at offset (x, y) from the center, `sv`/`ev` being
+            /// `startVector`/`endVector` so the cross products are signed distances to the ray
+            /// lines: binary in `.fast`, a pixel-wide linear ramp across each ray in `.soft`.
+            inline fn coverage(self: ArcRange, x: f32, y: f32, sv: Point(2, f32), ev: Point(2, f32), comptime mode: DrawMode) f32 {
+                const start_cross = x * sv.y() - y * sv.x();
+                const end_cross = x * ev.y() - y * ev.x();
+                if (mode == .fast) return if (self.containsCross(start_cross, end_cross)) 1 else 0;
+                const after_start = clamp(antialias_edge_offset - start_cross, 0, 1);
+                const before_end = clamp(antialias_edge_offset + end_cross, 0, 1);
+                // A wedge is the intersection of its two half-planes, a reflex arc their union.
+                return if (self.isLong()) @max(after_start, before_end) else @min(after_start, before_end);
             }
         };
 
@@ -970,9 +964,10 @@ pub fn Canvas(comptime T: type) type {
             }
         }
 
-        /// Renders a thick ring outline (or arc segment); `.fast` uses binary coverage. Each
-        /// row visits only the columns within reach of the outer edge and outside the inner
-        /// one (a pixel of margin either side), then tests every pixel as before.
+        /// Renders the ring between the two radii restricted to `arc` (a disk or pie when the
+        /// inner radius is 0); `.fast` uses binary coverage. Each row visits only the columns
+        /// within reach of the outer edge and outside the inner one (a pixel of margin either
+        /// side), then scores every pixel by radial times angular coverage.
         inline fn renderRing(self: Self, center: Point(2, f32), inner_radius: f32, outer_radius: f32, color: anytype, arc: ArcRange, opts: DrawOptions) void {
             const paint: Paint = .init(color, opts.blending);
             switch (opts.mode) {
@@ -986,6 +981,8 @@ pub fn Canvas(comptime T: type) type {
             const bbox = self.ringBoundingBox(center, outer_radius) orelse return;
             const edge: f32 = if (mode == .soft) antialias_edge_offset else 0;
             const full = arc.isFull();
+            const sv = arc.startVector();
+            const ev = arc.endVector();
             const reach_outer = outer_radius + edge;
             const reach_inner = if (inner_radius > 0) inner_radius - edge else 0;
             const col_min = as(f32, bbox.l);
@@ -1011,9 +1008,9 @@ pub fn Canvas(comptime T: type) type {
                     const c_hi: usize = @trunc(hi);
                     for (c_lo..c_hi + 1) |c| {
                         const x = as(f32, c) - center.x();
-                        const coverage = ringCoverage(x, y, inner_radius, outer_radius, mode);
+                        var coverage = ringCoverage(x, y, inner_radius, outer_radius, mode);
                         if (coverage <= 0) continue;
-                        if (!full and !arc.contains(std.math.atan2(y, x))) continue;
+                        if (!full) coverage *= arc.coverage(x, y, sv, ev, mode);
                         paint.cover(&self.image.data[r * self.image.stride + c], coverage);
                     }
                 }
@@ -1021,7 +1018,7 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Rasterizes a 1-pixel-thick Bresenham circle around `center`.
-        /// Each of the 8 octant-symmetric pixels is gated by an angle check.
+        /// Each of the 8 octant-symmetric pixels is gated by the arc's half-plane test.
         fn drawBresenhamCircle(self: Self, center: Point(2, f32), radius: f32, color: anytype, arc: ArcRange, blending: Blending) void {
             const paint: Paint = .init(color, blending);
             const cx: i32 = @round(center.x());
@@ -1031,13 +1028,15 @@ pub fn Canvas(comptime T: type) type {
             var y: f32 = 0;
             var err: f32 = 0;
             const full = arc.isFull();
+            const sv = arc.startVector();
+            const ev = arc.endVector();
             while (x >= y) {
                 const offsets = [_][2]f32{
                     .{ x, y }, .{ -x, y }, .{ x, -y }, .{ -x, -y },
                     .{ y, x }, .{ -y, x }, .{ y, -x }, .{ -y, -x },
                 };
                 for (offsets) |o| {
-                    if (!full and !arc.contains(std.math.atan2(o[1], o[0]))) continue;
+                    if (!full and arc.coverage(o[0], o[1], sv, ev, .fast) == 0) continue;
                     const col: i32 = @trunc(o[0]);
                     const row: i32 = @trunc(o[1]);
                     if (self.atOrNull(cy + row, cx + col)) |dest| paint.put(dest);
@@ -1050,36 +1049,6 @@ pub fn Canvas(comptime T: type) type {
                     x -= 1;
                     err -= 2 * x + 1;
                 }
-            }
-        }
-
-        /// Antialiased partial arc outline: a polyline along the arc for width 1, otherwise
-        /// the polygon between the outer and inner arcs.
-        fn drawArcSoft(self: Self, center: Point(2, f32), radius: f32, arc: ArcRange, width: u32, color: anytype, opts: DrawOptions) !void {
-            const segments: u32 = @max(8, @min(bezier_max_segments_count, @as(u32, @ceil(arc.length(radius) / 5.0))));
-            const angle_step = arc.span() / as(f32, segments);
-            var points: [2 * (bezier_max_segments_count + 1)]Point(2, f32) = undefined;
-            const outer = points[0 .. segments + 1];
-            if (width == 1) {
-                // The arc itself.
-                fillArcRing(outer, center, radius, arc.start, angle_step);
-                return self.strokePath(&.{outer}, false, 1, color, opts);
-            }
-            const half = as(f32, width) / 2;
-            fillArcRing(outer, center, radius + half, arc.start, angle_step);
-            fillArcRing(points[segments + 1 .. 2 * (segments + 1)], center, radius - half, arc.end, -angle_step);
-            try self.fillPolygon(points[0 .. 2 * (segments + 1)], color, opts);
-        }
-
-        /// Populates `buf` with points along a circular arc, starting at `start_angle` and
-        /// stepping by `angle_step` for each successive index.
-        fn fillArcRing(buf: []Point(2, f32), center: Point(2, f32), radius: f32, start_angle: f32, angle_step: f32) void {
-            for (buf, 0..) |*p, i| {
-                const angle = start_angle + as(f32, i) * angle_step;
-                p.* = .init(.{
-                    center.x() + radius * @cos(angle),
-                    center.y() + radius * @sin(angle),
-                });
             }
         }
 
@@ -1802,7 +1771,7 @@ pub fn Canvas(comptime T: type) type {
             if (arc.isFull()) return self.fillCircle(center, radius, color, opts);
             switch (opts.mode) {
                 .fast => self.fillArcFast(center, radius, arc, color, opts.blending),
-                .soft => try self.fillArcSoft(center, radius, arc, color, opts.blending),
+                .soft => self.renderRing(center, 0, radius, color, arc, opts),
             }
         }
 
@@ -1884,75 +1853,6 @@ pub fn Canvas(comptime T: type) type {
 
                     self.fillSpan(x, span_end, y, paint);
                     x = span_end;
-                }
-            }
-        }
-
-        /// Helper: Calculate antialiased coverage for arc boundaries
-        inline fn calculateArcCoverage(dist: f32, radius: f32, in_arc: bool, start_cross_product: f32, end_cross_product: f32) f32 {
-            const start_cross = @abs(start_cross_product);
-            const end_cross = @abs(end_cross_product);
-
-            // Circular boundary coverage
-            const circ_coverage = if (dist <= radius - 1.0)
-                1.0
-            else if (dist < radius + 1.0)
-                clamp(radius - dist + 0.5, 0, 1)
-            else
-                0.0;
-
-            const eps = 1e-5;
-
-            if (!in_arc) {
-                // Outside arc - apply edge antialiasing
-                var edge_coverage: f32 = 0;
-                if (start_cross < 1.0 and start_cross_product < eps) edge_coverage = @max(edge_coverage, 1.0 - start_cross);
-                if (end_cross < 1.0 and end_cross_product > -eps) edge_coverage = @max(edge_coverage, 1.0 - end_cross);
-                return circ_coverage * edge_coverage;
-            } else {
-                // Inside arc - reduce coverage near edges
-                var coverage = circ_coverage;
-                if (start_cross < 1.0 and start_cross_product >= -eps) coverage = @min(coverage, start_cross);
-                if (end_cross < 1.0 and end_cross_product <= eps) coverage = @min(coverage, end_cross);
-                return coverage;
-            }
-        }
-
-        /// Internal function for filling smooth (anti-aliased) arcs.
-        fn fillArcSoft(self: Self, center: Point(2, f32), radius: f32, arc: ArcRange, color: anytype, blending: Blending) !void {
-            // Precompute edge vectors
-            const start_edge = arc.startVector();
-            const end_edge = arc.endVector();
-
-            const bounds = self.ringBoundingBox(center, radius) orelse return;
-            const paint: Paint = .init(color, blending);
-
-            for (bounds.t..bounds.b) |r| {
-                const y = as(f32, r) - center.y();
-                for (bounds.l..bounds.r) |c| {
-                    const x = as(f32, c) - center.x();
-
-                    const dist_sq = x * x + y * y;
-                    if (dist_sq > (radius + 1) * (radius + 1)) continue;
-
-                    const angle = std.math.atan2(y, x);
-                    const in_arc = arc.contains(angle);
-
-                    const p: Point(2, f32) = .init(.{ x, y });
-
-                    const start_cross_product = p.cross(start_edge);
-                    const end_cross_product = p.cross(end_edge);
-
-                    if (!in_arc) {
-                        const eps = 1e-5;
-                        const near_start = @abs(start_cross_product) < 1.0 and start_cross_product < eps;
-                        const near_end = @abs(end_cross_product) < 1.0 and end_cross_product > -eps;
-                        if (!near_start and !near_end) continue;
-                    }
-
-                    const dist = @sqrt(dist_sq);
-                    const coverage = calculateArcCoverage(dist, radius, in_arc, start_cross_product, end_cross_product);
-                    paint.cover(&self.image.data[r * self.image.stride + c], coverage);
                 }
             }
         }
