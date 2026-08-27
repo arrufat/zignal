@@ -2334,21 +2334,21 @@ pub fn Canvas(comptime T: type) type {
 
         /// Blits one line of bitmap glyphs at `position`.
         fn blitBitmapLine(self: Self, text: []const u8, position: Point(2, f32), paint: Paint, font: BitmapFont, scale: f32, letter_spacing: f32, mode: DrawMode) void {
-            const text_rect = bitmapLineExtent(text, font, scale, letter_spacing).translate(position.x(), position.y());
-            const clip_rect = text_rect.intersect(self.imageRect()) orelse return;
-
             const y = position.y();
             var glyphs: BitmapFont.Layout = .init(font, text, scale);
             glyphs.x = position.x();
             glyphs.letter_spacing = letter_spacing;
-            while (glyphs.next()) |placed| {
-                if (scale == 1.0) {
-                    self.renderGlyphUnscaled(placed.glyph, placed.x, y, paint);
-                } else switch (mode) {
-                    .fast => self.renderGlyphFastScaled(placed.glyph, placed.x, y, scale, clip_rect, paint),
-                    .soft => self.renderGlyphSoftScaled(placed.glyph, placed.x, y, scale, paint),
-                }
+            // The 1:1 blit clips per pixel, so it skips the line's extent, a second pass over the text.
+            if (scale == 1.0) {
+                while (glyphs.next()) |placed| self.renderGlyphUnscaled(placed.glyph, placed.x, y, paint);
+                return;
             }
+            const text_rect = bitmapLineExtent(text, font, scale, letter_spacing).translate(position.x(), position.y());
+            const clip_rect = text_rect.intersect(self.imageRect()) orelse return;
+            while (glyphs.next()) |placed| switch (mode) {
+                .fast => self.renderGlyphFastScaled(placed.glyph, placed.x, y, scale, clip_rect, paint),
+                .soft => self.renderGlyphSoftScaled(placed.glyph, placed.x, y, scale, paint),
+            };
         }
 
         /// Blits a glyph 1:1. `x`/`y` are floored once, since floor commutes with adding the

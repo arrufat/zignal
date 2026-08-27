@@ -107,7 +107,7 @@ pub const Font = union(enum) {
 
     pub fn hasGlyph(self: Font, codepoint: u21) bool {
         return switch (self) {
-            .bitmap => |b| b.getGlyph(codepoint) != null,
+            .bitmap => |b| b.getEntry(codepoint) != null,
             .vector => |v| v.glyphIndex(codepoint) != 0,
         };
     }
