@@ -188,55 +188,18 @@ pub const Layout = struct {
         self.x += self.letter_spacing;
         return glyph;
     }
-};
 
-/// Calculate the bounding rectangle for rendering text
-/// Returns bounds where l,t are inclusive and r,b are exclusive
-/// For example, an 8x8 character has pixels at positions 0-7, so bounds are (0,0) to (8,8)
-pub fn getTextBounds(self: BitmapFont, text: []const u8, scale: f32) Rectangle(f32) {
-    var width: f32 = 0;
-    var x: f32 = 0;
-    var lines: f32 = 1;
-    var iter: std.unicode.Utf8Iterator = .{ .bytes = text, .i = 0 };
-    while (iter.nextCodepoint()) |codepoint| {
-        if (codepoint != '\n') {
-            x += @as(f32, self.getCharAdvanceWidth(codepoint)) * scale;
-            continue;
-        }
-        width = @max(width, x);
-        x = 0;
-        lines += 1;
-    }
-    width = @max(width, x);
-    return .{ .l = 0, .t = 0, .r = width, .b = lines * (@as(f32, self.char_height) * scale) };
-}
-
-/// Calculate the tight bounding rectangle for rendering text
-/// Returns bounds that exactly encompass the visible pixels
-/// Unlike getTextBounds, this excludes character padding
-pub fn getTextBoundsTight(self: BitmapFont, text: []const u8, scale: f32) Rectangle(f32) {
-    var layout: Layout = .init(self, text, scale);
-    var y: f32 = 0;
-    var bounds: ?Rectangle(f32) = null;
-    while (layout.iter.nextCodepoint()) |codepoint| {
-        if (codepoint == '\n') {
-            layout.x = 0;
-            y += @as(f32, self.char_height) * scale;
-            continue;
-        }
-        const x = layout.x;
-        const glyph = layout.place(codepoint) orelse continue;
-        const ink = glyph.inkBounds() orelse continue;
-        const box: Rectangle(f32) = .{
-            .l = x + @as(f32, ink.l) * scale,
-            .t = y + @as(f32, ink.t) * scale,
-            .r = x + @as(f32, ink.r) * scale,
-            .b = y + @as(f32, ink.b) * scale,
+    /// Device-pixel box of the glyph's ink, relative to the line's top-left corner.
+    pub fn inkBounds(self: Layout, item: Item) ?Rectangle(f32) {
+        const ink = item.glyph.inkBounds() orelse return null;
+        return .{
+            .l = item.x + @as(f32, ink.l) * self.scale,
+            .t = @as(f32, ink.t) * self.scale,
+            .r = item.x + @as(f32, ink.r) * self.scale,
+            .b = @as(f32, ink.b) * self.scale,
         };
-        bounds = if (bounds) |acc| acc.merge(box) else box;
     }
-    return bounds orelse .{ .l = 0, .t = 0, .r = 0, .b = 0 };
-}
+};
 
 /// Saves the font to a file.
 /// Supports BDF (`.bdf`, `.bdf.gz`) and PCF (`.pcf`, `.pcf.gz`) formats.
@@ -295,80 +258,3 @@ pub const test_font: BitmapFont = .{
     },
     .font_ascent = 7,
 };
-
-test "getTextBounds with Unicode" {
-    const testing = std.testing;
-    const font = BitmapFont{
-        .name = "Test",
-        .char_width = 8,
-        .char_height = 8,
-        .first_char = 0,
-        .last_char = 255,
-        .data = &@as([256 * 8]u8, @splat(0)),
-    };
-
-    // "A" is 1 byte, "©" is 2 bytes in UTF-8
-    const text = "A©";
-    const bounds = font.getTextBounds(text, 1.0);
-
-    // Both should be treated as 8px wide characters
-    try testing.expectEqual(@as(f32, 16.0), bounds.r);
-    try testing.expectEqual(@as(f32, 8.0), bounds.b);
-}
-
-test "getTextBoundsTight with Wide Font" {
-    const testing = std.testing;
-    // 16x8 font, 2 bytes per row
-    var data: [2 * 8]u8 = @splat(0);
-    // Set a pixel at (10, 2) - this is in the second byte of the 3rd row
-    data[2 * 2 + 1] = 1 << 2; // (10-8) = bit 2 of the second byte
-
-    const font = BitmapFont{
-        .name = "WideTest",
-        .char_width = 16,
-        .char_height = 8,
-        .first_char = 'A',
-        .last_char = 'A',
-        .data = &data,
-    };
-
-    const bounds = font.getTextBoundsTight("A", 1.0);
-    // Pixel is at (10, 2), so bounds should be (10, 2) to (11, 3)
-    try testing.expectEqual(@as(f32, 10.0), bounds.l);
-    try testing.expectEqual(@as(f32, 2.0), bounds.t);
-    try testing.expectEqual(@as(f32, 11.0), bounds.r);
-    try testing.expectEqual(@as(f32, 3.0), bounds.b);
-}
-
-test "getTextBoundsTight with Unicode" {
-    const testing = std.testing;
-    // Create a font where '©' (codepoint 0xA9) has a specific pattern
-    var data: [256 * 8]u8 = @splat(0);
-    // '©' at index 0xA9
-    const offset = 0xA9 * 8;
-    data[offset + 2] = 0x18; // 00011000 in row 2
-
-    const font = BitmapFont{
-        .name = "Test",
-        .char_width = 8,
-        .char_height = 8,
-        .first_char = 0,
-        .last_char = 255,
-        .data = &data,
-    };
-
-    // "©" is 2 bytes in UTF-8.
-    // Advance for 'A' (8px) + tight bounds of '©' (bits 3,4 at row 2)
-    // x position: 8 (from 'A') + 3 (min_x of '©') = 11
-    const text = "A©";
-    const bounds = font.getTextBoundsTight(text, 1.0);
-
-    // 'A' has no pixels in this test font. '©' has pixels at x=3,4 in its local space.
-    // 'A' is at x=0, '©' is at x=8.
-    // '©' pixels are at x=11 and x=12.
-    // Tight bounds: l=11, r=13, t=2, b=3.
-    try testing.expectEqual(@as(f32, 11.0), bounds.l);
-    try testing.expectEqual(@as(f32, 13.0), bounds.r);
-    try testing.expectEqual(@as(f32, 2.0), bounds.t);
-    try testing.expectEqual(@as(f32, 3.0), bounds.b);
-}

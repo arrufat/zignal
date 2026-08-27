@@ -271,8 +271,8 @@ pub fn lineHeight(self: VectorFont, size: f32) f32 {
     return as(f32, @as(i32, self.ascent) - self.descent + self.line_gap) * self.scaleFor(size);
 }
 
-/// Lays out `text` from a top-left origin with `\n` line breaks, yielding each glyph
-/// placed in device pixels.
+/// Lays out one line of `text` from its top-left origin, yielding each glyph placed in
+/// device pixels; `font.layout` breaks lines.
 pub const Layout = struct {
     pub const Item = struct {
         gid: u16,
@@ -285,7 +285,6 @@ pub const Layout = struct {
 
     font: VectorFont,
     scale: f32,
-    line_height: f32,
     iter: std.unicode.Utf8Iterator,
     x: f32 = 0,
     baseline: f32,
@@ -301,7 +300,6 @@ pub const Layout = struct {
         return .{
             .font = font,
             .scale = scale,
-            .line_height = font.lineHeight(size),
             .iter = .{ .bytes = text, .i = 0 },
             .baseline = as(f32, font.ascent) * scale,
         };
@@ -314,15 +312,8 @@ pub const Layout = struct {
         return null;
     }
 
-    /// Places `codepoint` at the pen and advances past it; `\n` starts the next line and
-    /// places nothing.
+    /// Places `codepoint` at the pen and advances past it.
     pub fn place(self: *Layout, codepoint: u21) ?Item {
-        if (codepoint == '\n') {
-            self.x = 0;
-            self.baseline += self.line_height;
-            self.prev = null;
-            return null;
-        }
         const gid = self.font.glyphIndex(codepoint);
         if (self.prev) |p| self.x += as(f32, self.font.kern(p, gid)) * self.scale;
         // One cache lookup serves both reads; `glyphIndex` keeps gid valid.
@@ -358,29 +349,6 @@ pub const Layout = struct {
     }
 };
 
-/// Box occupied by `text` at `size` pixels per em, relative to its top-left corner:
-/// the widest line's advance by the number of lines times the line height.
-pub fn getTextBounds(self: VectorFont, text: []const u8, size: f32) Rectangle(f32) {
-    var layout: Layout = .init(self, text, size);
-    layout.with_bounds = false;
-    var width: f32 = 0;
-    while (layout.next()) |_| width = @max(width, layout.x);
-    const lines = 1 + std.mem.count(u8, text, "\n");
-    return .{ .l = 0, .t = 0, .r = width, .b = as(f32, lines) * layout.line_height };
-}
-
-/// Union of the glyph boxes of `text`, relative to its top-left corner; empty when no
-/// glyph has ink.
-pub fn getTextBoundsTight(self: VectorFont, text: []const u8, size: f32) Rectangle(f32) {
-    var layout: Layout = .init(self, text, size);
-    var bounds: ?Rectangle(f32) = null;
-    while (layout.next()) |item| {
-        const box = layout.inkBounds(item) orelse continue;
-        bounds = if (bounds) |acc| acc.merge(box) else box;
-    }
-    return bounds orelse .{ .l = 0, .t = 0, .r = 0, .b = 0 };
-}
-
 pub fn format(self: VectorFont, writer: *Io.Writer) Io.Writer.Error!void {
     try writer.print("VectorFont{{ .units_per_em = {d}, .glyphs = {d}, .ascent = {d}, .descent = {d}", .{
         self.units_per_em,
@@ -394,6 +362,10 @@ pub fn format(self: VectorFont, writer: *Io.Writer) Io.Writer.Error!void {
 
 const testing = std.testing;
 const synthetic = @import("truetype/synthetic.zig");
+
+fn lineWidth(font: VectorFont, text: []const u8, size: f32) f32 {
+    return font_mod.layout.lineWidth(.{ .vector = font }, text, size, 0);
+}
 
 test "header metrics" {
     var buf: [synthetic.buffer_size]u8 = undefined;
@@ -433,22 +405,6 @@ test "glyph metrics incl. the hmtx tail" {
     try testing.expectEqual(GlyphMetrics{ .advance = 800, .lsb = 0 }, font.glyphMetrics(3));
     try testing.expectEqual(GlyphMetrics{ .advance = 800, .lsb = 100 }, font.glyphMetrics(6));
     try testing.expectEqual(GlyphMetrics{ .advance = 800, .lsb = 0 }, font.glyphMetrics(7));
-}
-
-test "text bounds" {
-    var buf: [synthetic.buffer_size]u8 = undefined;
-    const font = synthetic.font(&buf, .{});
-    // A then B: 800 + kern(1, 2) = -30, then 800; two lines of 1150 units.
-    const bounds = font.getTextBounds("AB\nA", 50);
-    try testing.expectApproxEqAbs(@as(f32, (800 - 30 + 800) * 0.05), bounds.r, 1e-4);
-    try testing.expectApproxEqAbs(@as(f32, 2 * 57.5), bounds.b, 1e-4);
-
-    const tight = font.getTextBoundsTight("A", 100);
-    try testing.expectApproxEqAbs(@as(f32, 10), tight.l, 1e-4);
-    try testing.expectApproxEqAbs(@as(f32, 70), tight.r, 1e-4);
-    try testing.expectApproxEqAbs(@as(f32, 90 - 70), tight.t, 1e-4);
-    try testing.expectApproxEqAbs(@as(f32, 90), tight.b, 1e-4);
-    try testing.expectEqual(@as(f32, 0), font.getTextBoundsTight("", 100).r);
 }
 
 test "rejects other formats and truncation without panicking" {
@@ -553,7 +509,7 @@ test "system font, when one is installed" {
     defer b.deinit(testing.allocator);
     try testing.expect(b.contourCount() >= 2);
     try testing.expect(font.kern(a, font.glyphIndex('V')) <= 0);
-    try testing.expect(font.getTextBounds("Hello", 24).r > 24);
+    try testing.expect(lineWidth(font, "Hello", 24) > 24);
 }
 
 test "system collection, when one is installed" {
@@ -582,7 +538,7 @@ test "system collection, when one is installed" {
     var cubics: usize = 0;
     for (o.points) |p| cubics += @intFromBool(p.kind == .cubic_control);
     try testing.expect(cubics > 0);
-    try testing.expect(font.getTextBounds("中文", 24).r > 24);
+    try testing.expect(lineWidth(font, "中文", 24) > 24);
 
     var last: VectorFont = try .loadFace(testing.io, testing.allocator, path, font.num_faces - 1);
     defer last.deinit(testing.allocator);
@@ -614,5 +570,5 @@ test "system CFF font, when one is installed" {
     const bounds = font.glyphBounds(font.glyphIndex('B')).?;
     try testing.expect(bounds.x_max > bounds.x_min and bounds.y_max > bounds.y_min);
     try testing.expect(font.kern(a, font.glyphIndex('V')) <= 0);
-    try testing.expect(font.getTextBounds("Hello", 24).r > 24);
+    try testing.expect(lineWidth(font, "Hello", 24) > 24);
 }

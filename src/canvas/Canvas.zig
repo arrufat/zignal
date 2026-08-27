@@ -2323,13 +2323,13 @@ pub fn Canvas(comptime T: type) type {
             for (0..n) |i| out[i] = @max(suffix[i], prefix[i + window - 1]);
         }
 
-        /// The box of one line of bitmap text relative to its pen origin: the font's bounds
-        /// plus the letter spacing after each glyph.
+        /// The box of one line of bitmap text relative to its pen origin: the pen after the
+        /// last glyph, with negative letter spacing ignored so every glyph stays inside.
         fn bitmapLineExtent(text: []const u8, font: BitmapFont, scale: f32, letter_spacing: f32) Rectangle(f32) {
-            const glyphs = std.unicode.utf8CountCodepoints(text) catch text.len;
-            var extent = font.getTextBounds(text, scale);
-            extent.r += @max(letter_spacing, 0) * as(f32, glyphs);
-            return extent;
+            var glyphs: BitmapFont.Layout = .init(font, text, scale);
+            glyphs.letter_spacing = @max(letter_spacing, 0);
+            while (glyphs.next()) |_| {}
+            return .{ .l = 0, .t = 0, .r = glyphs.x, .b = as(f32, font.char_height) * scale };
         }
 
         /// Blits one line of bitmap glyphs at `position`.

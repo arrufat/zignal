@@ -1,6 +1,6 @@
-//! Line layout shared by every text drawing entry point: paragraphs, word wrap,
-//! alignment and spacing, for bitmap and vector fonts alike. Widths come from
-//! `Font.getTextBounds`, so vector kerning is honored when deciding breaks.
+//! Line layout and measuring shared by every text entry point: paragraphs, word wrap,
+//! alignment and spacing, for bitmap and vector fonts alike. Widths come from the per-font
+//! `Layout` pens, so vector kerning is honored when deciding breaks.
 
 const std = @import("std");
 
@@ -98,7 +98,7 @@ pub fn lineAdvance(font: Font, size: f32, layout: TextLayout) f32 {
 /// The lines of `text` at `size`: paragraphs split on `\n`, then wrapped greedily to
 /// `max_width` when one is given. A wrapped line ends at a word boundary, the spaces at
 /// the break are consumed, and a word wider than `max_width` breaks between codepoints.
-/// Empty text yields one empty line, like `getTextBounds`.
+/// Empty text yields one empty line, so it measures one line tall.
 pub const Lines = struct {
     pub const Line = struct {
         text: []const u8,
@@ -208,6 +208,34 @@ pub fn measure(font: Font, text: []const u8, size: f32, max_width: ?f32, layout:
     return .{ .l = 0, .t = 0, .r = width, .b = @as(f32, @floatFromInt(count)) * lineAdvance(font, size, layout) };
 }
 
+/// Box of the inked pixels of `text` from its top-left corner: the union of every glyph's
+/// ink, each line one line height below the last. Empty when nothing has ink.
+pub fn measureTight(font: Font, text: []const u8, size: f32) Rectangle(f32) {
+    var lines: Lines = .init(font, text, size, null, 0);
+    var bounds: ?Rectangle(f32) = null;
+    var top: f32 = 0;
+    while (lines.next()) |line| : (top += font.lineHeight(size)) {
+        const ink = switch (font) {
+            .bitmap => |b| lineInk(BitmapFont.Layout.init(b, line.text, b.scaleFor(size))),
+            .vector => |v| lineInk(VectorFont.Layout.init(v, line.text, size)),
+        } orelse continue;
+        const box = ink.translate(0, top);
+        bounds = if (bounds) |acc| acc.merge(box) else box;
+    }
+    return bounds orelse .{ .l = 0, .t = 0, .r = 0, .b = 0 };
+}
+
+/// Union of the ink boxes of the glyphs `layout` places.
+fn lineInk(layout: anytype) ?Rectangle(f32) {
+    var glyphs = layout;
+    var bounds: ?Rectangle(f32) = null;
+    while (glyphs.next()) |item| {
+        const box = glyphs.inkBounds(item) orelse continue;
+        bounds = if (bounds) |acc| acc.merge(box) else box;
+    }
+    return bounds;
+}
+
 const testing = std.testing;
 const font8x8 = @import("font8x8.zig");
 const synthetic = @import("truetype/synthetic.zig");
@@ -269,7 +297,60 @@ test "spacing and measure" {
     const box = measure(font, "aaa bbb ccc", 8, 64, spaced);
     try testing.expectEqual(Rectangle(f32){ .l = 0, .t = 0, .r = 28, .b = 36 }, box);
     try testing.expectEqual(Rectangle(f32){ .l = 0, .t = 0, .r = 0, .b = 8 }, measure(font, "", 8, null, .default));
-    try testing.expectEqual(font.getTextBounds("ab\ncd", 8), measure(font, "ab\ncd", 8, null, .default));
+}
+
+test "getTextBounds is measureText under the default layout" {
+    var buf: [synthetic.buffer_size]u8 = undefined;
+    const vector: Font = .{ .vector = synthetic.font(&buf, .{}) };
+    const bitmap: Font = .{ .bitmap = font8x8.basic };
+    for ([_]Font{ bitmap, vector }) |font| {
+        for ([_][]const u8{ "", "AB", "AB\nA", "AB  \n A ", "\n" }) |text| {
+            try testing.expectEqual(font.measureText(text, 50, null, .default), font.getTextBounds(text, 50));
+        }
+        // Trailing spaces are left out, leading ones and line breaks count.
+        try testing.expectEqual(font.getTextBounds("AB", 50), font.getTextBounds("AB  ", 50));
+        try testing.expectEqual(font.getTextBounds(" AB", 50).r, font.getTextBounds(" AB  ", 50).r);
+        try testing.expect(font.getTextBounds(" AB", 50).r > font.getTextBounds("AB", 50).r);
+        try testing.expectEqual(2 * font.lineHeight(50), font.getTextBounds("AB\nA", 50).b);
+        try testing.expectEqual(font.getTextBounds("AB", 50).r, font.getTextBounds("AB\nA", 50).r);
+    }
+    // A then B: 800 + kern(1, 2) = -30, then 800 units, on two lines of 1150 units.
+    const bounds = vector.getTextBounds("AB\nA", 50);
+    try testing.expectApproxEqAbs(@as(f32, (800 - 30 + 800) * 0.05), bounds.r, 1e-4);
+    try testing.expectApproxEqAbs(@as(f32, 2 * 57.5), bounds.b, 1e-4);
+    // Codepoints of any byte length are one character wide in a fixed bitmap font.
+    try testing.expectEqual(Rectangle(f32){ .l = 0, .t = 0, .r = 16, .b = 8 }, bitmap.getTextBounds("A©", 8));
+    try testing.expectEqual(Rectangle(f32){ .l = 0, .t = 0, .r = 20, .b = 24 }, bitmap.measureText("A©", 8, null, .{ .letter_spacing = 4, .line_spacing = 3 }));
+}
+
+test "getTextBoundsTight is the ink of every line" {
+    var buf: [synthetic.buffer_size]u8 = undefined;
+    const vector: Font = .{ .vector = synthetic.font(&buf, .{}) };
+    const tight = vector.getTextBoundsTight("A", 100);
+    try testing.expectApproxEqAbs(@as(f32, 10), tight.l, 1e-4);
+    try testing.expectApproxEqAbs(@as(f32, 70), tight.r, 1e-4);
+    try testing.expectApproxEqAbs(@as(f32, 90 - 70), tight.t, 1e-4);
+    try testing.expectApproxEqAbs(@as(f32, 90), tight.b, 1e-4);
+    try testing.expectEqual(@as(f32, 0), vector.getTextBoundsTight("", 100).r);
+    // The second line's ink sits one line height lower.
+    const two = vector.getTextBoundsTight("A\nA", 100);
+    try testing.expectApproxEqAbs(tight.t, two.t, 1e-4);
+    try testing.expectApproxEqAbs(tight.b + vector.lineHeight(100), two.b, 1e-4);
+
+    // A 16 px wide glyph with one pixel set at (10, 2), in the second byte of its row.
+    var wide: [2 * 8]u8 = @splat(0);
+    wide[2 * 2 + 1] = 1 << 2;
+    const wide_font: Font = .{ .bitmap = .{ .name = "Wide", .char_width = 16, .char_height = 8, .first_char = 'A', .last_char = 'A', .data = &wide } };
+    try testing.expectEqual(Rectangle(f32){ .l = 10, .t = 2, .r = 11, .b = 3 }, wide_font.getTextBoundsTight("A", 8));
+    try testing.expectEqual(Rectangle(f32){ .l = 20, .t = 4, .r = 22, .b = 6 }, wide_font.getTextBoundsTight("A", 16));
+    try testing.expectEqual(Rectangle(f32){ .l = 10, .t = 2, .r = 27, .b = 11 }, wide_font.getTextBoundsTight("A\nAA", 8));
+
+    // A blank 'A' followed by a '©' (two UTF-8 bytes) inked at x = 3..5 of row 2.
+    var data: [256 * 8]u8 = @splat(0);
+    data[0xA9 * 8 + 2] = 0x18;
+    const latin: Font = .{ .bitmap = .{ .name = "Latin", .char_width = 8, .char_height = 8, .first_char = 0, .last_char = 255, .data = &data } };
+    try testing.expectEqual(Rectangle(f32){ .l = 11, .t = 2, .r = 13, .b = 3 }, latin.getTextBoundsTight("A©", 8));
+    try testing.expectEqual(Rectangle(f32){ .l = 0, .t = 0, .r = 0, .b = 0 }, latin.getTextBoundsTight("A", 8));
 }
 
 test "pen walks bitmap and vector lines alike" {

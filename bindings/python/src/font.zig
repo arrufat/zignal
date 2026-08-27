@@ -230,7 +230,8 @@ fn font_has_glyph(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 const font_get_text_bounds_doc =
     \\Box occupied by `text` drawn at `size`, relative to its top-left corner.
     \\
-    \\Width is the widest line's advance, height is the number of lines times the line height.
+    \\The same box as `measure_text` with its defaults: the widest line, without its trailing
+    \\spaces, by the number of lines times the line height.
     \\
     \\## Parameters
     \\- `text` (str): Text to measure; `\n` starts a new line
