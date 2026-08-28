@@ -30,6 +30,8 @@ pub const DecodeLimits = struct {
     max_blocks: usize = 1_048_576,
     /// Maximum number of scans (progressive JPEGs may have dozens).
     max_scans: usize = 64,
+
+    pub const default: DecodeLimits = .{};
 };
 
 inline fn exceeds(limit: u64, value: u64) bool {
@@ -90,7 +92,7 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
         while (true) {
             const byte = try reader.takeByte();
             bytes_read += 1;
-            if (bytes_read > limits.max_jpeg_bytes) return error.ImageTooLarge;
+            if (exceeds(limits.max_jpeg_bytes, bytes_read)) return error.ImageTooLarge;
             if (byte == 0xFF) break;
         }
 
@@ -100,7 +102,7 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
         while (marker_byte == 0xFF) {
             marker_byte = try reader.takeByte();
             bytes_read += 1;
-            if (bytes_read > limits.max_jpeg_bytes) return error.ImageTooLarge;
+            if (exceeds(limits.max_jpeg_bytes, bytes_read)) return error.ImageTooLarge;
         }
 
         if (marker_byte == 0x00) continue; // stuffed byte
@@ -286,12 +288,14 @@ pub const EncodeOptions = struct {
     subsampling: Subsampling = .yuv420,
     density_dpi: u16 = 72,
     comment: ?[]const u8 = null,
+    /// MCUs per restart interval (DRI); 0 writes no restart markers.
+    restart_interval: u16 = 0,
     pub const default: EncodeOptions = .{};
 };
 
 /// Save Image to JPEG file with baseline encoding.
 pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const bytes = try encode(T, allocator, image, .{ .subsampling = .yuv420 });
+    const bytes = try encode(T, allocator, image, .default);
     defer allocator.free(bytes);
 
     const file = try Io.Dir.cwd().createFile(io, file_path, .{});
@@ -311,7 +315,12 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
     }
 
     switch (T) {
-        u8 => return encodeGrayscale(allocator, image.asBytes(), @intCast(image.cols), @intCast(image.rows), options),
+        u8 => {
+            if (image.isContiguous()) return encodeGrayscale(allocator, image.asBytes(), @intCast(image.cols), @intCast(image.rows), options);
+            var contiguous = try image.dupe(allocator);
+            defer contiguous.deinit(allocator);
+            return encodeGrayscale(allocator, contiguous.asBytes(), @intCast(image.cols), @intCast(image.rows), options);
+        },
         Rgb => return encodeRgb(allocator, image, options),
         else => {
             var converted = try image.convert(allocator, Rgb);
@@ -444,11 +453,21 @@ const EntropyWriter = struct {
             try self.writeBits((@as(u32, 1) << pad) - 1, pad);
         }
     }
+    /// Ends a restart interval: pads to a byte boundary and emits RSTn (a marker, not stuffed).
+    fn restart(self: *EntropyWriter, n: u3) !void {
+        try self.flush();
+        try self.data.append(self.gpa, 0xFF);
+        try self.data.append(self.gpa, 0xD0 + @as(u8, n));
+    }
 };
 
 fn writeMarker(dst: *std.ArrayList(u8), gpa: Allocator, marker: u16) !void {
     try dst.append(gpa, 0xFF);
     try dst.append(gpa, @intCast(marker & 0xFF));
+}
+
+fn writeDRI(dst: *std.ArrayList(u8), gpa: Allocator, interval: u16) !void {
+    try writeSegment(dst, gpa, 0xFFDD, &std.mem.toBytes(std.mem.nativeTo(u16, interval, .big)));
 }
 
 fn writeSegment(dst: *std.ArrayList(u8), gpa: Allocator, marker: u16, payload: []const u8) !void {
@@ -816,6 +835,7 @@ fn encodeBlock(
 fn encodeBlocksRgb(
     image: Image(Rgb),
     subsampling: Subsampling,
+    restart_interval: u16,
     ql_recip: *const [64]u32,
     qc_recip: *const [64]u32,
     writer: *EntropyWriter,
@@ -850,8 +870,19 @@ fn encodeBlocksRgb(
     const mcu_width = 8 * h_max;
     const mcu_height = 8 * v_max;
 
+    var mcus_in_interval: u16 = 0;
+    var rst_index: u3 = 0;
     for (0..mcu_rows) |mcu_y| {
         for (0..mcu_cols) |mcu_x| {
+            if (restart_interval != 0 and mcus_in_interval == restart_interval) {
+                try writer.restart(rst_index);
+                rst_index +%= 1;
+                mcus_in_interval = 0;
+                prev_dc_y = 0;
+                prev_dc_cb = 0;
+                prev_dc_cr = 0;
+            }
+            mcus_in_interval += 1;
             const mcu_px0 = mcu_x * mcu_width;
             const mcu_py0 = mcu_y * mcu_height;
 
@@ -940,6 +971,7 @@ fn encodeRgb(allocator: Allocator, image: Image(Rgb), options: EncodeOptions) ![
     try writeDQT(&out, allocator, &ql, &qc);
     try writeSOF0(&out, allocator, @intCast(image.cols), @intCast(image.rows), false, options.subsampling);
     try writeDHT(&out, allocator, false);
+    if (options.restart_interval != 0) try writeDRI(&out, allocator, options.restart_interval);
     try writeSOS(&out, allocator, false);
 
     // Entropy-coded data
@@ -958,7 +990,7 @@ fn encodeRgb(allocator: Allocator, image: Image(Rgb), options: EncodeOptions) ![
     buildQuantRecipLLM(&ql_recip, &ql);
     buildQuantRecipLLM(&qc_recip, &qc);
 
-    try encodeBlocksRgb(image, options.subsampling, &ql_recip, &qc_recip, &ew, &dc_luma, &ac_luma, &dc_chroma, &ac_chroma);
+    try encodeBlocksRgb(image, options.subsampling, options.restart_interval, &ql_recip, &qc_recip, &ew, &dc_luma, &ac_luma, &dc_chroma, &ac_chroma);
     try ew.flush();
 
     // Append entropy-coded bytes into output
@@ -996,6 +1028,7 @@ fn encodeGrayscale(allocator: Allocator, bytes: []const u8, width: u32, height: 
 
     try writeSOF0(&out, allocator, @intCast(width), @intCast(height), true, .yuv444);
     try writeDHT(&out, allocator, true);
+    if (options.restart_interval != 0) try writeDRI(&out, allocator, options.restart_interval);
     try writeSOS(&out, allocator, true);
 
     var ew = EntropyWriter.init(allocator);
@@ -1016,8 +1049,17 @@ fn encodeGrayscale(allocator: Allocator, bytes: []const u8, width: u32, height: 
     const block_cols: usize = (cols + 7) / 8;
     var block: [64]i32 = undefined;
 
+    var mcus_in_interval: u16 = 0;
+    var rst_index: u3 = 0;
     for (0..block_rows) |br| {
         for (0..block_cols) |bc| {
+            if (options.restart_interval != 0 and mcus_in_interval == options.restart_interval) {
+                try ew.restart(rst_index);
+                rst_index +%= 1;
+                mcus_in_interval = 0;
+                prev_dc = 0;
+            }
+            mcus_in_interval += 1;
             for (0..8) |y| {
                 const iy = @min(rows - 1, br * 8 + y);
                 for (0..8) |x| {
@@ -1045,6 +1087,19 @@ pub const Marker = enum(u16) {
     SOF1 = 0xFFC1, // Extended sequential DCT
     SOF2 = 0xFFC2, // Progressive DCT
     SOF3 = 0xFFC3, // Lossless (sequential)
+    SOF5 = 0xFFC5, // Differential sequential (hierarchical)
+    SOF6 = 0xFFC6, // Differential progressive
+    SOF7 = 0xFFC7, // Differential lossless
+    JPG = 0xFFC8, // Reserved
+    SOF9 = 0xFFC9, // Extended sequential, arithmetic
+    SOF10 = 0xFFCA, // Progressive, arithmetic
+    SOF11 = 0xFFCB, // Lossless, arithmetic
+    SOF13 = 0xFFCD, // Differential sequential, arithmetic
+    SOF14 = 0xFFCE, // Differential progressive, arithmetic
+    SOF15 = 0xFFCF, // Differential lossless, arithmetic
+
+    // Temporary private use (standalone)
+    TEM = 0xFF01,
 
     // Huffman table
     DHT = 0xFFC4,
@@ -1112,6 +1167,8 @@ const Component = struct {
 // Scan component info from SOS
 const ScanComponent = struct {
     component_id: u8,
+    /// Index into `JpegState.components`, resolved by `parseSOS`.
+    component_index: u8,
     dc_table_id: u4,
     ac_table_id: u4,
 };
@@ -1167,13 +1224,13 @@ pub const JpegState = struct {
 
     // Progressive decoding state - persistent across scans
     dc_prediction_values: [4]i32 = @splat(0),
-    skip_count: u32 = 0, // For progressive AC scans
 
     /// True when decoding stopped early because limits.max_scans was reached.
     scan_limit_reached: bool = false,
 
-    // Restart marker tracking
-    expected_rst_marker: u3 = 0, // Cycles 0-7 for RST0-RST7
+    // Colour-model hints, resolved by `isRgbColorModel` with libjpeg's rules.
+    saw_jfif: bool = false,
+    adobe_transform: ?u8 = null,
 
     pub fn init(allocator: Allocator) JpegState {
         return .{
@@ -1187,6 +1244,47 @@ pub const JpegState = struct {
             },
             .scan_components = &[_]ScanComponent{},
         };
+    }
+
+    /// Records the colour-model hints carried by APP0 (JFIF) and APP14 (Adobe).
+    fn noteAppSegment(self: *JpegState, marker: Marker, payload: []const u8) void {
+        switch (marker) {
+            .APP0 => if (std.mem.startsWith(u8, payload, "JFIF\x00")) {
+                self.saw_jfif = true;
+            },
+            .APP14 => if (payload.len >= 12 and std.mem.startsWith(u8, payload, "Adobe")) {
+                self.adobe_transform = payload[11];
+            },
+            else => {},
+        }
+    }
+
+    /// True when the three components are stored as RGB rather than YCbCr: JFIF means
+    /// YCbCr, otherwise the Adobe transform flag decides, otherwise ids 'R','G','B'.
+    fn isRgbColorModel(self: JpegState) bool {
+        if (self.header.num_components != 3 or self.saw_jfif) return false;
+        if (self.adobe_transform) |transform| return transform == 0;
+        return self.components[0].id == 'R' and self.components[1].id == 'G' and self.components[2].id == 'B';
+    }
+
+    fn maxSamplingFactors(self: JpegState) struct { u4, u4 } {
+        var max_h: u4 = 1;
+        var max_v: u4 = 1;
+        for (self.components[0..self.header.num_components]) |comp| {
+            max_h = @max(max_h, comp.h_sampling);
+            max_v = @max(max_v, comp.v_sampling);
+        }
+        return .{ max_h, max_v };
+    }
+
+    /// A single-component scan walks that component's own block grid (T.81 A.2.2). For the
+    /// supported layouts that grid is the MCU grid unless the component carries the maximum
+    /// sampling factors, in which case it is the full block grid.
+    fn isNoninterleaved(self: JpegState, scan_components: []const ScanComponent) bool {
+        if (scan_components.len != 1) return false;
+        const comp = self.components[scan_components[0].component_index];
+        const max_h, const max_v = self.maxSamplingFactors();
+        return comp.h_sampling == max_h and comp.v_sampling == max_v;
     }
 
     pub fn deinit(self: *JpegState) void {
@@ -1355,6 +1453,8 @@ pub const JpegState = struct {
                 .v_sampling = @intCast(data[pos + 1] & 0x0F),
                 .quant_table_id = data[pos + 2],
             };
+            const comp = self.components[i];
+            if (comp.h_sampling == 0 or comp.v_sampling == 0 or comp.quant_table_id > 3) return error.InvalidSOF;
 
             max_h_sampling = @max(max_h_sampling, self.components[i].h_sampling);
             max_v_sampling = @max(max_v_sampling, self.components[i].v_sampling);
@@ -1389,8 +1489,6 @@ pub const JpegState = struct {
             const is_411 = (y_h == 4 and y_v == 1 and cb_h == 1 and cb_v == 1);
 
             if (!is_444 and !is_420 and !is_422 and !is_411) {
-                // Note: While 4:2:2 and 4:1:1 pass validation, they use fallback processing
-                // Only 4:4:4 and 4:2:0 have optimized implementations
                 return error.UnsupportedSamplingFactor;
             }
         }
@@ -1591,10 +1689,18 @@ pub const JpegState = struct {
         for (0..num_components) |i| {
             if (pos + 2 > data.len) return error.InvalidSOS;
 
+            const id = data[pos];
+            const dc_table_id = data[pos + 1] >> 4;
+            const ac_table_id = data[pos + 1] & 0x0F;
+            if (dc_table_id > 3 or ac_table_id > 3) return error.InvalidSOS;
+            const component_index = for (self.components[0..self.header.num_components], 0..) |frame_component, ci| {
+                if (frame_component.id == id) break ci;
+            } else return error.InvalidSOS;
             scan_components[i] = .{
-                .component_id = data[pos],
-                .dc_table_id = @intCast(data[pos + 1] >> 4),
-                .ac_table_id = @intCast(data[pos + 1] & 0x0F),
+                .component_id = id,
+                .component_index = @intCast(component_index),
+                .dc_table_id = @intCast(dc_table_id),
+                .ac_table_id = @intCast(ac_table_id),
             };
 
             pos += 2;
@@ -1659,6 +1765,9 @@ pub const BitReader = struct {
     byte_pos: usize = 0,
     bit_buffer: u64 = 0,
     bit_count: u7 = 0,
+    /// Set when a restart marker has been reached: the reader then feeds zero bits until
+    /// the scan loop consumes the marker with `consumeRestartMarker`.
+    marker_hit: bool = false,
 
     pub fn init(data: []const u8) BitReader {
         return .{ .data = data };
@@ -1672,37 +1781,38 @@ pub const BitReader = struct {
     }
 
     pub fn fillBits(self: *BitReader, num_bits: u7) !void {
-        // Optimization: process bytes in a tighter loop with a wider bit buffer to reduce call frequency
-        while (self.bit_count <= 56 and self.bit_count < num_bits) {
+        outer: while (self.bit_count <= 56 and self.bit_count < num_bits) {
+            if (self.marker_hit) {
+                // The interval's data is exhausted; pad so the last codes can be peeked.
+                self.bit_count += 8;
+                continue;
+            }
             if (self.byte_pos >= self.data.len) return error.UnexpectedEndOfData;
 
-            var byte_curr: u64 = self.data[self.byte_pos];
+            const byte_curr: u64 = self.data[self.byte_pos];
             self.byte_pos += 1;
 
             if (byte_curr == 0xFF) {
-                // Rare case: JPEG marker escape (0xFF 0x00) or restart marker
+                // Rare case: byte stuffing (0xFF 0x00), fill bytes, or a marker
                 while (true) {
                     if (self.byte_pos >= self.data.len) return error.UnexpectedEndOfData;
                     const byte_next: u8 = self.data[self.byte_pos];
-                    self.byte_pos += 1;
-
                     if (byte_next == 0x00) {
-                        break;
-                    } else if (byte_next == 0xFF) {
-                        continue;
-                    } else if (byte_next >= 0xD0 and byte_next <= 0xD7) {
-                        if (self.byte_pos >= self.data.len) return error.UnexpectedEndOfData;
-                        byte_curr = self.data[self.byte_pos];
                         self.byte_pos += 1;
-                        // After consuming a restart marker and reading the next byte,
-                        // we must check if THAT byte is also 0xFF.
-                        if (byte_curr == 0xFF) continue;
                         break;
-                    } else {
-                        // Marker encountered, stop filling bits here
-                        self.byte_pos -= 2;
-                        return error.UnexpectedEndOfData;
                     }
+                    if (byte_next == 0xFF) {
+                        self.byte_pos += 1;
+                        continue;
+                    }
+                    // A marker: rewind to its 0xFF. RSTn is consumed by the scan loop at the
+                    // interval boundary; any other marker ends the scan.
+                    self.byte_pos -= 1;
+                    if (byte_next >= 0xD0 and byte_next <= 0xD7) {
+                        self.marker_hit = true;
+                        continue :outer;
+                    }
+                    return error.UnexpectedEndOfData;
                 }
             }
 
@@ -1724,65 +1834,55 @@ pub const BitReader = struct {
         return @intCast(bits);
     }
 
-    pub fn flushBits(self: *BitReader) void {
-        // On restart boundaries or explicit flush requests
-        // discard any buffered bits and realign to the next byte.
+    /// At a restart-interval boundary: drop the buffered bits, skip to the RSTn marker and
+    /// consume it. Returns false when the scan data ends first (truncated file).
+    pub fn consumeRestartMarker(self: *BitReader) bool {
         self.bit_buffer = 0;
         self.bit_count = 0;
+        self.marker_hit = false;
+        // Resync: tolerate stray bytes before the marker, as libjpeg does.
+        while (self.byte_pos + 1 < self.data.len) : (self.byte_pos += 1) {
+            if (self.data[self.byte_pos] != 0xFF) continue;
+            const m = self.data[self.byte_pos + 1];
+            if (m >= 0xD0 and m <= 0xD7) {
+                self.byte_pos += 2;
+                return true;
+            }
+        }
+        return false;
     }
 };
 
-// Perform a scan (baseline or progressive)
 // Perform progressive scan
 fn performProgressiveScan(state: *JpegState, scan_info: ScanInfo) !void {
     if (state.block_storage == null) return error.BlockStorageNotAllocated;
 
     var skips: u32 = 0;
 
-    // Definition of noninterleaved
-    const noninterleaved = scan_info.components.len == 1 and scan_info.components[0].component_id == 1;
-
-    // Calculate sampling factors
-    var max_h_factor: u4 = 1;
-    var max_v_factor: u4 = 1;
-    for (state.components[0..state.header.num_components]) |comp| {
-        max_h_factor = @max(max_h_factor, comp.h_sampling);
-        max_v_factor = @max(max_v_factor, comp.v_sampling);
-    }
-
+    const max_h_factor, const max_v_factor = state.maxSamplingFactors();
+    const noninterleaved = state.isNoninterleaved(scan_info.components);
     const y_step = if (noninterleaved) 1 else max_v_factor;
     const x_step = if (noninterleaved) 1 else max_h_factor;
 
-    // Scan loop structure
+    var mcus_since_restart: u32 = 0;
     var y: usize = 0;
     while (y < state.block_height) : (y += y_step) {
         var x: usize = 0;
         while (x < state.block_width) : (x += x_step) {
-            const mcu_id = y * state.block_width_actual + x;
-
-            // Handle restart intervals
-            if (state.restart_interval != 0 and mcu_id % (state.restart_interval * y_step * x_step) == 0) {
-                state.bit_reader.flushBits();
+            if (state.restart_interval != 0 and mcus_since_restart == state.restart_interval) {
+                mcus_since_restart = 0;
                 state.dc_prediction_values = @splat(0);
                 skips = 0;
+                // Truncated before the marker: keep what was decoded.
+                if (!state.bit_reader.consumeRestartMarker()) return;
             }
+            mcus_since_restart += 1;
 
-            for (0..scan_info.components.len) |index| {
-                const scan_comp = scan_info.components[index];
-
-                var component_index: usize = undefined;
-                var v_max: usize = undefined;
-                var h_max: usize = undefined;
-
-                // Find the component
-                for (state.components[0..state.header.num_components], 0..) |frame_component, i| {
-                    if (frame_component.id == scan_comp.component_id) {
-                        component_index = i;
-                        v_max = if (noninterleaved) 1 else frame_component.v_sampling;
-                        h_max = if (noninterleaved) 1 else frame_component.h_sampling;
-                        break;
-                    }
-                }
+            for (scan_info.components) |scan_comp| {
+                const component_index = scan_comp.component_index;
+                const frame_component = state.components[component_index];
+                const v_max: usize = if (noninterleaved) 1 else frame_component.v_sampling;
+                const h_max: usize = if (noninterleaved) 1 else frame_component.h_sampling;
 
                 for (0..v_max) |v| {
                     for (0..h_max) |h| {
@@ -1801,11 +1901,6 @@ fn performProgressiveScan(state: *JpegState, scan_info: ScanInfo) !void {
                 }
             }
         }
-    }
-
-    // Save skip count for next progressive AC scan
-    if (scan_info.start_of_spectral_selection != 0) {
-        state.skip_count = skips;
     }
 }
 
@@ -1995,7 +2090,7 @@ fn processScanMarker(state: *JpegState, data: []const u8, pos: usize) !usize {
     const scan_end = findScanEnd(data, scan_start);
     state.bit_reader = BitReader.init(data[scan_start..scan_end]);
 
-    // For baseline JPEG, don't perform scan here - loadJpeg will call performBlockScan
+    // Baseline: the single scan is decoded by performBlockScan after the marker loop
     if (state.header.frame_type == .baseline) {
         // Track allocated components for baseline
         state.scan_components = scan_info.components;
@@ -2053,7 +2148,12 @@ pub fn decode(allocator: Allocator, data: []const u8, limits: DecodeLimits) !Jpe
 
         const marker_bytes = [2]u8{ data[pos], data[pos + 1] };
         const marker = Marker.fromBytes(marker_bytes) orelse {
-            // Skip unknown markers
+            // 0xFF fill bytes may precede a marker
+            if (marker_bytes[1] == 0xFF) {
+                pos += 1;
+                continue;
+            }
+            // Skip unknown (reserved) markers, which carry a length
             pos += 2;
             if (pos + 2 > data.len) break;
             const length = try readMarkerLength(data, pos);
@@ -2075,9 +2175,14 @@ pub fn decode(allocator: Allocator, data: []const u8, limits: DecodeLimits) !Jpe
                 try state.parseSOF(payload, frame_type, limits);
             },
 
-            // Specific unsupported SOF markers
             .SOF1 => return error.UnsupportedExtendedSequential,
             .SOF3 => return error.UnsupportedLosslessJpeg,
+            .SOF9, .SOF10, .SOF11, .SOF13, .SOF14, .SOF15, .DAC => return error.UnsupportedArithmeticCoding,
+            .SOF5, .SOF6, .SOF7, .DHP => return error.UnsupportedHierarchicalJpeg,
+            .JPG => return error.UnsupportedJpegVariant,
+
+            // Standalone markers carry no length
+            .TEM, .RST0, .RST1, .RST2, .RST3, .RST4, .RST5, .RST6, .RST7 => pos += 2,
 
             .DHT => {
                 const payload = try readMarkerPayload(data, &pos, &total_marker_bytes, limits);
@@ -2112,31 +2217,18 @@ pub fn decode(allocator: Allocator, data: []const u8, limits: DecodeLimits) !Jpe
                 try state.parseDRI(payload);
             },
 
-            // Detect arithmetic coding
-            .DAC => return error.UnsupportedArithmeticCoding,
-
-            // Detect hierarchical JPEG
-            .DHP => return error.UnsupportedHierarchicalJpeg,
-
-            // Detect differential JPEG
             .DNL => return error.UnsupportedJpegVariant,
 
             .APP0, .APP1, .APP2, .APP3, .APP4, .APP5, .APP6, .APP7, .APP8, .APP9, .APP10, .APP11, .APP12, .APP13, .APP14, .APP15, .COM => {
-                // Skip application and comment markers
+                // Skip application and comment markers, noting the colour-model hints
                 if (pos + 4 > data.len) break;
                 const length = try readMarkerLength(data, pos + 2);
                 try accumulateWithLimit(&total_marker_bytes, length, limits.max_marker_bytes, error.MarkerDataLimitExceeded);
+                if (length >= 2 and pos + 2 + length <= data.len) state.noteAppSegment(marker, data[pos + 4 .. pos + 2 + length]);
                 pos += 2 + length;
             },
 
-            else => {
-                // Check for other unsupported SOF markers
-                const marker_value = @backingInt(marker);
-                if (marker_value >= 0xFFC5 and marker_value <= 0xFFCF) {
-                    // SOF5-SOF15 are unsupported variants
-                    return error.UnsupportedJpegVariant;
-                }
-                // Skip other unknown markers with length
+            .EXP => {
                 if (pos + 4 > data.len) break;
                 const length = try readMarkerLength(data, pos + 2);
                 try accumulateWithLimit(&total_marker_bytes, length, limits.max_marker_bytes, error.MarkerDataLimitExceeded);
@@ -2153,94 +2245,10 @@ pub fn decode(allocator: Allocator, data: []const u8, limits: DecodeLimits) !Jpe
     return error.NoScanData;
 }
 
-// Error types
-pub const JpegError = error{
-    InvalidJpegFile,
-    InvalidMarker,
-    InvalidSOF,
-    DuplicateSOF,
-    InvalidDHT,
-    InvalidDQT,
-    InvalidSOS,
-    InvalidDRI,
-    UnsupportedJpegFormat,
-    // Specific unsupported format errors
-    UnsupportedExtendedSequential, // SOF1
-    UnsupportedLosslessJpeg, // SOF3
-    UnsupportedJpegVariant, // SOF5-SOF15
-    UnsupportedArithmeticCoding, // DAC marker
-    Unsupported12BitPrecision, // 12-bit samples
-    Unsupported16BitPrecision, // 16-bit samples
-    UnsupportedPrecision, // Other precision values
-    UnsupportedComponentCount, // Valid but unsupported component counts
-    UnsupportedSamplingFactor, // Sampling factors > 4
-    UnsupportedHierarchicalJpeg, // DHP marker
-    // Invalid format errors
-    InvalidComponentCount,
-    InvalidHuffmanTable,
-    InvalidQuantTable,
-    NoScanData,
-    UnexpectedEndOfData,
-    InvalidByteStuffing,
-    OutOfMemory,
-    InvalidHuffmanCode,
-    MissingHuffmanTable,
-    MissingQuantTable,
-    InvalidDCCoefficient,
-    InvalidACCoefficient,
-    InvalidACValue,
-    BlockStorageNotAllocated,
-    RgbStorageNotAllocated,
-    // Resource limit errors
-    JpegDataTooLarge,
-    MarkerDataLimitExceeded,
-    BlockMemoryLimitExceeded,
-};
-
 // IDCT implementation based on stb_image
 fn f2f(comptime x: f32) i32 {
     // 4096 = 1 << 12
     return @round(x * 4096);
-}
-
-fn idct1D(s0: i32, s1: i32, s2: i32, s3: i32, s4: i32, s5: i32, s6: i32, s7: i32) struct { i32, i32, i32, i32, i32, i32, i32, i32 } {
-    var p2 = s2;
-    var p3 = s6;
-
-    var p1 = (p2 + p3) * f2f(0.5411961);
-    var t2 = p1 + p3 * f2f(-1.847759065);
-    var t3 = p1 + p2 * f2f(0.765366865);
-    p2 = s0;
-    p3 = s4;
-    var t0 = (p2 + p3) * 4096;
-    var t1 = (p2 - p3) * 4096;
-    const x0 = t0 + t3;
-    const x3 = t0 - t3;
-    const x1 = t1 + t2;
-    const x2 = t1 - t2;
-    t0 = s7;
-    t1 = s5;
-    t2 = s3;
-    t3 = s1;
-    p3 = t0 + t2;
-    var p4 = t1 + t3;
-    p1 = t0 + t3;
-    p2 = t1 + t2;
-    const p5 = (p3 + p4) * f2f(1.175875602);
-    t0 = t0 * f2f(0.298631336);
-    t1 = t1 * f2f(2.053119869);
-    t2 = t2 * f2f(3.072711026);
-    t3 = t3 * f2f(1.501321110);
-    p1 = p5 + p1 * f2f(-0.899976223);
-    p2 = p5 + p2 * f2f(-2.562915447);
-    p3 = p3 * f2f(-1.961570560);
-    p4 = p4 * f2f(-0.390180644);
-    t3 += p1 + p4;
-    t2 += p2 + p3;
-    t1 += p2 + p4;
-    t0 += p1 + p3;
-
-    return .{ x0, x1, x2, x3, t0, t1, t2, t3 };
 }
 
 fn idct8x8(block: *[64]i32) void {
@@ -2390,58 +2398,35 @@ fn transpose8x8(rows: [8]@Vector(8, i32)) [8]@Vector(8, i32) {
     return res;
 }
 
-// Block scan function that fills block storage (from master)
+// Decode the baseline scan into block storage
 fn performBlockScan(state: *JpegState) !void {
     if (state.block_storage == null) return error.BlockStorageNotAllocated;
 
-    // Calculate maximum sampling factors
-    var max_h_factor: u4 = 1;
-    var max_v_factor: u4 = 1;
-    for (state.components[0..state.header.num_components]) |comp| {
-        max_h_factor = @max(max_h_factor, comp.h_sampling);
-        max_v_factor = @max(max_v_factor, comp.v_sampling);
-    }
-
-    // Scan structure
-    const noninterleaved = state.scan_components.len == 1 and state.scan_components[0].component_id == 1;
+    const max_h_factor, const max_v_factor = state.maxSamplingFactors();
+    const noninterleaved = state.isNoninterleaved(state.scan_components);
     const y_step = if (noninterleaved) 1 else max_v_factor;
     const x_step = if (noninterleaved) 1 else max_h_factor;
 
     // DC prediction values for each component
     var prediction_values: [4]i32 = @splat(0);
-
-    // Track MCUs to honor restart intervals
     var mcus_since_restart: u32 = 0;
 
     var y: usize = 0;
     while (y < state.block_height) : (y += y_step) {
         var x: usize = 0;
         while (x < state.block_width) : (x += x_step) {
-            // Handle restart intervals for baseline scans
             if (state.restart_interval != 0 and mcus_since_restart == state.restart_interval) {
-                // Reset DC predictions at restart boundary
                 prediction_values = @splat(0);
                 mcus_since_restart = 0;
-                // Reset expected RST marker sequence number
-                state.expected_rst_marker = 0;
-                // Align to next byte boundary before continuing entropy decoding
-                state.bit_reader.flushBits();
+                // Truncated before the marker: keep what was decoded.
+                if (!state.bit_reader.consumeRestartMarker()) return;
             }
-            // Decode each component at this position
+            mcus_since_restart += 1;
             for (state.scan_components) |scan_comp| {
-                // Find the component index for this scan component
-                var component_index: usize = 0;
-                var v_max: usize = undefined;
-                var h_max: usize = undefined;
-
-                for (state.components[0..state.header.num_components], 0..) |frame_component, i| {
-                    if (frame_component.id == scan_comp.component_id) {
-                        component_index = i;
-                        v_max = if (noninterleaved) 1 else frame_component.v_sampling;
-                        h_max = if (noninterleaved) 1 else frame_component.h_sampling;
-                        break;
-                    }
-                }
+                const component_index = scan_comp.component_index;
+                const frame_component = state.components[component_index];
+                const v_max: usize = if (noninterleaved) 1 else frame_component.v_sampling;
+                const h_max: usize = if (noninterleaved) 1 else frame_component.h_sampling;
 
                 // Decode all blocks for this component in this MCU
                 for (0..v_max) |v| {
@@ -2468,9 +2453,6 @@ fn performBlockScan(state: *JpegState) !void {
                     }
                 }
             }
-
-            // Count one MCU completed (one position in interleaved grid)
-            mcus_since_restart += 1;
         }
     }
 }
@@ -2500,7 +2482,7 @@ fn idctAllBlocks(state: *JpegState) void {
         for (0..state.header.num_components) |comp_idx| {
             idct8x8(&block_set[comp_idx]);
 
-            // Apply level shift (+128) only to Y component (component 0) - master's approach
+            // Level shift (+128) only the Y component; chroma stays centred for the colour conversion
             // Cb and Cr components stay centered around 0
             if (comp_idx == 0) {
                 for (0..64) |i| {
@@ -2535,6 +2517,18 @@ fn ycbcrToRgbAllBlocks(state: *JpegState) !void {
 
     // 4:4:4 - no chroma subsampling, each component has same number of blocks
     if (max_h == 1 and max_v == 1) {
+        if (state.isRgbColorModel()) {
+            // Planes are already R, G, B; only Y was level-shifted by the IDCT.
+            for (state.block_storage.?, 0..) |*block_set, idx| {
+                for (0..3) |c| {
+                    const shift: i32 = if (c == 0) 0 else 128;
+                    for (0..64) |i| {
+                        state.rgb_storage.?[idx][c][i] = @intCast(std.math.clamp(block_set[c][i] + shift, 0, 255));
+                    }
+                }
+            }
+            return;
+        }
         const V = @Vector(8, i32);
         for (state.block_storage.?, 0..) |*block_set, idx| {
             // Optimized YCbCr to RGB conversion using SIMD to process 8 pixels at once
@@ -3168,4 +3162,120 @@ test "Ycbcr to RGB conversion" {
     try testing.expectEqual(@as(u8, 0), black.r);
     try testing.expectEqual(@as(u8, 0), black.g);
     try testing.expectEqual(@as(u8, 0), black.b);
+}
+
+fn gradientImage(gpa: Allocator, rows: u32, cols: u32) !Image(Rgb) {
+    var img: Image(Rgb) = try .init(gpa, rows, cols);
+    for (0..rows) |y| {
+        for (0..cols) |x| {
+            img.at(y, x).* = .{
+                .r = @intCast((x * 255) / (cols - 1)),
+                .g = @intCast((y * 255) / (rows - 1)),
+                .b = @intCast(((x + y) * 255) / (cols + rows - 2)),
+            };
+        }
+    }
+    return img;
+}
+
+test "JPEG restart intervals decode identically to a single interval" {
+    const gpa = std.testing.allocator;
+    var img = try gradientImage(gpa, 37, 29);
+    defer img.deinit(gpa);
+    var gray = try img.convert(gpa, u8);
+    defer gray.deinit(gpa);
+
+    for ([_]Subsampling{ .yuv444, .yuv422, .yuv420 }) |subsampling| {
+        const plain = try encode(Rgb, gpa, img, .{ .subsampling = subsampling });
+        defer gpa.free(plain);
+        var want = try loadFromBytes(Rgb, gpa, plain, .{});
+        defer want.deinit(gpa);
+        for ([_]u16{ 1, 3 }) |interval| {
+            const bytes = try encode(Rgb, gpa, img, .{ .subsampling = subsampling, .restart_interval = interval });
+            defer gpa.free(bytes);
+            try std.testing.expect(std.mem.indexOf(u8, bytes, &.{ 0xFF, 0xDD }) != null);
+            var got = try loadFromBytes(Rgb, gpa, bytes, .{});
+            defer got.deinit(gpa);
+            try std.testing.expectEqualSlices(u8, want.asBytes(), got.asBytes());
+        }
+    }
+
+    const plain = try encode(u8, gpa, gray, .{});
+    defer gpa.free(plain);
+    var want = try loadFromBytes(u8, gpa, plain, .{});
+    defer want.deinit(gpa);
+    const bytes = try encode(u8, gpa, gray, .{ .restart_interval = 2 });
+    defer gpa.free(bytes);
+    var got = try loadFromBytes(u8, gpa, bytes, .{});
+    defer got.deinit(gpa);
+    try std.testing.expectEqualSlices(u8, want.data, got.data);
+
+    // Truncated inside the third interval: the first MCU row (two intervals) is intact.
+    const rgb = try encode(Rgb, gpa, img, .{ .subsampling = .yuv420, .restart_interval = 1 });
+    defer gpa.free(rgb);
+    var full = try loadFromBytes(Rgb, gpa, rgb, .{});
+    defer full.deinit(gpa);
+    const cut = std.mem.indexOf(u8, rgb, &.{ 0xFF, 0xD1 }).? + 3;
+    var partial = try loadFromBytes(Rgb, gpa, rgb[0..cut], .{});
+    defer partial.deinit(gpa);
+    for (0..16) |r| {
+        try std.testing.expectEqualSlices(u8, std.mem.sliceAsBytes(full.data[r * full.cols ..][0..full.cols]), std.mem.sliceAsBytes(partial.data[r * partial.cols ..][0..partial.cols]));
+    }
+}
+
+test "JPEG malformed SOS/SOF fields are rejected" {
+    const gpa = std.testing.allocator;
+    var img = try gradientImage(gpa, 8, 8);
+    defer img.deinit(gpa);
+    const bytes = try encode(Rgb, gpa, img, .{ .subsampling = .yuv444 });
+    defer gpa.free(bytes);
+    const sos = std.mem.indexOf(u8, bytes, &.{ 0xFF, 0xDA }).?;
+    const sof = std.mem.indexOf(u8, bytes, &.{ 0xFF, 0xC0 }).?;
+
+    const cases = [_]struct { offset: usize, value: u8, err: anyerror }{
+        .{ .offset = sos + 6, .value = 0x44, .err = error.InvalidSOS }, // Huffman table ids 4/4
+        .{ .offset = sos + 5, .value = 9, .err = error.InvalidSOS }, // component id absent from the frame
+        .{ .offset = sof + 11, .value = 0x00, .err = error.InvalidSOF }, // zero sampling factors
+        .{ .offset = sof + 12, .value = 7, .err = error.InvalidSOF }, // quantization table id 7
+    };
+    for (cases) |case| {
+        const corrupt = try gpa.dupe(u8, bytes);
+        defer gpa.free(corrupt);
+        corrupt[case.offset] = case.value;
+        try std.testing.expectError(case.err, loadFromBytes(Rgb, gpa, corrupt, .{}));
+    }
+}
+
+test "JPEG Adobe APP14 transform 0 decodes the planes as RGB" {
+    const gpa = std.testing.allocator;
+    var img = try gradientImage(gpa, 16, 16);
+    defer img.deinit(gpa);
+    const bytes = try encode(Rgb, gpa, img, .{ .subsampling = .yuv444, .quality = 100 });
+    defer gpa.free(bytes);
+
+    // Swap the JFIF APP0 segment for an Adobe APP14 segment with transform flag 0.
+    const app0 = std.mem.indexOf(u8, bytes, &.{ 0xFF, 0xE0 }).?;
+    const app0_len = (@as(usize, bytes[app0 + 2]) << 8) | bytes[app0 + 3];
+    const adobe = [_]u8{ 0xFF, 0xEE, 0x00, 0x0E, 'A', 'd', 'o', 'b', 'e', 0x00, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    var patched: std.ArrayList(u8) = .empty;
+    defer patched.deinit(gpa);
+    try patched.appendSlice(gpa, bytes[0..app0]);
+    try patched.appendSlice(gpa, &adobe);
+    try patched.appendSlice(gpa, bytes[app0 + 2 + app0_len ..]);
+
+    // The stored planes are the encoder's Y, Cb, Cr; they must come back untransformed.
+    var want: Image(Rgb) = try .init(gpa, 16, 16);
+    defer want.deinit(gpa);
+    for (img.data, want.data) |px, *w| {
+        const ycc = convertColor(Ycbcr, px);
+        w.* = .{ .r = ycc.y, .g = ycc.cb, .b = ycc.cr };
+    }
+    var got = try loadFromBytes(Rgb, gpa, patched.items, .{});
+    defer got.deinit(gpa);
+    try std.testing.expect(try want.psnr(got) > 40);
+
+    // With the JFIF segment the same scan is YCbCr.
+    var plain = try loadFromBytes(Rgb, gpa, bytes, .{});
+    defer plain.deinit(gpa);
+    try std.testing.expect(try img.psnr(plain) > 40);
 }
