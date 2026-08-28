@@ -955,3 +955,38 @@ test "a soft fill is unaffected by the fill before it" {
     try canvas_alone.fillPolygons(&.{&quad}, Rgba.black, .nonzero, .soft);
     try testing.expectEqualSlices(Rgba, alone.data, after.data);
 }
+
+test "shapes off the image or with non-finite input draw nothing" {
+    const allocator = testing.allocator;
+    var img = try Image(u8).init(allocator, 10, 10);
+    defer img.deinit(allocator);
+    img.fill(0);
+    const canvas = Canvas(u8).init(allocator, img);
+    const white: u8 = 255;
+    const nan = std.math.nan(f32);
+    const inf = std.math.inf(f32);
+    const above: []const Point(2, f32) = &.{ .init(.{ 1, -50 }), .init(.{ 8, -50 }), .init(.{ 8, -40 }), .init(.{ 1, -40 }) };
+    const nan_poly: []const Point(2, f32) = &.{ .init(.{ 1, nan }), .init(.{ 8, 1 }), .init(.{ 8, 8 }) };
+    for ([_]DrawOptions{ .soft, .fast }) |opts| {
+        canvas.drawPolygon(above, white, 3, opts);
+        try canvas.fillPolygons(&.{above}, white, .nonzero, opts);
+        try canvas.fillPolygon(above, white, opts);
+        canvas.drawPolygon(nan_poly, white, 3, opts);
+        try canvas.fillPolygon(nan_poly, white, opts);
+        canvas.drawLine(.init(.{ nan, 0 }), .init(.{ 5, 5 }), white, 1, opts);
+        canvas.drawLine(.init(.{ -1e9, -50 }), .init(.{ 1e9, -40 }), white, 1, opts);
+        canvas.drawCircle(.init(.{ nan, 5 }), 3, white, 1, opts);
+        canvas.fillCircle(.init(.{ 5, 5 }), inf, white, opts);
+        canvas.drawRectangle(.{ .l = nan, .t = 0, .r = 5, .b = 5 }, white, 1, opts);
+        canvas.fillRectangle(.{ .l = 0, .t = 0, .r = inf, .b = nan }, white, opts);
+        try canvas.drawArc(.init(.{ 5, nan }), 3, 0, 1, white, 1, opts);
+        try canvas.fillArc(.init(.{ 5, 5 }), nan, 0, 1, white, opts);
+    }
+    for (img.data) |px| try expect(px == 0);
+
+    // A pixel line that shoots far past the image still draws its visible part.
+    canvas.drawLine(.init(.{ -1e9, 5 }), .init(.{ 1e9, 5 }), white, 1, .fast);
+    try expectEqual(@as(u8, 255), img.at(5, 5).*);
+    canvas.drawLine(.init(.{ 2, -1e9 }), .init(.{ 3, 1e9 }), white, 1, .soft);
+    try expect(img.at(0, 2).* > 0 or img.at(0, 3).* > 0);
+}

@@ -104,11 +104,11 @@ const Metric = struct {
     const extents = .{ "left_sided_bearing", "right_sided_bearing", "character_width", "ascent", "descent" };
 
     fn width(self: Metric) u16 {
-        return @intCast(@abs(self.right_sided_bearing - self.left_sided_bearing));
+        return @intCast(@abs(@as(i32, self.right_sided_bearing) - self.left_sided_bearing));
     }
 
     fn height(self: Metric) u16 {
-        return @intCast(@abs(self.ascent + self.descent));
+        return @intCast(@abs(@as(i32, self.ascent) + self.descent));
     }
 };
 
@@ -382,9 +382,11 @@ fn parseEncodings(allocator: std.mem.Allocator, data: []const u8, table: TableEn
     encoding.max_byte1 = try t.reader.takeVarInt(u16, t.byte_order, @sizeOf(u16));
     try t.reader.discardAll(@sizeOf(u16)); // default_char
 
-    // Calculate total encodings with overflow protection
-    const cols: u32 = encoding.max_char_or_byte2 - encoding.min_char_or_byte2 + 1;
-    const rows: u32 = encoding.max_byte1 - encoding.min_byte1 + 1;
+    if (encoding.max_char_or_byte2 < encoding.min_char_or_byte2 or encoding.max_byte1 < encoding.min_byte1) {
+        return PcfError.InvalidEncodingRange;
+    }
+    const cols: u32 = @as(u32, encoding.max_char_or_byte2) - encoding.min_char_or_byte2 + 1;
+    const rows: u32 = @as(u32, encoding.max_byte1) - encoding.min_byte1 + 1;
     const encodings_count = cols * rows;
 
     // Both halves are bytes, so codepoints fit u16 and ascend with the table index.
@@ -509,9 +511,10 @@ fn convertToBitmapFont(
         try glyph_list.append(gpa, .{ .codepoint = codepoint, .glyph_index = glyph_index, .metric = metrics[glyph_index] });
     }
 
-    // Pre-calculate total bitmap size needed
+    // Pre-calculate total bitmap size needed; glyph extents must fit the u8 metrics.
     var total_bitmap_size: u32 = 0;
     for (glyph_list.items) |glyph_info| {
+        if (glyph_info.metric.width() > 255 or glyph_info.metric.height() > 255) return PcfError.InvalidBitmapData;
         total_bitmap_size += GlyphData.bytesForWidth(glyph_info.metric.width()) * glyph_info.metric.height();
     }
 

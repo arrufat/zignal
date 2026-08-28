@@ -29,7 +29,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     if (parsed.positionals.len < 2) {
         std.log.err("not enough arguments, need at least two images (reference and target).", .{});
         try args.printHelp(writer, help);
-        return;
+        return error.InvalidArguments;
     }
 
     const ref_path = parsed.positionals[0];

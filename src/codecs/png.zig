@@ -39,6 +39,8 @@ pub const DecodeLimits = struct {
     /// Maximum number of bytes produced by zlib inflate (including filter bytes,
     /// across all Adam7 passes when applicable).
     max_decompressed_bytes: usize = max_decompressed_default,
+
+    pub const default: DecodeLimits = .{};
 };
 
 const ChunkOrderState = struct {
@@ -898,6 +900,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !union(enum) {
                     return error.ImageTooLarge;
                 }
                 var output_data = try allocator.alloc(Rgba, @intCast(total_pixels));
+                errdefer allocator.free(output_data);
 
                 for (0..height) |y| {
                     const src_row_start = y * (scanline_bytes + 1) + 1;
@@ -918,6 +921,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !union(enum) {
                     return error.ImageTooLarge;
                 }
                 var output_data = try allocator.alloc(u8, @intCast(total_pixels));
+                errdefer allocator.free(output_data);
 
                 for (0..height) |y| {
                     const src_row_start = y * (scanline_bytes + 1) + 1;
@@ -941,6 +945,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !union(enum) {
                     return error.ImageTooLarge;
                 }
                 var output_data = try allocator.alloc(Rgba, @intCast(total_pixels));
+                errdefer allocator.free(output_data);
 
                 for (0..height) |y| {
                     const src_row_start = y * (scanline_bytes + 1) + 1;
@@ -961,6 +966,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !union(enum) {
                     return error.ImageTooLarge;
                 }
                 var output_data = try allocator.alloc(Rgb, @intCast(total_pixels));
+                errdefer allocator.free(output_data);
 
                 if (png_state.header.bit_depth == 8) {
                     // Optimized path for 8-bit RGB
@@ -1003,6 +1009,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !union(enum) {
                 return error.ImageTooLarge;
             }
             var output_data = try allocator.alloc(Rgba, @intCast(total_pixels));
+            errdefer allocator.free(output_data);
 
             if (png_state.header.bit_depth == 8) {
                 // Optimized path for 8-bit RGBA
@@ -1062,6 +1069,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !union(enum) {
             if (transparency != null) {
                 // Has transparency - convert to RGBA
                 var output_data = try allocator.alloc(Rgba, @intCast(total_pixels));
+                errdefer allocator.free(output_data);
                 const transparency_data = transparency.?;
 
                 for (0..height) |y| {
@@ -1103,6 +1111,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !union(enum) {
             } else {
                 // No transparency - convert to RGB
                 var output_data = try allocator.alloc(Rgb, @intCast(total_pixels));
+                errdefer allocator.free(output_data);
 
                 for (0..height) |y| {
                     const src_row_start = y * (scanline_bytes + 1) + 1;
@@ -1402,22 +1411,16 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
 
     switch (T) {
         u8, Rgb, Rgba => {
-            // Direct support - use image as-is
-            const image_bytes = image.asBytes();
-            return encodeRaw(allocator, image_bytes, image.cols, image.rows, color_type, 8, options);
+            // Views are packed into a contiguous copy first.
+            if (image.isContiguous()) return encodeRaw(allocator, image.asBytes(), image.cols, image.rows, color_type, 8, options);
+            var contiguous = try image.dupe(allocator);
+            defer contiguous.deinit(allocator);
+            return encodeRaw(allocator, contiguous.asBytes(), image.cols, image.rows, color_type, 8, options);
         },
         else => {
-            // Convert unsupported type to RGB
-            var rgb_image: Image(Rgb) = try .init(allocator, image.rows, image.cols);
+            var rgb_image = try image.convert(allocator, Rgb);
             defer rgb_image.deinit(allocator);
-
-            // Convert each pixel to RGB
-            for (image.data, 0..) |pixel, i| {
-                rgb_image.data[i] = convertColor(Rgb, pixel);
-            }
-
-            const image_bytes = rgb_image.asBytes();
-            return encodeRaw(allocator, image_bytes, image.cols, image.rows, color_type, 8, options);
+            return encodeRaw(allocator, rgb_image.asBytes(), image.cols, image.rows, color_type, 8, options);
         },
     }
 }
@@ -1806,6 +1809,7 @@ fn deinterlaceAdam7(allocator: Allocator, comptime T: type, decompressed: []u8, 
     }
 
     var output_data = try allocator.alloc(T, @intCast(total_pixels));
+    errdefer allocator.free(output_data);
     var data_offset: usize = 0;
 
     // Process each of the 7 Adam7 passes
@@ -1851,20 +1855,28 @@ fn deinterlaceAdam7(allocator: Allocator, comptime T: type, decompressed: []u8, 
 /// Extract grayscale pixel from Adam7 pass data with optional transparency
 fn extractGrayscalePixel(comptime T: type, src_row: []const u8, pass_x: usize, header: Header, transparency: ?[]const u8) T {
     var pixel_alpha: u8 = 255;
+    // The sample as stored, for the tRNS comparison; `pixel_value` is its 8-bit rendering.
+    var raw_sample: u16 = 0;
     const pixel_value: u8 = switch (header.bit_depth) {
-        8 => if (header.color_type == .grayscale_alpha) blk: {
-            if (pass_x * 2 + 1 < src_row.len) {
-                pixel_alpha = src_row[pass_x * 2 + 1];
+        8 => blk: {
+            if (header.color_type == .grayscale_alpha) {
+                if (pass_x * 2 + 1 < src_row.len) {
+                    pixel_alpha = src_row[pass_x * 2 + 1];
+                }
+                raw_sample = src_row[pass_x * 2];
+            } else {
+                raw_sample = src_row[pass_x];
             }
-            break :blk src_row[pass_x * 2];
-        } else src_row[pass_x],
+            break :blk @intCast(raw_sample);
+        },
         16 => blk: {
             const offset = if (header.color_type == .grayscale_alpha) pass_x * 4 else pass_x * 2;
             if (offset + 1 >= src_row.len) break :blk 0;
             if (header.color_type == .grayscale_alpha and offset + 3 < src_row.len) {
                 pixel_alpha = @intCast(std.mem.readInt(u16, src_row[offset + 2 .. offset + 4][0..2], .big) >> 8);
             }
-            break :blk @intCast(std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big) >> 8);
+            raw_sample = std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big);
+            break :blk @intCast(raw_sample >> 8);
         },
         1, 2, 4 => blk: {
             const bits_per_pixel = header.bit_depth;
@@ -1875,23 +1887,18 @@ fn extractGrayscalePixel(comptime T: type, src_row: []const u8, pass_x: usize, h
             const pixel_idx = pass_x % pixels_per_byte;
             const bit_offset: u3 = @intCast((pixels_per_byte - 1 - pixel_idx) * bits_per_pixel);
             const pixel_val = (src_row[byte_idx] >> bit_offset) & mask;
+            raw_sample = pixel_val;
             const scale_factor = 255 / mask;
             break :blk pixel_val * scale_factor;
         },
         else => 0,
     };
 
-    // Check for transparency (only for grayscale without alpha)
+    // tRNS for grayscale holds one 16-bit sample value in the image's bit depth.
     if (header.color_type == .grayscale) {
         if (transparency) |trans_data| {
-            if (trans_data.len >= 2) {
-                const transparent_value = if (header.is16Bit())
-                    @as(u8, @intCast(std.mem.readInt(u16, trans_data[0..2], .big) >> 8))
-                else
-                    trans_data[1]; // For 8-bit and sub-byte, use lower byte
-                if (pixel_value == transparent_value) {
-                    pixel_alpha = 0;
-                }
+            if (trans_data.len >= 2 and raw_sample == std.mem.readInt(u16, trans_data[0..2], .big)) {
+                pixel_alpha = 0;
             }
         }
     }
@@ -3487,4 +3494,38 @@ test "PNG grayscale with transparency chunk (tRNS)" {
 
     const pixel1 = extractGrayscalePixel(Rgba, &gs_src, 1, header, trans_slice);
     try std.testing.expectEqual(Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 }, pixel1);
+}
+
+test "PNG encode of a view packs only the visible pixels" {
+    const gpa = std.testing.allocator;
+    var img: Image(Rgb) = try .init(gpa, 8, 8);
+    defer img.deinit(gpa);
+    for (img.data, 0..) |*p, i| p.* = .{ .r = @intCast(i % 256), .g = @intCast((i * 7) % 256), .b = @intCast((i * 13) % 256) };
+    const view = img.view(.{ .l = 2, .t = 3, .r = 7, .b = 6 });
+    try std.testing.expect(!view.isContiguous());
+
+    const bytes = try encode(Rgb, gpa, view, .default);
+    defer gpa.free(bytes);
+    var decoded = try loadFromBytes(Rgb, gpa, bytes, .{});
+    defer decoded.deinit(gpa);
+    try std.testing.expectEqual(view.rows, decoded.rows);
+    try std.testing.expectEqual(view.cols, decoded.cols);
+    for (0..view.rows) |r| for (0..view.cols) |c| {
+        try std.testing.expectEqual(view.at(r, c).*, decoded.at(r, c).*);
+    };
+}
+
+test "PNG grayscale tRNS matches the raw sample at every bit depth" {
+    // 4-bit: samples 0x3 and 0xA; tRNS names sample 3.
+    const h4: Header = .{ .width = 2, .height = 1, .bit_depth = 4, .color_type = .grayscale };
+    const row4 = [_]u8{0x3A};
+    const trns3: []const u8 = &.{ 0, 3 };
+    try std.testing.expectEqual(@as(u8, 0), extractGrayscalePixel(Rgba, &row4, 0, h4, trns3).a);
+    try std.testing.expectEqual(@as(u8, 255), extractGrayscalePixel(Rgba, &row4, 1, h4, trns3).a);
+    // 16-bit: 0x1234 is transparent, 0x1200 (same high byte) is not.
+    const h16: Header = .{ .width = 2, .height = 1, .bit_depth = 16, .color_type = .grayscale };
+    const row16 = [_]u8{ 0x12, 0x34, 0x12, 0x00 };
+    const trns16: []const u8 = &.{ 0x12, 0x34 };
+    try std.testing.expectEqual(@as(u8, 0), extractGrayscalePixel(Rgba, &row16, 0, h16, trns16).a);
+    try std.testing.expectEqual(@as(u8, 255), extractGrayscalePixel(Rgba, &row16, 1, h16, trns16).a);
 }

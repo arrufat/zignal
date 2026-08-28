@@ -116,7 +116,7 @@ pub fn Enhancement(comptime T: type) type {
                     } else {
                         for (0..256) |i| {
                             if (cdf[i] >= cdf_min) {
-                                const numerator = (cdf[i] - cdf_min) * 255;
+                                const numerator = @as(u64, cdf[i] - cdf_min) * 255;
                                 lut[i] = @intCast(numerator / denominator);
                             } else {
                                 lut[i] = 0;
@@ -209,7 +209,7 @@ pub fn Enhancement(comptime T: type) type {
                                 } else {
                                     for (0..256) |i| {
                                         if (cdf[i] >= cdf_min) {
-                                            const numerator = (cdf[i] - cdf_min) * 255;
+                                            const numerator = @as(u64, cdf[i] - cdf_min) * 255;
                                             lut[i] = @intCast(numerator / denominator);
                                         } else {
                                             lut[i] = 0;
@@ -244,10 +244,10 @@ pub fn Enhancement(comptime T: type) type {
                             }
                         }
                     } else {
-                        return error.UnsupportedType;
+                        @compileError("equalize: unsupported pixel type " ++ @typeName(T));
                     }
                 },
-                else => return error.UnsupportedType,
+                else => @compileError("equalize: unsupported pixel type " ++ @typeName(T)),
             }
         }
     };

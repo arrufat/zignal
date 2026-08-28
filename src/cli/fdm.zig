@@ -34,9 +34,14 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
-    if (parsed.help or parsed.positionals.len < 2 or parsed.positionals.len > 3) {
+    if (parsed.help) {
         try args.printHelp(writer, help);
         return;
+    }
+    if (parsed.positionals.len < 2 or parsed.positionals.len > 3) {
+        std.log.err("expected a source image, a target image and an optional output path.", .{});
+        try args.printHelp(writer, help);
+        return error.InvalidArguments;
     }
 
     const source_path = parsed.positionals[0];

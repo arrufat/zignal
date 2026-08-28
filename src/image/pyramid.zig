@@ -40,11 +40,10 @@ pub fn ImagePyramid(comptime T: type) type {
             assert(blur_sigma > 0);
 
             var levels = try allocator.alloc(Image(T), n_levels);
+            @memset(levels, .empty);
             errdefer {
-                for (levels, 0..) |*level, i| {
-                    if (i > 0 and level.rows > 0) {
-                        level.deinit(allocator);
-                    }
+                for (levels[1..]) |*level| {
+                    if (level.rows > 0) level.deinit(allocator);
                 }
                 allocator.free(levels);
             }

@@ -8,7 +8,7 @@
 //!
 //! ### Basic interpolation:
 //! ```zig
-//! const pixel = image.interpolate(100.5, 50.3, .bilinear);
+//! const pixel = image.interpolate(100.5, 50.3, .bilinear, .mirror);
 //! ```
 //!
 //! ### Resize with different methods:
@@ -315,8 +315,7 @@ fn interpolateBilinear(comptime T: type, self: Image(T), x: f32, y: f32, border:
         }
     }.get;
 
-    // Original behavior: if any neighbor is out of bounds with .mirror, return null.
-    // For .zero, we continue with zeroes.
+    // With .mirror any out-of-bounds neighbor yields null; .zero continues with zeroes.
     if (border == .mirror) {
         if (r0_opt == null or r1_opt == null or c0_opt == null or c1_opt == null) return null;
     }

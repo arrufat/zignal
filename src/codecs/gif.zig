@@ -54,6 +54,8 @@ pub const DecodeLimits = struct {
     max_frames: u32 = max_frames_default,
     /// Total composed pixels across all frames (decoder-bomb guard).
     max_total_pixels: u64 = max_total_pixels_default,
+
+    pub const default: DecodeLimits = .{};
 };
 
 /// GIF metadata returned by `getInfo`. `frame_count` and `loop_count` are
@@ -793,17 +795,33 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
     const height: u16 = @intCast(image.rows);
     const num_pixels: usize = @as(usize, width) * @as(usize, height);
 
-    // 1) Resolve palette and produce per-pixel indices.
+    // 1) Resolve palette and produce per-pixel indices. Like the animated encoder, an
+    // Rgba image with transparent pixels reserves the last palette slot for them.
     var palette_buf: [256]Rgb = undefined;
     var palette: []const Rgb = palette_buf[0..0];
 
     const indices = try allocator.alloc(u8, num_pixels);
     defer allocator.free(indices);
+    const has_transparent = T == Rgba and blk: {
+        for (0..image.rows) |r| {
+            for (0..image.cols) |c| if (image.at(r, c).a < 128) break :blk true;
+        }
+        break :blk false;
+    };
+    var transparent_index: u8 = 0;
 
     if (options.palette) |custom| {
         if (custom.len < 2 or custom.len > 256) return error.PaletteTooSmall;
-        palette = custom;
-        try mapImageToPalette(T, allocator, image, palette, indices, options.dither, null);
+        if (has_transparent) {
+            if (custom.len >= 256) return error.PaletteTooLarge;
+            @memcpy(palette_buf[0..custom.len], custom);
+            palette_buf[custom.len] = .{ .r = 0, .g = 0, .b = 0 };
+            palette = palette_buf[0 .. custom.len + 1];
+            transparent_index = @intCast(custom.len);
+        } else {
+            palette = custom;
+        }
+        try mapImageToPalette(T, allocator, image, palette, indices, options.dither, if (has_transparent) transparent_index else null);
     } else if (T == u8) {
         // u8 → 256-entry linear gray palette; indices are the pixel values.
         @memcpy(&palette_buf, &quantize.linear_gray_256);
@@ -819,16 +837,21 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
             }
         }
     } else {
-        const max_colors = @max(@as(u16, 2), @min(options.max_colors, 256));
-        const palette_size = try quantize.medianCut(T, allocator, image, &palette_buf, max_colors);
+        const reserve: u16 = if (has_transparent) 1 else 0;
+        const max_colors = @max(@as(u16, 2), @min(options.max_colors, 256) -| reserve);
+        var palette_size = try quantize.medianCut(T, allocator, image, &palette_buf, max_colors);
         if (palette_size < 2) {
             // GIF requires at least 2 entries (min_code_size floor).
             palette_buf[1] = palette_buf[0];
-            palette = palette_buf[0..2];
-        } else {
-            palette = palette_buf[0..palette_size];
+            palette_size = 2;
         }
-        try mapImageToPalette(T, allocator, image, palette, indices, options.dither, null);
+        if (has_transparent) {
+            palette_buf[palette_size] = .{ .r = 0, .g = 0, .b = 0 };
+            transparent_index = @intCast(palette_size);
+            palette_size += 1;
+        }
+        palette = palette_buf[0..palette_size];
+        try mapImageToPalette(T, allocator, image, palette, indices, options.dither, if (has_transparent) transparent_index else null);
     }
 
     var min_code_size: u4 = 2;
@@ -848,6 +871,17 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
     try out.append(allocator, 0); // pixel aspect ratio
 
     try writeColorTable(allocator, &out, palette, declared_entries);
+
+    if (has_transparent) {
+        // Graphic Control Extension naming the transparent index.
+        try out.append(allocator, block_extension_introducer);
+        try out.append(allocator, ext_label_graphic_control);
+        try out.append(allocator, 0x04);
+        try out.append(allocator, gce_flag_transparent);
+        try writeU16Le(allocator, &out, 0);
+        try out.append(allocator, transparent_index);
+        try out.append(allocator, 0);
+    }
 
     try out.append(allocator, block_image_descriptor);
     try writeU16Le(allocator, &out, 0);
@@ -1050,7 +1084,7 @@ fn emitAnimatedFrame(
         }
     } else {
         const reserve: u16 = if (has_transparent) 1 else 0;
-        const max_colors = @max(@as(u16, 2), @min(options.max_colors, 256) - reserve);
+        const max_colors = @max(@as(u16, 2), @min(options.max_colors, 256) -| reserve);
         var size = try quantize.medianCut(T, gpa, frame, &palette_buf, max_colors);
         if (size < 2) {
             palette_buf[1] = palette_buf[0];
@@ -1831,4 +1865,21 @@ test "getInfo — image descriptor with local color table" {
     try expectEqual(@as(u32, 1), info.frame_count);
     try expect(info.has_global_color_table);
     try expectEqual(@as(u16, 2), info.global_color_table_size);
+}
+
+test "GIF encode keeps the transparent pixels of an Rgba image" {
+    const gpa = std.testing.allocator;
+    var img: Image(Rgba) = try .init(gpa, 4, 4);
+    defer img.deinit(gpa);
+    for (img.data, 0..) |*p, i| {
+        p.* = if (i % 3 == 0) .{ .r = 0, .g = 0, .b = 0, .a = 0 } else .{ .r = @intCast(i * 16), .g = 30, .b = 200, .a = 255 };
+    }
+    const bytes = try encode(Rgba, gpa, img, .default);
+    defer gpa.free(bytes);
+    var decoded = try loadFromBytes(Rgba, gpa, bytes, .{});
+    defer decoded.deinit(gpa);
+    for (img.data, decoded.data) |want, got| {
+        try std.testing.expectEqual(want.a, got.a);
+        if (want.a == 255) try std.testing.expect(@abs(@as(i32, want.r) - got.r) <= 8);
+    }
 }

@@ -135,7 +135,7 @@ pub fn clamp(comptime T: type, value: anytype) T {
 }
 
 /// Check if a type is an RGB or RGBA type with u8 components.
-/// Returns true for structs with 3 or 4 u8 fields named (r,g,b[,a]) or (red,green,blue[,alpha]).
+/// Returns true for structs with 3 or 4 u8 fields named r, g, b[, a].
 ///
 /// Example usage:
 /// ```zig

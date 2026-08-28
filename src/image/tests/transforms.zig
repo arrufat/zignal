@@ -454,3 +454,16 @@ test "flipTopBottom" {
     };
     try expectEqualDeep(expected, data);
 }
+
+test "insert with a rectangle outside the image or a NaN angle is a no-op" {
+    const allocator = std.testing.allocator;
+    var dest = try Image(u8).init(allocator, 10, 10);
+    defer dest.deinit(allocator);
+    dest.fill(0);
+    var source = try Image(u8).init(allocator, 4, 4);
+    defer source.deinit(allocator);
+    source.fill(255);
+    dest.insert(source, .{ .l = -20, .t = -20, .r = -10, .b = -10 }, 0.3, .bilinear, color.Blending.none);
+    dest.insert(source, .{ .l = 2, .t = 2, .r = 6, .b = 6 }, std.math.nan(f32), .bilinear, color.Blending.none);
+    for (dest.data) |px| try std.testing.expectEqual(@as(u8, 0), px);
+}

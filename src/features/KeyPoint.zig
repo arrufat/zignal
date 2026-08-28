@@ -15,7 +15,7 @@ y: f32,
 /// Diameter of the meaningful keypoint neighborhood
 size: f32,
 
-/// Computed orientation of the keypoint in degrees [0, 360)
+/// Computed orientation of the keypoint in degrees (-180, 180]
 angle: f32,
 
 /// The response by which the keypoint was detected (corner strength)

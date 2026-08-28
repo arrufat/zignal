@@ -258,6 +258,7 @@ pub fn MotionBlurOps(comptime T: type) type {
             strength: f32,
             blur_type: RadialType,
         ) !void {
+            if (image.rows == 0 or image.cols == 0) return;
             if (strength == 0) {
                 image.copy(out);
                 return;
@@ -266,6 +267,10 @@ pub fn MotionBlurOps(comptime T: type) type {
             // Convert normalized center to pixel coordinates
             const cx = center_x * @as(f32, @floatFromInt(image.cols - 1));
             const cy = center_y * @as(f32, @floatFromInt(image.rows - 1));
+            // Full strength is reached at the farthest corner, whatever the center.
+            const far_x = @max(cx, @as(f32, @floatFromInt(image.cols - 1)) - cx);
+            const far_y = @max(cy, @as(f32, @floatFromInt(image.rows - 1)) - cy);
+            const max_distance = @max(@sqrt(far_x * far_x + far_y * far_y), std.math.floatEps(f32));
 
             // Clamp strength to [0, 1]
             const clamped_strength = @max(0, @min(1, strength));
@@ -278,7 +283,6 @@ pub fn MotionBlurOps(comptime T: type) type {
             switch (@typeInfo(T)) {
                 .int, .float => {
                     // Process scalar types
-                    const max_distance = @sqrt(cx * cx + cy * cy);
                     for (0..image.rows) |r| {
                         for (0..image.cols) |c| {
                             const fx = @as(f32, @floatFromInt(c));
@@ -360,7 +364,6 @@ pub fn MotionBlurOps(comptime T: type) type {
                     // once per sample and accumulate all channels; the per-channel bilinear
                     // keeps the same two-stage form, so results are bit-identical.
                     const fields = comptime meta.structFields(T);
-                    const max_distance = @sqrt(cx * cx + cy * cy);
                     for (0..image.rows) |r| {
                         for (0..image.cols) |c| {
                             const fx = @as(f32, @floatFromInt(c));
