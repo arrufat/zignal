@@ -102,7 +102,7 @@ pub fn image_threshold_otsu(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv
         python.setMemoryError("threshold operation");
         return null;
     };
-    const threshold = handle.view.thresholdOtsu(out, allocator) catch {
+    const threshold = handle.view.thresholdOtsu(allocator, out) catch {
         python.setMemoryError("threshold operation");
         return null;
     };
@@ -175,7 +175,7 @@ pub fn image_threshold_adaptive_mean(self_obj: ?*c.PyObject, args: ?*c.PyObject,
         python.setMemoryError("adaptive threshold operation");
         return null;
     };
-    handle.view.thresholdAdaptiveMean(out, allocator, radius, @floatCast(c_value)) catch |err| {
+    handle.view.thresholdAdaptiveMean(allocator, out, radius, @floatCast(c_value)) catch |err| {
         switch (err) {
             error.InvalidRadius => python.setValueError("radius must be > 0", .{}),
             else => python.setMemoryError("threshold operation"),
@@ -217,10 +217,10 @@ fn morphologyCommon(
         return null;
     };
     const result = switch (op) {
-        .dilate => handle.view.dilateBinary(out, allocator, kernel, iterations),
-        .erode => handle.view.erodeBinary(out, allocator, kernel, iterations),
-        .open => handle.view.openBinary(out, allocator, kernel, iterations),
-        .close => handle.view.closeBinary(out, allocator, kernel, iterations),
+        .dilate => handle.view.dilateBinary(allocator, out, kernel, iterations),
+        .erode => handle.view.erodeBinary(allocator, out, kernel, iterations),
+        .open => handle.view.openBinary(allocator, out, kernel, iterations),
+        .close => handle.view.closeBinary(allocator, out, kernel, iterations),
     };
 
     result catch {

@@ -53,7 +53,7 @@ fn image_reshape(self: *ImageObject, rows: u32, cols: u32, method: Interpolation
     return self.py_image.?.dispatch(.{ rows, cols, method }, struct {
         fn apply(img: anytype, r: u32, col: u32, m: Interpolation) !*ImageObject {
             const out = @TypeOf(img.*).init(allocator, r, col) catch return error.OutOfMemory;
-            img.resize(out, allocator, m);
+            img.resize(allocator, out, m);
             return moveImageToPython(out) orelse error.OutOfMemory;
         }
     }.apply);
@@ -64,7 +64,7 @@ fn image_letterbox_shape(self: *ImageObject, rows: u32, cols: u32, method: Inter
     return self.py_image.?.dispatch(.{ rows, cols, method }, struct {
         fn apply(img: anytype, r: u32, col: u32, m: Interpolation) !*ImageObject {
             const out = @TypeOf(img.*).init(allocator, r, col) catch return error.OutOfMemory;
-            _ = img.letterbox(out, allocator, m);
+            _ = img.letterbox(allocator, out, m);
             return moveImageToPython(out) orelse error.OutOfMemory;
         }
     }.apply);

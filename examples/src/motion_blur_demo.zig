@@ -18,23 +18,23 @@ pub fn main(init: std.process.Init) !void {
 
     // Apply different motion blur effects using the unified API
     std.debug.print("Applying horizontal motion blur...\n", .{});
-    try image.motionBlur(blurred, init.gpa, .{ .linear = .{ .angle = 0, .distance = 30 } });
+    try image.motionBlur(init.gpa, blurred, .{ .linear = .{ .angle = 0, .distance = 30 } });
     try blurred.save(init.io, init.gpa, "motion-blur-horizontal.png");
 
     std.debug.print("Applying vertical motion blur...\n", .{});
-    try image.motionBlur(blurred, init.gpa, .{ .linear = .{ .angle = std.math.pi / 2.0, .distance = 30 } });
+    try image.motionBlur(init.gpa, blurred, .{ .linear = .{ .angle = std.math.pi / 2.0, .distance = 30 } });
     try blurred.save(init.io, init.gpa, "motion-blur-vertical.png");
 
     std.debug.print("Applying diagonal motion blur...\n", .{});
-    try image.motionBlur(blurred, init.gpa, .{ .linear = .{ .angle = std.math.pi / 4.0, .distance = 25 } });
+    try image.motionBlur(init.gpa, blurred, .{ .linear = .{ .angle = std.math.pi / 4.0, .distance = 25 } });
     try blurred.save(init.io, init.gpa, "motion-blur-diagonal.png");
 
     std.debug.print("Applying zoom blur...\n", .{});
-    try image.motionBlur(blurred, init.gpa, .{ .radial_zoom = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0.7 } });
+    try image.motionBlur(init.gpa, blurred, .{ .radial_zoom = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0.7 } });
     try blurred.save(init.io, init.gpa, "motion-blur-zoom.png");
 
     std.debug.print("Applying spin blur...\n", .{});
-    try image.motionBlur(blurred, init.gpa, .{ .radial_spin = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0.5 } });
+    try image.motionBlur(init.gpa, blurred, .{ .radial_spin = .{ .center_x = 0.5, .center_y = 0.5, .strength = 0.5 } });
     try blurred.save(init.io, init.gpa, "motion-blur-spin.png");
 
     std.debug.print("Motion blur examples saved successfully!\n", .{});

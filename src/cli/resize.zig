@@ -93,7 +93,7 @@ pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options
     errdefer out.deinit(gpa);
 
     const timer = common.Timer.begin(io);
-    img.resize(out, gpa, filter);
+    img.resize(gpa, out, filter);
     timer.logElapsed("resize");
 
     return out;

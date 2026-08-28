@@ -14,27 +14,27 @@ pub fn main(init: std.process.Init) !void {
     var edges: Image(u8) = try .init(init.gpa, image.rows, image.cols);
     defer edges.deinit(init.gpa);
 
-    try image.sobel(edges, init.gpa);
+    try image.sobel(init.gpa, edges);
     try edges.save(init.io, init.gpa, "image-demo-sobel.png");
 
     var blurred: Image(Rgba) = try .init(init.gpa, image.rows, image.cols);
     defer blurred.deinit(init.gpa);
-    try image.gaussianBlur(blurred, init.gpa, 5.0);
+    try image.gaussianBlur(init.gpa, blurred, 5.0);
     try blurred.save(init.io, init.gpa, "image-demo-gaussian.png");
 
     var resized: Image(Rgba) = try .init(init.gpa, image.rows / 2, image.cols / 2);
     defer resized.deinit(init.gpa);
-    image.resize(resized, init.gpa, .nearest);
+    image.resize(init.gpa, resized, .nearest);
     try resized.save(init.io, init.gpa, "image-demo-resized-nearest.png");
-    image.resize(resized, init.gpa, .bilinear);
+    image.resize(init.gpa, resized, .bilinear);
     try resized.save(init.io, init.gpa, "image-demo-resized-bilinear.png");
-    image.resize(resized, init.gpa, .bicubic);
+    image.resize(init.gpa, resized, .bicubic);
     try resized.save(init.io, init.gpa, "image-demo-resized-bicubic.png");
-    image.resize(resized, init.gpa, .catmull_rom);
+    image.resize(init.gpa, resized, .catmull_rom);
     try resized.save(init.io, init.gpa, "image-demo-resized-catmull-rom.png");
-    image.resize(resized, init.gpa, .{ .mitchell = .default });
+    image.resize(init.gpa, resized, .{ .mitchell = .default });
     try resized.save(init.io, init.gpa, "image-demo-resized-mitchell.png");
-    image.resize(resized, init.gpa, .lanczos);
+    image.resize(init.gpa, resized, .lanczos);
     try resized.save(init.io, init.gpa, "image-demo-resized-lanczos.png");
     std.debug.print("{f}\n", .{image});
     std.debug.print("{f}\n", .{image.display(init.io, .{ .auto = .{} })});

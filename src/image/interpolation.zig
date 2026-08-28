@@ -13,9 +13,9 @@
 //!
 //! ### Resize with different methods:
 //! ```zig
-//! var small = Image(Rgba).init(256, 256, small_data);
-//! var large = Image(Rgba).init(512, 512, large_data);
-//! small.resize(large, allocator, .lanczos); // High quality upscaling
+//! var small = try Image(Rgba).load(io, allocator, "small.png");
+//! var large = try Image(Rgba).init(allocator, 512, 512);
+//! small.resize(allocator, large, .lanczos); // High quality upscaling
 //! ```
 //!
 //! ## Performance Guide
