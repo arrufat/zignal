@@ -130,6 +130,7 @@ pub const Cli = struct {
                     if (err != error.BatchIncomplete) {
                         std.log.err("{s} command failed: {t}", .{ cmd_name, err });
                     }
+                    stdout.flush() catch {};
                     std.process.exit(1);
                 };
                 return;

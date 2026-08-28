@@ -64,6 +64,48 @@ const CoverageMax = struct {
 };
 
 /// How text glyphs are painted.
+/// Non-finite coordinates draw nothing rather than trip a float→int conversion.
+fn finitePoint(p: Point(2, f32)) bool {
+    return std.math.isFinite(p.x()) and std.math.isFinite(p.y());
+}
+
+fn finiteRect(rect: Rectangle(f32)) bool {
+    return std.math.isFinite(rect.l) and std.math.isFinite(rect.t) and std.math.isFinite(rect.r) and std.math.isFinite(rect.b);
+}
+
+/// Liang–Barsky: the part of segment p1–p2 inside `rect`, or null when it misses. A segment
+/// already inside comes back untouched, so its rasterization is unchanged. Computed in f64:
+/// for endpoints far outside, the f32 parameters would round onto each other.
+fn clipSegment(p1: Point(2, f32), p2: Point(2, f32), rect: Rectangle(f32)) ?[2]Point(2, f32) {
+    const x1: f64 = p1.x();
+    const y1: f64 = p1.y();
+    const dx = @as(f64, p2.x()) - x1;
+    const dy = @as(f64, p2.y()) - y1;
+    var t0: f64 = 0;
+    var t1: f64 = 1;
+    const ps = [_]f64{ -dx, dx, -dy, dy };
+    const qs = [_]f64{ x1 - rect.l, rect.r - x1, y1 - rect.t, rect.b - y1 };
+    for (ps, qs) |p, q| {
+        if (p == 0) {
+            if (q < 0) return null;
+            continue;
+        }
+        const t = q / p;
+        if (p < 0) {
+            if (t > t1) return null;
+            t0 = @max(t0, t);
+        } else {
+            if (t < t0) return null;
+            t1 = @min(t1, t);
+        }
+    }
+    if (t0 == 0 and t1 == 1) return .{ p1, p2 };
+    return .{
+        .init(.{ @as(f32, @floatCast(x1 + t0 * dx)), @as(f32, @floatCast(y1 + t0 * dy)) }),
+        .init(.{ @as(f32, @floatCast(x1 + t1 * dx)), @as(f32, @floatCast(y1 + t1 * dy)) }),
+    };
+}
+
 const GlyphStyle = union(enum) {
     fill,
     /// Stroke width in pixels.
@@ -295,17 +337,22 @@ pub fn Canvas(comptime T: type) type {
         /// rectangle+caps; `.soft` antialiases via Wu (width 1) or distance-based rendering.
         pub fn drawLine(self: Self, p1: Point(2, f32), p2: Point(2, f32), color: anytype, width: u32, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
-            if (width == 0) return;
+            if (width == 0 or !finitePoint(p1) or !finitePoint(p2)) return;
 
+            if (width == 1) {
+                // Pixel lines walk their whole length, so bound the ones that shoot far past
+                // the image; anything within the margin keeps its exact rasterization.
+                const margin = as(f32, self.image.rows + self.image.cols) + 2;
+                const box: Rectangle(f32) = .{ .l = -margin, .t = -margin, .r = as(f32, self.image.cols) + margin, .b = as(f32, self.image.rows) + margin };
+                const ends = clipSegment(p1, p2, box) orelse return;
+                return switch (opts.mode) {
+                    .fast => self.drawLineBresenham(ends[0], ends[1], color, opts.blending),
+                    .soft => self.drawLineXiaolinWu(ends[0], ends[1], color, opts.blending),
+                };
+            }
             switch (opts.mode) {
-                .fast => if (width == 1)
-                    self.drawLineBresenham(p1, p2, color, opts.blending)
-                else
-                    self.drawLineRectangle(p1, p2, width, color, opts),
-                .soft => if (width == 1)
-                    self.drawLineXiaolinWu(p1, p2, color, opts.blending)
-                else
-                    self.drawLineDistance(p1, p2, width, color, opts),
+                .fast => self.drawLineRectangle(p1, p2, width, color, opts),
+                .soft => self.drawLineDistance(p1, p2, width, color, opts),
             }
         }
 
@@ -593,6 +640,7 @@ pub fn Canvas(comptime T: type) type {
         /// Supports alpha blending for RGBA images with the normal blend mode.
         /// For rotation, scaling, or custom blend modes, users should access the canvas's image field directly.
         pub fn drawImage(self: Self, source: anytype, position: Point(2, f32), source_rect_opt: ?Rectangle(u32), blend_mode: Blending) void {
+            if (!finitePoint(position)) return;
             const full_rect = source.getRectangle();
             const src_rect = full_rect.intersect(source_rect_opt orelse full_rect) orelse return;
 
@@ -637,7 +685,7 @@ pub fn Canvas(comptime T: type) type {
         /// axis-aligned rectangles, exact and in one pass.
         pub fn drawRectangle(self: Self, rect: Rectangle(f32), color: anytype, width: u32, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
-            if (width == 0) return;
+            if (width == 0 or !finiteRect(rect)) return;
             const l = rect.l;
             const t = rect.t;
             const r = rect.r - 1;
@@ -819,6 +867,7 @@ pub fn Canvas(comptime T: type) type {
         /// Fractional edges are truncated to whole pixels, so `opts.mode` has no effect here.
         pub fn fillRectangle(self: Self, rect: Rectangle(f32), color: anytype, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
+            if (!finiteRect(rect)) return;
 
             const bounds = self.clampRectToImage(rect) orelse return;
             const paint: Paint = .init(color, opts.blending);
@@ -832,7 +881,7 @@ pub fn Canvas(comptime T: type) type {
         /// Use DrawMode.soft for anti-aliased edges or DrawMode.fast for fast aliased edges.
         pub fn drawCircle(self: Self, center: Point(2, f32), radius: f32, color: anytype, width: u32, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
-            if (radius <= 0 or width == 0) return;
+            if (!(radius > 0) or !std.math.isFinite(radius) or !finitePoint(center) or width == 0) return;
             self.strokeRing(center, radius, .full, width, color, opts);
         }
 
@@ -846,7 +895,7 @@ pub fn Canvas(comptime T: type) type {
         /// ```
         pub fn drawArc(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype, width: u32, opts: DrawOptions) !void {
             comptime assert(isColor(@TypeOf(color)));
-            if (radius <= 0 or width == 0) return;
+            if (!(radius > 0) or !std.math.isFinite(radius) or !finitePoint(center) or width == 0) return;
             const arc = ArcRange.fromAngles(start_angle, end_angle) orelse return;
             self.strokeRing(center, radius, arc, width, color, opts);
         }
@@ -1269,6 +1318,9 @@ pub fn Canvas(comptime T: type) type {
         /// wider ones go through `strokePolylines`.
         fn strokePath(self: Self, polys: []const []const Point(2, f32), closed: bool, width: u32, color: anytype, opts: DrawOptions) void {
             if (width == 0) return;
+            for (polys) |points| {
+                for (points) |p| if (!finitePoint(p)) return;
+            }
             if (width == 1) {
                 for (polys) |points| {
                     if (points.len == 0) continue;
@@ -1292,6 +1344,7 @@ pub fn Canvas(comptime T: type) type {
             var bounds: ?Rectangle(f32) = null;
             for (contours) |polygon| {
                 if (polygon.len < 3) continue;
+                for (polygon) |p| if (!finitePoint(p)) return;
                 vertices += polygon.len;
                 const box: Rectangle(f32) = .fromPoints(polygon);
                 bounds = if (bounds) |acc| acc.merge(box) else box;
@@ -1340,8 +1393,10 @@ pub fn Canvas(comptime T: type) type {
             // Pixel (r, c) spans [c - 0.5, c + 0.5) x [r - 0.5, r + 0.5); in accumulation space
             // it is the unit cell at (r - row_start, c - col_start).
             const frows: f32 = @floatFromInt(self.image.rows);
+            const row_end_f = @min(frows, bounds.b + 0.5);
+            if (row_end_f <= 0) return; // entirely above the image
             const row_start: usize = @floor(@max(0, bounds.t + 0.5));
-            const row_end: usize = @ceil(@min(frows, bounds.b + 0.5));
+            const row_end: usize = @ceil(row_end_f);
             if (row_start >= row_end) return;
             const height = row_end - row_start;
             const col_start: i64 = @floor(bounds.l + 0.5);
@@ -1748,7 +1803,7 @@ pub fn Canvas(comptime T: type) type {
         /// Use DrawMode.soft for anti-aliased edges or DrawMode.fast for hard edges.
         pub fn fillCircle(self: Self, center: Point(2, f32), radius: f32, color: anytype, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
-            if (radius <= 0) return;
+            if (!(radius > 0) or !std.math.isFinite(radius) or !finitePoint(center)) return;
 
             switch (opts.mode) {
                 .fast => self.fillCircleFast(center, radius, color, opts.blending),
@@ -1766,7 +1821,7 @@ pub fn Canvas(comptime T: type) type {
         /// ```
         pub fn fillArc(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype, opts: DrawOptions) !void {
             comptime assert(isColor(@TypeOf(color)));
-            if (radius <= 0) return;
+            if (!(radius > 0) or !std.math.isFinite(radius) or !finitePoint(center)) return;
             const arc = ArcRange.fromAngles(start_angle, end_angle) orelse return;
             if (arc.isFull()) return self.fillCircle(center, radius, color, opts);
             switch (opts.mode) {
@@ -2079,6 +2134,7 @@ pub fn Canvas(comptime T: type) type {
         /// `font.defaultSize()`, a bitmap font's native size. `\n` starts a new line.
         pub fn drawText(self: Self, text: []const u8, position: Point(2, f32), color: anytype, font: Font, font_size: ?f32, opts: DrawOptions) !void {
             comptime assert(isColor(@TypeOf(color)));
+            if (!finitePoint(position)) return;
             return self.renderText(text, unboundedBox(position), .init(color, opts.blending), font, font_size, .default, .fill, opts.mode);
         }
 
@@ -2087,6 +2143,7 @@ pub fn Canvas(comptime T: type) type {
         /// is clipped by the image only, not the box.
         pub fn drawTextBox(self: Self, text: []const u8, box: Rectangle(f32), color: anytype, font: Font, font_size: ?f32, layout: TextLayout, opts: DrawOptions) !void {
             comptime assert(isColor(@TypeOf(color)));
+            if (!finiteRect(box)) return;
             return self.renderText(text, box, .init(color, opts.blending), font, font_size, layout, .fill, opts.mode);
         }
 
@@ -2095,12 +2152,14 @@ pub fn Canvas(comptime T: type) type {
         /// diameter; draw the text over it for a readable label.
         pub fn drawTextOutline(self: Self, text: []const u8, position: Point(2, f32), color: anytype, font: Font, font_size: ?f32, width: f32, opts: DrawOptions) !void {
             comptime assert(isColor(@TypeOf(color)));
+            if (!finitePoint(position)) return;
             return self.renderText(text, unboundedBox(position), .init(color, opts.blending), font, font_size, .default, .{ .outline = width }, opts.mode);
         }
 
         /// `drawTextBox` stroking the glyphs as `drawTextOutline` does.
         pub fn drawTextBoxOutline(self: Self, text: []const u8, box: Rectangle(f32), color: anytype, font: Font, font_size: ?f32, width: f32, layout: TextLayout, opts: DrawOptions) !void {
             comptime assert(isColor(@TypeOf(color)));
+            if (!finiteRect(box)) return;
             return self.renderText(text, box, .init(color, opts.blending), font, font_size, layout, .{ .outline = width }, opts.mode);
         }
 
@@ -2120,7 +2179,7 @@ pub fn Canvas(comptime T: type) type {
         /// the one wrapping pass, since placing the block needs their count first.
         fn renderText(self: Self, text: []const u8, box: Rectangle(f32), paint: Paint, font: Font, font_size: ?f32, layout: TextLayout, style: GlyphStyle, mode: DrawMode) !void {
             const px = font_size orelse font.defaultSize();
-            if (px <= 0) return;
+            if (!(px > 0) or !std.math.isFinite(px)) return;
             const max_width: ?f32 = if (layout.wrap) box.width() else null;
             var lines: text_layout.Lines = .init(font, text, px, max_width, layout.letter_spacing);
             var stack: [lines_scratch_size]u8 align(16) = undefined;
@@ -2235,7 +2294,9 @@ pub fn Canvas(comptime T: type) type {
         /// coverage mask, dilates it by the stroke radius and blits it once, so the halo
         /// composites like any other shape.
         fn drawTextBitmap(self: Self, text: []const u8, position: Point(2, f32), paint: Paint, font: BitmapFont, scale: f32, letter_spacing: f32, style: GlyphStyle, mode: DrawMode) !void {
-            const radius: u32 = @ceil(style.reach());
+            const reach = style.reach();
+            if (!std.math.isFinite(reach)) return;
+            const radius: u32 = @ceil(@max(0, reach));
             if (radius == 0) return self.blitBitmapLine(text, position, paint, font, scale, letter_spacing, mode);
             // A few overwriting stamps of the unscaled (hard-edged) glyphs cannot double-blend
             // and beat the mask. Stamping per glyph, not per line, keeps the text walk to one.

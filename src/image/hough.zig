@@ -71,7 +71,8 @@ pub const HoughTransform = struct {
         self.allocator.free(self.y_cache);
     }
 
-    /// Performs the Hough Transform on a binary edge image.
+    /// Performs the Hough Transform on a binary edge image, adding votes to `accumulator`,
+    /// which the caller allocates and zeroes.
     pub fn compute(self: Self, edges: Image(u8), box: Rectangle(u32), accumulator: Image(u32)) void {
         assert(box.width() == self.size and box.height() == self.size);
         assert(accumulator.rows == self.size and accumulator.cols == self.size);

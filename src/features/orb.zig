@@ -153,7 +153,7 @@ fn detectWithPyramid(self: Orb, allocator: Allocator, pyramid: ImagePyramid(u8))
     defer all_keypoints.deinit(allocator);
 
     // Detect features at each pyramid level
-    for (0..self.n_levels) |level| {
+    for (0..pyramid.n_levels) |level| {
         if (level < self.first_level) continue;
 
         const level_image = pyramid.levels[level];
@@ -225,7 +225,7 @@ fn computeWithPyramid(self: Orb, allocator: Allocator, pyramid: ImagePyramid(u8)
     var descriptors = try allocator.alloc(BinaryDescriptor, keypoints.len);
 
     for (keypoints, 0..) |kp, i| {
-        const level = @min(@as(usize, @intCast(@max(0, kp.octave))), self.n_levels - 1);
+        const level = @min(@as(usize, @intCast(@max(0, kp.octave))), pyramid.n_levels - 1);
         const level_image = pyramid.levels[level];
 
         // Scale keypoint to pyramid level
@@ -660,4 +660,20 @@ test "ORB adaptive FAST threshold stays within bounds" {
     try expectEqual(@as(u8, 20), orb.computeAdaptiveThreshold(0));
     try expectEqual(true, orb.computeAdaptiveThreshold(10) >= 5);
     try expectEqual(true, orb.computeAdaptiveThreshold(11) >= 5);
+}
+
+test "ORB on an image smaller than the requested pyramid" {
+    const allocator = std.testing.allocator;
+    // 25 px: the default 8-level pyramid at 1.2 truncates before its last level.
+    var image = try Image(u8).init(allocator, 25, 25);
+    defer image.deinit(allocator);
+    image.fill(100);
+    for (5..15) |r| for (5..15) |c| {
+        image.at(r, c).* = 250;
+    };
+    const orb = Orb{ .n_features = 20, .fast_threshold = 10 };
+    const result = try orb.detectAndCompute(allocator, image);
+    defer allocator.free(result.keypoints);
+    defer allocator.free(result.descriptors);
+    try expectEqual(result.keypoints.len, result.descriptors.len);
 }

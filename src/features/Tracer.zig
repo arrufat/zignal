@@ -63,7 +63,10 @@ pub const Tracer = struct {
 
                     if (raw_path.items.len >= self.min_path_length) {
                         if (self.simplification_epsilon > 0) {
-                            const simplified = try self.simplifyPath(raw_path.items);
+                            const simplified = self.simplifyPath(raw_path.items) catch |err| {
+                                raw_path.deinit(self.allocator);
+                                return err;
+                            };
                             raw_path.deinit(self.allocator);
                             try paths.append(self.allocator, simplified);
                         } else {

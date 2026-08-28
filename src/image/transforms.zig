@@ -79,9 +79,9 @@ pub fn Transform(comptime T: type) type {
             // Choose the smaller scale to maintain aspect ratio
             const aspect_scale = @min(rows_scale, cols_scale);
 
-            // Calculate dimensions of the scaled image (ensure at least 1 pixel)
-            const scaled_rows: u32 = @round(aspect_scale * @as(f32, @floatFromInt(self.rows)));
-            const scaled_cols: u32 = @round(aspect_scale * @as(f32, @floatFromInt(self.cols)));
+            // Dimensions of the scaled image, at least 1 pixel each way
+            const scaled_rows: u32 = @max(1, @as(u32, @round(aspect_scale * @as(f32, @floatFromInt(self.rows)))));
+            const scaled_cols: u32 = @max(1, @as(u32, @round(aspect_scale * @as(f32, @floatFromInt(self.cols)))));
 
             // Calculate offset to center the image
             const offset_row = (out.rows -| scaled_rows) / 2;
@@ -338,10 +338,18 @@ pub fn Transform(comptime T: type) type {
             const bound_hw = half_width * abs_cos + half_height * abs_sin;
             const bound_hh = half_width * abs_sin + half_height * abs_cos;
 
-            const min_r: u32 = if (cy - bound_hh < 0) 0 else @as(u32, @floor(cy - bound_hh));
-            const max_r: u32 = @min(self.rows, @as(u32, @ceil(cy + bound_hh)) + 1);
-            const min_c: u32 = if (cx - bound_hw < 0) 0 else @as(u32, @floor(cx - bound_hw));
-            const max_c: u32 = @min(self.cols, @as(u32, @ceil(cx + bound_hw)) + 1);
+            // A rectangle that misses the image (or carries NaN) touches no pixel.
+            const top = cy - bound_hh;
+            const bottom = cy + bound_hh;
+            const left = cx - bound_hw;
+            const right = cx + bound_hw;
+            const rows_f: f32 = @floatFromInt(self.rows);
+            const cols_f: f32 = @floatFromInt(self.cols);
+            if (!(bottom >= 0 and right >= 0 and top < rows_f and left < cols_f)) return;
+            const min_r: u32 = @floor(@max(0, top));
+            const max_r: u32 = @min(self.rows, @as(u32, @ceil(@min(bottom, rows_f))) + 1);
+            const min_c: u32 = @floor(@max(0, left));
+            const max_c: u32 = @min(self.cols, @as(u32, @ceil(@min(right, cols_f))) + 1);
 
             // Only iterate over potentially affected pixels
             for (min_r..max_r) |r| {

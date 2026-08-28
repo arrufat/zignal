@@ -45,6 +45,8 @@ pub const DecodeLimits = struct {
     max_pixels: u64 = max_pixels_default,
     /// Maximum number of palette entries.
     max_palette_entries: u32 = max_palette_entries_default,
+
+    pub const default: DecodeLimits = .{};
 };
 
 /// DIB header variants, discriminated by the leading 4-byte size field.
@@ -262,10 +264,19 @@ fn readDibHeader(reader: *Io.Reader) !Header {
         const remaining = dib_size - 56;
         if (remaining > 0) _ = try reader.discard(.limited(remaining));
     } else if (dib_size > 40) {
-        // v2 (52) / v3 (56): some vendors put masks here. Skip past them — we
-        // re-read them as v3 BI_BITFIELDS trailing data below if relevant.
-        const skip = dib_size - 40;
-        _ = try reader.discard(.limited(skip));
+        // v2 (52) / v3 (56) carry the RGB (and for 56, alpha) masks in the header.
+        const extra = dib_size - 40;
+        if ((compression == .bitfields or compression == .alphabitfields) and extra >= 12) {
+            const r = try reader.takeInt(u32, .little);
+            const g = try reader.takeInt(u32, .little);
+            const b = try reader.takeInt(u32, .little);
+            const a: u32 = if (extra >= 16) try reader.takeInt(u32, .little) else 0;
+            header.masks = .{ .r = r, .g = g, .b = b, .a = a };
+            const rest = extra - @as(u32, if (extra >= 16) 16 else 12);
+            if (rest > 0) _ = try reader.discard(.limited(rest));
+        } else {
+            _ = try reader.discard(.limited(extra));
+        }
     }
 
     return header;

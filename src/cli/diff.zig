@@ -50,7 +50,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     if (parsed.positionals.len != 2) {
         std.log.err("expected exactly two input images.", .{});
         try args.printHelp(writer, help);
-        return;
+        return error.InvalidArguments;
     }
 
     const path1 = parsed.positionals[0];
@@ -61,14 +61,14 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     std.log.debug("loading first image: {s}", .{path1});
     var img1 = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path1) catch |err| {
         std.log.err("failed to load image '{s}': {t}", .{ path1, err });
-        return;
+        return err;
     };
     defer img1.deinit(gpa);
 
     std.log.debug("loading second image: {s}", .{path2});
     var img2 = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path2) catch |err| {
         std.log.err("failed to load image '{s}': {t}", .{ path2, err });
-        return;
+        return err;
     };
     defer img2.deinit(gpa);
 
@@ -76,7 +76,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         std.log.err("dimension mismatch: {d}x{d} vs {d}x{d}", .{
             img1.cols, img1.rows, img2.cols, img2.rows,
         });
-        return;
+        return error.DimensionMismatch;
     }
 
     const scale = parsed.options.scale orelse 1.0;

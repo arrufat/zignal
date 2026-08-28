@@ -45,6 +45,7 @@ pub fn psnr(comptime T: type, image_a: Image(T), image_b: Image(T)) !f64 {
         }
     }
 
+    if (component_count == 0) return error.ImageTooSmall;
     mse /= @as(f64, @floatFromInt(component_count));
     if (mse == 0.0) return std.math.inf(f64);
 

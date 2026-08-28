@@ -107,17 +107,8 @@ pub fn Image(comptime T: type) type {
         /// Integral image operations for fast box filtering and region sums.
         pub const Integral = @import("image/integral.zig").Integral(T);
 
-        /// Creates an empty image with zero dimensions, used as a placeholder for output parameters.
-        /// When passed to functions like `rotateFrom()`, `blurBox()`, etc., the function will
-        /// automatically allocate and size the image appropriately. This eliminates the need
-        /// to pre-allocate or guess output dimensions.
-        ///
-        /// Example usage:
-        /// ```zig
-        /// var rotated: Image(u8) = .empty;
-        /// try image.rotateFrom(allocator, center, angle, &rotated); // Auto-sizes to optimal dimensions
-        /// defer rotated.deinit(allocator);
-        /// ```
+        /// An image with zero dimensions and no allocation: the initial value of an image that
+        /// is filled in later (`var img: Image(u8) = .empty;`). Safe to `deinit`.
         pub const empty: Self = .{ .rows = 0, .cols = 0, .data = &[_]T{}, .stride = 0 };
 
         /// Constructs an image of rows and cols size allocating its own memory.
@@ -318,7 +309,7 @@ pub fn Image(comptime T: type) type {
         ///
         /// Example usage:
         /// ```zig
-        /// try image.rotate(allocator, image.getCenter(), angle, &rotated);
+        /// const center = image.getCenter();
         /// ```
         pub fn getCenter(self: Self) Point(2, f32) {
             return .init(.{
@@ -811,10 +802,8 @@ pub fn Image(comptime T: type) type {
         /// Example usage:
         /// ```zig
         /// var img = try Image(u8).load(io, allocator, "low_contrast.png");
-        /// var equalized = try img.equalize(allocator);
-        /// defer equalized.deinit(allocator);
+        /// img.equalize();
         /// ```
-        /// Equalizes the histogram to improve contrast. Modifies in-place.
         pub fn equalize(self: Self) void {
             return Enhancement(T).equalize(self);
         }
@@ -1130,7 +1119,7 @@ pub fn Image(comptime T: type) type {
         /// Computes the difference between `self` and `other` per pixel/channel.
         /// The result is stored in `out`, which must have the same dimensions.
         /// Applies scaling, thresholding, and visualization options in a single pass.
-        pub fn diff(self: Self, out: Self, other: Self, opts: DiffOptions) !DiffResult {
+        pub fn diff(self: Self, other: Self, out: Self, opts: DiffOptions) !DiffResult {
             return diff_mod.compute(T, self, out, other, opts);
         }
 
@@ -1263,4 +1252,6 @@ test {
     _ = @import("image/convolution.zig");
     _ = @import("image/order_statistic_blur.zig");
     _ = @import("image/tests/flood_fill.zig");
+    _ = @import("image/pyramid.zig");
+    _ = @import("image/metrics.zig");
 }

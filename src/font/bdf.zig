@@ -87,8 +87,8 @@ pub fn parse(gpa: Allocator, bytes: []const u8, filter: LoadFilter) !BitmapFont 
     errdefer gpa.free(glyphs);
     return .{
         .name = state.font.name,
-        .char_width = @intCast(@abs(state.font.bbox_width)),
-        .char_height = @intCast(@abs(state.font.bbox_height)),
+        .char_width = std.math.cast(u8, @abs(state.font.bbox_width)) orelse return BdfError.InvalidFormat,
+        .char_height = std.math.cast(u8, @abs(state.font.bbox_height)) orelse return BdfError.InvalidFormat,
         .data = bitmap_data,
         .glyphs = glyphs,
         .font_ascent = state.font.ascent,
@@ -219,7 +219,7 @@ fn parseGlyph(gpa: Allocator, lines: *std.mem.TokenIterator(u8, .any), state: *B
                 return false;
             }
             // BDF offsets count up from the baseline; ours count down from the line's top.
-            info.y_offset = state.font.ascent - (bottom + @as(i16, info.height));
+            info.y_offset = std.math.cast(i16, @as(i32, state.font.ascent) - bottom - info.height) orelse return BdfError.InvalidFormat;
 
             const bytes_per_row = info.bytesPerRow();
             try state.bitmap_data.ensureUnusedCapacity(gpa, info.bitmapSize());

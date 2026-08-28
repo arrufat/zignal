@@ -297,9 +297,9 @@ const State = struct {
 
                         if (total_read >= buffer.len) break :poll;
 
-                        // Stop at common response terminators
+                        // Stop at the final byte of DA (c), CPR (R), XTSMGRAPHICS (S) or a string terminator
                         const char: u8 = @intCast(ch);
-                        if ((char == 'c' or char == 'R' or char == '\\' or char == ';') and total_read > 3) {
+                        if ((char == 'c' or char == 'R' or char == 'S' or char == '\\') and total_read > 3) {
                             break :poll;
                         }
                     }
