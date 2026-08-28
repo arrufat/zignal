@@ -677,7 +677,28 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
                     self.items[0][2] * self.items[1][1] * self.items[2][0] -
                     self.items[0][1] * self.items[1][0] * self.items[2][2] -
                     self.items[0][0] * self.items[1][2] * self.items[2][1],
-                else => @compileError("Matrix(T).det() is not implemented for sizes above 3"),
+                else => blk: {
+                    // Gaussian elimination with partial pivoting on a copy.
+                    var a = self.items;
+                    var d: T = 1;
+                    for (0..rows) |c| {
+                        var p = c;
+                        for (c + 1..rows) |r| {
+                            if (@abs(a[r][c]) > @abs(a[p][c])) p = r;
+                        }
+                        if (a[p][c] == 0) break :blk 0;
+                        if (p != c) {
+                            std.mem.swap([cols]T, &a[c], &a[p]);
+                            d = -d;
+                        }
+                        d *= a[c][c];
+                        for (c + 1..rows) |r| {
+                            const f = a[r][c] / a[c][c];
+                            for (c..cols) |k| a[r][k] -= f * a[c][k];
+                        }
+                    }
+                    break :blk d;
+                },
             };
         }
 
@@ -717,7 +738,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
                     ans.items[2][1] = (self.items[0][1] * self.items[2][0] - self.items[0][0] * self.items[2][1]) / d;
                     ans.items[2][2] = (self.items[0][0] * self.items[1][1] - self.items[0][1] * self.items[1][0]) / d;
                 },
-                else => @compileError("Matrix(T).inv() is not implemented for sizes above 3"),
+                else => return self.solve(Self.identity()),
             }
             return ans;
         }
@@ -1246,4 +1267,29 @@ test "SMatrix svd basic" {
             try std.testing.expect(s.at(i - 1, 0).* >= s.at(i, 0).*);
         }
     }
+}
+
+test "SMatrix det and inv beyond 3x3" {
+    const a: SMatrix(f64, 4, 4) = .init(.{
+        .{ 4, 1, 2, 0 },
+        .{ 1, 5, 0, 3 },
+        .{ 2, 0, 6, 1 },
+        .{ 0, 3, 1, 7 },
+    });
+    // Symmetric positive definite; det = 447 (numpy).
+    try std.testing.expectApproxEqAbs(447.0, a.det(), 1e-9);
+    const inv = a.inv().?;
+    const prod = a.dot(inv);
+    for (0..4) |r| for (0..4) |c| {
+        const want: f64 = if (r == c) 1 else 0;
+        try std.testing.expectApproxEqAbs(want, prod.at(r, c).*, 1e-12);
+    };
+    const singular: SMatrix(f64, 4, 4) = .init(.{
+        .{ 1, 2, 3, 4 },
+        .{ 2, 4, 6, 8 },
+        .{ 0, 1, 0, 1 },
+        .{ 1, 0, 1, 0 },
+    });
+    try std.testing.expectEqual(0.0, singular.det());
+    try std.testing.expect(singular.inv() == null);
 }

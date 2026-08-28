@@ -257,3 +257,34 @@ test "Matrix pseudo-inverse zero matrix" {
     }
     try std.testing.expectEqual(@as(u32, 0), rank);
 }
+
+test "Matrix inverse/solve - singularity is relative to the matrix scale" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    // Entries far below floatEps(f32) are still a perfectly conditioned matrix.
+    inline for (.{ 2, 3, 4 }) |n| {
+        var a: Matrix(f32) = try .identity(gpa, n, n);
+        for (0..n) |i| a.at(i, i).* = 1e-9 * @as(f32, @floatFromInt(i + 1));
+        a.at(0, n - 1).* = 2e-9;
+        const a_inv = try a.inv();
+        const prod = try a.dot(a_inv);
+        for (0..n) |i| for (0..n) |j| {
+            const want: f32 = if (i == j) 1 else 0;
+            try std.testing.expectApproxEqAbs(want, prod.at(i, j).*, 1e-5);
+        };
+        // solve() goes through lu(); it must not skip small pivots.
+        const b: Matrix(f32) = try .initAll(gpa, n, 1, 1e-9);
+        const x = try a.solve(b);
+        const ax = try a.dot(x);
+        for (0..n) |i| try std.testing.expectApproxEqAbs(1e-9, ax.at(i, 0).*, 1e-14);
+    }
+
+    // A genuinely singular small-scale matrix is still rejected.
+    var s: Matrix(f64) = try .fromSlice(gpa, 2, 2, &.{ 1e-9, 2e-9, 2e-9, 4e-9 });
+    try std.testing.expectError(error.Singular, s.inv());
+
+    var empty: Matrix(f64) = try .init(gpa, 0, 0);
+    try std.testing.expectError(error.DimensionMismatch, empty.inv());
+}
