@@ -258,7 +258,7 @@ pub fn resizePlaneBicubicU8(
 ) void {
     const SCALE = 256;
 
-    // Bicubic kernel function (a = -0.5)
+    // Bicubic kernel function (a = -1, as in `interpolation.bicubicKernel`)
     const cubicKernel = struct {
         fn eval(t: i32) i32 {
             const at: i32 = @intCast(@abs(t));
@@ -522,126 +522,6 @@ pub fn resizePlaneLanczosU8(
 
             const result = if (weight_sum != 0) sum / weight_sum else 0;
             dst[r * dst_cols + c] = meta.clamp(u8, result);
-        }
-    }
-}
-
-/// Generic f32 plane resize.
-pub fn resizePlaneF32(
-    src: []const f32,
-    dst: []f32,
-    src_rows: u32,
-    src_cols: u32,
-    dst_rows: u32,
-    dst_cols: u32,
-    method: enum { nearest, bilinear, bicubic },
-) void {
-    switch (method) {
-        .nearest => {
-            const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
-            const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
-
-            for (0..dst_rows) |r| {
-                const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-                const src_y = @max(0, @min(src_rows - 1, @as(u32, @round(src_y_f))));
-
-                for (0..dst_cols) |c| {
-                    const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-                    const src_x = @max(0, @min(src_cols - 1, @as(u32, @round(src_x_f))));
-                    dst[r * dst_cols + c] = src[@as(usize, src_y) * src_cols + src_x];
-                }
-            }
-        },
-        .bilinear => {
-            const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
-            const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
-
-            for (0..dst_rows) |r| {
-                const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-                const src_y: u32 = @floor(src_y_f);
-                const src_y_next = resolveIndex(@intCast(src_y + 1), @intCast(src_rows), .mirror).?;
-                const fy = src_y_f - @floor(src_y_f);
-
-                for (0..dst_cols) |c| {
-                    const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-                    const src_x: u32 = @floor(src_x_f);
-                    const src_x_next = resolveIndex(@intCast(src_x + 1), @intCast(src_cols), .mirror).?;
-                    const fx = src_x_f - @floor(src_x_f);
-
-                    const tl = src[@as(usize, src_y) * src_cols + src_x];
-                    const tr = src[@as(usize, src_y) * src_cols + src_x_next];
-                    const bl = src[@as(usize, src_y_next) * src_cols + src_x];
-                    const br = src[@as(usize, src_y_next) * src_cols + src_x_next];
-
-                    const top = tl * (1 - fx) + tr * fx;
-                    const bottom = bl * (1 - fx) + br * fx;
-                    dst[r * dst_cols + c] = top * (1 - fy) + bottom * fy;
-                }
-            }
-        },
-        .bicubic => {
-            // Simplified bicubic for f32 - could be optimized further
-            resizePlaneBicubicF32(src, dst, src_rows, src_cols, dst_rows, dst_cols);
-        },
-    }
-}
-
-// Helper for f32 bicubic
-fn resizePlaneBicubicF32(
-    src: []const f32,
-    dst: []f32,
-    src_rows: u32,
-    src_cols: u32,
-    dst_rows: u32,
-    dst_cols: u32,
-) void {
-    const cubicKernel = struct {
-        fn eval(t: f32) f32 {
-            const at = @abs(t);
-            if (at <= 1) {
-                return 1 - 2 * at * at + at * at * at;
-            } else if (at <= 2) {
-                return 4 - 8 * at + 5 * at * at - at * at * at;
-            }
-            return 0;
-        }
-    }.eval;
-
-    const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
-    const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
-
-    for (0..dst_rows) |r| {
-        const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-        const src_y: isize = @floor(src_y_f);
-        const fy = src_y_f - @floor(src_y_f);
-
-        for (0..dst_cols) |c| {
-            const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-            const src_x: isize = @floor(src_x_f);
-            const fx = src_x_f - @floor(src_x_f);
-
-            var sum: f32 = 0;
-            var weight_sum: f32 = 0;
-
-            for (0..4) |ky| {
-                const y_idx = src_y + @as(isize, @intCast(ky)) - 1;
-                const pixel_y = resolveIndex(y_idx, @intCast(src_rows), .mirror).?;
-
-                const wy = cubicKernel(@as(f32, @floatFromInt(@as(isize, @intCast(ky)) - 1)) - fy);
-
-                for (0..4) |kx| {
-                    const x_idx = src_x + @as(isize, @intCast(kx)) - 1;
-                    const pixel_x = resolveIndex(x_idx, @intCast(src_cols), .mirror).?;
-
-                    const wx = cubicKernel(@as(f32, @floatFromInt(@as(isize, @intCast(kx)) - 1)) - fx);
-                    const w = wx * wy;
-
-                    sum += src[pixel_y * src_cols + pixel_x] * w;
-                    weight_sum += w;
-                }
-            }
-
-            dst[r * dst_cols + c] = if (weight_sum != 0) sum / weight_sum else 0;
         }
     }
 }

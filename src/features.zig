@@ -26,4 +26,5 @@ test {
     _ = @import("features/orb.zig");
     _ = @import("features/matcher.zig");
     _ = @import("features/Tracer.zig");
+    _ = @import("features/test_orb_integration.zig");
 }

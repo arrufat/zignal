@@ -158,18 +158,6 @@ pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blen
 
 // Channel implementations
 
-fn overlayChannel(comptime F: type, base: F, blend: F) F {
-    comptime assert(@typeInfo(F) == .float);
-    if (base < 0.5) return 2.0 * base * blend;
-    return 1.0 - 2.0 * (1.0 - base) * (1.0 - blend);
-}
-
-fn softLightChannel(comptime F: type, base: F, blend: F) F {
-    comptime assert(@typeInfo(F) == .float);
-    if (blend <= 0.5) return base - (1.0 - 2.0 * blend) * base * (1.0 - base);
-    return base + (2.0 * blend - 1.0) * (@sqrt(base) - base);
-}
-
 fn colorDodgeChannel(comptime F: type, base: F, blend: F) F {
     comptime assert(@typeInfo(F) == .float);
     if (base == 0) return 0;
@@ -182,11 +170,6 @@ fn colorBurnChannel(comptime F: type, base: F, blend: F) F {
     if (base >= 1.0) return 1.0;
     if (blend <= 0.0) return 0.0;
     return @max(0.0, 1.0 - (1.0 - base) / blend);
-}
-
-fn exclusionChannel(comptime F: type, base: F, blend: F) F {
-    comptime assert(@typeInfo(F) == .float);
-    return base + blend - 2.0 * base * blend;
 }
 
 // Tests

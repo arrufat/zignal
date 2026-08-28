@@ -4,8 +4,7 @@ const expectEqual = std.testing.expectEqual;
 
 const Image = @import("../image.zig").Image;
 const BruteForceMatcher = @import("matcher.zig").BruteForceMatcher;
-const MatchStats = @import("matcher.zig").MatchStats;
-const Orb = @import("orb.zig").Orb;
+const Orb = @import("orb.zig");
 
 // Import all ORB components
 // Test helpers
@@ -40,8 +39,6 @@ test "ORB full pipeline - detection, description, and matching" {
     try expectEqual(true, result1.keypoints.len > 0);
     try expectEqual(true, result2.keypoints.len > 0);
 
-    std.debug.print("\n[Integration Test] Detected {} keypoints in image1, {} in image2\n", .{ result1.keypoints.len, result2.keypoints.len });
-
     // Match features between images
     const matcher = BruteForceMatcher{
         .max_distance = 50,
@@ -52,17 +49,10 @@ test "ORB full pipeline - detection, description, and matching" {
     const matches = try matcher.match(allocator, result1.descriptors, result2.descriptors);
     defer allocator.free(matches);
 
-    std.debug.print("[Integration Test] Found {} matches\n", .{matches.len});
-
     // Compute match statistics
-    const stats = MatchStats.compute(matches);
-    std.debug.print("[Integration Test] Match stats: mean_dist={d:.2}, min={d:.2}, max={d:.2}\n", .{ stats.mean_distance, stats.min_distance, stats.max_distance });
 
     // Should find some matches between similar images (or at least detect features)
     // Relaxing this test as synthetic images may not always produce matches
-    if (result1.keypoints.len > 0 and result2.keypoints.len > 0) {
-        std.debug.print("[Integration Test] Both images have features, matching possible\n", .{});
-    }
 
     // Verify match properties
     for (matches) |match| {
@@ -108,13 +98,10 @@ test "ORB rotation invariance" {
     const matches = try matcher.match(allocator, orig_result.descriptors, rot_result.descriptors);
     defer allocator.free(matches);
 
-    std.debug.print("\n[Rotation Test] Original: {} features, Rotated: {} features, Matches: {}\n", .{ orig_result.keypoints.len, rot_result.keypoints.len, matches.len });
-
     // Should maintain some matches despite rotation
     if (orig_result.keypoints.len > 0 and rot_result.keypoints.len > 0) {
         const match_ratio = @as(f32, @floatFromInt(matches.len)) /
             @as(f32, @floatFromInt(@min(orig_result.keypoints.len, rot_result.keypoints.len)));
-        std.debug.print("[Rotation Test] Match ratio: {d:.2}\n", .{match_ratio});
 
         // Expect at least 20% matches for rotation invariance
         try expectEqual(true, match_ratio > 0.2);
@@ -148,8 +135,6 @@ test "ORB scale invariance" {
     defer allocator.free(scaled_result.keypoints);
     defer allocator.free(scaled_result.descriptors);
 
-    std.debug.print("\n[Scale Test] Original: {} features, Scaled: {} features\n", .{ orig_result.keypoints.len, scaled_result.keypoints.len });
-
     // Both should detect features
     try expectEqual(true, orig_result.keypoints.len > 0);
     try expectEqual(true, scaled_result.keypoints.len > 0);
@@ -161,14 +146,6 @@ test "ORB scale invariance" {
             scale_counts[@intCast(kp.octave)] += 1;
         }
     }
-
-    std.debug.print("[Scale Test] Features per octave: ", .{});
-    for (scale_counts, 0..) |count, i| {
-        if (count > 0) {
-            std.debug.print("L{}: {}, ", .{ i, count });
-        }
-    }
-    std.debug.print("\n", .{});
 }
 
 test "ORB kNN matching" {
@@ -213,8 +190,6 @@ test "ORB kNN matching" {
         allocator.free(knn_matches);
     }
 
-    std.debug.print("\n[kNN Test] Found {} query descriptors with matches\n", .{knn_matches.len});
-
     // Apply ratio test to filter good matches
     var good_matches: usize = 0;
     for (knn_matches) |query_matches| {
@@ -225,13 +200,11 @@ test "ORB kNN matching" {
             }
         }
     }
-
-    std.debug.print("[kNN Test] Good matches after ratio test: {}\n", .{good_matches});
 }
 
 // Helper functions to create test images
 
-fn createTestImage(allocator: Allocator, rows: usize, cols: usize, seed: u64) !Image(u8) {
+fn createTestImage(allocator: Allocator, rows: u32, cols: u32, seed: u64) !Image(u8) {
     var image = try Image(u8).init(allocator, rows, cols);
 
     var prng = std.Random.DefaultPrng.init(seed);
@@ -262,7 +235,7 @@ fn createTestImage(allocator: Allocator, rows: usize, cols: usize, seed: u64) !I
     return image;
 }
 
-fn createPatternImage(allocator: Allocator, rows: usize, cols: usize) !Image(u8) {
+fn createPatternImage(allocator: Allocator, rows: u32, cols: u32) !Image(u8) {
     var image = try Image(u8).init(allocator, rows, cols);
 
     // Fill with gray
@@ -291,7 +264,7 @@ fn createPatternImage(allocator: Allocator, rows: usize, cols: usize) !Image(u8)
     return image;
 }
 
-fn createRotatedPatternImage(allocator: Allocator, rows: usize, cols: usize) !Image(u8) {
+fn createRotatedPatternImage(allocator: Allocator, rows: u32, cols: u32) !Image(u8) {
     var image = try Image(u8).init(allocator, rows, cols);
 
     // Fill with gray

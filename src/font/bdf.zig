@@ -21,8 +21,6 @@ pub const BdfError = error{
     InvalidVersion,
     MissingRequired,
     InvalidBitmapData,
-    AllocationFailed,
-    InvalidCompression,
 };
 
 /// BDF font metadata

@@ -165,13 +165,6 @@ pub fn getCharData(self: BitmapFont, codepoint: u21) ?[]const u8 {
     return glyph.data;
 }
 
-/// Get the advance width for a character (how much to move the cursor)
-/// Returns per-character width if available, otherwise the default char_width
-pub fn getCharAdvanceWidth(self: BitmapFont, codepoint: u21) u16 {
-    const entry = self.getEntry(codepoint) orelse return self.char_width;
-    return entry.info.advanceWidth();
-}
-
 /// Lays out one line of text at `scale`, yielding each glyph with its pen position: the
 /// bitmap counterpart of `VectorFont.Layout`. Codepoints the font lacks only advance the
 /// pen, by the character width.
