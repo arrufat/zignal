@@ -138,6 +138,8 @@ pub fn Matrix(comptime T: type) type {
             tolerance: ?T = null,
             /// Optional pointer that receives the effective numerical rank (#σ > tol).
             effective_rank: ?*u32 = null,
+
+            pub const default: PinvOptions = .{};
         };
 
         pub fn init(allocator: std.mem.Allocator, rows: u32, cols: u32) !Self {
@@ -372,25 +374,31 @@ pub fn Matrix(comptime T: type) type {
         }
 
         /// Inverts the matrix using analytical formulas for small matrices (≤3x3)
-        /// and Gauss-Jordan elimination for larger matrices
+        /// and a pivoted LU solve for larger matrices
         pub fn inv(self: Self) MatrixError!Self {
             if (self.rows != self.cols) return error.NotSquare;
+            if (self.rows == 0) return error.DimensionMismatch;
 
             const n = self.rows;
+            // A determinant is "zero" when it is below the rounding noise of the products
+            // that formed it, so small-magnitude matrices are not mistaken for singular ones.
+            const eps = std.math.floatEps(T) * 100;
 
             // Use analytical formulas for small matrices (more efficient)
             if (n <= 3) {
                 switch (n) {
                     1 => {
                         const d = self.at(0, 0).*;
-                        if (@abs(d) < std.math.floatEps(T)) return error.Singular;
+                        if (d == 0) return error.Singular;
                         var ans: Matrix(T) = try .init(self.allocator, n, n);
                         ans.at(0, 0).* = 1 / d;
                         return ans;
                     },
                     2 => {
-                        const d = self.at(0, 0).* * self.at(1, 1).* - self.at(0, 1).* * self.at(1, 0).*;
-                        if (@abs(d) < std.math.floatEps(T)) return error.Singular;
+                        const p0 = self.at(0, 0).* * self.at(1, 1).*;
+                        const p1 = self.at(0, 1).* * self.at(1, 0).*;
+                        const d = p0 - p1;
+                        if (@abs(d) <= (@abs(p0) + @abs(p1)) * eps) return error.Singular;
                         var ans: Matrix(T) = try .init(self.allocator, n, n);
                         ans.at(0, 0).* = self.at(1, 1).* / d;
                         ans.at(0, 1).* = -self.at(0, 1).* / d;
@@ -404,7 +412,13 @@ pub fn Matrix(comptime T: type) type {
                         const c02 = self.at(0, 1).* * self.at(1, 2).* - self.at(0, 2).* * self.at(1, 1).*;
 
                         const d = self.at(0, 0).* * c00 + self.at(1, 0).* * c01 + self.at(2, 0).* * c02;
-                        if (@abs(d) < std.math.floatEps(T)) return error.Singular;
+                        const magnitude = @abs(self.at(0, 0).* * self.at(1, 1).* * self.at(2, 2).*) +
+                            @abs(self.at(0, 0).* * self.at(1, 2).* * self.at(2, 1).*) +
+                            @abs(self.at(1, 0).* * self.at(0, 2).* * self.at(2, 1).*) +
+                            @abs(self.at(1, 0).* * self.at(0, 1).* * self.at(2, 2).*) +
+                            @abs(self.at(2, 0).* * self.at(0, 1).* * self.at(1, 2).*) +
+                            @abs(self.at(2, 0).* * self.at(0, 2).* * self.at(1, 1).*);
+                        if (@abs(d) <= magnitude * eps) return error.Singular;
 
                         var ans: Matrix(T) = try .init(self.allocator, n, n);
                         ans.at(0, 0).* = c00 / d;
@@ -421,8 +435,13 @@ pub fn Matrix(comptime T: type) type {
                     else => unreachable,
                 }
             } else {
-                // Use Gauss-Jordan elimination for larger matrices
-                return self.inverseGaussJordan();
+                // A⁻¹ = solve(A, I) through the pivoted LU, which carries the
+                // scale-relative singularity test.
+                var lu_result = try self.lu();
+                defer lu_result.deinit();
+                var ident: Matrix(T) = try .identity(self.allocator, n, n);
+                defer ident.deinit();
+                return lu_result.solve(ident);
             }
         }
 
@@ -506,80 +525,6 @@ pub fn Matrix(comptime T: type) type {
             }
 
             return v_sigma.dotTranspose(svd_result.u);
-        }
-
-        /// Inverts the matrix using Gauss-Jordan elimination with partial pivoting
-        /// This is a general method that works for any size square matrix
-        fn inverseGaussJordan(self: Self) MatrixError!Self {
-            const n = self.rows;
-
-            // Create augmented matrix [A | I]
-            var augmented: Matrix(T) = try .init(self.allocator, n, 2 * n);
-            defer augmented.deinit();
-
-            // Copy original matrix to left half and identity to right half
-            for (0..n) |i| {
-                for (0..n) |j| {
-                    augmented.at(i, j).* = self.at(i, j).*;
-                    augmented.at(i, n + j).* = if (i == j) 1.0 else 0.0;
-                }
-            }
-
-            // Perform Gauss-Jordan elimination
-            for (0..n) |pivot_col| {
-                // Find pivot (partial pivoting for numerical stability)
-                var max_row = pivot_col;
-                var max_val = @abs(augmented.at(pivot_col, pivot_col).*);
-
-                for (pivot_col + 1..n) |row_idx| {
-                    const val = @abs(augmented.at(row_idx, pivot_col).*);
-                    if (val > max_val) {
-                        max_val = val;
-                        max_row = row_idx;
-                    }
-                }
-
-                // Check for singular matrix
-                if (max_val < std.math.floatEps(T) * 10) return error.Singular;
-
-                // Columns before pivot_col in the left half are already reduced
-                // to unit columns (exact zeros in the rows below), so the row
-                // operations can start at pivot_col.
-
-                // Swap rows if needed
-                if (max_row != pivot_col) {
-                    for (pivot_col..2 * n) |j| {
-                        std.mem.swap(T, augmented.at(pivot_col, j), augmented.at(max_row, j));
-                    }
-                }
-
-                // Scale pivot row
-                const pivot = augmented.at(pivot_col, pivot_col).*;
-                for (pivot_col..2 * n) |j| {
-                    augmented.at(pivot_col, j).* /= pivot;
-                }
-
-                // Eliminate column in all other rows
-                for (0..n) |row_idx| {
-                    if (row_idx != pivot_col) {
-                        const factor = augmented.at(row_idx, pivot_col).*;
-                        for (pivot_col..2 * n) |j| {
-                            augmented.at(row_idx, j).* -= factor * augmented.at(pivot_col, j).*;
-                        }
-                    }
-                }
-            }
-
-            // Extract inverse from right half of augmented matrix
-            var ans: Matrix(T) = try .init(self.allocator, n, n);
-
-            for (0..n) |i| {
-                for (0..n) |j| {
-                    ans.at(i, j).* = augmented.at(i, n + j).*;
-                }
-            }
-
-            return ans;
         }
 
         /// Extract a submatrix - changes dimensions
@@ -1294,9 +1239,10 @@ pub fn Matrix(comptime T: type) type {
                     u.at(pivot_col, j).* = work.at(pivot_col, j).*;
                 }
 
-                // Compute L column and eliminate
+                // Compute L column and eliminate. An exactly-zero pivot means the whole
+                // column below it is zero too (it was the max), so there is nothing to do.
                 for (pivot_col + 1..n) |row_idx| {
-                    if (@abs(work.at(pivot_col, pivot_col).*) > std.math.floatEps(T)) {
+                    if (work.at(pivot_col, pivot_col).* != 0) {
                         const factor = work.at(row_idx, pivot_col).* / work.at(pivot_col, pivot_col).*;
                         l.at(row_idx, pivot_col).* = factor;
 

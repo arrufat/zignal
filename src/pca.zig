@@ -405,11 +405,13 @@ pub fn Pca(
             // Project eigenvectors back to feature space. The Gram matrix is
             // n_samples × n_samples and `fit` clamps num_components to at most
             // n_samples - 1, so every requested component has a backing eigenvector.
+            // Rank cutoff relative to the leading eigenvalue, so tiny-scale data keeps its components.
+            const tol = result.s.at(0, 0).* * @as(T, @floatFromInt(n)) * std.math.floatEps(T);
             for (0..num_components) |i| {
                 const eigenval = result.s.at(i, 0).*;
                 self.eigenvalues[i] = eigenval;
 
-                if (eigenval > 1e-12) {
+                if (eigenval > tol) {
                     // Principal component: X^T u_i / sqrt((n-1) * eigenval)
                     for (0..self.dim) |j| {
                         var sum: T = 0;

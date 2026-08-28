@@ -25,8 +25,7 @@ def _expected_skewness(values: list[float]) -> float:
     if math.isclose(m2, 0.0):
         return 0.0
     variance = m2 / (n - 1)
-    skew = (n / ((n - 1) * (n - 2))) * (m3 / (m2 / n))
-    return skew / (variance**1.5)
+    return (n / ((n - 1) * (n - 2))) * m3 / (variance**1.5)
 
 
 def _expected_excess_kurtosis(values: list[float]) -> float:
@@ -37,7 +36,8 @@ def _expected_excess_kurtosis(values: list[float]) -> float:
     if math.isclose(m2, 0.0):
         return 0.0
     n1 = n - 1
-    kurt = ((n * (n + 1)) / (n1 * (n - 2) * (n - 3))) * (m4 / ((m2 * m2) / (n * n)))
+    variance = m2 / n1
+    kurt = ((n * (n + 1)) / (n1 * (n - 2) * (n - 3))) * (m4 / (variance * variance))
     kurt -= (3 * n1 * n1) / ((n - 2) * (n - 3))
     return kurt
 

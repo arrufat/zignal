@@ -30,7 +30,7 @@ pub fn Result(comptime T: type) type {
 /// returned ascending, with `vectors`' columns the matching unit eigenvectors. The caller owns the
 /// returned matrices. Returns `error.NotSymmetric` if `a` is not symmetric within a magnitude-relative
 /// tolerance (a general non-symmetric eigendecomposition, with its complex spectrum, is out of scope),
-/// or `error.NotFinite` if any entry is NaN or infinite.
+/// `error.NotFinite` if any entry is NaN or infinite, or `error.NotConverged` after 100 sweeps.
 pub fn eigh(comptime T: type, allocator: std.mem.Allocator, a: Matrix(T)) !Result(T) {
     comptime assert(@typeInfo(T) == .float);
     if (a.rows != a.cols) return error.NotSquare;
@@ -67,12 +67,13 @@ pub fn eigh(comptime T: type, allocator: std.mem.Allocator, a: Matrix(T)) !Resul
     const off_tol = frob_sq * eps * eps;
 
     var sweep: usize = 0;
-    while (sweep < 100) : (sweep += 1) {
+    while (true) : (sweep += 1) {
         var off: T = 0;
         for (0..n) |p| for (p + 1..n) |q| {
             off += work.at(p, q).* * work.at(p, q).*;
         };
         if (off <= off_tol) break;
+        if (sweep == 100) return error.NotConverged;
 
         for (0..n) |p| {
             for (p + 1..n) |q| {

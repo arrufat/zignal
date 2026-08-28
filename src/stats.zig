@@ -139,10 +139,9 @@ pub fn RunningStats(comptime T: type, comptime config: RunningStatsConfig) type 
             const variance_val = self.variance();
             if (variance_val == 0) return 0;
 
+            // G1 = n / ((n-1)(n-2)) · Σ(x-μ)³ / s³ with s² the sample variance.
             const n = @as(T, @floatFromInt(self.n));
-            const skew = (n / ((n - 1) * (n - 2))) *
-                (self.m3 / (self.m2 / n));
-            return skew / std.math.pow(T, variance_val, 1.5);
+            return (n / ((n - 1) * (n - 2))) * self.m3 / std.math.pow(T, variance_val, 1.5);
         }
 
         /// Compute the excess kurtosis (requires n > 3)
@@ -153,14 +152,11 @@ pub fn RunningStats(comptime T: type, comptime config: RunningStatsConfig) type 
             const variance_val = self.variance();
             if (variance_val == 0) return 0;
 
+            // G2 = n(n+1) / ((n-1)(n-2)(n-3)) · Σ(x-μ)⁴ / s⁴ − 3(n-1)² / ((n-2)(n-3)).
             const n: T = @floatFromInt(self.n);
             const n1 = n - 1;
-
-            const kurt = ((n * (n + 1)) / (n1 * (n - 2) * (n - 3))) *
-                (self.m4 / (self.m2 * self.m2 / (n * n))) -
+            return ((n * (n + 1)) / (n1 * (n - 2) * (n - 3))) * (self.m4 / (variance_val * variance_val)) -
                 (3 * n1 * n1) / ((n - 2) * (n - 3));
-
-            return kurt;
         }
 
         /// Get the minimum value seen so far
@@ -364,6 +360,16 @@ test "RunningStats: skewness and kurtosis" {
     try testing.expect(@abs(stats.exKurtosis()) < 1.0);
 }
 
+test "RunningStats: skewness and kurtosis exact values, scale invariant" {
+    // {0,0,0,1}: G1 = 2, G2 = 4 (scipy.stats.skew/kurtosis with bias=False).
+    for ([_]f64{ 1, 10, 1e-3 }) |scale| {
+        var stats: RunningStats(f64, .all) = .init();
+        for ([_]f64{ 0, 0, 0, scale }) |v| stats.add(v);
+        try testing.expectApproxEqAbs(2.0, stats.skewness(), 1e-12);
+        try testing.expectApproxEqAbs(4.0, stats.exKurtosis(), 1e-12);
+    }
+}
+
 test "RunningStats: combine" {
     var stats1: RunningStats(f64, .all) = .init();
     var stats2: RunningStats(f64, .all) = .init();
@@ -432,45 +438,69 @@ test "RunningStats: edge cases" {
     try testing.expectEqual(@as(f64, 0), stats.exKurtosis());
 }
 
+/// Two-pass sample skewness and excess kurtosis (G1, G2) of `values`, as a reference.
+fn referenceMoments(values: []const f64) struct { skew: f64, kurt: f64 } {
+    const n: f64 = @floatFromInt(values.len);
+    var mean_val: f64 = 0;
+    for (values) |v| mean_val += v;
+    mean_val /= n;
+    var m2: f64 = 0;
+    var m3: f64 = 0;
+    var m4: f64 = 0;
+    for (values) |v| {
+        const d = v - mean_val;
+        m2 += d * d;
+        m3 += d * d * d;
+        m4 += d * d * d * d;
+    }
+    const s2 = m2 / (n - 1);
+    return .{
+        .skew = n / ((n - 1) * (n - 2)) * m3 / std.math.pow(f64, s2, 1.5),
+        .kurt = n * (n + 1) / ((n - 1) * (n - 2) * (n - 3)) * m4 / (s2 * s2) - 3 * (n - 1) * (n - 1) / ((n - 2) * (n - 3)),
+    };
+}
+
 test "RunningStats: normal distribution approximation" {
     var stats: RunningStats(f64, .all) = .init();
-
-    // Generate standard normal data using Zig's built-in normal random generator
-    var prng = std.Random.DefaultPrng.init(42); // Fixed seed for deterministic test
+    var prng = std.Random.DefaultPrng.init(42);
     const rand = prng.random();
-
-    var i: usize = 0;
-    while (i < 100) : (i += 1) {
-        const value = rand.floatNorm(f64);
-        stats.add(value);
+    var values: [100]f64 = undefined;
+    for (&values) |*v| {
+        v.* = rand.floatNorm(f64);
+        stats.add(v.*);
     }
 
     try testing.expectEqual(100, stats.currentN());
-    try testing.expectApproxEqAbs(0, @abs(stats.mean()), 0.1); // Should be near 0
-    try testing.expectApproxEqAbs(1.0, stats.variance(), 0.04); // Should be near 1
-    try testing.expectApproxEqAbs(1.0, stats.stdDev(), 0.04); // Should be near 1
-    try testing.expectApproxEqAbs(0, @abs(stats.skewness()), 0.25); // Should be near 0 for symmetric
-    try testing.expectApproxEqAbs(0, @abs(stats.exKurtosis()), 0.15); // Should be near 0 for normal-like
+    try testing.expectApproxEqAbs(0, @abs(stats.mean()), 0.1);
+    try testing.expectApproxEqAbs(1.0, stats.variance(), 0.04);
+    try testing.expectApproxEqAbs(1.0, stats.stdDev(), 0.04);
+    // The running estimate must match the two-pass reference; the sample itself is only
+    // loosely normal (standard errors at n=100: skew ≈ 0.24, kurtosis ≈ 0.49).
+    const ref = referenceMoments(&values);
+    try testing.expectApproxEqAbs(ref.skew, stats.skewness(), 1e-10);
+    try testing.expectApproxEqAbs(ref.kurt, stats.exKurtosis(), 1e-10);
+    try testing.expect(@abs(stats.skewness()) < 0.5);
+    try testing.expect(@abs(stats.exKurtosis()) < 1.0);
 }
 
 test "RunningStats: skewed distribution" {
     var stats: RunningStats(f64, .all) = .init();
-
-    // Generate right-skewed data using Zig's exponential random generator
-    var prng = std.Random.DefaultPrng.init(123); // Fixed seed for deterministic test
+    var prng = std.Random.DefaultPrng.init(123);
     const rand = prng.random();
-
-    var i: usize = 0;
-    while (i < 100) : (i += 1) {
-        const value = rand.floatExp(f64); // Exponential distribution: mean 1, skewed right
-        stats.add(value);
+    var values: [100]f64 = undefined;
+    for (&values) |*v| {
+        v.* = rand.floatExp(f64); // mean 1, skew 2, excess kurtosis 6
+        stats.add(v.*);
     }
 
     try testing.expectEqual(@as(usize, 100), stats.currentN());
-    try testing.expectApproxEqAbs(@as(f64, 1.0), stats.mean(), 0.05); // Should be near 1
-    try testing.expectApproxEqAbs(@as(f64, 1.0), stats.variance(), 0.12); // Should be near 1
-    try testing.expect(stats.skewness() > 1.9); // Positive skewness expected for exponential
-    try testing.expect(stats.exKurtosis() > 3.1); // High excess kurtosis for exponential
+    try testing.expectApproxEqAbs(@as(f64, 1.0), stats.mean(), 0.05);
+    try testing.expectApproxEqAbs(@as(f64, 1.0), stats.variance(), 0.12);
+    const ref = referenceMoments(&values);
+    try testing.expectApproxEqAbs(ref.skew, stats.skewness(), 1e-10);
+    try testing.expectApproxEqAbs(ref.kurt, stats.exKurtosis(), 1e-10);
+    try testing.expect(stats.skewness() > 1.0);
+    try testing.expect(stats.exKurtosis() > 1.5);
 }
 
 test "RunningStats: scaling/z-score" {

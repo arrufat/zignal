@@ -36,6 +36,8 @@ pub const Options = struct {
     with_v: bool = false,
     /// Controls computation and size of the U matrix.
     mode: Mode = .full_u,
+
+    pub const default: Options = .{};
 };
 
 /// Result type for SVD decomposition: A = U × Σ × V^T
