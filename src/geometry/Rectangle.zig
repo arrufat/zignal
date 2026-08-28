@@ -6,7 +6,9 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 const meta = @import("../meta.zig");
 const Point = @import("Point.zig").Point;
 
-/// A generic rectangle object with some convenience functionality.
+/// An axis-aligned rectangle. Half-open, like NumPy slices: it covers `l <= x < r` and
+/// `t <= y < b`, so `r` and `b` are one past the last pixel and `width() == r - l`. This is
+/// the convention of every rectangle in the library (views, crop, extract, drawing).
 pub fn Rectangle(comptime T: type) type {
     switch (@typeInfo(T)) {
         .int, .float => {},

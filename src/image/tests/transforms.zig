@@ -240,8 +240,8 @@ test "extract rotated rectangle basic and 90deg" {
         }
     }
 
-    // Define a 3x3 square from (1,1) to (3,3)
-    const rect = Rectangle(f32){ .l = 1, .t = 1, .r = 3, .b = 3 };
+    // The 3x3 block of pixels 1..3: rects are half-open, so r = b = 4.
+    const rect = Rectangle(f32){ .l = 1, .t = 1, .r = 4, .b = 4 };
 
     // Output 3x3 buffer
     var out0: Image(u8) = try .init(allocator, 3, 3);
@@ -289,7 +289,7 @@ test "extract single-pixel axis handling centers correctly" {
         }
     }
 
-    const rect = Rectangle(f32){ .l = 1, .t = 1, .r = 3, .b = 3 }; // 3x3
+    const rect = Rectangle(f32){ .l = 1, .t = 1, .r = 4, .b = 4 }; // pixels 1..3
 
     // 1x1 output should sample rectangle center -> source (2,2) => 22
     var out1: Image(u8) = try .init(allocator, 1, 1);
@@ -466,4 +466,42 @@ test "insert with a rectangle outside the image or a NaN angle is a no-op" {
     dest.insert(source, .{ .l = -20, .t = -20, .r = -10, .b = -10 }, 0.3, .bilinear, color.Blending.none);
     dest.insert(source, .{ .l = 2, .t = 2, .r = 6, .b = 6 }, std.math.nan(f32), .bilinear, color.Blending.none);
     for (dest.data) |px| try std.testing.expectEqual(@as(u8, 0), px);
+}
+
+test "extract, crop and insert agree on the half-open rect" {
+    const allocator = std.testing.allocator;
+    var image: Image(u8) = try .init(allocator, 6, 7);
+    defer image.deinit(allocator);
+    for (0..image.rows) |r| for (0..image.cols) |c| {
+        image.at(r, c).* = @intCast(r * 10 + c);
+    };
+    const rect = Rectangle(f32){ .l = 2, .t = 1, .r = 5, .b = 4 }; // pixels 2..4 × 1..3
+
+    var cropped = try image.crop(allocator, rect);
+    defer cropped.deinit(allocator);
+    try expectEqual(@as(u32, 3), cropped.rows);
+    try expectEqual(@as(u32, 3), cropped.cols);
+
+    // A hair of rotation forces the resampling path; it must land on the same pixels.
+    var extracted: Image(u8) = try .init(allocator, 3, 3);
+    defer extracted.deinit(allocator);
+    image.extract(extracted, rect, 1e-5, .nearest, .zero);
+    try std.testing.expectEqualSlices(u8, cropped.data, extracted.data);
+
+    // The whole image through the resampling path is the identity.
+    var whole: Image(u8) = try .init(allocator, 6, 7);
+    defer whole.deinit(allocator);
+    const full: Rectangle(f32) = .{ .l = 0, .t = 0, .r = 7, .b = 6 };
+    image.extract(whole, full, 1e-5, .nearest, .zero);
+    try std.testing.expectEqualSlices(u8, image.data, whole.data);
+
+    // Inserting the crop back through the resampling path touches exactly the rect.
+    var dest: Image(u8) = try .init(allocator, 6, 7);
+    defer dest.deinit(allocator);
+    dest.fill(255);
+    dest.insert(cropped, rect, 1e-5, .nearest, color.Blending.none);
+    for (0..dest.rows) |r| for (0..dest.cols) |c| {
+        const inside = r >= 1 and r < 4 and c >= 2 and c < 5;
+        try expectEqual(if (inside) image.at(r, c).* else 255, dest.at(r, c).*);
+    };
 }

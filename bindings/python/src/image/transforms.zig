@@ -530,7 +530,8 @@ pub const image_extract_doc =
     \\Returns a new Image containing the extracted and resampled region.
     \\
     \\## Parameters
-    \\- `rect` (Rectangle): The rectangular region to extract (before rotation)
+    \\- `rect` (Rectangle): The rectangular region to extract (before rotation). Half-open like
+    \\  `crop`: `Rectangle(1, 1, 3, 3)` covers pixels 1 and 2 in each direction.
     \\- `angle` (float, optional): Rotation angle in radians (counter-clockwise). Default: 0.0
     \\- `size` (int or tuple[int, int], optional). If not specified, uses the rectangle's dimensions.
     \\  - If int: output is a square of side `size`
@@ -648,7 +649,7 @@ pub const image_insert_doc =
     \\
     \\## Parameters
     \\- `source` (Image): The image to insert
-    \\- `rect` (Rectangle): Destination rectangle where the source will be placed
+    \\- `rect` (Rectangle): Destination rectangle where the source will be placed (half-open, like `extract`)
     \\- `angle` (float, optional): Rotation angle in radians (counter-clockwise). Default: 0.0
     \\- `method` (Interpolation, optional): Interpolation method. Default: BILINEAR
     \\- `blend_mode` (Blending, optional): Compositing mode for RGBA images. Default: NONE
