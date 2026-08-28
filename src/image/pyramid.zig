@@ -80,7 +80,7 @@ pub fn ImagePyramid(comptime T: type) type {
                 // Apply Gaussian blur if sigma > 0.5
                 if (sigma > 0.5) {
                     blurred = try .initLike(allocator, source);
-                    try source.gaussianBlur(blurred, allocator, sigma);
+                    try source.gaussianBlur(allocator, blurred, sigma);
                 }
 
                 // Allocate and resize to create the new level
@@ -88,7 +88,7 @@ pub fn ImagePyramid(comptime T: type) type {
 
                 // Use bilinear interpolation for downsampling from original or blurred
                 const source_to_use = if (blurred.rows > 0) blurred else source;
-                source_to_use.resize(levels[i], allocator, .bilinear);
+                source_to_use.resize(allocator, levels[i], .bilinear);
             }
 
             return .{

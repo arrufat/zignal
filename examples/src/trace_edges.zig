@@ -23,9 +23,9 @@ pub fn main(init: std.process.Init) !void {
     var edges = try Image(u8).init(init.gpa, image.rows, image.cols);
     defer edges.deinit(init.gpa);
 
-    try gray.canny(edges, init.gpa, 2.0, 25, 75);
+    try gray.canny(init.gpa, edges, 2.0, 25, 75);
     // Custom "Human-Like" Shen-Castan parameters
-    // try gray.shenCastan(edges,init.gpa, .{
+    // try gray.shenCastan(init.gpa,edges, .{
     //     .smooth = 0.5, // Moderate smoothing (balance detail/structure)
     //     .window_size = 13, // Medium window
     //     .high_ratio = 0.92, // More sensitive start threshold

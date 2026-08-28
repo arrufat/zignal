@@ -71,12 +71,12 @@ fn decodeGray(allocator: Allocator, image: Image(u8)) !?DecodeResult {
     for (0..2) |pass| {
         if (pass == 0) {
             const radius = @max(@min(image.rows, image.cols) / adaptive_radius_divisor, adaptive_radius_min);
-            image.thresholdAdaptiveMean(binary, allocator, radius, adaptive_offset) catch |err| switch (err) {
+            image.thresholdAdaptiveMean(allocator, binary, radius, adaptive_offset) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
                 else => continue,
             };
         } else {
-            _ = image.thresholdOtsu(binary, allocator) catch continue;
+            _ = image.thresholdOtsu(allocator, binary) catch continue;
         }
         if (try detectAndDecode(allocator, binary, modules)) |result| return result;
     }
@@ -710,7 +710,7 @@ fn photoSimulate(allocator: Allocator, clean: Image(u8), opts: struct {
     if (opts.sigma > 0) {
         var blurred = try Image(u8).initLike(allocator, out);
         errdefer blurred.deinit(allocator);
-        try out.gaussianBlur(blurred, allocator, opts.sigma);
+        try out.gaussianBlur(allocator, blurred, opts.sigma);
         out.deinit(allocator);
         return blurred;
     }

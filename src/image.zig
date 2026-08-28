@@ -130,7 +130,7 @@ pub fn Image(comptime T: type) type {
         /// ```zig
         /// var blurred = try Image(u8).initLike(allocator, original);
         /// defer blurred.deinit(allocator);
-        /// try original.gaussianBlur(1.4, blurred);
+        /// try original.gaussianBlur(allocator, blurred, 1.4);
         /// ```
         pub fn initLike(allocator: Allocator, reference: anytype) !Image(T) {
             const RefType = @TypeOf(reference);
@@ -512,7 +512,7 @@ pub fn Image(comptime T: type) type {
         /// Resizes an image to fit in out, using the specified interpolation method.
         /// The output image must have the desired dimensions pre-allocated.
         /// Note: allocator is used for temporary buffers during RGB/RGBA channel processing.
-        pub fn resize(self: Self, out: Self, allocator: Allocator, method: Interpolation) void {
+        pub fn resize(self: Self, allocator: Allocator, out: Self, method: Interpolation) void {
             interpolation.resize(T, self, out, allocator, method);
         }
 
@@ -528,14 +528,14 @@ pub fn Image(comptime T: type) type {
             if (new_rows == 0 or new_cols == 0) return error.InvalidDimensions;
 
             const scaled: Self = try .init(allocator, new_rows, new_cols);
-            self.resize(scaled, allocator, method);
+            self.resize(allocator, scaled, method);
             return scaled;
         }
 
         /// Resizes an image to fit within the output dimensions while preserving aspect ratio.
         /// The image is centered with black/zero padding around it (letterboxing).
         /// Returns a rectangle describing the area containing the actual image content.
-        pub fn letterbox(self: Self, out: Self, allocator: Allocator, method: Interpolation) Rectangle(u32) {
+        pub fn letterbox(self: Self, allocator: Allocator, out: Self, method: Interpolation) Rectangle(u32) {
             return Transform(T).letterbox(self, out, allocator, method);
         }
 
@@ -624,7 +624,7 @@ pub fn Image(comptime T: type) type {
         /// Computes a blurred version of `self` using a box blur. The `radius` parameter
         /// determines the size of the box window. The output image must be pre-allocated
         /// with the same dimensions as the input.
-        pub fn boxBlur(self: Self, out: Self, allocator: Allocator, radius: u32) !void {
+        pub fn boxBlur(self: Self, allocator: Allocator, out: Self, radius: u32) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
@@ -639,7 +639,7 @@ pub fn Image(comptime T: type) type {
         /// Applies a median blur using a square window with the given radius.
         /// Radius specifies half the window size; window size = `radius * 2 + 1`.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn medianBlur(self: Self, out: Self, allocator: Allocator, radius: usize) !void {
+        pub fn medianBlur(self: Self, allocator: Allocator, out: Self, radius: usize) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
@@ -656,12 +656,12 @@ pub fn Image(comptime T: type) type {
         /// ```zig
         /// var robust = try Image(u8).initLike(allocator, image);
         /// defer robust.deinit(allocator);
-        /// try image.percentileBlur(robust, allocator, 2, 0.1, .mirror);
+        /// try image.percentileBlur( allocator,robust, 2, 0.1, .mirror);
         /// ```
         pub fn percentileBlur(
             self: Self,
-            out: Self,
             allocator: Allocator,
+            out: Self,
             radius: usize,
             percentile: f64,
             border: BorderMode,
@@ -680,12 +680,12 @@ pub fn Image(comptime T: type) type {
         /// ```zig
         /// var denoised = try Image(u8).initLike(allocator, image);
         /// defer denoised.deinit(allocator);
-        /// try image.minBlur(denoised, allocator, 1, .mirror);
+        /// try image.minBlur( allocator,denoised, 1, .mirror);
         /// ```
         pub fn minBlur(
             self: Self,
-            out: Self,
             allocator: Allocator,
+            out: Self,
             radius: usize,
             border: BorderMode,
         ) !void {
@@ -703,12 +703,12 @@ pub fn Image(comptime T: type) type {
         /// ```zig
         /// var mask = try Image(u8).initLike(allocator, image);
         /// defer mask.deinit(allocator);
-        /// try image.maxBlur(mask, allocator, 2, .mirror);
+        /// try image.maxBlur( allocator,mask, 2, .mirror);
         /// ```
         pub fn maxBlur(
             self: Self,
-            out: Self,
             allocator: Allocator,
+            out: Self,
             radius: usize,
             border: BorderMode,
         ) !void {
@@ -726,12 +726,12 @@ pub fn Image(comptime T: type) type {
         /// ```zig
         /// var softened = try Image(u8).initLike(allocator, image);
         /// defer softened.deinit(allocator);
-        /// try image.midpointBlur(softened, allocator, 1, .mirror);
+        /// try image.midpointBlur( allocator,softened, 1, .mirror);
         /// ```
         pub fn midpointBlur(
             self: Self,
-            out: Self,
             allocator: Allocator,
+            out: Self,
             radius: usize,
             border: BorderMode,
         ) !void {
@@ -751,12 +751,12 @@ pub fn Image(comptime T: type) type {
         /// ```zig
         /// var robust_mean = try Image(Rgba).initLike(allocator, color_image);
         /// defer robust_mean.deinit(allocator);
-        /// try color_image.alphaTrimmedMeanBlur(robust_mean, allocator, 2, 0.1, .mirror);
+        /// try color_image.alphaTrimmedMeanBlur( allocator,robust_mean, 2, 0.1, .mirror);
         /// ```
         pub fn alphaTrimmedMeanBlur(
             self: Self,
-            out: Self,
             allocator: Allocator,
+            out: Self,
             radius: usize,
             trim_fraction: f64,
             border: BorderMode,
@@ -771,7 +771,7 @@ pub fn Image(comptime T: type) type {
         /// `sharpened = 2 * original - blurred`, where `blurred` is a box-blurred version
         /// of the original image. The `radius` parameter controls the size of the blur.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn sharpen(self: Self, out: Self, allocator: Allocator, radius: usize) !void {
+        pub fn sharpen(self: Self, allocator: Allocator, out: Self, radius: usize) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
@@ -825,7 +825,7 @@ pub fn Image(comptime T: type) type {
         /// Computes Otsu's threshold and produces a binary image.
         /// Returns the threshold value that maximizes between-class variance.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn thresholdOtsu(self: Self, out: Image(u8), allocator: Allocator) !u8 {
+        pub fn thresholdOtsu(self: Self, allocator: Allocator, out: Image(u8)) !u8 {
             if (comptime T != u8) {
                 @compileError("thresholdOtsu is only available for Image(u8)");
             }
@@ -838,7 +838,7 @@ pub fn Image(comptime T: type) type {
         /// Applies adaptive mean thresholding using a square window defined by `radius`.
         /// Each pixel is compared against the mean of its local neighborhood minus `c`.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn thresholdAdaptiveMean(self: Self, out: Image(u8), allocator: Allocator, radius: usize, c: f32) !void {
+        pub fn thresholdAdaptiveMean(self: Self, allocator: Allocator, out: Image(u8), radius: usize, c: f32) !void {
             if (comptime T != u8) {
                 @compileError("thresholdAdaptiveMean is only available for Image(u8)");
             }
@@ -850,7 +850,7 @@ pub fn Image(comptime T: type) type {
 
         /// Performs binary dilation using the provided structuring element.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn dilateBinary(self: Self, out: Image(u8), allocator: Allocator, kernel: BinaryKernel, iterations: usize) !void {
+        pub fn dilateBinary(self: Self, allocator: Allocator, out: Image(u8), kernel: BinaryKernel, iterations: usize) !void {
             if (comptime T != u8) {
                 @compileError("dilateBinary is only available for Image(u8)");
             }
@@ -862,7 +862,7 @@ pub fn Image(comptime T: type) type {
 
         /// Performs binary erosion using the provided structuring element.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn erodeBinary(self: Self, out: Image(u8), allocator: Allocator, kernel: BinaryKernel, iterations: usize) !void {
+        pub fn erodeBinary(self: Self, allocator: Allocator, out: Image(u8), kernel: BinaryKernel, iterations: usize) !void {
             if (comptime T != u8) {
                 @compileError("erodeBinary is only available for Image(u8)");
             }
@@ -874,7 +874,7 @@ pub fn Image(comptime T: type) type {
 
         /// Performs a binary opening (erosion followed by dilation).
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn openBinary(self: Self, out: Image(u8), allocator: Allocator, kernel: BinaryKernel, iterations: usize) !void {
+        pub fn openBinary(self: Self, allocator: Allocator, out: Image(u8), kernel: BinaryKernel, iterations: usize) !void {
             if (comptime T != u8) {
                 @compileError("openBinary is only available for Image(u8)");
             }
@@ -886,7 +886,7 @@ pub fn Image(comptime T: type) type {
 
         /// Performs a binary closing (dilation followed by erosion).
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn closeBinary(self: Self, out: Image(u8), allocator: Allocator, kernel: BinaryKernel, iterations: usize) !void {
+        pub fn closeBinary(self: Self, allocator: Allocator, out: Image(u8), kernel: BinaryKernel, iterations: usize) !void {
             if (comptime T != u8) {
                 @compileError("closeBinary is only available for Image(u8)");
             }
@@ -899,9 +899,9 @@ pub fn Image(comptime T: type) type {
         /// Applies a 2D convolution with the given kernel to the image.
         pub fn convolve(
             self: Self,
+            allocator: Allocator,
             /// The output image (must be pre-allocated with same dimensions).
             out: Self,
-            allocator: Allocator,
             /// A 2D array representing the convolution kernel.
             kernel: anytype,
             /// How to handle pixels at the image borders.
@@ -917,9 +917,9 @@ pub fn Image(comptime T: type) type {
         /// This is much more efficient for separable filters like Gaussian blur.
         pub fn convolveSeparable(
             self: Self,
+            allocator: Allocator,
             /// The output image (must be pre-allocated with same dimensions).
             out: Self,
-            allocator: Allocator,
             /// Horizontal (column) kernel.
             kernel_x: []const f32,
             /// Vertical (row) kernel.
@@ -936,9 +936,9 @@ pub fn Image(comptime T: type) type {
         /// Applies Gaussian blur to the image using separable convolution.
         pub fn gaussianBlur(
             self: Self,
+            allocator: Allocator,
             /// The output blurred image (must be pre-allocated with same dimensions).
             out: Self,
-            allocator: Allocator,
             /// Standard deviation of the Gaussian kernel.
             sigma: f32,
         ) !void {
@@ -981,9 +981,9 @@ pub fn Image(comptime T: type) type {
         /// The output image must be pre-allocated with the same dimensions as the input.
         pub fn sobel(
             self: Self,
+            allocator: Allocator,
             /// Output image that will be filled with the Sobel magnitude image.
             out: Image(u8),
-            allocator: Allocator,
         ) !void {
             if (self.rows != out.rows or self.cols != out.cols) {
                 return error.DimensionMismatch;
@@ -997,9 +997,9 @@ pub fn Image(comptime T: type) type {
         /// The output image must be pre-allocated with the same dimensions as the input.
         pub fn shenCastan(
             self: Self,
+            allocator: Allocator,
             /// Output edge map as binary image (0 or 255).
             out: Image(u8),
-            allocator: Allocator,
             /// Shen-Castan options (smoothing, thresholds, thinning, hysteresis).
             opts: ShenCastan,
         ) !void {
@@ -1025,13 +1025,13 @@ pub fn Image(comptime T: type) type {
         /// ```zig
         /// var edges = try Image(u8).initLike(allocator, image);
         /// defer edges.deinit(allocator);
-        /// try image.canny(edges, allocator, 1.4, 50, 150);
+        /// try image.canny( allocator,edges, 1.4, 50, 150);
         /// ```
         pub fn canny(
             self: Self,
+            allocator: Allocator,
             /// Output edge map as binary image (0 or 255).
             out: Image(u8),
-            allocator: Allocator,
             /// Standard deviation for Gaussian blur (typical: 1.0-2.0).
             sigma: f32,
             /// Lower threshold for hysteresis (0-255).
@@ -1055,13 +1055,13 @@ pub fn Image(comptime T: type) type {
         /// defer out.deinit(allocator);
         ///
         /// // Linear motion blur
-        /// try image.motionBlur(out, allocator, .{ .linear = .{ .angle = 0, .distance = 30 }});
+        /// try image.motionBlur( allocator,out, .{ .linear = .{ .angle = 0, .distance = 30 }});
         /// ```
         pub fn motionBlur(
             self: Self,
+            allocator: Allocator,
             /// Output image containing the motion blurred result.
             out: Self,
-            allocator: Allocator,
             /// Type and parameters of motion blur to apply.
             motion: MotionBlur,
         ) !void {

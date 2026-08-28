@@ -81,7 +81,7 @@ fn benchGaussian(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: s
         gpa: std.mem.Allocator,
         sigma: f32,
         fn run(self: @This()) !void {
-            try self.src.gaussianBlur(self.dst, self.gpa, self.sigma);
+            try self.src.gaussianBlur(self.gpa, self.dst, self.sigma);
         }
     };
     try benchOp(io, name, rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa, .sigma = sigma });
@@ -103,7 +103,7 @@ fn benchConvolve2D(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random:
         gpa: std.mem.Allocator,
         border: BorderMode,
         fn run(self: @This()) !void {
-            try self.src.convolve(self.dst, self.gpa, kernel, self.border);
+            try self.src.convolve(self.gpa, self.dst, kernel, self.border);
         }
     };
     try benchOp(io, name, rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa, .border = border });
@@ -122,7 +122,7 @@ fn benchSobel(io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[
         dst: Image(u8),
         gpa: std.mem.Allocator,
         fn run(self: @This()) !void {
-            try self.src.sobel(self.dst, self.gpa);
+            try self.src.sobel(self.gpa, self.dst);
         }
     };
     try benchOp(io, "sobel f32", rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa });
@@ -144,7 +144,7 @@ fn benchMotionBlur(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random:
         gpa: std.mem.Allocator,
         distance: usize,
         fn run(self: @This()) !void {
-            try self.src.motionBlur(self.dst, self.gpa, .{ .linear = .{ .angle = 0, .distance = self.distance } });
+            try self.src.motionBlur(self.gpa, self.dst, .{ .linear = .{ .angle = 0, .distance = self.distance } });
         }
     };
     try benchOp(io, name, rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa, .distance = distance });
@@ -165,7 +165,7 @@ fn benchSeparable(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: 
         dst: Image(T),
         gpa: std.mem.Allocator,
         fn run(self: @This()) !void {
-            try self.src.convolveSeparable(self.dst, self.gpa, &gaussian_9, &gaussian_9, .mirror);
+            try self.src.convolveSeparable(self.gpa, self.dst, &gaussian_9, &gaussian_9, .mirror);
         }
     };
     try benchOp(io, name, rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa });
@@ -187,7 +187,7 @@ fn benchMedian(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std
         gpa: std.mem.Allocator,
         radius: usize,
         fn run(self: @This()) !void {
-            try self.src.medianBlur(self.dst, self.gpa, self.radius);
+            try self.src.medianBlur(self.gpa, self.dst, self.radius);
         }
     };
     try benchOp(io, name, rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa, .radius = radius });
