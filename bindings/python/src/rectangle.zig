@@ -734,7 +734,7 @@ pub const rectangle_properties_metadata = [_]python.PropertyWithMetadata{
 var rectangle_getset = python.toPyGetSetDefArray(&rectangle_properties_metadata);
 
 // Class documentation - keep it simple
-const rectangle_class_doc = "A rectangle defined by its `left`, `top`, `right`, and `bottom` coordinates.";
+const rectangle_class_doc = "A rectangle defined by its `left`, `top`, `right`, and `bottom` coordinates. Half-open like NumPy slices: `right` and `bottom` are exclusive, so `Rectangle(0, 0, 10, 10)` covers pixels 0..9.";
 
 // Init documentation - detailed explanation
 pub const rectangle_init_doc =

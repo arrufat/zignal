@@ -223,7 +223,9 @@ pub fn Transform(comptime T: type) type {
 
         /// Extracts a rotated rectangular region (defined in source coordinates) and resamples it
         /// to fill the pre-allocated `out` image. `angle` is in radians, counter-clockwise around
-        /// the rect center.
+        /// the rect center. Like `crop` and `view`, `rect` is half-open: it covers the pixel
+        /// areas `[l, r) × [t, b)`, so `(1, 1, 3, 3)` is the 2×2 block of pixels 1 and 2, and
+        /// `extract` at angle 0 into an `out` of the rect's size is exactly `crop`.
         ///
         /// Notes:
         /// - Out-of-bounds samples are filled with zeroed pixels (e.g., black/transparent).
@@ -249,26 +251,19 @@ pub fn Transform(comptime T: type) type {
                 return;
             }
 
-            // General path: rotation and/or resampling
-            const cx: f32 = (rect.l + rect.r) * 0.5;
-            const cy: f32 = (rect.t + rect.b) * 0.5;
+            // General path: rotation and/or resampling. Pixel i's centre sits at coordinate i,
+            // so the rect's area [l, r) is the centre range [l - 0.5, r - 0.5); out pixel c
+            // samples the centre of its share of that area.
+            const cx: f32 = (rect.l + rect.r) * 0.5 - 0.5;
+            const cy: f32 = (rect.t + rect.b) * 0.5 - 0.5;
 
             const cos_a = @cos(angle);
             const sin_a = @sin(angle);
 
-            // Normalized mapping with center sampling when size == 1
             for (0..out.rows) |r| {
-                const ty: f32 = if (out.rows == 1)
-                    0.5
-                else
-                    @as(f32, @floatFromInt(r)) / (frows - 1);
-                const y_rect = rect.t + ty * height;
+                const y_rect = rect.t + (@as(f32, @floatFromInt(r)) + 0.5) / frows * height - 0.5;
                 for (0..out.cols) |c| {
-                    const tx: f32 = if (out.cols == 1)
-                        0.5
-                    else
-                        @as(f32, @floatFromInt(c)) / (fcols - 1);
-                    const x_rect = rect.l + tx * width;
+                    const x_rect = rect.l + (@as(f32, @floatFromInt(c)) + 0.5) / fcols * width - 0.5;
 
                     // Rotate around rectangle center by +angle (CCW)
                     const dx = x_rect - cx;
@@ -282,7 +277,8 @@ pub fn Transform(comptime T: type) type {
         }
 
         /// Inserts `source` into `self` at the destination rectangle, with optional rotation
-        /// (radians, counter-clockwise around the rect center). Complement of `extract`.
+        /// (radians, counter-clockwise around the rect center). Complement of `extract`; `rect`
+        /// is half-open like everywhere else (`(1, 1, 3, 3)` covers pixels 1 and 2).
         ///
         /// Notes:
         /// - The source image is scaled to fit the destination rectangle.
@@ -320,9 +316,9 @@ pub fn Transform(comptime T: type) type {
                 return;
             }
 
-            // General path with rotation/scaling
-            const cx = (rect.l + rect.r) * 0.5;
-            const cy = (rect.t + rect.b) * 0.5;
+            // General path with rotation/scaling, in pixel-centre coordinates (see `extract`).
+            const cx = (rect.l + rect.r) * 0.5 - 0.5;
+            const cy = (rect.t + rect.b) * 0.5 - 0.5;
             const cos = @cos(angle);
             const sin = @sin(angle);
 
@@ -364,16 +360,14 @@ pub fn Transform(comptime T: type) type {
                     const rect_x = cos * dx + sin * dy;
                     const rect_y = -sin * dx + cos * dy;
 
-                    // Check if inside rectangle (simplified bounds check)
-                    if (@abs(rect_x) > half_width or @abs(rect_y) > half_height) continue;
+                    // A pixel is inside when its centre lies in the half-open rect area.
+                    if (rect_x < -half_width or rect_x >= half_width or rect_y < -half_height or rect_y >= half_height) continue;
 
-                    // Map to normalized [0,1] coordinates
+                    // Normalized [0,1) position within the rect, then source pixel-centre coordinates
                     const norm_x = (rect_x + half_width) * inv_width;
                     const norm_y = (rect_y + half_height) * inv_height;
-
-                    // Map to source image coordinates
-                    const src_x = if (source.cols == 1) 0 else norm_x * (fcols - 1);
-                    const src_y = if (source.rows == 1) 0 else norm_y * (frows - 1);
+                    const src_x = if (source.cols == 1) 0 else norm_x * fcols - 0.5;
+                    const src_y = if (source.rows == 1) 0 else norm_y * frows - 0.5;
 
                     // Sample from source
                     if (interpolate(SourcePixelType, source, src_x, src_y, method, .mirror)) |src_val| {

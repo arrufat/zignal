@@ -577,7 +577,8 @@ pub fn Image(comptime T: type) type {
 
         /// Extracts a rotated rectangular region (defined in source coordinates) and resamples it
         /// to fill the pre-allocated `out` image. `angle` is in radians, counter-clockwise around
-        /// the rect center.
+        /// the rect center. `rect` is half-open like `crop`/`view`: `(1, 1, 3, 3)` covers pixels
+        /// 1 and 2, and extracting at angle 0 into an `out` of the rect's size is exactly `crop`.
         ///
         /// Notes:
         /// - Out-of-bounds samples are filled with zeroed pixels (e.g., black/transparent).
@@ -587,7 +588,8 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Inserts `source` into `self` at the destination rectangle, with optional rotation
-        /// (radians, counter-clockwise around the rect center). Complement of `extract`.
+        /// (radians, counter-clockwise around the rect center). Complement of `extract`; `rect`
+        /// is half-open (`(1, 1, 3, 3)` covers pixels 1 and 2).
         ///
         /// Notes:
         /// - The source image is scaled to fit the destination rectangle.
