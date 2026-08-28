@@ -109,8 +109,6 @@ test "Matrix QR decomposition simple" {
     var qr_result = try mat.qr();
     defer qr_result.deinit();
 
-    // Remove debug print
-
     // The largest column (column 2) should be first
     try expectEqual(@as(usize, 2), qr_result.perm.indices[0]);
 }
@@ -216,27 +214,6 @@ test "Matrix QR decomposition" {
     a_norm = @sqrt(a_norm);
 
     const relative_error = frobenius_error / a_norm;
-    if (relative_error >= 1e-8) {
-        std.debug.print("\nQR test failing with relative error: {}\n", .{relative_error});
-        std.debug.print("Permutation: {} {} {}\n", .{ qr_result.perm.indices[0], qr_result.perm.indices[1], qr_result.perm.indices[2] });
-
-        // Let's check if it's an issue with our test by computing Q*R directly
-        std.debug.print("\nDirect check - Q*R:\n", .{});
-        for (0..3) |i| {
-            for (0..3) |j| {
-                std.debug.print("{d:8.2} ", .{qr_product.at(i, j).*});
-            }
-            std.debug.print("\n", .{});
-        }
-
-        std.debug.print("\nA permuted:\n", .{});
-        for (0..3) |i| {
-            for (0..3) |j| {
-                std.debug.print("{d:8.2} ", .{ap.at(i, j).*});
-            }
-            std.debug.print("\n", .{});
-        }
-    }
     try std.testing.expect(relative_error < 1e-8);
 
     // Verify rank is computed correctly (should be 3 for this full-rank matrix)
@@ -256,10 +233,6 @@ test "Matrix QR decomposition" {
             try std.testing.expectApproxEqAbs(ap.at(i, j).*, ap_from_mat.at(i, j).*, 1e-10);
         }
     }
-
-    // Verify columns are ordered by decreasing diagonal values in R (skip for now due to permutation complexity)
-    // try std.testing.expect(@abs(qr_result.r.at(0, 0).*) >= @abs(qr_result.r.at(1, 1).*));
-    // try std.testing.expect(@abs(qr_result.r.at(1, 1).*) >= @abs(qr_result.r.at(2, 2).*));
 
     // Test rectangular matrix (4x3) with linearly independent columns
     var rect_mat: Matrix(f64) = try .init(arena.allocator(), 4, 3);
@@ -391,9 +364,6 @@ test "Matrix QR decomposition with rank-deficient matrix" {
         }
     }
     const deficient_relative_error = @sqrt(deficient_error) / @sqrt(deficient_norm);
-    if (deficient_relative_error >= 1e-10) {
-        std.debug.print("Deficient test: relative_error = {}, error = {}, norm = {}\n", .{ deficient_relative_error, @sqrt(deficient_error), @sqrt(deficient_norm) });
-    }
     try std.testing.expect(deficient_relative_error < 1e-10);
 
     // Test with zero matrix (rank 0)

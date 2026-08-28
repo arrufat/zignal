@@ -54,12 +54,6 @@ pub fn Histogram(comptime T: type) type {
                 return stats.percentile(&self.values, p);
             }
 
-            /// Calculate percentile from a fraction in the range [0, 1].
-            pub fn percentileFraction(self: Self, fraction: f64) u8 {
-                std.debug.assert(fraction >= 0.0 and fraction <= 1.0);
-                return stats.percentile(&self.values, fraction);
-            }
-
             /// Return the smallest intensity with a non-zero count, or null if empty.
             pub fn firstNonZero(self: Self) ?u8 {
                 for (self.values, 0..) |count, value| {

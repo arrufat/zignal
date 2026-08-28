@@ -56,8 +56,7 @@ pub fn resolveIndex(idx: isize, length: isize, border: BorderMode) ?usize {
             if (length <= 0) break :blk null;
             if (length == 1) break :blk 0;
             const period = 2 * (length - 1);
-            const m = @mod(idx, period);
-            const i = if (m < 0) m + period else m;
+            const i = @mod(idx, period);
             break :blk @intCast(if (i >= length) period - i else i);
         },
         .wrap => if (length == 0) null else @intCast(@mod(idx, length)),

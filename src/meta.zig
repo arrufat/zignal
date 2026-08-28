@@ -63,16 +63,6 @@ pub fn getGenericBaseName(comptime T: type) []const u8 {
     return name;
 }
 
-/// Converts a comptime string to lowercase.
-/// e.g., "RGB" -> "rgb", "OkLab" -> "oklab"
-pub fn comptimeLowercase(comptime input: []const u8) []const u8 {
-    comptime var result: [input.len]u8 = undefined;
-    inline for (input, 0..) |char, i| {
-        result[i] = std.ascii.toLower(char);
-    }
-    return &result;
-}
-
 /// A struct field's name, type and default value, mirroring the old `std.builtin.Type.StructField`.
 pub const FieldDesc = struct { name: [:0]const u8, type: type, default_value_ptr: ?*const anyopaque };
 
@@ -168,31 +158,6 @@ pub fn isRgb(comptime T: type) bool {
     }
 
     return true;
-}
-
-/// Check if a struct type has an alpha channel (4th field named 'a' or 'alpha').
-///
-/// Example usage:
-/// ```zig
-/// const has_alpha = meta.hasAlphaChannel(Rgba); // true
-/// const no_alpha = meta.hasAlphaChannel(Rgb);   // false
-/// ```
-pub fn hasAlphaChannel(comptime T: type) bool {
-    const fields = comptime structFields(T);
-    if (fields.len != 4) return false;
-    const last_field = fields[3];
-    return std.mem.eql(u8, last_field.name, "a") or std.mem.eql(u8, last_field.name, "alpha");
-}
-
-/// Check if a type is specifically an RGBA type (RGB + alpha channel).
-///
-/// Example usage:
-/// ```zig
-/// const is_rgba = meta.isRgba(Rgba); // true
-/// const not_rgba = meta.isRgba(Rgb); // false
-/// ```
-pub fn isRgba(comptime T: type) bool {
-    return isRgb(T) and hasAlphaChannel(T);
 }
 
 /// Safely casts a value to type T, returning an error if the value is out of range.
