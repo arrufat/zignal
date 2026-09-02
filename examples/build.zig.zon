@@ -2,7 +2,7 @@
     .name = .zignal_examples,
     .version = "0.0.0",
     .fingerprint = 0xcf70e6a9b7002db6,
-    .minimum_zig_version = "0.17.0-dev.1862+40ebd8162",
+    .minimum_zig_version = "0.17.0-dev.1970+67f39b551",
     .dependencies = .{
         .zignal = .{
             .path = "../",
