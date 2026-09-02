@@ -82,6 +82,7 @@ pub const qrcode = @import("qrcode.zig");
 pub const matrix = @import("matrix.zig");
 pub const SMatrix = matrix.SMatrix;
 pub const Matrix = matrix.Matrix;
+pub const gpu = @import("gpu.zig");
 pub const meta = @import("meta.zig");
 
 /// 3D Perlin noise.
@@ -127,4 +128,5 @@ test {
     _ = @import("meta.zig");
     _ = @import("stats.zig");
     _ = @import("dynlib.zig");
+    if (@import("build_options").gpu) _ = @import("gpu.zig");
 }
