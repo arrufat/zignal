@@ -338,9 +338,17 @@ pub fn Matrix(comptime T: type) type {
         /// Transpose the matrix
         pub fn transpose(self: Self) MatrixError!Self {
             var result: Matrix(T) = try .init(self.allocator, self.cols, self.rows);
-            for (0..self.rows) |r| {
-                for (0..self.cols) |c| {
-                    result.at(c, r).* = self.at(r, c).*;
+            // 16×16 tiles keep both the strided reads and the strided writes within a few cache lines.
+            const tile = 16;
+            var r0: usize = 0;
+            while (r0 < self.rows) : (r0 += tile) {
+                var c0: usize = 0;
+                while (c0 < self.cols) : (c0 += tile) {
+                    for (r0..@min(r0 + tile, self.rows)) |r| {
+                        for (c0..@min(c0 + tile, self.cols)) |c| {
+                            result.at(c, r).* = self.at(r, c).*;
+                        }
+                    }
                 }
             }
             return result;
@@ -572,58 +580,89 @@ pub fn Matrix(comptime T: type) type {
             return self.gemm(true, self, false, 1.0, 0.0, null);
         }
 
-        /// SIMD GEMM kernel. Both matrices must be arranged for row-major access.
-        fn simdGemmKernel(
-            comptime VecType: type,
-            result: *Matrix(T),
-            matrix_a: Matrix(T),
-            matrix_b: Matrix(T),
-            alpha: T,
-            a_rows: u32,
-            a_cols: u32,
-            b_cols: u32,
-        ) void {
-            comptime assert(@typeInfo(VecType) == .vector);
+        /// C += alpha * A * B for row-major A (m×k) and B (k×n).
+        /// Blocked over k and n so the B block stays in L2 while every row of A streams past it,
+        /// with a `micro_rows` × `2·vec_len` register tile so each B load feeds `2·micro_rows` FMAs.
+        fn blockedGemm(comptime VecType: type, c: *Matrix(T), a: Matrix(T), b: Matrix(T), alpha: T) void {
             const vec_len = @typeInfo(VecType).vector.len;
-            const alignment = @alignOf(VecType);
+            const tile_cols = 2 * vec_len;
+            const block_k: usize = 256;
+            // ~512 KB of B per block, rounded to whole register tiles.
+            const block_n: usize = @max(tile_cols, (512 * 1024 / @sizeOf(T)) / block_k / tile_cols * tile_cols);
+            const m: usize = a.rows;
+            const k: usize = a.cols;
+            const n: usize = b.cols;
 
-            // Determine if we can use aligned loads for all rows.
-            // This requires:
-            // 1. Both base pointers are aligned to VecType.
-            // 2. The row stride (a_cols) is a multiple of the alignment (in elements).
-            const row_stride_aligned = (a_cols * @sizeOf(T)) % alignment == 0;
-            const all_aligned = row_stride_aligned;
-
-            // Both matrices are now guaranteed to be accessed row-wise
-            for (0..a_rows) |i| {
-                const a_row_offset = i * a_cols;
-                for (0..b_cols) |j| {
-                    const b_row_offset = j * a_cols;
-                    var accumulator: T = 0;
-
-                    // Process vec_len elements at once
-                    var k: u32 = 0;
-                    if (all_aligned) {
-                        while (k + vec_len <= a_cols) : (k += vec_len) {
-                            const a_ptr: *const VecType = @ptrCast(@alignCast(&matrix_a.items[a_row_offset + k]));
-                            const b_ptr: *const VecType = @ptrCast(@alignCast(&matrix_b.items[b_row_offset + k]));
-                            accumulator += @reduce(.Add, a_ptr.* * b_ptr.*);
-                        }
-                    } else {
-                        while (k + vec_len <= a_cols) : (k += vec_len) {
-                            // Use unaligned loads (Zig's slice-to-vector dereference)
-                            const a_vec: VecType = matrix_a.items[a_row_offset + k .. a_row_offset + k + vec_len][0..vec_len].*;
-                            const b_vec: VecType = matrix_b.items[b_row_offset + k .. b_row_offset + k + vec_len][0..vec_len].*;
-                            accumulator += @reduce(.Add, a_vec * b_vec);
+            var j0: usize = 0;
+            while (j0 < n) : (j0 += block_n) {
+                const j1 = @min(j0 + block_n, n);
+                var k0: usize = 0;
+                while (k0 < k) : (k0 += block_k) {
+                    const k1 = @min(k0 + block_k, k);
+                    var i: usize = 0;
+                    while (i < m) : (i += micro_rows) {
+                        switch (@min(micro_rows, m - i)) {
+                            inline 1...micro_rows => |rows| microTile(VecType, rows, c, a, b, alpha, i, k0, k1, j0, j1),
+                            else => unreachable,
                         }
                     }
+                }
+            }
+        }
 
-                    // Handle remainder elements
-                    while (k < a_cols) : (k += 1) {
-                        accumulator += matrix_a.items[a_row_offset + k] * matrix_b.items[b_row_offset + k];
+        const micro_rows = 4;
+
+        /// Rows `i..i+rows` of C for columns `j0..j1`, accumulating over `k0..k1`.
+        fn microTile(
+            comptime VecType: type,
+            comptime rows: usize,
+            c: *Matrix(T),
+            a: Matrix(T),
+            b: Matrix(T),
+            alpha: T,
+            i: usize,
+            k0: usize,
+            k1: usize,
+            j0: usize,
+            j1: usize,
+        ) void {
+            const vec_len = @typeInfo(VecType).vector.len;
+            const tile_cols = 2 * vec_len;
+            const k: usize = a.cols;
+            const n: usize = b.cols;
+            const alpha_v: VecType = @splat(alpha);
+
+            var j = j0;
+            while (j + tile_cols <= j1) : (j += tile_cols) {
+                var acc0: [rows]VecType = @splat(@splat(0));
+                var acc1: [rows]VecType = @splat(@splat(0));
+                for (k0..k1) |kk| {
+                    const b_row = b.items[kk * n + j ..];
+                    const b0: VecType = b_row[0..vec_len].*;
+                    const b1: VecType = b_row[vec_len..][0..vec_len].*;
+                    inline for (0..rows) |r| {
+                        const a_v: VecType = @splat(a.items[(i + r) * k + kk]);
+                        acc0[r] += a_v * b0;
+                        acc1[r] += a_v * b1;
                     }
-
-                    result.at(i, j).* += alpha * accumulator;
+                }
+                inline for (0..rows) |r| {
+                    const c_row = c.items[(i + r) * n + j ..];
+                    const c0: VecType = c_row[0..vec_len].*;
+                    const c1: VecType = c_row[vec_len..][0..vec_len].*;
+                    c_row[0..vec_len].* = c0 + alpha_v * acc0[r];
+                    c_row[vec_len..][0..vec_len].* = c1 + alpha_v * acc1[r];
+                }
+            }
+            // Column tail narrower than a register tile: contiguous i-k-j updates.
+            if (j < j1) {
+                inline for (0..rows) |r| {
+                    for (k0..k1) |kk| {
+                        const a_ik = alpha * a.items[(i + r) * k + kk];
+                        for (c.items[(i + r) * n + j .. (i + r) * n + j1], b.items[kk * n + j .. kk * n + j1]) |*cv, bv| {
+                            cv.* += a_ik * bv;
+                        }
+                    }
                 }
             }
         }
@@ -682,73 +721,15 @@ pub fn Matrix(comptime T: type) type {
                 @memset(result.items, 0);
             }
 
-            // Skip computation if alpha is zero
             if (alpha != 0) {
-                const vec_len = std.simd.suggestVectorLength(T) orelse 1;
-
-                // Calculate total operations to determine if SIMD is worth the overhead
-                const total_ops = a_rows * a_cols * b_cols;
-                const simd_threshold = 512; // Use SIMD for larger matrices (>512 operations)
-
-                // Use SIMD only for larger matrices where the benefit outweighs allocation overhead
-                if (vec_len > 1 and total_ops >= simd_threshold) {
-                    // Enable SIMD for all 4 transpose combinations
-                    const VecType = @Vector(vec_len, T);
-
-                    if (!trans_a and !trans_b) {
-                        // Case 1: A * B - transpose B for cache-friendly row-major access
-                        var b_transposed: Matrix(T) = try .init(self.allocator, b_cols, a_cols);
-                        defer b_transposed.deinit();
-                        for (0..a_cols) |k| {
-                            for (0..b_cols) |j| {
-                                b_transposed.at(j, k).* = other.at(k, j).*;
-                            }
-                        }
-                        simdGemmKernel(VecType, &result, self, b_transposed, alpha, a_rows, a_cols, b_cols);
-                    } else if (trans_a and !trans_b) {
-                        // Case 2: A^T * B - transpose A for cache-friendly row-major access
-                        var a_transposed: Matrix(T) = try .init(self.allocator, a_rows, a_cols);
-                        defer a_transposed.deinit();
-                        // Transpose A: a_transposed[i,j] = A[j,i]
-                        for (0..a_cols) |k| {
-                            for (0..a_rows) |i| {
-                                a_transposed.at(i, k).* = self.at(k, i).*;
-                            }
-                        }
-                        // Handle special case when A and B are the same matrix (for covariance)
-                        if (self.items.ptr == other.items.ptr) {
-                            // For covariance (A^T * A), we need to also use transposed for B
-                            simdGemmKernel(VecType, &result, a_transposed, a_transposed, alpha, a_rows, a_cols, b_cols);
-                        } else {
-                            // General case: transpose B for row-wise access
-                            var b_transposed: Matrix(T) = try .init(self.allocator, b_cols, a_cols);
-                            defer b_transposed.deinit();
-                            for (0..a_cols) |k| {
-                                for (0..b_cols) |j| {
-                                    b_transposed.at(j, k).* = other.at(k, j).*;
-                                }
-                            }
-                            simdGemmKernel(VecType, &result, a_transposed, b_transposed, alpha, a_rows, a_cols, b_cols);
-                        }
-                    } else if (!trans_a and trans_b) {
-                        // Case 3: A * B^T - no transpose needed, B^T is naturally row-wise
-                        simdGemmKernel(VecType, &result, self, other, alpha, a_rows, a_cols, b_cols);
-                    } else if (trans_a and trans_b) {
-                        // Case 4: A^T * B^T - transpose A so rows are contiguous, reuse B rows directly
-                        var a_transposed: Matrix(T) = try .init(self.allocator, a_rows, a_cols);
-                        defer a_transposed.deinit();
-                        for (0..a_rows) |i| {
-                            for (0..a_cols) |j| {
-                                a_transposed.at(i, j).* = self.at(j, i).*;
-                            }
-                        }
-
-                        // op(B) = B^T. Each column j of B^T corresponds to row j of B, which is already
-                        // contiguous in memory, so we can feed `other` directly to the SIMD kernel.
-                        simdGemmKernel(VecType, &result, a_transposed, other, alpha, a_rows, a_cols, b_cols);
-                    }
+                if (std.simd.suggestVectorLength(T)) |vec_len| {
+                    // The kernel wants op(A) and op(B) row-major; only transposed operands are copied.
+                    var a_t: ?Matrix(T) = if (trans_a) try self.transpose() else null;
+                    defer if (a_t) |*t| t.deinit();
+                    var b_t: ?Matrix(T) = if (trans_b) try other.transpose() else null;
+                    defer if (b_t) |*t| t.deinit();
+                    blockedGemm(@Vector(vec_len, T), &result, a_t orelse self, b_t orelse other, alpha);
                 } else {
-                    // No SIMD support, use scalar implementation for all transpose combinations
                     for (0..a_rows) |i| {
                         for (0..b_cols) |j| {
                             var accumulator: T = 0;
