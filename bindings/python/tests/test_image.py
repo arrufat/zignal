@@ -224,6 +224,31 @@ class TestImage:
         with pytest.raises(ValueError):
             img.alpha_trimmed_mean_blur(1, 0.6)
 
+    def test_filters_release_the_gil(self):
+        import threading
+        import time
+
+        rng = np.random.default_rng(1)
+        img = zignal.Image.from_numpy(rng.integers(0, 256, (1080, 1920, 1), dtype=np.uint8))
+        start = time.perf_counter()
+        probe_at = [None]
+
+        def blur():
+            for _ in range(3):
+                img.median_blur(8)
+
+        def probe():
+            probe_at[0] = time.perf_counter() - start
+
+        worker = threading.Thread(target=blur)
+        worker.start()
+        time.sleep(0.02)
+        threading.Thread(target=probe).start()
+        worker.join()
+        total = time.perf_counter() - start
+        # With the GIL held the probe would only run once the blurs finish.
+        assert probe_at[0] is not None and probe_at[0] < total / 2
+
     def test_gaussian_blur_iir_matches_fir(self):
         rng = np.random.default_rng(7)
         arr = rng.integers(0, 256, size=(96, 128, 1), dtype=np.uint8)
