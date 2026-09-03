@@ -18,6 +18,14 @@ pub fn initThreadedIo() void {
     io = threaded.io();
 }
 
+/// Calls `func(args...)` with the GIL released, so other Python threads run while a filter
+/// works. `func` must not touch Python objects; the caller reports errors after it returns.
+pub fn withoutGil(func: anytype, args: anytype) @TypeOf(@call(.auto, func, args)) {
+    const state = c.PyEval_SaveThread();
+    defer c.PyEval_RestoreThread(state);
+    return @call(.auto, func, args);
+}
+
 pub const c = @import("c");
 
 /// Clear the Python error indicator if one is set.
