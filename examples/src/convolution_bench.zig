@@ -73,9 +73,9 @@ fn medianNs(io: std.Io, run_io: std.Io, rows: usize, cols: usize, ctx: anytype) 
     return samples[iters / 2];
 }
 
-fn benchGaussian(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: usize, cols: usize, sigma: f32) !void {
+fn benchGaussian(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: usize, cols: usize, sigma: f32, options: zignal.GaussianBlurOptions) !void {
     var name_buf: [64]u8 = undefined;
-    const name = try std.fmt.bufPrint(&name_buf, "gaussianBlur {s} sigma={d}", .{ @typeName(T), sigma });
+    const name = try std.fmt.bufPrint(&name_buf, "gaussianBlur {s} sigma={d} {t}", .{ @typeName(T), sigma, options.method });
     if (skipped(name, filter)) return;
 
     var src = try initRandom(T, gpa, random, rows, cols);
@@ -88,11 +88,12 @@ fn benchGaussian(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: s
         dst: Image(T),
         gpa: std.mem.Allocator,
         sigma: f32,
+        options: zignal.GaussianBlurOptions,
         fn run(self: @This(), run_io: std.Io) !void {
-            try self.src.gaussianBlur(run_io, self.gpa, self.dst, self.sigma);
+            try self.src.gaussianBlur(run_io, self.gpa, self.dst, self.sigma, self.options);
         }
     };
-    try benchOp(io, name, rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa, .sigma = sigma });
+    try benchOp(io, name, rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa, .sigma = sigma, .options = options });
 }
 
 fn benchConvolve2D(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: usize, cols: usize, comptime kernel: anytype, kernel_name: []const u8, border: BorderMode) !void {
@@ -217,13 +218,18 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("{s:-<42}-+-{s:-<9}-+-{s:-<9}-+-{s:-<9}-+-{s:-<7}-+-{s:-<8}\n", .{ "", "", "", "", "", "" });
 
     // Gaussian blur (separable u8 fixed-point and struct paths)
-    try benchGaussian(u8, io, gpa, random, filter, 480, 640, 1);
-    try benchGaussian(u8, io, gpa, random, filter, 480, 640, 3);
-    try benchGaussian(u8, io, gpa, random, filter, 480, 640, 8);
-    try benchGaussian(u8, io, gpa, random, filter, 2048, 2048, 3);
-    try benchGaussian(u8, io, gpa, random, filter, 2160, 3840, 3);
-    try benchGaussian(Rgb, io, gpa, random, filter, 480, 640, 3);
-    try benchGaussian(Rgb, io, gpa, random, filter, 2160, 3840, 3);
+    try benchGaussian(u8, io, gpa, random, filter, 480, 640, 1, .default);
+    try benchGaussian(u8, io, gpa, random, filter, 480, 640, 3, .default);
+    try benchGaussian(u8, io, gpa, random, filter, 480, 640, 8, .default);
+    try benchGaussian(u8, io, gpa, random, filter, 2048, 2048, 3, .default);
+    try benchGaussian(u8, io, gpa, random, filter, 2160, 3840, 3, .default);
+    try benchGaussian(Rgb, io, gpa, random, filter, 480, 640, 3, .default);
+    try benchGaussian(Rgb, io, gpa, random, filter, 2160, 3840, 3, .default);
+    // Recursive Gaussian: constant cost per pixel regardless of sigma
+    try benchGaussian(u8, io, gpa, random, filter, 480, 640, 3, .{ .method = .iir });
+    try benchGaussian(u8, io, gpa, random, filter, 480, 640, 8, .{ .method = .iir });
+    try benchGaussian(u8, io, gpa, random, filter, 2160, 3840, 3, .{ .method = .iir });
+    try benchGaussian(Rgb, io, gpa, random, filter, 480, 640, 3, .{ .method = .iir });
 
     // 2D convolution (interior SIMD + border rows; 64x64 with 7x7 is border-dominated)
     try benchConvolve2D(u8, io, gpa, random, filter, 480, 640, sharpen_3x3, "3x3", .mirror);

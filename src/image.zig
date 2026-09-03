@@ -54,6 +54,26 @@ pub const BinaryKernel = binary.Kernel;
 const convolution = @import("image/convolution.zig");
 const box_blur = @import("image/box_blur.zig");
 pub const MotionBlur = @import("image/motion_blur.zig").MotionBlur;
+const iir_gaussian = @import("image/iir_gaussian.zig");
+
+pub const GaussianMethod = enum {
+    /// Exact separable kernel with radius `ceil(3·sigma)` and mirrored borders; cost grows with sigma.
+    fir,
+    /// Young–van Vliet recursive approximation with replicated borders: constant cost per pixel,
+    /// within a few 8-bit units of `.fir`. Meant for large sigma; below `iir_gaussian.min_sigma`
+    /// it uses `.fir`.
+    iir,
+    /// `.fir` below `GaussianBlurOptions.auto_iir_sigma`, `.iir` from there on.
+    auto,
+};
+
+pub const GaussianBlurOptions = struct {
+    method: GaussianMethod = .fir,
+
+    pub const default: GaussianBlurOptions = .{};
+    /// Where `.auto` switches to the recursive filter: the measured crossover on a multi-core pool.
+    pub const auto_iir_sigma = iir_gaussian.auto_sigma;
+};
 const MotionBlurOps = @import("image/motion_blur.zig").MotionBlurOps;
 pub const Colormap = @import("image/colormaps.zig").Colormap;
 const Blending = @import("blending.zig").Blending;
@@ -946,6 +966,7 @@ pub fn Image(comptime T: type) type {
             out: Self,
             /// Standard deviation of the Gaussian kernel.
             sigma: f32,
+            options: GaussianBlurOptions,
         ) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
@@ -957,6 +978,12 @@ pub fn Image(comptime T: type) type {
             }
             if (sigma < 0) return error.InvalidSigma;
 
+            const recursive = switch (options.method) {
+                .fir => false,
+                .iir => sigma >= iir_gaussian.min_sigma,
+                .auto => sigma >= iir_gaussian.auto_sigma,
+            };
+            if (recursive) return iir_gaussian.blur(T, io, self, out, allocator, sigma);
             const kernel = try convolution.gaussianKernel(allocator, sigma);
             defer allocator.free(kernel);
             try convolution.convolveSeparable(T, io, self, out, allocator, kernel, kernel, .mirror);
@@ -1229,6 +1256,7 @@ test {
     _ = @import("image/display.zig");
     _ = @import("image/tests/integral.zig");
     _ = @import("image/tests/filters.zig");
+    _ = @import("image/iir_gaussian.zig");
     _ = @import("image/tests/transforms.zig");
     _ = @import("image/tests/display.zig");
     _ = @import("image/tests/interpolation.zig");

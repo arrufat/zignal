@@ -347,7 +347,7 @@ const ChannelStrategy = enum { normalized, scaled, non_uniform };
 /// Shared struct-pixel path: splits `image` into u8 planes, shortcuts uniform channels
 /// (`kernel_sum` is in `scale` fixed-point units), convolves the rest via `ctx.convolvePlane`,
 /// and merges the results into `out`.
-fn convolvePlanes(
+pub fn convolvePlanes(
     comptime T: type,
     image: Image(T),
     out: Image(T),

@@ -439,12 +439,15 @@ pub const image_gaussian_blur_doc =
     \\
     \\## Parameters
     \\- `sigma` (float): Standard deviation of the Gaussian kernel. Must be > 0.
+    \\- `method` (GaussianMethod): `FIR` (default) is the exact kernel; `IIR` is a recursive
+    \\  approximation with constant cost per pixel, for large sigma; `AUTO` picks by sigma.
     \\
     \\## Examples
     \\```python
     \\img = Image.load("photo.png")
     \\blurred = img.gaussian_blur(2.0)
     \\blurred_soft = img.gaussian_blur(5.0)  # More blur
+    \\fast_soft = img.gaussian_blur(12.0, method=GaussianMethod.IIR)
     \\```
 ;
 
@@ -452,9 +455,10 @@ pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
     const self = python.safeCast(ImageObject, self_obj);
     python.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
 
-    const Params = struct { sigma: f64 };
+    const Params = struct { sigma: f64, method: c_long = 0 };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
+    const method = enum_utils.longToEnum(zignal.GaussianMethod, params.method) catch return null;
 
     // Validate sigma: must be finite and > 0
     if (!std.math.isFinite(params.sigma)) {
@@ -463,13 +467,13 @@ pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
     }
     const sigma_pos = python.validatePositive(f64, params.sigma, "sigma") catch return null;
 
-    return self.py_image.?.dispatch(.{sigma_pos}, struct {
-        fn apply(img: anytype, s: f64) ?*c.PyObject {
+    return self.py_image.?.dispatch(.{ sigma_pos, method }, struct {
+        fn apply(img: anytype, s: f64, m: zignal.GaussianMethod) ?*c.PyObject {
             const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
                 python.setMemoryError("image operation");
                 return null;
             };
-            img.gaussianBlur(python.io, allocator, out, @floatCast(s)) catch |err| {
+            img.gaussianBlur(python.io, allocator, out, @floatCast(s), .{ .method = m }) catch |err| {
                 if (err == error.InvalidSigma) {
                     python.setValueError("Invalid sigma value", .{});
                 } else {

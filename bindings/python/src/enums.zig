@@ -28,6 +28,7 @@ pub const registry = [_]Entry{
     .{ .type = zignal.Interpolation, .doc = interpolation.interpolation_doc, .values = &interpolation.interpolation_values },
     .{ .type = zignal.BorderMode, .doc = border_mode.border_mode_doc, .values = &border_mode.border_mode_values },
     .{ .type = zignal.FloodFillOptions.ThresholdMode, .doc = image.threshold_mode_doc, .values = &image.threshold_mode_values },
+    .{ .type = zignal.GaussianMethod, .doc = image.gaussian_method_doc, .values = &image.gaussian_method_values },
     .{ .type = zignal.optimization.OptimizationPolicy, .doc = optimization.optimization_policy_doc, .values = &optimization.optimization_policy_values },
     .{ .type = zignal.qrcode.EcLevel, .doc = qrcode.ec_level_doc, .values = &qrcode.ec_level_values },
 };

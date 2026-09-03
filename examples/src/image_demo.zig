@@ -19,7 +19,7 @@ pub fn main(init: std.process.Init) !void {
 
     var blurred: Image(Rgba) = try .init(init.gpa, image.rows, image.cols);
     defer blurred.deinit(init.gpa);
-    try image.gaussianBlur(init.io, init.gpa, blurred, 5.0);
+    try image.gaussianBlur(init.io, init.gpa, blurred, 5.0, .default);
     try blurred.save(init.io, init.gpa, "image-demo-gaussian.png");
 
     var resized: Image(Rgba) = try .init(init.gpa, image.rows / 2, image.cols / 2);

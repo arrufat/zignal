@@ -711,7 +711,7 @@ fn photoSimulate(allocator: Allocator, clean: Image(u8), opts: struct {
     if (opts.sigma > 0) {
         var blurred = try Image(u8).initLike(allocator, out);
         errdefer blurred.deinit(allocator);
-        try out.gaussianBlur(Io.Threaded.global_single_threaded.io(), allocator, blurred, opts.sigma);
+        try out.gaussianBlur(Io.Threaded.global_single_threaded.io(), allocator, blurred, opts.sigma, .default);
         out.deinit(allocator);
         return blurred;
     }
