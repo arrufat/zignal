@@ -34,6 +34,7 @@ pub fn build(b: *std.Build) void {
         "edge_detection",
         "blur_box_vs_gaussian",
         "convolution_bench",
+        "transform_bench",
         "trace_edges",
         "colormaps_demo",
         "optimization_example",

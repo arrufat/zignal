@@ -42,7 +42,7 @@ fn image_scale(self: *ImageObject, scale: f32, method: Interpolation) !*ImageObj
     python.ensureInitialized(self, "py_image", "Image not initialized") catch return error.ImageNotInitialized;
     return self.py_image.?.dispatch(.{ scale, method }, struct {
         fn apply(img: anytype, s: f32, m: Interpolation) !*ImageObject {
-            const out = try img.scale(allocator, s, m);
+            const out = try python.withoutGil(@TypeOf(img.*).scale, .{ img.*, python.io, allocator, s, m });
             return moveImageToPython(out) orelse error.OutOfMemory;
         }
     }.apply);
@@ -53,7 +53,7 @@ fn image_reshape(self: *ImageObject, rows: u32, cols: u32, method: Interpolation
     return self.py_image.?.dispatch(.{ rows, cols, method }, struct {
         fn apply(img: anytype, r: u32, col: u32, m: Interpolation) !*ImageObject {
             const out = @TypeOf(img.*).init(allocator, r, col) catch return error.OutOfMemory;
-            img.resize(allocator, out, m);
+            python.withoutGil(@TypeOf(img.*).resize, .{ img.*, python.io, allocator, out, m });
             return moveImageToPython(out) orelse error.OutOfMemory;
         }
     }.apply);
@@ -64,7 +64,7 @@ fn image_letterbox_shape(self: *ImageObject, rows: u32, cols: u32, method: Inter
     return self.py_image.?.dispatch(.{ rows, cols, method }, struct {
         fn apply(img: anytype, r: u32, col: u32, m: Interpolation) !*ImageObject {
             const out = @TypeOf(img.*).init(allocator, r, col) catch return error.OutOfMemory;
-            _ = img.letterbox(allocator, out, m);
+            _ = python.withoutGil(@TypeOf(img.*).letterbox, .{ img.*, python.io, allocator, out, m });
             return moveImageToPython(out) orelse error.OutOfMemory;
         }
     }.apply);
@@ -294,7 +294,7 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 
     return self.py_image.?.dispatch(.{ angle, method, border }, struct {
         fn apply(img: anytype, a: f64, m: Interpolation, b: zignal.BorderMode) ?*c.PyObject {
-            const out = img.rotate(allocator, @floatCast(a), m, b) catch {
+            const out = python.withoutGil(@TypeOf(img.*).rotate, .{ img.*, python.io, allocator, @as(f32, @floatCast(a)), m, b }) catch {
                 python.setMemoryError("image rotate");
                 return null;
             };
@@ -394,7 +394,7 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                         .{@floatCast(transform.bias[1])},
                     }),
                 };
-                img.warp(warped_img, zignal_transform, m);
+                python.withoutGil(@TypeOf(img.*).warp, .{ img.*, python.io, warped_img, zignal_transform, m });
             } else if (c.PyObject_IsInstance(t_obj, @ptrCast(&transforms.AffineTransformType)) > 0) {
                 const transform: *transforms.AffineTransformObject = @ptrCast(t_obj);
                 const zignal_transform: zignal.AffineTransform(f32) = .{
@@ -407,7 +407,7 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                         .{@floatCast(transform.bias[1])},
                     }),
                 };
-                img.warp(warped_img, zignal_transform, m);
+                python.withoutGil(@TypeOf(img.*).warp, .{ img.*, python.io, warped_img, zignal_transform, m });
             } else if (c.PyObject_IsInstance(t_obj, @ptrCast(&transforms.ProjectiveTransformType)) > 0) {
                 const transform: *transforms.ProjectiveTransformObject = @ptrCast(t_obj);
                 const zignal_transform: zignal.ProjectiveTransform(f32) = .{
@@ -417,7 +417,7 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                         .{ @floatCast(transform.matrix[2][0]), @floatCast(transform.matrix[2][1]), @floatCast(transform.matrix[2][2]) },
                     }),
                 };
-                img.warp(warped_img, zignal_transform, m);
+                python.withoutGil(@TypeOf(img.*).warp, .{ img.*, python.io, warped_img, zignal_transform, m });
             } else {
                 warped_img.deinit(allocator);
                 c.PyErr_SetString(c.PyExc_TypeError, "transform must be a SimilarityTransform, AffineTransform, or ProjectiveTransform");
@@ -515,7 +515,7 @@ pub fn image_crop(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     return self.py_image.?.dispatch(.{rect}, struct {
         fn apply(img: anytype, r: zignal.Rectangle(f32)) ?*c.PyObject {
-            const out = img.crop(allocator, r) catch |err| {
+            const out = python.withoutGil(@TypeOf(img.*).crop, .{ img.*, python.io, allocator, r }) catch |err| {
                 python.mapZigError(err, "crop image");
                 return null;
             };
@@ -636,7 +636,7 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
                 python.mapZigError(err, "extract image");
                 return null;
             };
-            img.extract(out, r, @floatCast(a), m, b);
+            python.withoutGil(@TypeOf(img.*).extract, .{ img.*, python.io, out, r, @as(f32, @floatCast(a)), m, b });
             return @ptrCast(moveImageToPython(out) orelse return null);
         }
     }.apply);

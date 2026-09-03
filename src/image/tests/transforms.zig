@@ -1,6 +1,7 @@
 //! Transform and geometry tests
 
 const std = @import("std");
+const io = std.Io.Threaded.global_single_threaded.io();
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 
@@ -9,6 +10,7 @@ const Rectangle = @import("../../geometry.zig").Rectangle;
 const Image = @import("../../image.zig").Image;
 const Interpolation = @import("../../root.zig").Interpolation;
 
+const Rgb = color.Rgb(u8);
 const Rgba = color.Rgba(u8);
 
 test "getRectangle" {
@@ -176,22 +178,22 @@ test "rotate orthogonal fast paths" {
     image.at(2, 3).* = 12;
 
     // Test 0 degree rotation
-    var rotated_0 = try image.rotate(std.testing.allocator, 0, .bilinear, .mirror);
+    var rotated_0 = try image.rotate(io, std.testing.allocator, 0, .bilinear, .mirror);
     defer rotated_0.deinit(std.testing.allocator);
     try expectEqual(@as(u8, 1), rotated_0.at(0, 0).*);
 
     // Test 90 degree rotation
-    var rotated_90 = try image.rotate(std.testing.allocator, std.math.pi / 2.0, .bilinear, .mirror);
+    var rotated_90 = try image.rotate(io, std.testing.allocator, std.math.pi / 2.0, .bilinear, .mirror);
     defer rotated_90.deinit(std.testing.allocator);
     // After 90° rotation, top-left becomes bottom-left
     // Original (0,0)=1 should be at (2,0) in rotated image (accounting for centering)
 
     // Test 180 degree rotation
-    var rotated_180 = try image.rotate(std.testing.allocator, std.math.pi, .bilinear, .mirror);
+    var rotated_180 = try image.rotate(io, std.testing.allocator, std.math.pi, .bilinear, .mirror);
     defer rotated_180.deinit(std.testing.allocator);
 
     // Test 270 degree rotation
-    var rotated_270 = try image.rotate(std.testing.allocator, 3.0 * std.math.pi / 2.0, .bilinear, .mirror);
+    var rotated_270 = try image.rotate(io, std.testing.allocator, 3.0 * std.math.pi / 2.0, .bilinear, .mirror);
     defer rotated_270.deinit(std.testing.allocator);
 
     // Verify dimensions are as expected
@@ -220,7 +222,7 @@ test "rotate arbitrary angle" {
     }
 
     // Test 45 degree rotation
-    var rotated = try image.rotate(std.testing.allocator, std.math.pi / 4.0, .bilinear, .mirror);
+    var rotated = try image.rotate(io, std.testing.allocator, std.math.pi / 4.0, .bilinear, .mirror);
     defer rotated.deinit(std.testing.allocator);
 
     // Should be larger than original to fit rotated content
@@ -248,7 +250,7 @@ test "extract rotated rectangle basic and 90deg" {
     defer out0.deinit(allocator);
 
     // Angle 0: should match the submatrix directly
-    image.extract(out0, rect, 0.0, .nearest, .mirror);
+    image.extract(io, out0, rect, 0.0, .nearest, .mirror);
 
     try expectEqual(@as(u8, 11), out0.at(0, 0).*);
     try expectEqual(@as(u8, 12), out0.at(0, 1).*);
@@ -264,7 +266,7 @@ test "extract rotated rectangle basic and 90deg" {
     var out90: Image(u8) = try .init(allocator, 3, 3);
     defer out90.deinit(allocator);
 
-    image.extract(out90, rect, std.math.pi / 2.0, .nearest, .mirror);
+    image.extract(io, out90, rect, std.math.pi / 2.0, .nearest, .mirror);
 
     try expectEqual(@as(u8, 13), out90.at(0, 0).*);
     try expectEqual(@as(u8, 23), out90.at(0, 1).*);
@@ -294,13 +296,13 @@ test "extract single-pixel axis handling centers correctly" {
     // 1x1 output should sample rectangle center -> source (2,2) => 22
     var out1: Image(u8) = try .init(allocator, 1, 1);
     defer out1.deinit(allocator);
-    image.extract(out1, rect, 0.0, .nearest, .mirror);
+    image.extract(io, out1, rect, 0.0, .nearest, .mirror);
     try expectEqual(@as(u8, 22), out1.at(0, 0).*);
 
     // 1x3: rows==1 should sample center row (y=2), cols span left-to-right
     var out_row1: Image(u8) = try .init(allocator, 1, 3);
     defer out_row1.deinit(allocator);
-    image.extract(out_row1, rect, 0.0, .nearest, .mirror);
+    image.extract(io, out_row1, rect, 0.0, .nearest, .mirror);
     try expectEqual(@as(u8, 21), out_row1.at(0, 0).*);
     try expectEqual(@as(u8, 22), out_row1.at(0, 1).*);
     try expectEqual(@as(u8, 23), out_row1.at(0, 2).*);
@@ -308,7 +310,7 @@ test "extract single-pixel axis handling centers correctly" {
     // 3x1: cols==1 should sample center col (x=2), rows span top-to-bottom
     var out_col1: Image(u8) = try .init(allocator, 3, 1);
     defer out_col1.deinit(allocator);
-    image.extract(out_col1, rect, 0.0, .nearest, .mirror);
+    image.extract(io, out_col1, rect, 0.0, .nearest, .mirror);
     try expectEqual(@as(u8, 12), out_col1.at(0, 0).*);
     try expectEqual(@as(u8, 22), out_col1.at(1, 0).*);
     try expectEqual(@as(u8, 32), out_col1.at(2, 0).*);
@@ -342,7 +344,7 @@ test "insert and extract inverse relationship" {
         // Extract region
         var extracted = try Image(u8).init(allocator, tc.size, tc.size);
         defer extracted.deinit(allocator);
-        source.extract(extracted, tc.rect, tc.angle, tc.method, .mirror);
+        source.extract(io, extracted, tc.rect, tc.angle, tc.method, .mirror);
 
         // Insert back into blank canvas
         var canvas = try Image(u8).init(allocator, 64, 64);
@@ -416,11 +418,11 @@ test "extract from empty image regression" {
     const rect = Rectangle(f32).init(0, 0, 2, 2);
 
     // Should not panic with REPLICATE
-    empty.extract(out, rect, 0.0, .nearest, .replicate);
+    empty.extract(io, out, rect, 0.0, .nearest, .replicate);
     try expectEqual(@as(u8, 0), out.at(0, 0).*);
 
     // Should not panic with WRAP
-    empty.extract(out, rect, 0.0, .nearest, .wrap);
+    empty.extract(io, out, rect, 0.0, .nearest, .wrap);
     try expectEqual(@as(u8, 0), out.at(0, 0).*);
 }
 
@@ -477,7 +479,7 @@ test "extract, crop and insert agree on the half-open rect" {
     };
     const rect = Rectangle(f32){ .l = 2, .t = 1, .r = 5, .b = 4 }; // pixels 2..4 × 1..3
 
-    var cropped = try image.crop(allocator, rect);
+    var cropped = try image.crop(io, allocator, rect);
     defer cropped.deinit(allocator);
     try expectEqual(@as(u32, 3), cropped.rows);
     try expectEqual(@as(u32, 3), cropped.cols);
@@ -485,14 +487,14 @@ test "extract, crop and insert agree on the half-open rect" {
     // A hair of rotation forces the resampling path; it must land on the same pixels.
     var extracted: Image(u8) = try .init(allocator, 3, 3);
     defer extracted.deinit(allocator);
-    image.extract(extracted, rect, 1e-5, .nearest, .zero);
+    image.extract(io, extracted, rect, 1e-5, .nearest, .zero);
     try std.testing.expectEqualSlices(u8, cropped.data, extracted.data);
 
     // The whole image through the resampling path is the identity.
     var whole: Image(u8) = try .init(allocator, 6, 7);
     defer whole.deinit(allocator);
     const full: Rectangle(f32) = .{ .l = 0, .t = 0, .r = 7, .b = 6 };
-    image.extract(whole, full, 1e-5, .nearest, .zero);
+    image.extract(io, whole, full, 1e-5, .nearest, .zero);
     try std.testing.expectEqualSlices(u8, image.data, whole.data);
 
     // Inserting the crop back through the resampling path touches exactly the rect.
@@ -504,4 +506,75 @@ test "extract, crop and insert agree on the half-open rect" {
         const inside = r >= 1 and r < 4 and c >= 2 and c < 5;
         try expectEqual(if (inside) image.at(r, c).* else 255, dest.at(r, c).*);
     };
+}
+
+// Every banded transform must produce the same bytes on a thread pool as serially.
+test "transforms are identical on a thread pool" {
+    const allocator = std.testing.allocator;
+    var pool: std.Io.Threaded = .init(allocator, .{});
+    defer pool.deinit();
+    const pool_io = pool.io();
+    const SimilarityTransform = @import("../../geometry.zig").SimilarityTransform;
+    const Point = @import("../../geometry/Point.zig").Point;
+
+    var prng = std.Random.DefaultPrng.init(0x7ea);
+    const random = prng.random();
+
+    inline for ([_]type{ u8, f32, Rgb }) |T| {
+        var src: Image(T) = try .init(allocator, 720, 960);
+        defer src.deinit(allocator);
+        for (src.data) |*px| px.* = switch (T) {
+            u8 => random.int(u8),
+            f32 => 255 * random.float(f32),
+            else => .{ .r = random.int(u8), .g = random.int(u8), .b = random.int(u8) },
+        };
+
+        const Check = struct {
+            fn same(a: Image(T), b: Image(T)) !void {
+                try std.testing.expectEqualSlices(T, a.data, b.data);
+            }
+        };
+
+        // Resize up and down with every method (Rgb takes the u8 plane path, the rest the generic one).
+        const methods = [_]Interpolation{ .nearest, .bilinear, .bicubic, .catmull_rom, .{ .mitchell = .default }, .lanczos };
+        for (methods) |method| {
+            for ([_][2]u32{ .{ 1000, 1400 }, .{ 300, 400 } }) |shape| {
+                var a: Image(T) = try .init(allocator, shape[0], shape[1]);
+                defer a.deinit(allocator);
+                var b: Image(T) = try .init(allocator, shape[0], shape[1]);
+                defer b.deinit(allocator);
+                src.resize(io, allocator, a, method);
+                src.resize(pool_io, allocator, b, method);
+                try Check.same(a, b);
+            }
+        }
+
+        var rot_a: Image(T) = try .init(allocator, 900, 1100);
+        defer rot_a.deinit(allocator);
+        var rot_b: Image(T) = try .init(allocator, 900, 1100);
+        defer rot_b.deinit(allocator);
+        src.rotateInto(io, rot_a, 0.5, .bilinear, .mirror);
+        src.rotateInto(pool_io, rot_b, 0.5, .bilinear, .mirror);
+        try Check.same(rot_a, rot_b);
+
+        const from = [_]Point(2, f32){ .init(.{ 0, 0 }), .init(.{ 100, 0 }), .init(.{ 0, 100 }) };
+        const to = [_]Point(2, f32){ .init(.{ 10, 20 }), .init(.{ 90, 35 }), .init(.{ -5, 110 }) };
+        const transform = try SimilarityTransform(f32).init(&from, &to);
+        var warp_a: Image(T) = try .init(allocator, 700, 900);
+        defer warp_a.deinit(allocator);
+        var warp_b: Image(T) = try .init(allocator, 700, 900);
+        defer warp_b.deinit(allocator);
+        src.warp(io, warp_a, transform, .bicubic);
+        src.warp(pool_io, warp_b, transform, .bicubic);
+        try Check.same(warp_a, warp_b);
+
+        var ext_a: Image(T) = try .init(allocator, 400, 400);
+        defer ext_a.deinit(allocator);
+        var ext_b: Image(T) = try .init(allocator, 400, 400);
+        defer ext_b.deinit(allocator);
+        const rect: Rectangle(f32) = .init(200, 150, 650, 600);
+        src.extract(io, ext_a, rect, 0.3, .bilinear, .zero);
+        src.extract(pool_io, ext_b, rect, 0.3, .bilinear, .zero);
+        try Check.same(ext_a, ext_b);
+    }
 }

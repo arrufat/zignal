@@ -49,6 +49,7 @@ pub const Options = struct {
 /// Converts an image to sixel format
 pub fn fromImage(
     comptime T: type,
+    io: std.Io,
     image: Image(T),
     gpa: Allocator,
     options: Options,
@@ -63,9 +64,9 @@ pub fn fromImage(
 
     if (!detect.isIdentityScale(scale)) {
         if (comptime is_rgb) {
-            prepared_img = try image.scale(gpa, scale, options.interpolation);
+            prepared_img = try image.scale(io, gpa, scale, options.interpolation);
         } else {
-            var scaled = try image.scale(gpa, scale, options.interpolation);
+            var scaled = try image.scale(io, gpa, scale, options.interpolation);
             defer scaled.deinit(gpa);
             prepared_img = try scaled.convert(gpa, Rgb);
         }
@@ -279,7 +280,7 @@ test "basic sixel encoding - 2x2 image" {
     img.at(1, 0).* = .{ .r = 0, .g = 0, .b = 255 }; // Blue
     img.at(1, 1).* = .{ .r = 255, .g = 255, .b = 0 }; // Yellow
 
-    const sixel_data = try fromImage(Rgb, img, allocator, .{
+    const sixel_data = try fromImage(Rgb, std.Io.Threaded.global_single_threaded.io(), img, allocator, .{
         .palette = .fixed_6x7x6,
         .dither = .none,
         .width = 100,
@@ -311,7 +312,7 @@ test "basic sixel encoding - verify palette format" {
         }
     }
 
-    const sixel_data = try fromImage(Rgb, img, allocator, .{
+    const sixel_data = try fromImage(Rgb, std.Io.Threaded.global_single_threaded.io(), img, allocator, .{
         .palette = .{ .adaptive = .{ .max_colors = 16 } },
         .dither = .none,
         .width = 100,
@@ -335,7 +336,7 @@ test "palette mode - fixed 6x7x6 color mapping" {
     img.at(0, 1).* = .{ .r = 255, .g = 255, .b = 255 }; // White - last index
     img.at(0, 2).* = .{ .r = 255, .g = 0, .b = 0 }; // Red
 
-    const sixel_data = try fromImage(Rgb, img, allocator, .{
+    const sixel_data = try fromImage(Rgb, std.Io.Threaded.global_single_threaded.io(), img, allocator, .{
         .palette = .fixed_6x7x6,
         .dither = .none,
         .width = 100,
@@ -378,7 +379,7 @@ test "palette mode - adaptive with color reduction" {
     }
 
     // Test with max_colors = 4 (force color reduction)
-    const sixel_data = try fromImage(Rgb, img, allocator, .{
+    const sixel_data = try fromImage(Rgb, std.Io.Threaded.global_single_threaded.io(), img, allocator, .{
         .palette = .{ .adaptive = .{ .max_colors = 4 } },
         .dither = .none,
         .width = 100,
@@ -400,7 +401,7 @@ test "edge case - single pixel image" {
 
     img.at(0, 0).* = .{ .r = 128, .g = 128, .b = 128 };
 
-    const sixel_data = try fromImage(Rgb, img, allocator, .{
+    const sixel_data = try fromImage(Rgb, std.Io.Threaded.global_single_threaded.io(), img, allocator, .{
         .palette = .fixed_web216,
         .dither = .none,
         .width = 100,
@@ -428,7 +429,7 @@ test "edge case - uniform color image" {
         }
     }
 
-    const sixel_data = try fromImage(Rgb, img, allocator, .{
+    const sixel_data = try fromImage(Rgb, std.Io.Threaded.global_single_threaded.io(), img, allocator, .{
         .palette = .{ .adaptive = .{ .max_colors = 256 } },
         .dither = .none,
         .width = 100,

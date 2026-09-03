@@ -675,7 +675,7 @@ fn photoSimulate(allocator: Allocator, clean: Image(u8), opts: struct {
     }
     const transform = ProjectiveTransform(f64).init(&destination, &source) catch return error.DegenerateCorners;
     const t32 = transform.as(f32);
-    clean.warp(out, t32, .bilinear);
+    clean.warp(std.Io.Threaded.global_single_threaded.io(), out, t32, .bilinear);
     // warp's mirror border tiles reflected copies of the source across the
     // canvas; pixels mapping outside the source are quiet-zone white.
     for (0..out.rows) |r| {

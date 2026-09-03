@@ -1,6 +1,7 @@
 //! Interpolation method tests
 
 const std = @import("std");
+const io = std.Io.Threaded.global_single_threaded.io();
 const expectEqual = std.testing.expectEqual;
 const expectEqualDeep = std.testing.expectEqualDeep;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
@@ -285,7 +286,7 @@ test "resize preserves value range" {
     defer dst.deinit(allocator);
 
     // Test resize with bilinear interpolation
-    src.resize(allocator, dst, .bilinear);
+    src.resize(io, allocator, dst, .bilinear);
 
     // Check that all interpolated values are within the original range
     var min_val: u8 = 255;

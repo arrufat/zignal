@@ -16,7 +16,7 @@ pub fn main(init: std.process.Init) !void {
     defer image.deinit(init.gpa);
     var canvas: Canvas(u8) = undefined;
 
-    var scaled = try image.scale(init.gpa, 0.5, .bilinear);
+    var scaled = try image.scale(init.io, init.gpa, 0.5, .bilinear);
     defer scaled.deinit(init.gpa);
     std.debug.print("{f}\n", .{scaled.display(init.io, .{ .auto = .{} })});
 

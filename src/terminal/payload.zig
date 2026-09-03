@@ -2,6 +2,7 @@
 //! (kitty, iTerm2): aspect-preserving scale, then PNG-encode.
 
 const std = @import("std");
+const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
 const Image = @import("../image.zig").Image;
@@ -13,6 +14,7 @@ const detect = @import("detect.zig");
 /// and PNG-encode it. Caller owns the returned bytes (free with `gpa.free`).
 pub fn scaledPng(
     comptime T: type,
+    io: Io,
     image: Image(T),
     gpa: Allocator,
     width: ?u32,
@@ -25,7 +27,7 @@ pub fn scaledPng(
 
     const scale_factor = detect.aspectScale(width, height, image.rows, image.cols);
     if (!detect.isIdentityScale(scale_factor)) {
-        scaled_image = try image.scale(gpa, scale_factor, interpolation);
+        scaled_image = try image.scale(io, gpa, scale_factor, interpolation);
         image_to_encode = scaled_image.?;
     }
 

@@ -4,11 +4,13 @@
 //! rotation, flipping, cropping, extraction, insertion, and letterboxing.
 
 const std = @import("std");
+const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
 const Blending = @import("../blending.zig").Blending;
 const Rectangle = @import("../geometry.zig").Rectangle;
 const Point = @import("../geometry/Point.zig").Point;
+const parallel = @import("parallel.zig");
 const Image = @import("../image.zig").Image;
 const assignPixel = @import("../image.zig").assignPixel;
 const BorderMode = @import("border.zig").BorderMode;
@@ -16,6 +18,9 @@ const computeCoords = @import("border.zig").computeCoords;
 const interpolate = @import("interpolation.zig").interpolate;
 const Interpolation = @import("interpolation.zig").Interpolation;
 /// Transform operations for Image(T)
+/// Output size that fits an image rotated by an angle.
+pub const RotateBounds = struct { rows: u32, cols: u32 };
+
 pub fn Transform(comptime T: type) type {
     return struct {
         const Self = Image(T);
@@ -46,7 +51,7 @@ pub fn Transform(comptime T: type) type {
         /// Resizes an image to fit within the output dimensions while preserving aspect ratio.
         /// The image is centered with black/zero padding around it (letterboxing).
         /// Returns a rectangle describing the area containing the actual image content.
-        pub fn letterbox(self: Self, out: Self, allocator: Allocator, method: Interpolation) Rectangle(u32) {
+        pub fn letterbox(self: Self, io: Io, out: Self, allocator: Allocator, method: Interpolation) Rectangle(u32) {
             const interpolation = @import("interpolation.zig");
 
             // Ensure output has valid dimensions
@@ -72,7 +77,7 @@ pub fn Transform(comptime T: type) type {
 
             // If scale factors are exactly equal, aspect ratios match - skip letterboxing
             if (rows_scale == cols_scale) {
-                interpolation.resize(T, self, out, allocator, method);
+                interpolation.resize(T, io, self, out, allocator, method);
                 return out.getRectangle();
             }
 
@@ -99,7 +104,7 @@ pub fn Transform(comptime T: type) type {
             const output_view = out.view(content_rect);
 
             // Resize the image into the view
-            interpolation.resize(T, self, output_view, allocator, method);
+            interpolation.resize(T, io, self, output_view, allocator, method);
 
             // Zero only the padding bands
             out.setBorder(content_rect, std.mem.zeroes(T));
@@ -109,7 +114,7 @@ pub fn Transform(comptime T: type) type {
 
         /// Computes the output dimensions needed to contain `self` rotated by `angle` (radians)
         /// without clipping.
-        pub fn rotateBounds(self: Self, angle: f32) struct { rows: u32, cols: u32 } {
+        pub fn rotateBounds(self: Self, angle: f32) RotateBounds {
             // Normalize angle to [0, 2π) range
             const normalized_angle = @mod(angle, std.math.tau);
             const epsilon = 1e-6;
@@ -150,17 +155,17 @@ pub fn Transform(comptime T: type) type {
 
         /// Rotates the image by `angle` (radians) around its center, returning a new image sized
         /// by `rotateBounds` to fit the rotated content.
-        pub fn rotate(self: Self, gpa: Allocator, angle: f32, method: Interpolation, border: BorderMode) !Self {
+        pub fn rotate(self: Self, io: Io, gpa: Allocator, angle: f32, method: Interpolation, border: BorderMode) !Self {
             const bounds = rotateBounds(self, angle);
             const rotated = try Self.init(gpa, bounds.rows, bounds.cols);
-            rotateInto(self, rotated, angle, method, border);
+            rotateInto(self, io, rotated, angle, method, border);
             return rotated;
         }
 
         /// Rotates the image by `angle` (radians) around its center into the pre-allocated `out`.
         /// `out` is typically sized via `rotateBounds`, but any shape is accepted; the result is
         /// centered with zero/`border` padding for any uncovered pixels.
-        pub fn rotateInto(self: Self, out: Self, angle: f32, method: Interpolation, border: BorderMode) void {
+        pub fn rotateInto(self: Self, io: Io, out: Self, angle: f32, method: Interpolation, border: BorderMode) void {
             const center = self.getCenter();
             const normalized_angle = @mod(angle, std.math.tau);
             const epsilon = 1e-6;
@@ -193,31 +198,76 @@ pub fn Transform(comptime T: type) type {
             const offset_x = (@as(f32, @floatFromInt(out.cols)) - @as(f32, @floatFromInt(self.cols))) / 2.0;
             const offset_y = (@as(f32, @floatFromInt(out.rows)) - @as(f32, @floatFromInt(self.rows))) / 2.0;
 
-            const rotated_center_x = center.x() + offset_x;
-            const rotated_center_y = center.y() + offset_y;
+            const ctx: Resample = .{
+                .src = self,
+                .out = out,
+                .method = method,
+                .border = border,
+                .cos = cos,
+                .sin = sin,
+                .dst_cx = center.x() + offset_x,
+                .dst_cy = center.y() + offset_y,
+                .src_cx = center.x(),
+                .src_cy = center.y(),
+            };
+            parallel.forRowBands(io, out.rows, parallel.bandCount(out.rows, out.cols), &ctx, Resample.rotateBand);
+        }
 
-            for (0..out.rows) |r| {
-                const y: f32 = @floatFromInt(r);
-                for (0..out.cols) |c| {
-                    const x: f32 = @floatFromInt(c);
-                    const dx = x - rotated_center_x;
-                    const dy = y - rotated_center_y;
-                    const rotated_dx = cos * dx - sin * dy;
-                    const rotated_dy = sin * dx + cos * dy;
-                    const src_x = rotated_dx + center.x();
-                    const src_y = rotated_dy + center.y();
-                    out.at(r, c).* = if (interpolate(T, self, src_x, src_y, method, border)) |val| val else std.mem.zeroes(T);
+        /// Inverse-mapped resampling shared by the general rotate and extract paths: output
+        /// pixel (c, r) maps to `dst -> rotate by (cos, sin) about the centres -> src`.
+        const Resample = struct {
+            src: Self,
+            out: Self,
+            method: Interpolation,
+            border: BorderMode,
+            cos: f32,
+            sin: f32,
+            /// Rotation centre in output coordinates and its image in source coordinates.
+            dst_cx: f32,
+            dst_cy: f32,
+            src_cx: f32,
+            src_cy: f32,
+            /// Output-to-rect scale and rect origin for `extract` (1 and 0 for rotate).
+            scale_x: f32 = 1,
+            scale_y: f32 = 1,
+            origin_x: f32 = 0,
+            origin_y: f32 = 0,
+
+            fn rotateBand(ctx: *const Resample, _: usize, r0: usize, r1: usize) void {
+                for (r0..r1) |r| {
+                    const dy = @as(f32, @floatFromInt(r)) - ctx.dst_cy;
+                    for (0..ctx.out.cols) |c| {
+                        const dx = @as(f32, @floatFromInt(c)) - ctx.dst_cx;
+                        const src_x = ctx.cos * dx - ctx.sin * dy + ctx.src_cx;
+                        const src_y = ctx.sin * dx + ctx.cos * dy + ctx.src_cy;
+                        ctx.out.at(r, c).* = if (interpolate(T, ctx.src, src_x, src_y, ctx.method, ctx.border)) |val| val else std.mem.zeroes(T);
+                    }
                 }
             }
-        }
+
+            fn extractBand(ctx: *const Resample, _: usize, r0: usize, r1: usize) void {
+                for (r0..r1) |r| {
+                    const y_rect = ctx.origin_y + (@as(f32, @floatFromInt(r)) + 0.5) * ctx.scale_y - 0.5;
+                    const dy = y_rect - ctx.src_cy;
+                    for (0..ctx.out.cols) |c| {
+                        const x_rect = ctx.origin_x + (@as(f32, @floatFromInt(c)) + 0.5) * ctx.scale_x - 0.5;
+                        // Rotate around rectangle center by +angle (CCW)
+                        const dx = x_rect - ctx.src_cx;
+                        const src_x = ctx.src_cx + ctx.cos * dx - ctx.sin * dy;
+                        const src_y = ctx.src_cy + ctx.sin * dx + ctx.cos * dy;
+                        ctx.out.at(r, c).* = if (interpolate(T, ctx.src, src_x, src_y, ctx.method, ctx.border)) |val| val else std.mem.zeroes(T);
+                    }
+                }
+            }
+        };
 
         /// Crops a rectangular region from the image. Coordinates are rounded; out-of-bounds areas
         /// are filled with zeroed pixels (e.g., black/transparent).
-        pub fn crop(self: Self, allocator: Allocator, rectangle: Rectangle(f32)) !Self {
+        pub fn crop(self: Self, io: Io, allocator: Allocator, rectangle: Rectangle(f32)) !Self {
             const chip_rows: u32 = @round(rectangle.height());
             const chip_cols: u32 = @round(rectangle.width());
             const chip = try Self.init(allocator, chip_rows, chip_cols);
-            extract(self, chip, rectangle, 0, .nearest, .zero);
+            extract(self, io, chip, rectangle, 0, .nearest, .zero);
             return chip;
         }
 
@@ -230,7 +280,7 @@ pub fn Transform(comptime T: type) type {
         /// Notes:
         /// - Out-of-bounds samples are filled with zeroed pixels (e.g., black/transparent).
         /// - `out` can be a view; strides are respected via `at()` accessors.
-        pub fn extract(self: Self, out: Self, rect: Rectangle(f32), angle: f32, method: Interpolation, border: BorderMode) void {
+        pub fn extract(self: Self, io: Io, out: Self, rect: Rectangle(f32), angle: f32, method: Interpolation, border: BorderMode) void {
             if (out.rows == 0 or out.cols == 0) return;
 
             const frows: f32 = @floatFromInt(out.rows);
@@ -257,23 +307,23 @@ pub fn Transform(comptime T: type) type {
             const cx: f32 = (rect.l + rect.r) * 0.5 - 0.5;
             const cy: f32 = (rect.t + rect.b) * 0.5 - 0.5;
 
-            const cos_a = @cos(angle);
-            const sin_a = @sin(angle);
-
-            for (0..out.rows) |r| {
-                const y_rect = rect.t + (@as(f32, @floatFromInt(r)) + 0.5) / frows * height - 0.5;
-                for (0..out.cols) |c| {
-                    const x_rect = rect.l + (@as(f32, @floatFromInt(c)) + 0.5) / fcols * width - 0.5;
-
-                    // Rotate around rectangle center by +angle (CCW)
-                    const dx = x_rect - cx;
-                    const dy = y_rect - cy;
-                    const src_x = cx + cos_a * dx - sin_a * dy;
-                    const src_y = cy + sin_a * dx + cos_a * dy;
-
-                    out.at(r, c).* = if (interpolate(T, self, src_x, src_y, method, border)) |val| val else std.mem.zeroes(T);
-                }
-            }
+            const ctx: Resample = .{
+                .src = self,
+                .out = out,
+                .method = method,
+                .border = border,
+                .cos = @cos(angle),
+                .sin = @sin(angle),
+                .dst_cx = cx,
+                .dst_cy = cy,
+                .src_cx = cx,
+                .src_cy = cy,
+                .scale_x = width / fcols,
+                .scale_y = height / frows,
+                .origin_x = rect.l,
+                .origin_y = rect.t,
+            };
+            parallel.forRowBands(io, out.rows, parallel.bandCount(out.rows, out.cols), &ctx, Resample.extractBand);
         }
 
         /// Inserts `source` into `self` at the destination rectangle, with optional rotation
@@ -521,15 +571,25 @@ pub fn Transform(comptime T: type) type {
 
         /// Applies a geometric transform to the image using backward mapping.
         /// For each pixel in the output, applies the transform to find the corresponding source pixel.
-        pub fn warp(self: Self, out: Self, transform: anytype, method: Interpolation) void {
-            for (0..out.rows) |r| {
-                for (0..out.cols) |c| {
-                    const out_point: Point(2, f32) = .init(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) });
-                    const src_point = transform.project(out_point);
-                    const value = interpolate(T, self, src_point.x(), src_point.y(), method, .mirror) orelse std.mem.zeroes(T);
-                    out.at(r, c).* = value;
+        pub fn warp(self: Self, io: Io, out: Self, transform: anytype, method: Interpolation) void {
+            const Ctx = struct {
+                src: Self,
+                out: Self,
+                transform: @TypeOf(transform),
+                method: Interpolation,
+
+                fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
+                    for (r0..r1) |r| {
+                        for (0..ctx.out.cols) |c| {
+                            const out_point: Point(2, f32) = .init(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) });
+                            const src_point = ctx.transform.project(out_point);
+                            ctx.out.at(r, c).* = interpolate(T, ctx.src, src_point.x(), src_point.y(), ctx.method, .mirror) orelse std.mem.zeroes(T);
+                        }
+                    }
                 }
-            }
+            };
+            const ctx: Ctx = .{ .src = self, .out = out, .transform = transform, .method = method };
+            parallel.forRowBands(io, out.rows, parallel.bandCount(out.rows, out.cols), &ctx, Ctx.band);
         }
     };
 }

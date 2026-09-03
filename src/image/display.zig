@@ -99,7 +99,7 @@ pub fn DisplayFormatter(comptime T: type) type {
         ) *const Image(T) {
             const scale_factor = terminal.aspectScale(w, h, self.image.rows, self.image.cols);
             if (terminal.isIdentityScale(scale_factor)) return self.image;
-            out_scaled.* = self.image.scale(allocator, scale_factor, .bilinear) catch return self.image;
+            out_scaled.* = self.image.scale(self.io, allocator, scale_factor, .bilinear) catch return self.image;
             return &out_scaled.*.?;
         }
 
@@ -126,8 +126,8 @@ pub fn DisplayFormatter(comptime T: type) type {
                     continue :fmt selected;
                 },
                 .kitty => |options| {
-                    const data = kitty.fromImage(T, self.image.*, allocator, options) catch |err| switch (err) {
-                        error.OutOfMemory => kitty.fromImage(T, self.image.*, allocator, .default) catch null,
+                    const data = kitty.fromImage(T, self.io, self.image.*, allocator, options) catch |err| switch (err) {
+                        error.OutOfMemory => kitty.fromImage(T, self.io, self.image.*, allocator, .default) catch null,
                         else => null,
                     };
                     if (data) |d| {
@@ -139,8 +139,8 @@ pub fn DisplayFormatter(comptime T: type) type {
                     }
                 },
                 .iterm2 => |options| {
-                    const data = iterm2.fromImage(T, self.image.*, allocator, options) catch |err| switch (err) {
-                        error.OutOfMemory => iterm2.fromImage(T, self.image.*, allocator, .default) catch null,
+                    const data = iterm2.fromImage(T, self.io, self.image.*, allocator, options) catch |err| switch (err) {
+                        error.OutOfMemory => iterm2.fromImage(T, self.io, self.image.*, allocator, .default) catch null,
                         else => null,
                     };
                     if (data) |d| {
@@ -151,8 +151,8 @@ pub fn DisplayFormatter(comptime T: type) type {
                     // iTerm2 has no image-reset sequence; on failure emit nothing.
                 },
                 .sixel => |options| {
-                    const data = sixel.fromImage(T, self.image.*, allocator, options) catch |err| switch (err) {
-                        error.OutOfMemory => sixel.fromImage(T, self.image.*, allocator, .fallback) catch null,
+                    const data = sixel.fromImage(T, self.io, self.image.*, allocator, options) catch |err| switch (err) {
+                        error.OutOfMemory => sixel.fromImage(T, self.io, self.image.*, allocator, .fallback) catch null,
                         else => null,
                     };
                     if (data) |d| {

@@ -39,6 +39,7 @@ const Enhancement = @import("image/enhancement.zig").Enhancement;
 const binary = @import("image/binary.zig");
 const meta = @import("meta.zig");
 const Transform = @import("image/transforms.zig").Transform;
+const RotateBounds = @import("image/transforms.zig").RotateBounds;
 const interpolation = @import("image/interpolation.zig");
 const OrderStatisticBlurOps = @import("image/order_statistic_blur.zig").OrderStatisticBlurOps;
 
@@ -529,17 +530,17 @@ pub fn Image(comptime T: type) type {
             return interpolation.interpolate(T, self, x, y, method, border);
         }
 
-        /// Resizes an image to fit in out, using the specified interpolation method.
-        /// The output image must have the desired dimensions pre-allocated.
+        /// Resizes an image to fit in out, using the specified interpolation method, in output-row
+        /// bands on `io`. The output image must have the desired dimensions pre-allocated.
         /// Note: allocator is used for temporary buffers during RGB/RGBA channel processing.
-        pub fn resize(self: Self, allocator: Allocator, out: Self, method: Interpolation) void {
-            interpolation.resize(T, self, out, allocator, method);
+        pub fn resize(self: Self, io: Io, allocator: Allocator, out: Self, method: Interpolation) void {
+            interpolation.resize(T, io, self, out, allocator, method);
         }
 
         /// Scales the image by the given factor using the specified interpolation method.
         /// A factor > 1.0 enlarges the image, < 1.0 shrinks it.
         /// The caller is responsible for calling deinit() on the returned image.
-        pub fn scale(self: Self, allocator: Allocator, factor: f32, method: Interpolation) !Self {
+        pub fn scale(self: Self, io: Io, allocator: Allocator, factor: f32, method: Interpolation) !Self {
             if (factor <= 0) return error.InvalidScaleFactor;
 
             const new_rows: u32 = @round(@as(f32, @floatFromInt(self.rows)) * factor);
@@ -548,15 +549,15 @@ pub fn Image(comptime T: type) type {
             if (new_rows == 0 or new_cols == 0) return error.InvalidDimensions;
 
             const scaled: Self = try .init(allocator, new_rows, new_cols);
-            self.resize(allocator, scaled, method);
+            self.resize(io, allocator, scaled, method);
             return scaled;
         }
 
         /// Resizes an image to fit within the output dimensions while preserving aspect ratio.
         /// The image is centered with black/zero padding around it (letterboxing).
         /// Returns a rectangle describing the area containing the actual image content.
-        pub fn letterbox(self: Self, allocator: Allocator, out: Self, method: Interpolation) Rectangle(u32) {
-            return Transform(T).letterbox(self, out, allocator, method);
+        pub fn letterbox(self: Self, io: Io, allocator: Allocator, out: Self, method: Interpolation) Rectangle(u32) {
+            return Transform(T).letterbox(self, io, out, allocator, method);
         }
 
         /// Rotates the image by `angle` (radians) around its center, returning a new image sized
@@ -564,22 +565,22 @@ pub fn Image(comptime T: type) type {
         ///
         /// Example:
         /// ```zig
-        /// var rotated = try image.rotate(allocator, std.math.pi / 4.0, .bilinear, .zero);
+        /// var rotated = try image.rotate(io, allocator, std.math.pi / 4.0, .bilinear, .zero);
         /// defer rotated.deinit(allocator);
         /// ```
-        pub fn rotate(self: Self, allocator: Allocator, angle: f32, method: Interpolation, border: BorderMode) !Self {
-            return Transform(T).rotate(self, allocator, angle, method, border);
+        pub fn rotate(self: Self, io: Io, allocator: Allocator, angle: f32, method: Interpolation, border: BorderMode) !Self {
+            return Transform(T).rotate(self, io, allocator, angle, method, border);
         }
 
         /// Rotates the image into the pre-allocated `out`, centered with `border` padding for any
         /// uncovered area. Use `rotateBounds(angle)` to size `out` if you want no clipping.
-        pub fn rotateInto(self: Self, out: Self, angle: f32, method: Interpolation, border: BorderMode) void {
-            return Transform(T).rotateInto(self, out, angle, method, border);
+        pub fn rotateInto(self: Self, io: Io, out: Self, angle: f32, method: Interpolation, border: BorderMode) void {
+            return Transform(T).rotateInto(self, io, out, angle, method, border);
         }
 
         /// Computes the output dimensions needed to contain `self` rotated by `angle` (radians)
         /// without clipping.
-        pub fn rotateBounds(self: Self, angle: f32) struct { rows: u32, cols: u32 } {
+        pub fn rotateBounds(self: Self, angle: f32) RotateBounds {
             return Transform(T).rotateBounds(self, angle);
         }
 
@@ -588,11 +589,11 @@ pub fn Image(comptime T: type) type {
         ///
         /// Example:
         /// ```zig
-        /// var chip = try image.crop(allocator, .{ .l = 10, .t = 10, .r = 100, .b = 100 });
+        /// var chip = try image.crop(io, allocator, .{ .l = 10, .t = 10, .r = 100, .b = 100 });
         /// defer chip.deinit(allocator);
         /// ```
-        pub fn crop(self: Self, allocator: Allocator, rectangle: Rectangle(f32)) !Self {
-            return Transform(T).crop(self, allocator, rectangle);
+        pub fn crop(self: Self, io: Io, allocator: Allocator, rectangle: Rectangle(f32)) !Self {
+            return Transform(T).crop(self, io, allocator, rectangle);
         }
 
         /// Extracts a rotated rectangular region (defined in source coordinates) and resamples it
@@ -603,8 +604,8 @@ pub fn Image(comptime T: type) type {
         /// Notes:
         /// - Out-of-bounds samples are filled with zeroed pixels (e.g., black/transparent).
         /// - `out` can be a view; strides are respected via `at()` accessors.
-        pub fn extract(self: Self, out: Self, rect: Rectangle(f32), angle: f32, method: Interpolation, border: BorderMode) void {
-            return Transform(T).extract(self, out, rect, angle, method, border);
+        pub fn extract(self: Self, io: Io, out: Self, rect: Rectangle(f32), angle: f32, method: Interpolation, border: BorderMode) void {
+            return Transform(T).extract(self, io, out, rect, angle, method, border);
         }
 
         /// Inserts `source` into `self` at the destination rectangle, with optional rotation
@@ -630,10 +631,10 @@ pub fn Image(comptime T: type) type {
         /// const transform: SimilarityTransform(T) = try .init(from_points, to_points);
         /// const warped: Image(T) = try .init(allocator, 512, 512);
         /// defer warped.deinit(allocator);
-        /// image.warp(warped, transform, .bilinear);
+        /// image.warp(io, warped, transform, .bilinear);
         /// ```
-        pub fn warp(self: Self, out: Self, transform: anytype, method: Interpolation) void {
-            return Transform(T).warp(self, out, transform, method);
+        pub fn warp(self: Self, io: Io, out: Self, transform: anytype, method: Interpolation) void {
+            return Transform(T).warp(self, io, out, transform, method);
         }
 
         /// Computes the integral image, also known as a summed-area table (SAT), of `self`.
