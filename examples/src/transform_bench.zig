@@ -59,7 +59,7 @@ fn methodName(method: Interpolation) []const u8 {
 
 fn benchResize(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, src_rows: u32, src_cols: u32, dst_rows: u32, dst_cols: u32, method: Interpolation) !void {
     var name_buf: [96]u8 = undefined;
-    const name = try std.fmt.bufPrint(&name_buf, "resize {s} {s} {d}x{d}->", .{ @typeName(T), methodName(method), src_rows, src_cols });
+    const name = try std.mem.print(&name_buf, "resize {s} {s} {d}x{d}->", .{ @typeName(T), methodName(method), src_rows, src_cols });
     if (skipped(name, filter)) return;
     var src: Image(T) = try .init(gpa, src_rows, src_cols);
     defer src.deinit(gpa);
@@ -80,7 +80,7 @@ fn benchResize(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std
 
 fn benchRotate(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: u32, cols: u32, method: Interpolation) !void {
     var name_buf: [96]u8 = undefined;
-    const name = try std.fmt.bufPrint(&name_buf, "rotate 30deg {s} {s}", .{ @typeName(T), methodName(method) });
+    const name = try std.mem.print(&name_buf, "rotate 30deg {s} {s}", .{ @typeName(T), methodName(method) });
     if (skipped(name, filter)) return;
     var src: Image(T) = try .init(gpa, rows, cols);
     defer src.deinit(gpa);
@@ -101,7 +101,7 @@ fn benchRotate(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std
 
 fn benchWarp(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: u32, cols: u32) !void {
     var name_buf: [96]u8 = undefined;
-    const name = try std.fmt.bufPrint(&name_buf, "warp similarity {s} bilinear", .{@typeName(T)});
+    const name = try std.mem.print(&name_buf, "warp similarity {s} bilinear", .{@typeName(T)});
     if (skipped(name, filter)) return;
     var src: Image(T) = try .init(gpa, rows, cols);
     defer src.deinit(gpa);
@@ -124,7 +124,7 @@ fn benchWarp(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.R
 
 fn benchExtract(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: u32, cols: u32, size: u32) !void {
     var name_buf: [96]u8 = undefined;
-    const name = try std.fmt.bufPrint(&name_buf, "extract rotated {d}^2 {s} bilinear", .{ size, @typeName(T) });
+    const name = try std.mem.print(&name_buf, "extract rotated {d}^2 {s} bilinear", .{ size, @typeName(T) });
     if (skipped(name, filter)) return;
     var src: Image(T) = try .init(gpa, rows, cols);
     defer src.deinit(gpa);

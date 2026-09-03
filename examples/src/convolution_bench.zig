@@ -76,7 +76,7 @@ fn medianNs(io: std.Io, run_io: std.Io, rows: usize, cols: usize, ctx: anytype) 
 
 fn benchGaussian(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: usize, cols: usize, sigma: f32, options: zignal.GaussianBlurOptions) !void {
     var name_buf: [64]u8 = undefined;
-    const name = try std.fmt.bufPrint(&name_buf, "gaussianBlur {s} sigma={d} {t}", .{ @typeName(T), sigma, options.method });
+    const name = try std.mem.print(&name_buf, "gaussianBlur {s} sigma={d} {t}", .{ @typeName(T), sigma, options.method });
     if (skipped(name, filter)) return;
 
     var src = try initRandom(T, gpa, random, rows, cols);
@@ -99,7 +99,7 @@ fn benchGaussian(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: s
 
 fn benchConvolve2D(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: usize, cols: usize, comptime kernel: anytype, kernel_name: []const u8, border: BorderMode) !void {
     var name_buf: [64]u8 = undefined;
-    const name = try std.fmt.bufPrint(&name_buf, "convolve {s} {s} .{s}", .{ kernel_name, @typeName(T), @tagName(border) });
+    const name = try std.mem.print(&name_buf, "convolve {s} {s} .{s}", .{ kernel_name, @typeName(T), @tagName(border) });
     if (skipped(name, filter)) return;
 
     var src = try initRandom(T, gpa, random, rows, cols);
@@ -140,7 +140,7 @@ fn benchSobel(io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[
 
 fn benchMotionBlur(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: usize, cols: usize, distance: usize, comptime axis: enum { horizontal, vertical }) !void {
     var name_buf: [64]u8 = undefined;
-    const name = try std.fmt.bufPrint(&name_buf, "motionBlur linear {t} {s} d={d}", .{ axis, @typeName(T), distance });
+    const name = try std.mem.print(&name_buf, "motionBlur linear {t} {s} d={d}", .{ axis, @typeName(T), distance });
     if (skipped(name, filter)) return;
 
     var src = try initRandom(T, gpa, random, rows, cols);
@@ -162,7 +162,7 @@ fn benchMotionBlur(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random:
 
 fn benchSeparable(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: usize, cols: usize) !void {
     var name_buf: [64]u8 = undefined;
-    const name = try std.fmt.bufPrint(&name_buf, "convolveSeparable {s} 9-tap .mirror", .{@typeName(T)});
+    const name = try std.mem.print(&name_buf, "convolveSeparable {s} 9-tap .mirror", .{@typeName(T)});
     if (skipped(name, filter)) return;
 
     var src = try initRandom(T, gpa, random, rows, cols);
@@ -183,7 +183,7 @@ fn benchSeparable(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: 
 
 fn benchMedian(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: usize, cols: usize, radius: usize) !void {
     var name_buf: [64]u8 = undefined;
-    const name = try std.fmt.bufPrint(&name_buf, "medianBlur {s} r={d}", .{ @typeName(T), radius });
+    const name = try std.mem.print(&name_buf, "medianBlur {s} r={d}", .{ @typeName(T), radius });
     if (skipped(name, filter)) return;
 
     var src = try initRandom(T, gpa, random, rows, cols);

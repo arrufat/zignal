@@ -134,7 +134,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                                     const max_val = std.math.maxInt(field.type);
 
                                     var buffer: [256]u8 = undefined;
-                                    const msg = std.fmt.bufPrintSentinel(&buffer, "Value is out of range for {s} (valid range: {} to {})", .{ @typeName(field.type), min_val, max_val }, 0) catch "Value out of range";
+                                    const msg = std.mem.printSentinel(&buffer, "Value is out of range for {s} (valid range: {} to {})", .{ @typeName(field.type), min_val, max_val }, 0) catch "Value out of range";
 
                                     c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
                                     return -1;
@@ -745,10 +745,10 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
 
             var buffer: [128]u8 = undefined;
             const formatted = switch (fields.len) {
-                1 => std.fmt.bufPrintSentinel(&buffer, "{s}({s}={})", .{ name, fields[0].name, self.field0 }, 0) catch return null,
-                2 => std.fmt.bufPrintSentinel(&buffer, "{s}({s}={}, {s}={})", .{ name, fields[0].name, self.field0, fields[1].name, self.field1 }, 0) catch return null,
-                3 => std.fmt.bufPrintSentinel(&buffer, "{s}({s}={}, {s}={}, {s}={})", .{ name, fields[0].name, self.field0, fields[1].name, self.field1, fields[2].name, self.field2 }, 0) catch return null,
-                4 => std.fmt.bufPrintSentinel(&buffer, "{s}({s}={}, {s}={}, {s}={}, {s}={})", .{ name, fields[0].name, self.field0, fields[1].name, self.field1, fields[2].name, self.field2, fields[3].name, self.field3 }, 0) catch return null,
+                1 => std.mem.printSentinel(&buffer, "{s}({s}={})", .{ name, fields[0].name, self.field0 }, 0) catch return null,
+                2 => std.mem.printSentinel(&buffer, "{s}({s}={}, {s}={})", .{ name, fields[0].name, self.field0, fields[1].name, self.field1 }, 0) catch return null,
+                3 => std.mem.printSentinel(&buffer, "{s}({s}={}, {s}={}, {s}={})", .{ name, fields[0].name, self.field0, fields[1].name, self.field1, fields[2].name, self.field2 }, 0) catch return null,
+                4 => std.mem.printSentinel(&buffer, "{s}({s}={}, {s}={}, {s}={}, {s}={})", .{ name, fields[0].name, self.field0, fields[1].name, self.field1, fields[2].name, self.field2, fields[3].name, self.field3 }, 0) catch return null,
                 else => unreachable,
             };
 
@@ -800,7 +800,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 var offset: usize = 0;
 
                 // Start with SGR escape codes and type name
-                const header = std.fmt.bufPrint(
+                const header = std.mem.print(
                     buffer[offset..],
                     "\x1b[1m\x1b[38;2;{d};{d};{d}m\x1b[48;2;{d};{d};{d}m{s}(",
                     .{ fg, fg, fg, rgb.r, rgb.g, rgb.b, name },
@@ -809,7 +809,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
 
                 // Print each field in Python style (field=value)
                 inline for (fields, 0..) |field, i| {
-                    const field_name = std.fmt.bufPrint(
+                    const field_name = std.mem.print(
                         buffer[offset..],
                         "{s}=",
                         .{field.name},
@@ -826,20 +826,20 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                     };
 
                     const field_value = switch (field.type) {
-                        u8 => std.fmt.bufPrint(buffer[offset..], "{d}", .{value}) catch return null,
-                        f64 => std.fmt.bufPrint(buffer[offset..], "{d}", .{value}) catch return null,
-                        else => std.fmt.bufPrint(buffer[offset..], "{any}", .{value}) catch return null,
+                        u8 => std.mem.print(buffer[offset..], "{d}", .{value}) catch return null,
+                        f64 => std.mem.print(buffer[offset..], "{d}", .{value}) catch return null,
+                        else => std.mem.print(buffer[offset..], "{any}", .{value}) catch return null,
                     };
                     offset += field_value.len;
 
                     if (i < fields.len - 1) {
-                        const sep = std.fmt.bufPrint(buffer[offset..], ", ", .{}) catch return null;
+                        const sep = std.mem.print(buffer[offset..], ", ", .{}) catch return null;
                         offset += sep.len;
                     }
                 }
 
                 // Close parenthesis and reset SGR codes
-                const footer = std.fmt.bufPrint(buffer[offset..], ")\x1b[0m", .{}) catch return null;
+                const footer = std.mem.print(buffer[offset..], ")\x1b[0m", .{}) catch return null;
                 offset += footer.len;
 
                 const formatted = buffer[0..offset];

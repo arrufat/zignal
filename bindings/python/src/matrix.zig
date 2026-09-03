@@ -231,7 +231,7 @@ fn matrix_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     if (self.matrix_ptr) |ptr| {
         // Create a string representation
         var buffer: [256]u8 = undefined;
-        const slice = std.fmt.bufPrintSentinel(&buffer, "Matrix({} x {}, float64)", .{ ptr.rows, ptr.cols }, 0) catch {
+        const slice = std.mem.printSentinel(&buffer, "Matrix({} x {}, float64)", .{ ptr.rows, ptr.cols }, 0) catch {
             return python.create("Matrix(error formatting)");
         };
         return python.create(slice);
@@ -257,7 +257,7 @@ fn matrix_str(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
                     const val = ptr.at(i, j).*;
                     if (j > 0) list.appendSlice(allocator, ", ") catch return null;
                     var buf: [32]u8 = undefined;
-                    const s = std.fmt.bufPrint(&buf, "{d:.4}", .{val}) catch return null;
+                    const s = std.mem.print(&buf, "{d:.4}", .{val}) catch return null;
                     list.appendSlice(allocator, s) catch return null;
                 }
                 list.appendSlice(allocator, "]\n") catch return null;

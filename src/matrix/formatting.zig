@@ -5,9 +5,9 @@ const Io = std.Io;
 
 /// Helper function to format numbers with fallback to scientific notation
 fn formatNumber(comptime T: type, buf: []u8, comptime format_str: []const u8, value: T) []const u8 {
-    return std.fmt.bufPrint(buf, format_str, .{value}) catch {
+    return std.mem.print(buf, format_str, .{value}) catch {
         // If formatting fails (number too large), try scientific notation
-        return std.fmt.bufPrint(buf, "{any}", .{value}) catch {
+        return std.mem.print(buf, "{any}", .{value}) catch {
             // If even scientific notation fails, use a fallback
             return "ERR";
         };
