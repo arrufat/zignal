@@ -397,21 +397,27 @@ const StdTables = struct {
     };
 };
 
+/// Per symbol `code << 8 | length`, one load per coded coefficient.
 const HuffmanEncoder = struct {
-    codes: [256]u16 = @splat(0),
-    sizes: [256]u8 = @splat(0),
+    entries: [256]u32 = @splat(0),
+
+    inline fn code(self: *const HuffmanEncoder, symbol: u32) u32 {
+        return self.entries[symbol] >> 8;
+    }
+    inline fn size(self: *const HuffmanEncoder, symbol: u32) u32 {
+        return self.entries[symbol] & 0xFF;
+    }
 };
 
 fn buildHuffmanEncoder(bits: []const u8, vals: []const u8) HuffmanEncoder {
     var enc = HuffmanEncoder{};
-    var code: u16 = 0;
+    var code: u32 = 0;
     var k: usize = 0;
     for (0..16) |i| {
         const nb = bits[i];
         for (0..nb) |_| {
             const sym = vals[k];
-            enc.codes[sym] = code;
-            enc.sizes[sym] = @intCast(i + 1);
+            enc.entries[sym] = code << 8 | @as(u32, @intCast(i + 1));
             code += 1;
             k += 1;
         }
@@ -419,47 +425,6 @@ fn buildHuffmanEncoder(bits: []const u8, vals: []const u8) HuffmanEncoder {
     }
     return enc;
 }
-
-const EntropyWriter = struct {
-    gpa: Allocator,
-    data: std.ArrayList(u8),
-    bit_buf: u32 = 0,
-    bit_count: u5 = 0,
-
-    pub fn init(gpa: Allocator) EntropyWriter {
-        return .{ .gpa = gpa, .data = .empty };
-    }
-    pub fn deinit(self: *EntropyWriter) void {
-        self.data.deinit(self.gpa);
-    }
-
-    fn writeByte(self: *EntropyWriter, b: u8) !void {
-        try self.data.append(self.gpa, b);
-        if (b == 0xFF) try self.data.append(self.gpa, 0x00);
-    }
-    fn writeBits(self: *EntropyWriter, code: u32, size: u5) !void {
-        self.bit_buf = (self.bit_buf << size) | (code & ((@as(u32, 1) << size) - 1));
-        self.bit_count += size;
-        while (self.bit_count >= 8) {
-            const shard = (self.bit_buf >> (self.bit_count - 8)) & 0xFF;
-            const out: u8 = @intCast(shard);
-            try self.writeByte(out);
-            self.bit_count -= 8;
-        }
-    }
-    fn flush(self: *EntropyWriter) !void {
-        if (self.bit_count > 0) {
-            const pad: u5 = 8 - self.bit_count;
-            try self.writeBits((@as(u32, 1) << pad) - 1, pad);
-        }
-    }
-    /// Ends a restart interval: pads to a byte boundary and emits RSTn (a marker, not stuffed).
-    fn restart(self: *EntropyWriter, n: u3) !void {
-        try self.flush();
-        try self.data.append(self.gpa, 0xFF);
-        try self.data.append(self.gpa, 0xD0 + @as(u8, n));
-    }
-};
 
 fn writeMarker(dst: *std.ArrayList(u8), gpa: Allocator, marker: u16) !void {
     try dst.append(gpa, 0xFF);
@@ -602,356 +567,550 @@ fn writeSOS(dst: *std.ArrayList(u8), gpa: Allocator, grayscale: bool) !void {
     try writeSegment(dst, gpa, 0xFFDA, tmp.items);
 }
 
-fn magnitudeCategory(value: i32) u5 {
-    if (value == 0) return 0;
-    var v: u32 = @intCast(if (value < 0) -value else value);
-    var c: u5 = 0;
-    while (v != 0) : (v >>= 1) c += 1;
-    return c;
-}
-
-fn magnitudeBits(value: i32, mag: u5) u32 {
-    if (mag == 0) return 0;
-    if (value >= 0) return @intCast(value);
-    const base: i32 = (@as(i32, 1) << @intCast(mag)) - 1;
-    return @intCast(base + value);
-}
-
 // -----------------------------
-// Forward DCT - Loeffler-Ligtenberg-Moschytz (LLM) algorithm
+// Encoder: entropy writer
 // -----------------------------
 
-// LLM DCT constants in 13-bit fixed point (CONST_BITS = 13)
-inline fn FIX(comptime x: f32) i32 {
-    return @round(x * (1 << 13));
-}
+/// Big-endian bit packer; every 0xFF byte gets its stuffed zero. Callers reserve room per
+/// block so the hot path never allocates, and code a block through a `Bits` register copy
+/// of the pending bits.
+const BitWriter = struct {
+    gpa: Allocator,
+    list: std.ArrayList(u8) = .empty,
+    pending: Bits = .{},
 
-const FIX_0_298631336: i32 = FIX(0.298631336);
-const FIX_0_390180644: i32 = FIX(0.390180644);
-const FIX_0_541196100: i32 = FIX(0.541196100);
-const FIX_0_765366865: i32 = FIX(0.765366865);
-const FIX_0_899976223: i32 = FIX(0.899976223);
-const FIX_1_175875602: i32 = FIX(1.175875602);
-const FIX_1_501321110: i32 = FIX(1.501321110);
-const FIX_1_847759065: i32 = FIX(1.847759065);
-const FIX_1_961570560: i32 = FIX(1.961570560);
-const FIX_2_053119869: i32 = FIX(2.053119869);
-const FIX_2_562915447: i32 = FIX(2.562915447);
-const FIX_3_072711026: i32 = FIX(3.072711026);
+    /// Right-aligned pending bits.
+    const Bits = struct {
+        acc: u64 = 0,
+        count: u32 = 0,
+    };
 
-inline fn DESCALE(x: i64, n: u5) i32 {
-    const add: i64 = @as(i64, 1) << (n - 1);
-    return @intCast((x + add) >> n);
-}
+    /// The largest block (64 codes of up to 27 bits, every byte stuffed) plus a marker.
+    const block_reserve = 512;
 
-// Integer forward DCT based on libjpeg's jfdctint.c implementation
-// This is an accurate integer implementation using the
-// Loeffler, Ligtenberg and Moschytz algorithm with 12 multiplies and 32 adds.
-fn fdct8x8_llm(src: *const [64]i32, dst: *[64]i32) void {
-    const CONST_BITS: u5 = 13;
-    const PASS1_BITS: u5 = 2;
-
-    var data: [64]i32 = undefined;
-
-    // Pass 1: process rows.
-    // Note results are scaled up by sqrt(8) compared to a true DCT;
-    // furthermore, we scale the results by 2**PASS1_BITS.
-    for (0..8) |y| {
-        const tmp0: i64 = src[y * 8 + 0] + src[y * 8 + 7];
-        const tmp7: i64 = src[y * 8 + 0] - src[y * 8 + 7];
-        const tmp1: i64 = src[y * 8 + 1] + src[y * 8 + 6];
-        const tmp6: i64 = src[y * 8 + 1] - src[y * 8 + 6];
-        const tmp2: i64 = src[y * 8 + 2] + src[y * 8 + 5];
-        const tmp5: i64 = src[y * 8 + 2] - src[y * 8 + 5];
-        const tmp3: i64 = src[y * 8 + 3] + src[y * 8 + 4];
-        const tmp4: i64 = src[y * 8 + 3] - src[y * 8 + 4];
-
-        // Even part per LL&M figure 1 --- note that published figure is faulty;
-        // rotator "sqrt(2)*c1" should be "sqrt(2)*c6".
-        const tmp10 = tmp0 + tmp3;
-        const tmp13 = tmp0 - tmp3;
-        const tmp11 = tmp1 + tmp2;
-        const tmp12 = tmp1 - tmp2;
-
-        data[y * 8 + 0] = @intCast((tmp10 + tmp11) << PASS1_BITS);
-        data[y * 8 + 4] = @intCast((tmp10 - tmp11) << PASS1_BITS);
-
-        const z1 = (tmp12 + tmp13) * FIX_0_541196100;
-        data[y * 8 + 2] = DESCALE(z1 + tmp13 * FIX_0_765366865, CONST_BITS - PASS1_BITS);
-        data[y * 8 + 6] = DESCALE(z1 + tmp12 * (-FIX_1_847759065), CONST_BITS - PASS1_BITS);
-
-        // Odd part per figure 8 --- note paper omits factor of sqrt(2).
-        // cK represents cos(K*pi/16).
-        // lo..i3 in the paper are tmp4..tmp7 here.
-        var z1_odd = tmp4 + tmp7;
-        var z2 = tmp5 + tmp6;
-        var z3 = tmp4 + tmp6;
-        var z4 = tmp5 + tmp7;
-        const z5 = (z3 + z4) * FIX_1_175875602; // sqrt(2) * c3
-
-        const t4 = tmp4 * FIX_0_298631336; // sqrt(2) * (-c1+c3+c5-c7)
-        const t5 = tmp5 * FIX_2_053119869; // sqrt(2) * ( c1+c3-c5+c7)
-        const t6 = tmp6 * FIX_3_072711026; // sqrt(2) * ( c1+c3+c5-c7)
-        const t7 = tmp7 * FIX_1_501321110; // sqrt(2) * ( c1+c3-c5-c7)
-        z1_odd = z1_odd * (-FIX_0_899976223); // sqrt(2) * (c7-c3)
-        z2 = z2 * (-FIX_2_562915447); // sqrt(2) * (-c1-c3)
-        z3 = z3 * (-FIX_1_961570560); // sqrt(2) * (-c3-c5)
-        z4 = z4 * (-FIX_0_390180644); // sqrt(2) * (c5-c3)
-
-        z3 += z5;
-        z4 += z5;
-
-        data[y * 8 + 7] = DESCALE(t4 + z1_odd + z3, CONST_BITS - PASS1_BITS);
-        data[y * 8 + 5] = DESCALE(t5 + z2 + z4, CONST_BITS - PASS1_BITS);
-        data[y * 8 + 3] = DESCALE(t6 + z2 + z3, CONST_BITS - PASS1_BITS);
-        data[y * 8 + 1] = DESCALE(t7 + z1_odd + z4, CONST_BITS - PASS1_BITS);
+    fn deinit(self: *BitWriter) void {
+        self.list.deinit(self.gpa);
     }
 
-    // Pass 2: process columns.
-    // We remove the PASS1_BITS scaling, but leave the results scaled up
-    // by an overall factor of 8.
-    for (0..8) |x| {
-        const tmp0: i64 = data[0 * 8 + x] + data[7 * 8 + x];
-        const tmp7: i64 = data[0 * 8 + x] - data[7 * 8 + x];
-        const tmp1: i64 = data[1 * 8 + x] + data[6 * 8 + x];
-        const tmp6: i64 = data[1 * 8 + x] - data[6 * 8 + x];
-        const tmp2: i64 = data[2 * 8 + x] + data[5 * 8 + x];
-        const tmp5: i64 = data[2 * 8 + x] - data[5 * 8 + x];
-        const tmp3: i64 = data[3 * 8 + x] + data[4 * 8 + x];
-        const tmp4: i64 = data[3 * 8 + x] - data[4 * 8 + x];
-
-        // Even part
-        const tmp10 = tmp0 + tmp3;
-        const tmp13 = tmp0 - tmp3;
-        const tmp11 = tmp1 + tmp2;
-        const tmp12 = tmp1 - tmp2;
-
-        dst[0 * 8 + x] = DESCALE(tmp10 + tmp11, PASS1_BITS);
-        dst[4 * 8 + x] = DESCALE(tmp10 - tmp11, PASS1_BITS);
-
-        const z1 = (tmp12 + tmp13) * FIX_0_541196100;
-        dst[2 * 8 + x] = DESCALE(z1 + tmp13 * FIX_0_765366865, CONST_BITS + PASS1_BITS);
-        dst[6 * 8 + x] = DESCALE(z1 + tmp12 * (-FIX_1_847759065), CONST_BITS + PASS1_BITS);
-
-        // Odd part
-        var z1_odd = tmp4 + tmp7;
-        var z2 = tmp5 + tmp6;
-        var z3 = tmp4 + tmp6;
-        var z4 = tmp5 + tmp7;
-        const z5 = (z3 + z4) * FIX_1_175875602;
-
-        const t4 = tmp4 * FIX_0_298631336;
-        const t5 = tmp5 * FIX_2_053119869;
-        const t6 = tmp6 * FIX_3_072711026;
-        const t7 = tmp7 * FIX_1_501321110;
-        z1_odd = z1_odd * (-FIX_0_899976223);
-        z2 = z2 * (-FIX_2_562915447);
-        z3 = z3 * (-FIX_1_961570560);
-        z4 = z4 * (-FIX_0_390180644);
-
-        z3 += z5;
-        z4 += z5;
-
-        dst[7 * 8 + x] = DESCALE(t4 + z1_odd + z3, CONST_BITS + PASS1_BITS);
-        dst[5 * 8 + x] = DESCALE(t5 + z2 + z4, CONST_BITS + PASS1_BITS);
-        dst[3 * 8 + x] = DESCALE(t6 + z2 + z3, CONST_BITS + PASS1_BITS);
-        dst[1 * 8 + x] = DESCALE(t7 + z1_odd + z4, CONST_BITS + PASS1_BITS);
+    fn reserve(self: *BitWriter) !void {
+        try self.list.ensureUnusedCapacity(self.gpa, block_reserve);
     }
-}
 
-// Reciprocal-based quantization (fold normalization/scaling into the divisor).
-const RECIP_SHIFT: u5 = 24; // high precision for reciprocals
-
-fn buildQuantRecipLLM(divisors_out: *[64]u32, qtbl: *const [64]u8) void {
-    // For LLM DCT (libjpeg-style), the output is scaled by 8
-    // We need to divide by 8 * quantization value
-    for (0..64) |idx| {
-        const q = @as(f64, qtbl[idx]);
-        const scale = 8.0; // Overall factor of 8 from the DCT
-        const recip_f = (@as(f64, 1 << RECIP_SHIFT)) / (q * scale);
-        const recip_u: u32 = @round(@max(0.0, @min(4_294_967_295.0, recip_f)));
-        divisors_out[idx] = recip_u;
+    /// Appends `size` (1-27) bits.
+    inline fn put(self: *BitWriter, bits: *Bits, code: u32, size: u32) void {
+        bits.acc = (bits.acc << @intCast(size)) | code;
+        bits.count += size;
+        if (bits.count >= 32) self.emitWord(bits);
     }
-}
 
-inline fn quantizeWithRecip(val: i32, recip: u32) i32 {
-    if (val == 0) return 0;
-    const a: i64 = if (val < 0) -@as(i64, val) else val;
-    const prod: i64 = a * @as(i64, recip);
-    var q: i64 = (prod + (@as(i64, 1) << (RECIP_SHIFT - 1))) >> RECIP_SHIFT;
-    if (val < 0) q = -q;
-    return @intCast(q);
-}
-
-// Helper function to encode a single 8x8 block
-fn encodeBlock(
-    block: *const [64]i32,
-    quant_recip: *const [64]u32,
-    writer: *EntropyWriter,
-    dc_encoder: *const HuffmanEncoder,
-    ac_encoder: *const HuffmanEncoder,
-    prev_dc: *i32,
-) !void {
-    var dct: [64]i32 = undefined;
-    fdct8x8_llm(block, &dct);
-
-    var coeffs: [64]i32 = undefined;
-    // Quantization using reciprocal divisors (JPEG normalization folded in)
-    for (0..64) |i| coeffs[i] = quantizeWithRecip(dct[i], quant_recip[i]);
-
-    // Encode DC coefficient
-    const dc_coeff = coeffs[0];
-    const diff = dc_coeff - prev_dc.*;
-    prev_dc.* = dc_coeff;
-
-    const mag = magnitudeCategory(diff);
-    try writer.writeBits(@intCast(dc_encoder.codes[mag]), @as(u5, @intCast(dc_encoder.sizes[mag])));
-    if (mag > 0) try writer.writeBits(magnitudeBits(diff, mag), mag);
-
-    // Encode AC coefficients
-    var run: u8 = 0;
-    for (1..64) |k| {
-        const v = coeffs[zigzag[k]];
-        if (v == 0) {
-            run += 1;
-            if (run == 16) {
-                try writer.writeBits(@intCast(ac_encoder.codes[0xF0]), @as(u5, @intCast(ac_encoder.sizes[0xF0])));
-                run = 0;
-            }
+    /// Writes the oldest 32 pending bits, four bytes at once when none is 0xFF.
+    inline fn emitWord(self: *BitWriter, bits: *Bits) void {
+        bits.count -= 32;
+        const word: u32 = @truncate(bits.acc >> @intCast(bits.count));
+        const has_ff = (word & 0x7F7F7F7F) + 0x01010101 & word & 0x80808080;
+        const bytes: [4]u8 = @bitCast(std.mem.nativeToBig(u32, word));
+        if (has_ff == 0) {
+            self.list.appendSliceAssumeCapacity(&bytes);
         } else {
-            while (run >= 16) : (run -= 16) {
-                try writer.writeBits(@intCast(ac_encoder.codes[0xF0]), @as(u5, @intCast(ac_encoder.sizes[0xF0])));
-            }
-            const amag = magnitudeCategory(v);
-            const sym: u8 = (run << 4) | @as(u8, amag);
-            try writer.writeBits(@intCast(ac_encoder.codes[sym]), @as(u5, @intCast(ac_encoder.sizes[sym])));
-            try writer.writeBits(magnitudeBits(v, amag), amag);
-            run = 0;
+            for (bytes) |byte| self.putByte(byte);
         }
     }
-    if (run > 0) try writer.writeBits(@intCast(ac_encoder.codes[0x00]), @as(u5, @intCast(ac_encoder.sizes[0x00])));
+
+    fn putByte(self: *BitWriter, byte: u8) void {
+        self.list.appendAssumeCapacity(byte);
+        if (byte == 0xFF) self.list.appendAssumeCapacity(0x00);
+    }
+
+    /// Pads to a byte boundary with 1 bits and writes everything out.
+    fn flush(self: *BitWriter) void {
+        var bits = self.pending;
+        const partial = bits.count % 8;
+        if (partial != 0) self.put(&bits, (@as(u32, 1) << @intCast(8 - partial)) - 1, 8 - partial);
+        while (bits.count >= 8) {
+            bits.count -= 8;
+            self.putByte(@truncate(bits.acc >> @intCast(bits.count)));
+        }
+        self.pending = bits;
+    }
+
+    /// Ends a restart interval: pads and emits RSTn (a marker, not stuffed).
+    fn restart(self: *BitWriter, n: u3) void {
+        self.flush();
+        self.list.appendAssumeCapacity(0xFF);
+        self.list.appendAssumeCapacity(0xD0 + @as(u8, n));
+    }
+};
+
+inline fn magnitudeCategory(value: i32) u5 {
+    return @intCast(32 - @clz(@abs(value)));
 }
 
-fn encodeBlocksRgb(
-    image: Image(Rgb),
-    subsampling: Subsampling,
-    restart_interval: u16,
-    ql_recip: *const [64]u32,
-    qc_recip: *const [64]u32,
-    writer: *EntropyWriter,
-    dc_luma: *const HuffmanEncoder,
-    ac_luma: *const HuffmanEncoder,
-    dc_chroma: *const HuffmanEncoder,
-    ac_chroma: *const HuffmanEncoder,
-) !void {
-    const rows: usize = image.rows;
-    const cols: usize = image.cols;
-    const h_max: usize = switch (subsampling) {
-        .yuv444 => 1,
-        .yuv422 => 2,
-        .yuv420 => 2,
-    };
-    const v_max: usize = switch (subsampling) {
-        .yuv444 => 1,
-        .yuv422 => 1,
-        .yuv420 => 2,
-    };
-    const mcu_rows: usize = (rows + (8 * v_max) - 1) / (8 * v_max);
-    const mcu_cols: usize = (cols + (8 * h_max) - 1) / (8 * h_max);
+/// Magnitude bits of `value` (T.81 F.1.2.1): negative values are stored as their one's
+/// complement, computed without a branch on the sign.
+inline fn magnitudeBits(value: i32, mag: u5) u32 {
+    const negative_mask = value >> 31;
+    return @bitCast(value + (negative_mask & ((@as(i32, 1) << mag) - 1)));
+}
 
-    var prev_dc_y: i32 = 0;
-    var prev_dc_cb: i32 = 0;
-    var prev_dc_cr: i32 = 0;
-
-    var block: [64]i32 = undefined;
-
-    // MCU buffer - sized for the largest case (16x16 for 4:2:0)
-    var mcu_buffer: [16][16]Ycbcr = undefined;
-    const mcu_width = 8 * h_max;
-    const mcu_height = 8 * v_max;
-
-    var mcus_in_interval: u16 = 0;
-    var rst_index: u3 = 0;
-    for (0..mcu_rows) |mcu_y| {
-        for (0..mcu_cols) |mcu_x| {
-            if (restart_interval != 0 and mcus_in_interval == restart_interval) {
-                try writer.restart(rst_index);
-                rst_index +%= 1;
-                mcus_in_interval = 0;
-                prev_dc_y = 0;
-                prev_dc_cb = 0;
-                prev_dc_cr = 0;
+/// Maps each byte of a natural-order nonzero mask to its bits in zigzag order.
+const zigzag_masks: [8][256]u64 = blk: {
+    @setEvalBranchQuota(20000);
+    var inverse: [64]u6 = undefined;
+    for (zigzag, 0..) |natural, k| inverse[natural] = k;
+    var tables: [8][256]u64 = undefined;
+    for (&tables, 0..) |*table, byte| {
+        for (table, 0..) |*entry, pattern| {
+            var m: u64 = 0;
+            for (0..8) |bit| {
+                if (pattern >> bit & 1 != 0) m |= @as(u64, 1) << inverse[byte * 8 + bit];
             }
-            mcus_in_interval += 1;
-            const mcu_px0 = mcu_x * mcu_width;
-            const mcu_py0 = mcu_y * mcu_height;
-
-            // Convert entire MCU to YCbCr once
-            for (0..mcu_height) |y| {
-                const iy = @min(rows - 1, mcu_py0 + y);
-                for (0..mcu_width) |x| {
-                    const ix = @min(cols - 1, mcu_px0 + x);
-                    mcu_buffer[y][x] = convertColor(Ycbcr, image.at(iy, ix).*);
-                }
-            }
-
-            // Encode Y blocks directly from buffer
-            for (0..v_max) |vy| {
-                for (0..h_max) |hx| {
-                    const by0 = vy * 8;
-                    const bx0 = hx * 8;
-                    for (0..8) |y| {
-                        for (0..8) |x| {
-                            block[y * 8 + x] = @as(i32, mcu_buffer[by0 + y][bx0 + x].y) - 128;
-                        }
-                    }
-                    try encodeBlock(&block, ql_recip, writer, dc_luma, ac_luma, &prev_dc_y);
-                }
-            }
-
-            // Encode Cb block with downsampling from buffer
-            for (0..8) |y| {
-                for (0..8) |x| {
-                    if (h_max == 1 and v_max == 1) {
-                        // 4:4:4 - no downsampling
-                        block[y * 8 + x] = @as(i32, mcu_buffer[y][x].cb) - 128;
-                    } else {
-                        // Average the corresponding pixels for downsampling
-                        var sum_cb: u32 = 0;
-                        for (0..v_max) |dy| {
-                            for (0..h_max) |dx| {
-                                sum_cb += mcu_buffer[y * v_max + dy][x * h_max + dx].cb;
-                            }
-                        }
-                        const avg_cb = sum_cb / (h_max * v_max);
-                        block[y * 8 + x] = @as(i32, @intCast(avg_cb)) - 128;
-                    }
-                }
-            }
-            try encodeBlock(&block, qc_recip, writer, dc_chroma, ac_chroma, &prev_dc_cb);
-
-            // Encode Cr block with downsampling from buffer
-            for (0..8) |y| {
-                for (0..8) |x| {
-                    if (h_max == 1 and v_max == 1) {
-                        // 4:4:4 - no downsampling
-                        block[y * 8 + x] = @as(i32, mcu_buffer[y][x].cr) - 128;
-                    } else {
-                        // Average the corresponding pixels for downsampling
-                        var sum_cr: u32 = 0;
-                        for (0..v_max) |dy| {
-                            for (0..h_max) |dx| {
-                                sum_cr += mcu_buffer[y * v_max + dy][x * h_max + dx].cr;
-                            }
-                        }
-                        const avg_cr = sum_cr / (h_max * v_max);
-                        block[y * 8 + x] = @as(i32, @intCast(avg_cr)) - 128;
-                    }
-                }
-            }
-            try encodeBlock(&block, qc_recip, writer, dc_chroma, ac_chroma, &prev_dc_cr);
+            entry.* = m;
         }
     }
+    break :blk tables;
+};
+
+/// Huffman-codes one quantized block (natural order) with the DC predictor. A bitmask of
+/// the nonzero coefficients in zigzag order drives the loop, one step per coded coefficient,
+/// so zero runs cost no branches.
+fn encodeBlockCoefs(w: *BitWriter, coefs: *const [64]i16, dc: *const HuffmanEncoder, ac: *const HuffmanEncoder, prev_dc: *i32) void {
+    var bits = w.pending;
+    defer w.pending = bits;
+
+    const dc_val: i32 = coefs[0];
+    const diff = dc_val - prev_dc.*;
+    prev_dc.* = dc_val;
+    const mag = magnitudeCategory(diff);
+    w.put(&bits, dc.code(mag) << mag | magnitudeBits(diff, mag), dc.size(mag) + mag);
+
+    var natural: u64 = 0;
+    inline for (0..4) |i| {
+        const v: @Vector(16, i16) = coefs[i * 16 ..][0..16].*;
+        const nonzero: u16 = @bitCast(v != @as(@Vector(16, i16), @splat(0)));
+        natural |= @as(u64, nonzero) << (i * 16);
+    }
+    var mask: u64 = 0;
+    inline for (0..8) |i| mask |= zigzag_masks[i][@as(u8, @truncate(natural >> (8 * i)))];
+    mask &= ~@as(u64, 1);
+
+    var last: u32 = 0;
+    while (mask != 0) {
+        const k: u32 = @ctz(mask);
+        mask &= mask - 1;
+        var run = k - last - 1;
+        while (run >= 16) : (run -= 16) w.put(&bits, ac.code(0xF0), ac.size(0xF0));
+        const v: i32 = coefs[zigzag[k]];
+        const m = magnitudeCategory(v);
+        const sym = run << 4 | m;
+        w.put(&bits, ac.code(sym) << m | magnitudeBits(v, m), ac.size(sym) + m);
+        last = k;
+    }
+    if (last != 63) w.put(&bits, ac.code(0x00), ac.size(0x00));
+}
+
+// -----------------------------
+// Encoder: forward DCT and quantization
+// -----------------------------
+
+/// Quantizer for one coefficient position: `(|x| + corr) * recip >> shift` equals
+/// `(|x| + d / 2) / d` for every 15-bit `|x|` (libjpeg-turbo's reciprocal construction).
+const QuantDivisor = struct {
+    recip: u32,
+    corr: u32,
+    shift: u32,
+
+    fn init(divisor: u32) QuantDivisor {
+        std.debug.assert(divisor >= 2);
+        const b: u5 = @intCast(31 - @clz(divisor));
+        var shift: u6 = @as(u6, 16) + b;
+        var recip: u64 = (@as(u64, 1) << shift) / divisor;
+        const rem = (@as(u64, 1) << shift) % divisor;
+        var corr: u32 = divisor / 2;
+        if (rem == 0) {
+            // Power of two: the reciprocal would need 17 bits.
+            recip >>= 1;
+            shift -= 1;
+        } else if (rem <= divisor / 2) {
+            corr += 1;
+        } else {
+            recip += 1;
+        }
+        return .{ .recip = @intCast(recip), .corr = corr, .shift = shift };
+    }
+};
+
+/// Per-component quantization: divisors are `8 * q`, the DCT's own scale folded in.
+const Quantizer = struct {
+    recip: [64]u32,
+    corr: [64]u32,
+    shift: [64]u32,
+
+    fn init(table: *const [64]u8) Quantizer {
+        var self: Quantizer = undefined;
+        for (table, 0..) |q, i| {
+            const d: QuantDivisor = .init(@as(u32, q) * 8);
+            self.recip[i] = d.recip;
+            self.corr[i] = d.corr;
+            self.shift[i] = d.shift;
+        }
+        return self;
+    }
+};
+
+/// Forward DCT: libjpeg's jfdctint butterflies on 16-lane vectors, two blocks side by side
+/// like `Idct`, followed by quantization. Output is the quantized block in natural order.
+const Fdct = struct {
+    const V16 = Dct.V16;
+    const V8 = Dct.V8;
+    const U32 = @Vector(16, u32);
+
+    const const_bits = 13;
+    fn fix(comptime x: f32) i16 {
+        return @intFromFloat(@round(x * (1 << const_bits)));
+    }
+    const f0298 = fix(0.298631336);
+    const f0390 = fix(0.390180644);
+    const f0541 = fix(0.541196100);
+    const f0765 = fix(0.765366865);
+    const f0899 = fix(0.899976223);
+    const f1175 = fix(1.175875602);
+    const f1501 = fix(1.501321110);
+    const f1847 = fix(1.847759065);
+    const f1961 = fix(1.961570560);
+    const f2053 = fix(2.053119869);
+    const f2562 = fix(2.562915447);
+    const f3072 = fix(3.072711026);
+
+    // Even outputs from (tmp13, tmp12); odd outputs as two dot products over (tmp4, tmp7)
+    // and (tmp5, tmp6), the z1..z5 cross terms of jfdctint folded into the constants.
+    const c2 = Dct.pair(f0541 + f0765, f0541);
+    const c6 = Dct.pair(f0541, f0541 - f1847);
+    const c7a = Dct.pair(f0298 - f0899 - f1961 + f1175, f1175 - f0899);
+    const c7b = Dct.pair(f1175, f1175 - f1961);
+    const c5a = Dct.pair(f1175, f1175 - f0390);
+    const c5b = Dct.pair(f2053 - f2562 - f0390 + f1175, f1175 - f2562);
+    const c3a = Dct.pair(f1175 - f1961, f1175);
+    const c3b = Dct.pair(f1175 - f2562, f3072 - f2562 - f1961 + f1175);
+    const c1a = Dct.pair(f1175 - f0899, f1501 - f0899 - f0390 + f1175);
+    const c1b = Dct.pair(f1175 - f0390, f1175);
+
+    inline fn descale(l: V8, h: V8, comptime shift: u5) V16 {
+        const round: V8 = @splat(@as(i32, 1) << (shift - 1));
+        return Dct.packs((l + round) >> @splat(shift), (h + round) >> @splat(shift));
+    }
+
+    /// One 1-D pass. Pass 1 keeps two extra fraction bits, pass 2 removes them.
+    inline fn pass(r: *[8]V16, comptime first: bool) void {
+        const tmp0 = r[0] +| r[7];
+        const tmp7 = r[0] -| r[7];
+        const tmp1 = r[1] +| r[6];
+        const tmp6 = r[1] -| r[6];
+        const tmp2 = r[2] +| r[5];
+        const tmp5 = r[2] -| r[5];
+        const tmp3 = r[3] +| r[4];
+        const tmp4 = r[3] -| r[4];
+        const tmp10 = tmp0 +| tmp3;
+        const tmp13 = tmp0 -| tmp3;
+        const tmp11 = tmp1 +| tmp2;
+        const tmp12 = tmp1 -| tmp2;
+        const shift = if (first) const_bits - 2 else const_bits + 2;
+        if (first) {
+            r[0] = (tmp10 +| tmp11) << @splat(2);
+            r[4] = (tmp10 -| tmp11) << @splat(2);
+        } else {
+            const two: V16 = @splat(2);
+            r[0] = (tmp10 +| tmp11 +| two) >> @splat(2);
+            r[4] = (tmp10 -| tmp11 +| two) >> @splat(2);
+        }
+        const e_lo = Dct.unpacklo(tmp13, tmp12);
+        const e_hi = Dct.unpackhi(tmp13, tmp12);
+        r[2] = descale(Dct.madd(e_lo, c2), Dct.madd(e_hi, c2), shift);
+        r[6] = descale(Dct.madd(e_lo, c6), Dct.madd(e_hi, c6), shift);
+        const a_lo = Dct.unpacklo(tmp4, tmp7);
+        const a_hi = Dct.unpackhi(tmp4, tmp7);
+        const b_lo = Dct.unpacklo(tmp5, tmp6);
+        const b_hi = Dct.unpackhi(tmp5, tmp6);
+        r[7] = descale(Dct.madd(a_lo, c7a) + Dct.madd(b_lo, c7b), Dct.madd(a_hi, c7a) + Dct.madd(b_hi, c7b), shift);
+        r[5] = descale(Dct.madd(a_lo, c5a) + Dct.madd(b_lo, c5b), Dct.madd(a_hi, c5a) + Dct.madd(b_hi, c5b), shift);
+        r[3] = descale(Dct.madd(a_lo, c3a) + Dct.madd(b_lo, c3b), Dct.madd(a_hi, c3a) + Dct.madd(b_hi, c3b), shift);
+        r[1] = descale(Dct.madd(a_lo, c1a) + Dct.madd(b_lo, c1b), Dct.madd(a_hi, c1a) + Dct.madd(b_hi, c1b), shift);
+    }
+
+    /// Transforms and quantizes the 8x8 sample tiles at `a` and `b` (the same component),
+    /// row-major with `stride`, into natural-order coefficient blocks.
+    fn pairInto(a: [*]const u8, b: [*]const u8, stride: usize, quant: *const Quantizer, out_a: *[64]i16, out_b: *[64]i16) void {
+        var r: [8]V16 = undefined;
+        for (0..8) |i| {
+            const row_a: @Vector(8, u8) = a[i * stride ..][0..8].*;
+            const row_b: @Vector(8, u8) = b[i * stride ..][0..8].*;
+            const samples: V16 = @intCast(@shuffle(u8, row_a, row_b, Dct.concat));
+            r[i] = samples - @as(V16, @splat(128));
+        }
+        // Rows first (lanes are rows after a transpose), then columns.
+        Dct.transpose(&r);
+        pass(&r, true);
+        Dct.transpose(&r);
+        pass(&r, false);
+        for (0..8) |i| {
+            const recip: U32 = @shuffle(u32, @as(@Vector(8, u32), quant.recip[i * 8 ..][0..8].*), undefined, Dct.dup8);
+            const corr: U32 = @shuffle(u32, @as(@Vector(8, u32), quant.corr[i * 8 ..][0..8].*), undefined, Dct.dup8);
+            const shift: U32 = @shuffle(u32, @as(@Vector(8, u32), quant.shift[i * 8 ..][0..8].*), undefined, Dct.dup8);
+            const mag: U32 = @intCast(@abs(r[i]));
+            const q: V16 = @intCast(((mag + corr) * recip) >> @as(@Vector(16, u5), @intCast(shift)));
+            const signed = @select(i16, r[i] < @as(V16, @splat(0)), -q, q);
+            const both: [16]i16 = signed;
+            out_a[i * 8 ..][0..8].* = both[0..8].*;
+            out_b[i * 8 ..][0..8].* = both[8..16].*;
+        }
+    }
+};
+
+// -----------------------------
+// Encoder: MCU-row pipeline
+// -----------------------------
+
+/// Sample planes for one MCU row: luma at full resolution, chroma at its sampling, widths
+/// padded to whole MCUs (edge pixels replicated) plus vector slack, and the quantized
+/// coefficient blocks of the row in plane order.
+const EncodeBand = struct {
+    allocator: Allocator,
+    h_max: usize,
+    v_max: usize,
+    mcu_cols: usize,
+    y_stride: usize,
+    c_stride: usize,
+    y: []u8,
+    /// Full-resolution chroma; the subsampled planes are derived from these.
+    cb_full: []u8,
+    cr_full: []u8,
+    cb: []u8,
+    cr: []u8,
+    y_coefs: [][64]i16,
+    cb_coefs: [][64]i16,
+    cr_coefs: [][64]i16,
+
+    const slack = 32;
+
+    fn init(allocator: Allocator, cols: usize, h_max: usize, v_max: usize, chroma: bool) !EncodeBand {
+        const mcu_cols = (cols + 8 * h_max - 1) / (8 * h_max);
+        const y_stride = mcu_cols * 8 * h_max;
+        const c_stride = mcu_cols * 8;
+        const rows = 8 * v_max;
+        var self: EncodeBand = .{
+            .allocator = allocator,
+            .h_max = h_max,
+            .v_max = v_max,
+            .mcu_cols = mcu_cols,
+            .y_stride = y_stride,
+            .c_stride = c_stride,
+            .y = &.{},
+            .cb_full = &.{},
+            .cr_full = &.{},
+            .cb = &.{},
+            .cr = &.{},
+            .y_coefs = &.{},
+            .cb_coefs = &.{},
+            .cr_coefs = &.{},
+        };
+        errdefer self.deinit();
+        self.y = try allocator.alloc(u8, y_stride * rows + slack);
+        self.y_coefs = try allocator.alloc([64]i16, mcu_cols * h_max * v_max);
+        if (chroma) {
+            self.cb_full = try allocator.alloc(u8, y_stride * rows + slack);
+            self.cr_full = try allocator.alloc(u8, y_stride * rows + slack);
+            if (h_max == 1 and v_max == 1) {
+                self.cb = self.cb_full;
+                self.cr = self.cr_full;
+            } else {
+                self.cb = try allocator.alloc(u8, c_stride * 8 + slack);
+                self.cr = try allocator.alloc(u8, c_stride * 8 + slack);
+            }
+            self.cb_coefs = try allocator.alloc([64]i16, mcu_cols);
+            self.cr_coefs = try allocator.alloc([64]i16, mcu_cols);
+        }
+        return self;
+    }
+
+    fn deinit(self: *EncodeBand) void {
+        self.allocator.free(self.y);
+        self.allocator.free(self.cb_full);
+        self.allocator.free(self.cr_full);
+        if (self.cb.ptr != self.cb_full.ptr) {
+            self.allocator.free(self.cb);
+            self.allocator.free(self.cr);
+        }
+        self.allocator.free(self.y_coefs);
+        self.allocator.free(self.cb_coefs);
+        self.allocator.free(self.cr_coefs);
+    }
+
+    /// Converts the pixel rows of MCU row `mcu_y` into the planes, replicating edges.
+    fn fillRgb(self: *EncodeBand, image: Image(Rgb), mcu_y: usize) void {
+        const rows = 8 * self.v_max;
+        for (0..rows) |r| {
+            const src_row = @min(mcu_y * rows + r, image.rows - 1);
+            const src = image.data[src_row * image.stride ..][0..image.cols];
+            convertRow(src, self.y[r * self.y_stride ..], self.cb_full[r * self.y_stride ..], self.cr_full[r * self.y_stride ..]);
+            for ([_][]u8{ self.y, self.cb_full, self.cr_full }) |plane| {
+                const row = plane[r * self.y_stride ..][0..self.y_stride];
+                @memset(row[image.cols..], row[image.cols - 1]);
+            }
+        }
+        if (self.h_max == 2) {
+            for ([_][2][]u8{ .{ self.cb_full, self.cb }, .{ self.cr_full, self.cr } }) |planes| {
+                for (0..8) |cy| {
+                    const top = planes[0][cy * self.v_max * self.y_stride ..];
+                    const bottom = planes[0][(cy * self.v_max + self.v_max - 1) * self.y_stride ..];
+                    downsampleRow(top, bottom, self.v_max == 2, planes[1][cy * self.c_stride ..], self.c_stride);
+                }
+            }
+        }
+    }
+
+    /// Copies grayscale rows into the luma plane, replicating edges.
+    fn fillGray(self: *EncodeBand, bytes: []const u8, cols: usize, rows_total: usize, mcu_y: usize) void {
+        for (0..8) |r| {
+            const src_row = @min(mcu_y * 8 + r, rows_total - 1);
+            const row = self.y[r * self.y_stride ..][0..self.y_stride];
+            @memcpy(row[0..cols], bytes[src_row * cols ..][0..cols]);
+            @memset(row[cols..], row[cols - 1]);
+        }
+    }
+
+    /// BT.601 RGB to YCbCr, 16 pixels at a time with the fixed-point constants of
+    /// `convertColor`, so the result matches the scalar conversion exactly.
+    fn convertRow(src: []const Rgb, y: []u8, cb: []u8, cr: []u8) void {
+        const V = @Vector(16, i32);
+        const B = @Vector(16, u8);
+        var px: usize = 0;
+        if (RenderBand.packed_rgb) {
+            while (px + 16 <= src.len) : (px += 16) {
+                const bytes: @Vector(48, u8) = std.mem.sliceAsBytes(src[px..][0..16])[0..48].*;
+                const r: V = @intCast(@shuffle(u8, bytes, undefined, deinterleave_r));
+                const g: V = @intCast(@shuffle(u8, bytes, undefined, deinterleave_g));
+                const b: V = @intCast(@shuffle(u8, bytes, undefined, deinterleave_b));
+                const half: V = @splat(32768);
+                const bias: V = @splat(128);
+                const lo: V = @splat(0);
+                const hi: V = @splat(255);
+                const yv = (@as(V, @splat(19595)) * r + @as(V, @splat(38470)) * g + @as(V, @splat(7471)) * b + half) >> @splat(16);
+                const cbv = ((@as(V, @splat(-11059)) * r + @as(V, @splat(-21710)) * g + @as(V, @splat(32768)) * b + half) >> @splat(16)) + bias;
+                const crv = ((@as(V, @splat(32768)) * r + @as(V, @splat(-27439)) * g + @as(V, @splat(-5329)) * b + half) >> @splat(16)) + bias;
+                y[px..][0..16].* = @as(B, @intCast(std.math.clamp(yv, lo, hi)));
+                cb[px..][0..16].* = @as(B, @intCast(std.math.clamp(cbv, lo, hi)));
+                cr[px..][0..16].* = @as(B, @intCast(std.math.clamp(crv, lo, hi)));
+            }
+        }
+        for (src[px..], y[px..src.len], cb[px..src.len], cr[px..src.len]) |p, *yo, *cbo, *cro| {
+            const ycc = convertColor(Ycbcr, p);
+            yo.* = ycc.y;
+            cbo.* = ycc.cb;
+            cro.* = ycc.cr;
+        }
+    }
+
+    const deinterleave_r = blk: {
+        var m: [16]i32 = undefined;
+        for (0..16) |i| m[i] = 3 * i;
+        break :blk m;
+    };
+    const deinterleave_g = blk: {
+        var m: [16]i32 = undefined;
+        for (0..16) |i| m[i] = 3 * i + 1;
+        break :blk m;
+    };
+    const deinterleave_b = blk: {
+        var m: [16]i32 = undefined;
+        for (0..16) |i| m[i] = 3 * i + 2;
+        break :blk m;
+    };
+    const evens = blk: {
+        var m: [16]i32 = undefined;
+        for (0..16) |i| m[i] = 2 * i;
+        break :blk m;
+    };
+    const odds = blk: {
+        var m: [16]i32 = undefined;
+        for (0..16) |i| m[i] = 2 * i + 1;
+        break :blk m;
+    };
+
+    /// Averages horizontal pairs (and the two rows when `vertical`) into `dst`, rounding
+    /// to nearest: 16 chroma samples per step from 32 (or 64) inputs.
+    fn downsampleRow(top: []const u8, bottom: []const u8, vertical: bool, dst: []u8, count: usize) void {
+        const W = @Vector(32, u16);
+        const V = @Vector(16, u16);
+        var cx: usize = 0;
+        while (cx < count) : (cx += 16) {
+            var sum: W = @intCast(@as(@Vector(32, u8), top[2 * cx ..][0..32].*));
+            if (vertical) sum += @as(W, @intCast(@as(@Vector(32, u8), bottom[2 * cx ..][0..32].*)));
+            const pairs: V = @shuffle(u16, sum, undefined, evens) + @shuffle(u16, sum, undefined, odds);
+            const avg = if (vertical) (pairs + @as(V, @splat(2))) >> @splat(2) else (pairs + @as(V, @splat(1))) >> @splat(1);
+            dst[cx..][0..16].* = @as(@Vector(16, u8), @intCast(avg));
+        }
+    }
+
+    /// Transforms every block of a plane in adjacent pairs (an odd last block against itself).
+    fn transformPlane(plane: []const u8, stride: usize, block_rows: usize, quant: *const Quantizer, coefs: [][64]i16) void {
+        const blocks_per_row = stride / 8;
+        for (0..block_rows) |by| {
+            const row = plane[by * 8 * stride ..].ptr;
+            var bx: usize = 0;
+            while (bx < blocks_per_row) : (bx += 2) {
+                const bx1 = @min(bx + 1, blocks_per_row - 1);
+                var spare: [64]i16 = undefined;
+                const out_b = if (bx1 == bx) &spare else &coefs[by * blocks_per_row + bx1];
+                Fdct.pairInto(row + bx * 8, row + bx1 * 8, stride, quant, &coefs[by * blocks_per_row + bx], out_b);
+            }
+        }
+    }
+};
+
+const ScanTables = struct {
+    y_quant: Quantizer,
+    c_quant: Quantizer,
+    dc_luma: HuffmanEncoder,
+    ac_luma: HuffmanEncoder,
+    dc_chroma: HuffmanEncoder,
+    ac_chroma: HuffmanEncoder,
+};
+
+/// Entropy-codes one MCU row from the band's coefficient blocks in interleaved order.
+fn encodeBandScan(w: *BitWriter, band: *const EncodeBand, tables: *const ScanTables, chroma: bool, restart_interval: u16, mcus_in_interval: *u16, rst_index: *u3, prev_dc: *[3]i32) !void {
+    const blocks_per_row = band.y_stride / 8;
+    for (0..band.mcu_cols) |mcu_x| {
+        try w.reserve();
+        if (restart_interval != 0 and mcus_in_interval.* == restart_interval) {
+            w.restart(rst_index.*);
+            rst_index.* +%= 1;
+            mcus_in_interval.* = 0;
+            prev_dc.* = @splat(0);
+        }
+        mcus_in_interval.* += 1;
+        for (0..band.v_max) |vy| {
+            for (0..band.h_max) |hx| {
+                try w.reserve();
+                encodeBlockCoefs(w, &band.y_coefs[vy * blocks_per_row + mcu_x * band.h_max + hx], &tables.dc_luma, &tables.ac_luma, &prev_dc[0]);
+            }
+        }
+        if (chroma) {
+            try w.reserve();
+            encodeBlockCoefs(w, &band.cb_coefs[mcu_x], &tables.dc_chroma, &tables.ac_chroma, &prev_dc[1]);
+            try w.reserve();
+            encodeBlockCoefs(w, &band.cr_coefs[mcu_x], &tables.dc_chroma, &tables.ac_chroma, &prev_dc[2]);
+        }
+    }
+}
+
+fn scanTables(ql: *const [64]u8, qc: *const [64]u8) ScanTables {
+    return .{
+        .y_quant = .init(ql),
+        .c_quant = .init(qc),
+        .dc_luma = buildHuffmanEncoder(&StdTables.bits_dc_luma, &StdTables.val_dc_luma),
+        .ac_luma = buildHuffmanEncoder(&StdTables.bits_ac_luma, &StdTables.val_ac_luma),
+        .dc_chroma = buildHuffmanEncoder(&StdTables.bits_dc_chroma, &StdTables.val_dc_chroma),
+        .ac_chroma = buildHuffmanEncoder(&StdTables.bits_ac_chroma, &StdTables.val_ac_chroma),
+    };
 }
 
 fn encodeRgb(allocator: Allocator, image: Image(Rgb), options: EncodeOptions) ![]u8 {
@@ -974,27 +1133,35 @@ fn encodeRgb(allocator: Allocator, image: Image(Rgb), options: EncodeOptions) ![
     if (options.restart_interval != 0) try writeDRI(&out, allocator, options.restart_interval);
     try writeSOS(&out, allocator, false);
 
-    // Entropy-coded data
-    var ew = EntropyWriter.init(allocator);
-    defer ew.deinit();
+    const h_max: usize = switch (options.subsampling) {
+        .yuv444 => 1,
+        .yuv422, .yuv420 => 2,
+    };
+    const v_max: usize = switch (options.subsampling) {
+        .yuv444, .yuv422 => 1,
+        .yuv420 => 2,
+    };
+    const tables = scanTables(&ql, &qc);
+    var band: EncodeBand = try .init(allocator, image.cols, h_max, v_max, true);
+    defer band.deinit();
+    var w: BitWriter = .{ .gpa = allocator };
+    defer w.deinit();
 
-    // Build Huffman encoders
-    const dc_luma = buildHuffmanEncoder(&StdTables.bits_dc_luma, &StdTables.val_dc_luma);
-    const ac_luma = buildHuffmanEncoder(&StdTables.bits_ac_luma, &StdTables.val_ac_luma);
-    const dc_chroma = buildHuffmanEncoder(&StdTables.bits_dc_chroma, &StdTables.val_dc_chroma);
-    const ac_chroma = buildHuffmanEncoder(&StdTables.bits_ac_chroma, &StdTables.val_ac_chroma);
+    var prev_dc: [3]i32 = @splat(0);
+    var mcus_in_interval: u16 = 0;
+    var rst_index: u3 = 0;
+    const mcu_rows = (image.rows + 8 * v_max - 1) / (8 * v_max);
+    for (0..mcu_rows) |mcu_y| {
+        band.fillRgb(image, mcu_y);
+        EncodeBand.transformPlane(band.y, band.y_stride, v_max, &tables.y_quant, band.y_coefs);
+        EncodeBand.transformPlane(band.cb, band.c_stride, 1, &tables.c_quant, band.cb_coefs);
+        EncodeBand.transformPlane(band.cr, band.c_stride, 1, &tables.c_quant, band.cr_coefs);
+        try encodeBandScan(&w, &band, &tables, true, options.restart_interval, &mcus_in_interval, &rst_index, &prev_dc);
+    }
+    try w.reserve();
+    w.flush();
 
-    // Build reciprocal quantization tables with folded normalization/scaling
-    var ql_recip: [64]u32 = undefined;
-    var qc_recip: [64]u32 = undefined;
-    buildQuantRecipLLM(&ql_recip, &ql);
-    buildQuantRecipLLM(&qc_recip, &qc);
-
-    try encodeBlocksRgb(image, options.subsampling, options.restart_interval, &ql_recip, &qc_recip, &ew, &dc_luma, &ac_luma, &dc_chroma, &ac_chroma);
-    try ew.flush();
-
-    // Append entropy-coded bytes into output
-    try out.appendSlice(allocator, ew.data.items);
+    try out.appendSlice(allocator, w.list.items);
 
     // EOI
     try out.append(allocator, 0xFF);
@@ -1004,8 +1171,6 @@ fn encodeRgb(allocator: Allocator, image: Image(Rgb), options: EncodeOptions) ![
 }
 
 fn encodeGrayscale(allocator: Allocator, bytes: []const u8, width: u32, height: u32, options: EncodeOptions) ![]u8 {
-    _ = options.subsampling; // not used for grayscale
-
     var out = std.ArrayList(u8).empty;
     defer out.deinit(allocator);
 
@@ -1017,8 +1182,8 @@ fn encodeGrayscale(allocator: Allocator, bytes: []const u8, width: u32, height: 
     if (options.comment) |c| try writeCOM(&out, allocator, c);
 
     var ql: [64]u8 = undefined;
-    var dummy: [64]u8 = undefined;
-    scaleQuantTables(options.quality, &ql, &dummy);
+    var qc: [64]u8 = undefined;
+    scaleQuantTables(options.quality, &ql, &qc);
     // Only luma table used
     var tmp_dqt = std.ArrayList(u8).empty;
     defer tmp_dqt.deinit(allocator);
@@ -1031,50 +1196,25 @@ fn encodeGrayscale(allocator: Allocator, bytes: []const u8, width: u32, height: 
     if (options.restart_interval != 0) try writeDRI(&out, allocator, options.restart_interval);
     try writeSOS(&out, allocator, true);
 
-    var ew = EntropyWriter.init(allocator);
-    defer ew.deinit();
+    const tables = scanTables(&ql, &qc);
+    const cols: usize = width;
+    const rows: usize = height;
+    var band: EncodeBand = try .init(allocator, cols, 1, 1, false);
+    defer band.deinit();
+    var w: BitWriter = .{ .gpa = allocator };
+    defer w.deinit();
 
-    const dc = buildHuffmanEncoder(&StdTables.bits_dc_luma, &StdTables.val_dc_luma);
-    const ac = buildHuffmanEncoder(&StdTables.bits_ac_luma, &StdTables.val_ac_luma);
-
-    // Build reciprocal quantization table with folded normalization/scaling
-    var ql_recip: [64]u32 = undefined;
-    buildQuantRecipLLM(&ql_recip, &ql);
-
-    var prev_dc: i32 = 0;
-
-    const rows: usize = @intCast(height);
-    const cols: usize = @intCast(width);
-    const block_rows: usize = (rows + 7) / 8;
-    const block_cols: usize = (cols + 7) / 8;
-    var block: [64]i32 = undefined;
-
+    var prev_dc: [3]i32 = @splat(0);
     var mcus_in_interval: u16 = 0;
     var rst_index: u3 = 0;
-    for (0..block_rows) |br| {
-        for (0..block_cols) |bc| {
-            if (options.restart_interval != 0 and mcus_in_interval == options.restart_interval) {
-                try ew.restart(rst_index);
-                rst_index +%= 1;
-                mcus_in_interval = 0;
-                prev_dc = 0;
-            }
-            mcus_in_interval += 1;
-            for (0..8) |y| {
-                const iy = @min(rows - 1, br * 8 + y);
-                for (0..8) |x| {
-                    const ix = @min(cols - 1, bc * 8 + x);
-                    const v: u8 = bytes[iy * cols + ix];
-                    // Convert to fixed-point, center at 128
-                    block[y * 8 + x] = @as(i32, v) - 128;
-                }
-            }
-            try encodeBlock(&block, &ql_recip, &ew, &dc, &ac, &prev_dc);
-        }
+    for (0..(rows + 7) / 8) |mcu_y| {
+        band.fillGray(bytes, cols, rows, mcu_y);
+        EncodeBand.transformPlane(band.y, band.y_stride, 1, &tables.y_quant, band.y_coefs);
+        try encodeBandScan(&w, &band, &tables, false, options.restart_interval, &mcus_in_interval, &rst_index, &prev_dc);
     }
-
-    try ew.flush();
-    try out.appendSlice(allocator, ew.data.items);
+    try w.reserve();
+    w.flush();
+    try out.appendSlice(allocator, w.list.items);
     try out.append(allocator, 0xFF);
     try out.append(allocator, 0xD9);
     return out.toOwnedSlice(allocator);
@@ -2247,13 +2387,13 @@ pub fn decode(allocator: Allocator, data: []const u8, limits: DecodeLimits) !Jpe
 // vectors, two blocks side by side (lanes 0-7 block A, 8-15 block B). Every 16-bit
 // interleave stays within 128-bit lanes, so the two blocks never mix and the pair transposes
 // as two independent 8x8 tiles. Bit-exact with the 32-bit scalar transform.
-const Idct = struct {
+/// 16-lane building blocks shared by the forward and inverse DCT: two 8x8 blocks travel side
+/// by side (lanes 0-7 block A, 8-15 block B) and every 16-bit interleave stays within its
+/// 128-bit lane, so the pair transposes as two independent tiles.
+const Dct = struct {
     const V16 = @Vector(16, i16);
     const V8 = @Vector(8, i32);
 
-    fn f2f(comptime x: f32) i16 {
-        return @intFromFloat(@round(x * 4096));
-    }
     /// Alternating constants for the paired multiply-add.
     fn pair(comptime a: i16, comptime b: i16) V16 {
         var v: [16]i16 = undefined;
@@ -2263,14 +2403,6 @@ const Idct = struct {
         }
         return v;
     }
-    const rot0_0 = pair(f2f(0.5411961), f2f(0.5411961) + f2f(-1.847759065));
-    const rot0_1 = pair(f2f(0.5411961) + f2f(0.765366865), f2f(0.5411961));
-    const rot1_0 = pair(f2f(1.175875602) + f2f(-0.899976223), f2f(1.175875602));
-    const rot1_1 = pair(f2f(1.175875602), f2f(1.175875602) + f2f(-2.562915447));
-    const rot2_0 = pair(f2f(-1.961570560) + f2f(0.298631336), f2f(-1.961570560));
-    const rot2_1 = pair(f2f(-1.961570560), f2f(-1.961570560) + f2f(3.072711026));
-    const rot3_0 = pair(f2f(-0.390180644) + f2f(2.053119869), f2f(-0.390180644));
-    const rot3_1 = pair(f2f(-0.390180644), f2f(-0.390180644) + f2f(1.501321110));
 
     const lo16 = [16]i32{ 0, -1, 1, -2, 2, -3, 3, -4, 8, -9, 9, -10, 10, -11, 11, -12 };
     const hi16 = [16]i32{ 4, -5, 5, -6, 6, -7, 7, -8, 12, -13, 13, -14, 14, -15, 15, -16 };
@@ -2280,6 +2412,7 @@ const Idct = struct {
     const high_half = [8]i32{ 4, 5, 6, 7, 12, 13, 14, 15 };
     const pack_mask = [16]i32{ 0, 1, 2, 3, -1, -2, -3, -4, 4, 5, 6, 7, -5, -6, -7, -8 };
     const concat = [16]i32{ 0, 1, 2, 3, 4, 5, 6, 7, -1, -2, -3, -4, -5, -6, -7, -8 };
+    const dup8 = [16]i32{ 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7 };
 
     inline fn unpacklo(a: V16, b: V16) V16 {
         return @shuffle(i16, a, b, lo16);
@@ -2295,6 +2428,47 @@ const Idct = struct {
         const co: V8 = @intCast(@shuffle(i16, c, undefined, odd));
         return xe * ce + xo * co;
     }
+    /// Saturating pack of two halves (elements 0-3, 8-11 in `l`, the rest in `h`) into
+    /// element order.
+    inline fn packs(l: V8, h: V8) V16 {
+        const wide = @shuffle(i32, l, h, pack_mask);
+        return @intCast(std.math.clamp(wide, @as(@Vector(16, i32), @splat(-32768)), @as(@Vector(16, i32), @splat(32767))));
+    }
+    /// Transposes both 8x8 tiles in place.
+    inline fn transpose(r: *[8]V16) void {
+        inline for ([_][2]usize{ .{ 0, 4 }, .{ 1, 5 }, .{ 2, 6 }, .{ 3, 7 }, .{ 0, 2 }, .{ 1, 3 }, .{ 4, 6 }, .{ 5, 7 }, .{ 0, 1 }, .{ 2, 3 }, .{ 4, 5 }, .{ 6, 7 } }) |p| {
+            const a = r[p[0]];
+            r[p[0]] = unpacklo(a, r[p[1]]);
+            r[p[1]] = unpackhi(a, r[p[1]]);
+        }
+    }
+};
+
+/// Inverse DCT: the stb_image SSE2 formulation of the libjpeg "islow" transform on block
+/// pairs. Bit-exact with the 32-bit scalar transform.
+const Idct = struct {
+    const V16 = Dct.V16;
+    const V8 = Dct.V8;
+    const pair = Dct.pair;
+    const unpacklo = Dct.unpacklo;
+    const unpackhi = Dct.unpackhi;
+    const madd = Dct.madd;
+    const packs = Dct.packs;
+    const transpose = Dct.transpose;
+    const concat = Dct.concat;
+
+    fn f2f(comptime x: f32) i16 {
+        return @intFromFloat(@round(x * 4096));
+    }
+    const rot0_0 = pair(f2f(0.5411961), f2f(0.5411961) + f2f(-1.847759065));
+    const rot0_1 = pair(f2f(0.5411961) + f2f(0.765366865), f2f(0.5411961));
+    const rot1_0 = pair(f2f(1.175875602) + f2f(-0.899976223), f2f(1.175875602));
+    const rot1_1 = pair(f2f(1.175875602), f2f(1.175875602) + f2f(-2.562915447));
+    const rot2_0 = pair(f2f(-1.961570560) + f2f(0.298631336), f2f(-1.961570560));
+    const rot2_1 = pair(f2f(-1.961570560), f2f(-1.961570560) + f2f(3.072711026));
+    const rot3_0 = pair(f2f(-0.390180644) + f2f(2.053119869), f2f(-0.390180644));
+    const rot3_1 = pair(f2f(-0.390180644), f2f(-0.390180644) + f2f(1.501321110));
+
     /// 32-bit intermediates: `l` holds elements 0-3 and 8-11, `h` the rest, the unpack order.
     const Wide = struct { l: V8, h: V8 };
     inline fn rot(x: V16, y: V16, c0: V16, c1: V16) struct { Wide, Wide } {
@@ -2303,8 +2477,8 @@ const Idct = struct {
         return .{ .{ .l = madd(lo, c0), .h = madd(hi, c0) }, .{ .l = madd(lo, c1), .h = madd(hi, c1) } };
     }
     inline fn widen(x: V16) Wide {
-        const l: V8 = @intCast(@shuffle(i16, x, undefined, low_half));
-        const h: V8 = @intCast(@shuffle(i16, x, undefined, high_half));
+        const l: V8 = @intCast(@shuffle(i16, x, undefined, Dct.low_half));
+        const h: V8 = @intCast(@shuffle(i16, x, undefined, Dct.high_half));
         return .{ .l = l << @splat(12), .h = h << @splat(12) };
     }
     inline fn wadd(a: Wide, b: Wide) Wide {
@@ -2312,11 +2486,6 @@ const Idct = struct {
     }
     inline fn wsub(a: Wide, b: Wide) Wide {
         return .{ .l = a.l - b.l, .h = a.h - b.h };
-    }
-    /// Saturating pack of the two halves back into element order.
-    inline fn packs(l: V8, h: V8) V16 {
-        const wide = @shuffle(i32, l, h, pack_mask);
-        return @intCast(std.math.clamp(wide, @as(@Vector(16, i32), @splat(-32768)), @as(@Vector(16, i32), @splat(32767))));
     }
     inline fn bfly(a: Wide, b: Wide, comptime bias: i32, comptime shift: u5) struct { V16, V16 } {
         const ab: Wide = .{ .l = a.l + @as(V8, @splat(bias)), .h = a.h + @as(V8, @splat(bias)) };
@@ -2345,15 +2514,6 @@ const Idct = struct {
         r[1], r[6] = bfly(x1, x6, bias, shift);
         r[2], r[5] = bfly(x2, x5, bias, shift);
         r[3], r[4] = bfly(x3, x4, bias, shift);
-    }
-
-    /// Transposes both 8x8 tiles in place.
-    inline fn transpose(r: *[8]V16) void {
-        inline for ([_][2]usize{ .{ 0, 4 }, .{ 1, 5 }, .{ 2, 6 }, .{ 3, 7 }, .{ 0, 2 }, .{ 1, 3 }, .{ 4, 6 }, .{ 5, 7 }, .{ 0, 1 }, .{ 2, 3 }, .{ 4, 5 }, .{ 6, 7 } }) |p| {
-            const a = r[p[0]];
-            r[p[0]] = unpacklo(a, r[p[1]]);
-            r[p[1]] = unpackhi(a, r[p[1]]);
-        }
     }
 
     /// Dequantizes and inverse-transforms blocks `a` and `b` (the same component) into
@@ -2749,6 +2909,47 @@ pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u
     const jpeg_data = try Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
     defer allocator.free(jpeg_data);
     return loadFromBytes(T, allocator, jpeg_data, limits);
+}
+
+test "quantizer reciprocals match integer division for every table value" {
+    // (|x| + corr) * recip >> shift must equal (|x| + d / 2) / d over the DCT's 15-bit range.
+    for (1..256) |q| {
+        const d: u32 = @intCast(q * 8);
+        const div: QuantDivisor = .init(d);
+        var x: u32 = 0;
+        while (x < 1 << 15) : (x += 1) {
+            const fast = (x + div.corr) * div.recip >> @intCast(div.shift);
+            try std.testing.expectEqual((x + d / 2) / d, fast);
+        }
+    }
+}
+
+test "forward DCT matches a floating-point reference" {
+    var prng = std.Random.DefaultPrng.init(7);
+    const rnd = prng.random();
+    var samples: [2][64]u8 = undefined;
+    for (&samples) |*block| for (block) |*v| {
+        v.* = rnd.int(u8);
+    };
+    // Unit quantizers divide the 8x-scaled integer transform by 8: the output is the DCT itself.
+    const unit: [64]u8 = @splat(1);
+    const quant: Quantizer = .init(&unit);
+    var out: [2][64]i16 = undefined;
+    Fdct.pairInto(&samples[0], &samples[1], 8, &quant, &out[0], &out[1]);
+    for (samples, out) |block, coefs| {
+        for (0..8) |v| for (0..8) |u| {
+            var sum: f64 = 0;
+            for (0..8) |y| for (0..8) |x| {
+                const px = @as(f64, @floatFromInt(block[y * 8 + x])) - 128;
+                sum += px * @cos((2 * @as(f64, @floatFromInt(x)) + 1) * @as(f64, @floatFromInt(u)) * std.math.pi / 16) *
+                    @cos((2 * @as(f64, @floatFromInt(y)) + 1) * @as(f64, @floatFromInt(v)) * std.math.pi / 16);
+            };
+            const cu: f64 = if (u == 0) 1.0 / @sqrt(2.0) else 1.0;
+            const cv: f64 = if (v == 0) 1.0 / @sqrt(2.0) else 1.0;
+            const expected = sum * cu * cv / 4;
+            try std.testing.expectApproxEqAbs(expected, @as(f64, @floatFromInt(coefs[v * 8 + u])), 1.0);
+        };
+    }
 }
 
 test "JPEG encode -> decode RGB roundtrip" {
