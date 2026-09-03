@@ -2392,8 +2392,8 @@ fn transpose8x8(rows: [8]@Vector(8, i32)) [8]@Vector(8, i32) {
 
 // Decode the baseline scan into block storage
 /// Baseline scan, one MCU row at a time: decode into the band store, render, repeat.
-fn performBlockScan(comptime T: type, state: *JpegState, img: *Image(T)) !void {
-    const band = state.block_storage orelse return error.BlockStorageNotAllocated;
+fn performBlockScan(comptime T: type, state: *JpegState, band: *RenderBand, img: *Image(T)) !void {
+    const blocks = state.block_storage orelse return error.BlockStorageNotAllocated;
     const max_h_factor, const max_v_factor = state.maxSamplingFactors();
     const noninterleaved = state.isNoninterleaved(state.scan_components);
     const y_step: usize = if (noninterleaved) 1 else max_v_factor;
@@ -2431,7 +2431,7 @@ fn performBlockScan(comptime T: type, state: *JpegState, img: *Image(T)) !void {
                             const actual_y = y + v;
                             var tmp_block: [64]i32 = undefined;
                             const in_bounds = (actual_y < state.block_height and actual_x < state.block_width);
-                            const block_ptr: *[64]i32 = if (in_bounds) &band[v * bw + actual_x][component_index] else &tmp_block;
+                            const block_ptr: *[64]i32 = if (in_bounds) &blocks[v * bw + actual_x][component_index] else &tmp_block;
 
                             _ = state.bit_reader.fillBits(24) catch {};
                             decodeBlockBaseline(state, scan_comp, block_ptr, &prediction_values[component_index]) catch |err| switch (err) {
@@ -2450,18 +2450,229 @@ fn performBlockScan(comptime T: type, state: *JpegState, img: *Image(T)) !void {
             // Blocks from the failing MCU onwards were never written.
             for (0..y_step) |v| {
                 for (x..bw) |bx| {
-                    for (&band[v * bw + bx]) |*block| @memset(block, 0);
+                    for (&blocks[v * bw + bx]) |*block| @memset(block, 0);
                 }
             }
         }
-        try renderBlockRows(T, state, band, y, @min(y_step, state.block_height - y), img);
+        try renderBlockRows(T, state, band, blocks, y, @min(y_step, state.block_height - y), img);
     }
 }
 
+/// Sample planes for one MCU row plus the chroma upsampling scratch, reused for every band.
+/// Rows carry `lanes` bytes of slack so the vector passes never read past an allocation.
+const RenderBand = struct {
+    allocator: Allocator,
+    planes: [4][]u8,
+    strides: [4]usize,
+    /// Vertically blended chroma row at chroma resolution as `sample * 256`, with one
+    /// replicated sample on each side so the horizontal taps clamp at the edges.
+    vrow: []i32,
+    /// Upsampled chroma rows at luma resolution.
+    crows: [2][]u8,
+    /// Converted row for output types other than `Rgb`.
+    rgb_row: []Rgb,
+    /// Each component's quantization table, widened once.
+    dequant: [4][64]i32,
+
+    const lanes = 16;
+    const V = @Vector(lanes, i32);
+    const B = @Vector(lanes, u8);
+
+    fn init(allocator: Allocator, state: *const JpegState) !RenderBand {
+        const nc: usize = state.header.num_components;
+        const max_h, _ = state.maxSamplingFactors();
+        const mcus_x = @as(usize, state.block_width_actual) / max_h;
+        const padded = @as(usize, state.block_width_actual) * 8 + lanes;
+        var self: RenderBand = .{
+            .allocator = allocator,
+            .planes = @splat(&.{}),
+            .strides = @splat(0),
+            .vrow = &.{},
+            .crows = .{ &.{}, &.{} },
+            .rgb_row = &.{},
+            .dequant = undefined,
+        };
+        errdefer self.deinit();
+        for (0..nc) |c| {
+            const comp = state.components[c];
+            const quant_table = state.quant_tables[comp.quant_table_id] orelse return error.MissingQuantTable;
+            for (&self.dequant[c], quant_table) |*d, q| d.* = q;
+            self.strides[c] = mcus_x * @as(usize, comp.h_sampling) * 8;
+            self.planes[c] = try allocator.alloc(u8, self.strides[c] * @as(usize, comp.v_sampling) * 8 + padded);
+        }
+        if (nc == 3) {
+            self.vrow = try allocator.alloc(i32, padded + 2);
+            for (&self.crows) |*crow| crow.* = try allocator.alloc(u8, padded);
+            self.rgb_row = try allocator.alloc(Rgb, padded);
+        }
+        return self;
+    }
+
+    fn deinit(self: *RenderBand) void {
+        for (self.planes) |plane| self.allocator.free(plane);
+        self.allocator.free(self.vrow);
+        for (self.crows) |crow| self.allocator.free(crow);
+        self.allocator.free(self.rgb_row);
+    }
+
+    /// Plane row `r` of component `c`, running to the end of the plane's slack.
+    fn row(self: *const RenderBand, c: usize, r: usize) []u8 {
+        return self.planes[c][r * self.strides[c] ..];
+    }
+
+    /// Level-shifts, clamps and stores an inverse-transformed block at plane row `r`, column `x`.
+    fn storeBlock(self: *RenderBand, c: usize, r: usize, x: usize, block: *const [64]i32) void {
+        const S = @Vector(8, i32);
+        const stride = self.strides[c];
+        const dst = self.planes[c][r * stride + x ..];
+        for (0..8) |i| {
+            const v: S = block[i * 8 ..][0..8].*;
+            const shifted = std.math.clamp(v + @as(S, @splat(128)), @as(S, @splat(0)), @as(S, @splat(255)));
+            dst[i * stride ..][0..8].* = @as(@Vector(8, u8), @intCast(shifted));
+        }
+    }
+
+    /// Chroma component `c` for luma row `py` at luma resolution: bilinear between the two
+    /// nearest chroma rows and columns with centred sample positions (T.871 upsampling),
+    /// replicated at the band and image edges. Same-sampled components return their row.
+    fn chromaRow(self: *RenderBand, state: *const JpegState, c: usize, py: usize, max_h: usize, max_v: usize) []const u8 {
+        const comp = state.components[c];
+        const vc: usize = comp.v_sampling;
+        if (comp.h_sampling == max_h and vc == max_v) return self.row(c, py);
+        const cw = self.strides[c];
+        // Vertical blend into vrow[1..cw+1]; the position maths mirrors the horizontal taps.
+        const scaled: i32 = @intCast(((2 * py + 1) * vc * 128) / max_v);
+        const centred = scaled - 128;
+        const lo: usize, const frac: i32 = if (centred <= 0)
+            .{ 0, 0 }
+        else if (@as(usize, @intCast(centred >> 8)) + 1 >= vc * 8)
+            .{ vc * 8 - 1, 0 }
+        else
+            .{ @intCast(centred >> 8), centred & 255 };
+        const hi = if (frac == 0) lo else lo + 1;
+        const top = self.row(c, lo);
+        const bottom = self.row(c, hi);
+        const w_lo: V = @splat(256 - frac);
+        const w_hi: V = @splat(frac);
+        var x: usize = 0;
+        while (x < cw) : (x += lanes) {
+            const t: V = @intCast(@as(B, top[x..][0..lanes].*));
+            const b: V = @intCast(@as(B, bottom[x..][0..lanes].*));
+            self.vrow[1 + x ..][0..lanes].* = t * w_lo + b * w_hi;
+        }
+        self.vrow[0] = self.vrow[1];
+        self.vrow[cw + 1] = self.vrow[cw];
+        const crow = self.crows[c - 1];
+        switch (max_h / comp.h_sampling) {
+            1 => {
+                var i: usize = 0;
+                while (i < cw) : (i += lanes) {
+                    const v: V = self.vrow[1 + i ..][0..lanes].*;
+                    crow[i..][0..lanes].* = @as(B, @intCast((v + @as(V, @splat(128))) >> @splat(8)));
+                }
+            },
+            2 => self.upsampleRow(2, crow, cw),
+            4 => self.upsampleRow(4, crow, cw),
+            else => unreachable,
+        }
+        return crow;
+    }
+
+    /// Horizontal `factor`× upsample of `vrow` into `crow`: output `factor * i + k` sits at
+    /// chroma position `i + (2k + 1) / (2 factor) - 1/2`, so its two taps and weights are
+    /// fixed per phase `k` and the whole chunk is two shuffles of one chroma load.
+    fn upsampleRow(self: *const RenderBand, comptime factor: usize, crow: []u8, cw: usize) void {
+        const taps = comptime blk: {
+            var lo_mask: [lanes]i32 = undefined;
+            var hi_mask: [lanes]i32 = undefined;
+            var w_hi: [lanes]i32 = undefined;
+            for (0..lanes) |j| {
+                const k = j % factor;
+                const offset: i32 = @intCast((2 * k + 1) * 128 / factor);
+                // Lane 0 of the load is chroma sample `i0 - 1`.
+                const lo: i32 = @intCast(j / factor);
+                lo_mask[j] = if (offset < 128) lo else lo + 1;
+                hi_mask[j] = lo_mask[j] + 1;
+                w_hi[j] = if (offset < 128) offset + 128 else offset - 128;
+            }
+            break :blk .{ .lo = lo_mask, .hi = hi_mask, .w_hi = w_hi };
+        };
+        const w_hi: V = taps.w_hi;
+        const w_lo: V = @as(V, @splat(256)) - w_hi;
+        const rounding: V = @splat(32768);
+        var x: usize = 0;
+        while (x < cw * factor) : (x += lanes) {
+            const src: V = self.vrow[x / factor ..][0..lanes].*;
+            const lo = @shuffle(i32, src, undefined, taps.lo);
+            const hi = @shuffle(i32, src, undefined, taps.hi);
+            crow[x..][0..lanes].* = @as(B, @intCast((lo * w_lo + hi * w_hi + rounding) >> @splat(16)));
+        }
+    }
+
+    /// YCbCr (or stored RGB) rows to `width` pixels of `dst`, 16 at a time.
+    fn convertRow(y: []const u8, cb: []const u8, cr: []const u8, rgb_model: bool, dst: []Rgb, width: usize) void {
+        const bias: V = @splat(128);
+        const rounding: V = @splat(32768);
+        var px: usize = 0;
+        while (px < width) : (px += lanes) {
+            const yv: V = @intCast(@as(B, y[px..][0..lanes].*));
+            const c1: V = @intCast(@as(B, cb[px..][0..lanes].*));
+            const c2: V = @intCast(@as(B, cr[px..][0..lanes].*));
+            var r: B = undefined;
+            var g: B = undefined;
+            var b: B = undefined;
+            if (rgb_model) {
+                r = @intCast(yv);
+                g = @intCast(c1);
+                b = @intCast(c2);
+            } else {
+                const u = c1 - bias;
+                const v = c2 - bias;
+                const lo: V = @splat(0);
+                const hi: V = @splat(255);
+                r = @intCast(std.math.clamp(yv + ((@as(V, @splat(91881)) * v + rounding) >> @splat(16)), lo, hi));
+                g = @intCast(std.math.clamp(yv - ((@as(V, @splat(22554)) * u + @as(V, @splat(46802)) * v + rounding) >> @splat(16)), lo, hi));
+                b = @intCast(std.math.clamp(yv + ((@as(V, @splat(116130)) * u + rounding) >> @splat(16)), lo, hi));
+            }
+            const n = @min(lanes, width - px);
+            const out = dst[px..][0..n];
+            if (n == lanes and packed_rgb) {
+                const rg = @shuffle(u8, r, g, interleave2);
+                const rgb = @shuffle(u8, rg, b, interleave3);
+                std.mem.sliceAsBytes(out)[0 .. 3 * lanes].* = rgb;
+            } else {
+                const ra: [lanes]u8 = r;
+                const ga: [lanes]u8 = g;
+                const ba: [lanes]u8 = b;
+                for (out, ra[0..n], ga[0..n], ba[0..n]) |*px_out, pr, pg, pb| px_out.* = .{ .r = pr, .g = pg, .b = pb };
+            }
+        }
+    }
+
+    const packed_rgb = @sizeOf(Rgb) == 3 and @offsetOf(Rgb, "r") == 0 and @offsetOf(Rgb, "g") == 1 and @offsetOf(Rgb, "b") == 2;
+    const interleave2 = blk: {
+        var mask: [2 * lanes]i32 = undefined;
+        for (0..lanes) |i| {
+            mask[2 * i] = @intCast(i);
+            mask[2 * i + 1] = ~@as(i32, @intCast(i));
+        }
+        break :blk mask;
+    };
+    const interleave3 = blk: {
+        var mask: [3 * lanes]i32 = undefined;
+        for (0..lanes) |i| {
+            mask[3 * i] = @intCast(2 * i);
+            mask[3 * i + 1] = @intCast(2 * i + 1);
+            mask[3 * i + 2] = ~@as(i32, @intCast(i));
+        }
+        break :blk mask;
+    };
+};
+
 /// Dequantizes, inverse-transforms and colour-converts block rows `[block_row0, block_row0 +
 /// block_rows)` into `img`. `blocks` holds those rows from index 0, `block_width_actual` wide,
-/// as whole MCU rows so chroma is upsampled within its MCU.
-fn renderBlockRows(comptime T: type, state: *JpegState, blocks: [][4][64]i32, block_row0: usize, block_rows: usize, img: *Image(T)) !void {
+/// as whole MCU rows so chroma is upsampled within its MCU row.
+fn renderBlockRows(comptime T: type, state: *JpegState, band: *RenderBand, blocks: [][4][64]i32, block_row0: usize, block_rows: usize, img: *Image(T)) !void {
     const nc: usize = state.header.num_components;
     const bw: usize = state.block_width_actual;
     const max_h, const max_v = state.maxSamplingFactors();
@@ -2474,15 +2685,17 @@ fn renderBlockRows(comptime T: type, state: *JpegState, blocks: [][4][64]i32, bl
             const set = &blocks[v * bw + bx];
             for (0..nc) |c| {
                 const comp = state.components[c];
-                if (v >= comp.v_sampling or bx % max_h >= comp.h_sampling) continue;
-                const quant_table = state.quant_tables[comp.quant_table_id] orelse return error.MissingQuantTable;
+                const hc: usize = comp.h_sampling;
+                if (v >= comp.v_sampling or bx % max_h >= hc) continue;
                 const block = &set[c];
-                for (block, quant_table) |*coef, q| coef.* *= @as(i32, q);
-                idct8x8(block);
-                // Chroma stays centred for the colour conversion.
-                if (c == 0 or rgb_model) {
-                    for (block) |*v_| v_.* += 128;
+                const S = @Vector(8, i32);
+                for (0..8) |i| {
+                    const coefs: S = block[i * 8 ..][0..8].*;
+                    const scale: S = band.dequant[c][i * 8 ..][0..8].*;
+                    block[i * 8 ..][0..8].* = coefs * scale;
                 }
+                idct8x8(block);
+                band.storeBlock(c, v * 8, (bx / max_h * hc + bx % max_h) * 8, block);
             }
         }
     }
@@ -2490,82 +2703,39 @@ fn renderBlockRows(comptime T: type, state: *JpegState, blocks: [][4][64]i32, bl
     const width: usize = state.header.width;
     const y0 = block_row0 * 8;
     const rows = @min(block_rows * 8, @as(usize, state.header.height) - y0);
-    const mcu_w = @as(usize, max_h) * 8;
-
     for (0..rows) |py| {
-        const row = y0 + py;
-        for (0..width) |px| {
-            const y_val = blocks[(py / 8) * bw + px / 8][0][(py % 8) * 8 + px % 8];
-            if (nc == 1) {
-                img.at(row, px).* = convertColor(T, @as(u8, @intCast(std.math.clamp(y_val, 0, 255))));
-                continue;
+        const dst = img.data[(y0 + py) * img.stride ..][0..width];
+        const luma = band.row(0, py);
+        if (nc == 1) {
+            if (T == u8) {
+                @memcpy(dst, luma[0..width]);
+            } else {
+                for (dst, luma[0..width]) |*out, y| out.* = convertColor(T, y);
             }
-            const mcu_x = px / mcu_w;
-            const in_mcu_x = px % mcu_w;
-            const c1 = sampleChroma(state, blocks, 1, mcu_x, in_mcu_x, py, max_h, max_v);
-            const c2 = sampleChroma(state, blocks, 2, mcu_x, in_mcu_x, py, max_h, max_v);
-            const rgb: Rgb = if (rgb_model) .{
-                .r = @intCast(std.math.clamp(y_val, 0, 255)),
-                .g = @intCast(std.math.clamp(c1, 0, 255)),
-                .b = @intCast(std.math.clamp(c2, 0, 255)),
-            } else .{
-                .r = @intCast(std.math.clamp(y_val + ((91881 * c2 + 32768) >> 16), 0, 255)),
-                .g = @intCast(std.math.clamp(y_val - ((22554 * c1 + 46802 * c2 + 32768) >> 16), 0, 255)),
-                .b = @intCast(std.math.clamp(y_val + ((116130 * c1 + 32768) >> 16), 0, 255)),
-            };
-            img.at(row, px).* = convertColor(T, rgb);
+            continue;
+        }
+        const cb = band.chromaRow(state, 1, py, max_h, max_v);
+        const cr = band.chromaRow(state, 2, py, max_h, max_v);
+        if (T == Rgb) {
+            RenderBand.convertRow(luma, cb, cr, rgb_model, dst, width);
+        } else {
+            RenderBand.convertRow(luma, cb, cr, rgb_model, band.rgb_row, width);
+            for (dst, band.rgb_row[0..width]) |*out, rgb| out.* = convertColor(T, rgb);
         }
     }
-}
-
-/// Component `c` at luma pixel (`in_mcu_x`, `py`) of MCU column `mcu_x`: direct when sampled
-/// like luma, else bilinear within the MCU (positions in 1/256 units, any h/v factors).
-inline fn sampleChroma(state: *const JpegState, blocks: []const [4][64]i32, c: usize, mcu_x: usize, in_mcu_x: usize, py: usize, max_h: usize, max_v: usize) i32 {
-    const comp = state.components[c];
-    const hc: usize = comp.h_sampling;
-    const vc: usize = comp.v_sampling;
-    const bw: usize = state.block_width_actual;
-    const first_block = mcu_x * max_h;
-    if (hc == max_h and vc == max_v) {
-        return blocks[(py / 8) * bw + first_block + in_mcu_x / 8][c][(py % 8) * 8 + in_mcu_x % 8];
-    }
-    const Axis = struct { lo: usize, hi: usize, frac: i32 };
-    const axis = struct {
-        fn map(pos: usize, factor: usize, max: usize) Axis {
-            const len = factor * 8;
-            const scaled: i32 = @intCast(((2 * pos + 1) * factor * 128) / max);
-            const centred = scaled - 128;
-            if (centred <= 0) return .{ .lo = 0, .hi = 0, .frac = 0 };
-            const lo: usize = @intCast(@divFloor(centred, 256));
-            if (lo + 1 >= len) return .{ .lo = len - 1, .hi = len - 1, .frac = 0 };
-            return .{ .lo = lo, .hi = lo + 1, .frac = centred - @as(i32, @intCast(lo)) * 256 };
-        }
-    }.map;
-    const ax = axis(in_mcu_x, hc, max_h);
-    const ay = axis(py, vc, max_v);
-    const sample = struct {
-        fn at(b: []const [4][64]i32, w: usize, base: usize, comp_idx: usize, cy: usize, cx: usize) i32 {
-            return b[(cy / 8) * w + base + cx / 8][comp_idx][(cy % 8) * 8 + cx % 8];
-        }
-    }.at;
-    const s00 = sample(blocks, bw, first_block, c, ay.lo, ax.lo);
-    const s01 = sample(blocks, bw, first_block, c, ay.lo, ax.hi);
-    const s10 = sample(blocks, bw, first_block, c, ay.hi, ax.lo);
-    const s11 = sample(blocks, bw, first_block, c, ay.hi, ax.hi);
-    const top = s00 * (256 - ax.frac) + s01 * ax.frac;
-    const bottom = s10 * (256 - ax.frac) + s11 * ax.frac;
-    return (top * (256 - ay.frac) + bottom * ay.frac + 32768) >> 16;
 }
 
 /// Baseline frames stream their scan; progressive frames render the full store band by band.
 fn decodeInto(comptime T: type, state: *JpegState, img: *Image(T)) !void {
-    if (state.header.frame_type == .baseline) return performBlockScan(T, state, img);
+    var band: RenderBand = try .init(state.allocator, state);
+    defer band.deinit();
+    if (state.header.frame_type == .baseline) return performBlockScan(T, state, &band, img);
     const full = state.block_storage orelse return error.BlockStorageNotAllocated;
     _, const max_v = state.maxSamplingFactors();
     const bw: usize = state.block_width_actual;
     var y: usize = 0;
     while (y < state.block_height) : (y += max_v) {
-        try renderBlockRows(T, state, full[y * bw ..], y, @min(max_v, state.block_height - y), img);
+        try renderBlockRows(T, state, &band, full[y * bw ..], y, @min(max_v, state.block_height - y), img);
     }
 }
 
