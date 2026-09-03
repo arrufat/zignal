@@ -1528,3 +1528,53 @@ test "filters are identical on a thread pool" {
         }
     }
 }
+
+// Kernels above 7x7 loop over rows at runtime instead of unrolling both axes; every size
+// must match a plain reference for u8 and f32 in every border mode.
+test "large 2D kernels match a scalar reference" {
+    const allocator = std.testing.allocator;
+    var prng = std.Random.DefaultPrng.init(0xbeef);
+    const random = prng.random();
+
+    inline for ([_]type{ u8, f32 }) |T| {
+        var src: Image(T) = try .init(allocator, 37, 41);
+        defer src.deinit(allocator);
+        for (src.data) |*px| px.* = if (T == u8) random.int(u8) else 255 * random.float(f32);
+        var out: Image(T) = try .initLike(allocator, src);
+        defer out.deinit(allocator);
+
+        inline for ([_]usize{ 9, 15, 31 }) |k| {
+            // Centre plus the four corners, in 1/256 steps so the u8 fixed-point taps are exact
+            // while the taps still reach the kernel's full extent.
+            var kernel: [k][k]f32 = @splat(@splat(0));
+            kernel[k / 2][k / 2] = 128.0 / 256.0;
+            kernel[0][0] = 32.0 / 256.0;
+            kernel[0][k - 1] = 32.0 / 256.0;
+            kernel[k - 1][0] = 32.0 / 256.0;
+            kernel[k - 1][k - 1] = 32.0 / 256.0;
+            for ([_]BorderMode{ .zero, .replicate, .mirror, .wrap }) |mode| {
+                try src.convolve(io, allocator, out, kernel, mode);
+                for (0..src.rows) |r| {
+                    for (0..src.cols) |c| {
+                        var acc: f32 = 0;
+                        for (0..k) |ky| {
+                            for (0..k) |kx| {
+                                const sr = @as(isize, @intCast(r + ky)) - @as(isize, k / 2);
+                                const sc = @as(isize, @intCast(c + kx)) - @as(isize, k / 2);
+                                const sample = @import("../border.zig").getPixel(T, src, sr, sc, mode);
+                                acc += @as(f32, sample) * kernel[ky][kx];
+                            }
+                        }
+                        const got = out.at(r, c).*;
+                        if (T == u8) {
+                            // Exact taps: the only difference is the round-half-up store.
+                            try std.testing.expect(@abs(@as(f32, got) - acc) <= 0.51);
+                        } else {
+                            try std.testing.expectApproxEqAbs(acc, got, 1e-2);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
