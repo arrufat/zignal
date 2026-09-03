@@ -54,3 +54,9 @@ bindings/python/docs/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Local example assets and generated fixtures
+examples/fixtures/
+examples/scripts/
+examples/font_demo.png
+examples/pipeline.zon
