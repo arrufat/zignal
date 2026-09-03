@@ -159,16 +159,21 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("{s:<40} | {s:^9} | {s:>9} | {s:>9} | {s:>7} | {s:>8}\n", .{ "benchmark", "output", "serial ms", "pool ms", "speedup", "MPix/s" });
     std.debug.print("{s:-<40}-+-{s:-<9}-+-{s:-<9}-+-{s:-<9}-+-{s:-<7}-+-{s:-<8}\n", .{ "", "", "", "", "", "" });
 
-    // 4K -> 1080p downscale, all three pixel families
+    // Downscale 4K -> 1080p, then upscale 480p -> 4K; per direction: u8, Rgb, f32; kernels
+    // in tap order (bilinear 2, bicubic 4, lanczos 6).
     try benchResize(u8, io, gpa, random, filter, 2160, 3840, 1080, 1920, .bilinear);
+    try benchResize(u8, io, gpa, random, filter, 2160, 3840, 1080, 1920, .bicubic);
+    try benchResize(u8, io, gpa, random, filter, 2160, 3840, 1080, 1920, .lanczos);
     try benchResize(Rgb, io, gpa, random, filter, 2160, 3840, 1080, 1920, .bilinear);
     try benchResize(Rgb, io, gpa, random, filter, 2160, 3840, 1080, 1920, .bicubic);
     try benchResize(Rgb, io, gpa, random, filter, 2160, 3840, 1080, 1920, .lanczos);
     try benchResize(f32, io, gpa, random, filter, 2160, 3840, 1080, 1920, .bilinear);
-    // 480p -> 4K upscale
+    try benchResize(u8, io, gpa, random, filter, 480, 640, 2160, 3840, .bilinear);
+    try benchResize(u8, io, gpa, random, filter, 480, 640, 2160, 3840, .bicubic);
+    try benchResize(u8, io, gpa, random, filter, 480, 640, 2160, 3840, .lanczos);
     try benchResize(Rgb, io, gpa, random, filter, 480, 640, 2160, 3840, .bilinear);
     try benchResize(Rgb, io, gpa, random, filter, 480, 640, 2160, 3840, .bicubic);
-    try benchResize(u8, io, gpa, random, filter, 480, 640, 2160, 3840, .lanczos);
+    try benchResize(Rgb, io, gpa, random, filter, 480, 640, 2160, 3840, .lanczos);
 
     try benchRotate(Rgb, io, gpa, random, filter, 1080, 1920, .bilinear);
     try benchRotate(u8, io, gpa, random, filter, 1080, 1920, .bicubic);

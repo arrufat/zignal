@@ -205,60 +205,8 @@ fn PlaneBands(comptime T: type, comptime Plane: type) type {
 }
 
 // ============================================================================
-// Optimized Plane Resize Functions: output rows [r_start, r_end) of a dst_rows x dst_cols plane
+// Direct plane resize: output rows [r_start, r_end) of a dst_rows x dst_cols plane
 // ============================================================================
-
-/// Optimized bilinear resize for u8 planes using integer arithmetic.
-/// Uses fixed-point arithmetic (scaled by 256) for performance.
-pub fn resizePlaneBilinearU8(
-    src: []const u8,
-    dst: []u8,
-    src_rows: u32,
-    src_cols: u32,
-    dst_rows: u32,
-    dst_cols: u32,
-    r_start: usize,
-    r_end: usize,
-) void {
-    const s = 256;
-    const sf: f32 = s;
-
-    // Calculate scaling ratios
-    const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
-    const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
-
-    // Process each output pixel
-    for (r_start..r_end) |r| {
-        const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-        const src_y_i: isize = @floor(src_y_f);
-        const fy: i32 = @trunc((src_y_f - @floor(src_y_f)) * sf);
-
-        const y0 = resolveIndex(src_y_i, @intCast(src_rows), .mirror).?;
-        const y1 = resolveIndex(src_y_i + 1, @intCast(src_rows), .mirror).?;
-
-        for (0..dst_cols) |c| {
-            const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-            const src_x_i: isize = @floor(src_x_f);
-            const fx: i32 = @trunc((src_x_f - @floor(src_x_f)) * sf);
-
-            const x0 = resolveIndex(src_x_i, @intCast(src_cols), .mirror).?;
-            const x1 = resolveIndex(src_x_i + 1, @intCast(src_cols), .mirror).?;
-
-            // Get the 4 neighboring pixels
-            const tl = @as(i32, src[y0 * src_cols + x0]);
-            const tr = @as(i32, src[y0 * src_cols + x1]);
-            const bl = @as(i32, src[y1 * src_cols + x0]);
-            const br = @as(i32, src[y1 * src_cols + x1]);
-
-            // Bilinear interpolation using integer arithmetic
-            const top = tl * (s - fx) + tr * fx;
-            const bottom = bl * (s - fx) + br * fx;
-            const result = @divTrunc(top * (s - fy) + bottom * fy, s * s);
-
-            dst[r * dst_cols + c] = meta.clamp(u8, result);
-        }
-    }
-}
 
 /// Optimized nearest neighbor resize for u8 planes.
 pub fn resizePlaneNearestU8(
@@ -286,289 +234,127 @@ pub fn resizePlaneNearestU8(
     }
 }
 
-/// Optimized bicubic resize for u8 planes using integer arithmetic.
-pub fn resizePlaneBicubicU8(
-    src: []const u8,
-    dst: []u8,
-    src_rows: u32,
-    src_cols: u32,
-    dst_rows: u32,
-    dst_cols: u32,
-    r_start: usize,
-    r_end: usize,
-) void {
-    const SCALE = 256;
+// ============================================================================
+// Separable u8 plane resize (bicubic, Catmull-Rom, Mitchell, Lanczos)
+// ============================================================================
 
-    // Bicubic kernel function (a = -1, as in `interpolation.bicubicKernel`)
-    const cubicKernel = struct {
-        fn eval(t: i32) i32 {
-            const at: i32 = @intCast(@abs(t));
-            if (at <= SCALE) {
-                // 1 - 2*t^2 + |t|^3
-                const t2 = @divTrunc(at * at, SCALE);
-                const t3 = @divTrunc(t2 * at, SCALE);
-                return SCALE - 2 * t2 + t3;
-            } else if (at <= 2 * SCALE) {
-                // 4 - 8*|t| + 5*t^2 - |t|^3
-                const t2 = @divTrunc(at * at, SCALE);
-                const t3 = @divTrunc(t2 * at, SCALE);
-                return 4 * SCALE - 8 * at + 5 * t2 - t3;
-            }
-            return 0;
-        }
-    }.eval;
+const interpolation = @import("interpolation.zig");
+const Interpolation = interpolation.Interpolation;
 
-    const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
-    const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
+/// Fixed-point weight precision; two passes leave 2·weight_shift bits of headroom in an i32
+/// (255 · 1.4 · 1024 per pass with the negative lobes).
+pub const weight_shift = 10;
+pub const weight_scale: i32 = 1 << weight_shift;
+pub const max_taps = 6;
 
-    for (r_start..r_end) |r| {
-        const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-        const src_y: isize = @floor(src_y_f);
-        const fy: i32 = @trunc((src_y_f - @floor(src_y_f)) * SCALE);
+/// Mirror-resolved source indices and fixed-point weights for every output position along
+/// one axis. Each position's weights sum to exactly `weight_scale`, so the passes need no
+/// per-pixel normalization; the kernel is evaluated `taps` times per output position instead
+/// of `taps²` per pixel.
+pub const AxisTaps = struct {
+    taps: usize,
+    indices: []u32,
+    weights: []i32,
 
-        for (0..dst_cols) |c| {
-            const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-            const src_x: isize = @floor(src_x_f);
-            const fx: i32 = @trunc((src_x_f - @floor(src_x_f)) * SCALE);
+    pub fn init(allocator: std.mem.Allocator, src_len: u32, dst_len: u32, method: Interpolation) !AxisTaps {
+        const taps = interpolation.kernelTaps(method);
+        const indices = try allocator.alloc(u32, @as(usize, dst_len) * taps);
+        errdefer allocator.free(indices);
+        const weights = try allocator.alloc(i32, @as(usize, dst_len) * taps);
+        const ratio = @as(f32, @floatFromInt(src_len)) / @as(f32, @floatFromInt(dst_len));
 
-            var sum: i32 = 0;
-            var weight_sum: i32 = 0;
-
-            for (0..4) |ky| {
-                const y_idx = src_y + @as(isize, @intCast(ky)) - 1;
-                const pixel_y = resolveIndex(y_idx, @intCast(src_rows), .mirror).?;
-
-                const wy = cubicKernel(@as(i32, @intCast(ky)) * SCALE - SCALE - fy);
-
-                for (0..4) |kx| {
-                    const x_idx = src_x + @as(isize, @intCast(kx)) - 1;
-                    const pixel_x = resolveIndex(x_idx, @intCast(src_cols), .mirror).?;
-
-                    const wx = cubicKernel(@as(i32, @intCast(kx)) * SCALE - SCALE - fx);
-                    const w = @divTrunc(wx * wy, SCALE);
-
-                    const pixel_val = @as(i32, src[pixel_y * src_cols + pixel_x]);
-                    sum += pixel_val * w;
-                    weight_sum += w;
-                }
-            }
-
-            const result = if (weight_sum != 0)
-                @divTrunc(sum, weight_sum)
-            else
-                0;
-
-            dst[r * dst_cols + c] = meta.clamp(u8, result);
-        }
-    }
-}
-
-/// Optimized Catmull-Rom resize for u8 planes using integer arithmetic.
-pub fn resizePlaneCatmullRomU8(
-    src: []const u8,
-    dst: []u8,
-    src_rows: u32,
-    src_cols: u32,
-    dst_rows: u32,
-    dst_cols: u32,
-    r_start: usize,
-    r_end: usize,
-) void {
-    const SCALE = 256;
-
-    // Catmull-Rom kernel function
-    const catmullRomKernel = struct {
-        fn eval(t: i32) i32 {
-            const at: i32 = @intCast(@abs(t));
-            if (at <= SCALE) {
-                // 1.5*|t|^3 - 2.5*|t|^2 + 1
-                const t2 = @divTrunc(at * at, SCALE);
-                const t3 = @divTrunc(t2 * at, SCALE);
-                return SCALE - @divTrunc(5 * t2, 2) + @divTrunc(3 * t3, 2);
-            } else if (at <= 2 * SCALE) {
-                // -0.5*|t|^3 + 2.5*|t|^2 - 4*|t| + 2
-                const t2 = @divTrunc(at * at, SCALE);
-                const t3 = @divTrunc(t2 * at, SCALE);
-                return 2 * SCALE - 4 * at + @divTrunc(5 * t2, 2) - @divTrunc(t3, 2);
-            }
-            return 0;
-        }
-    }.eval;
-
-    const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
-    const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
-
-    for (r_start..r_end) |r| {
-        const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-        const src_y: isize = @floor(src_y_f);
-        const fy: i32 = @trunc((src_y_f - @floor(src_y_f)) * SCALE);
-
-        for (0..dst_cols) |c| {
-            const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-            const src_x: isize = @floor(src_x_f);
-            const fx: i32 = @trunc((src_x_f - @floor(src_x_f)) * SCALE);
-
-            var sum: i32 = 0;
-            var weight_sum: i32 = 0;
-
-            // 4x4 kernel
-            for (0..4) |ky| {
-                const y_idx = src_y + @as(isize, @intCast(ky)) - 1;
-                const pixel_y = resolveIndex(y_idx, @intCast(src_rows), .mirror).?;
-
-                const wy = catmullRomKernel(@as(i32, @intCast(ky)) * SCALE - SCALE - fy);
-
-                for (0..4) |kx| {
-                    const x_idx = src_x + @as(isize, @intCast(kx)) - 1;
-                    const pixel_x = resolveIndex(x_idx, @intCast(src_cols), .mirror).?;
-
-                    const wx = catmullRomKernel(@as(i32, @intCast(kx)) * SCALE - SCALE - fx);
-                    const w = @divTrunc(wx * wy, SCALE);
-
-                    const pixel_val = @as(i32, src[pixel_y * src_cols + pixel_x]);
-                    sum += pixel_val * w;
-                    weight_sum += w;
-                }
-            }
-
-            const result = if (weight_sum != 0)
-                @divTrunc(sum, weight_sum)
-            else
-                0;
-
-            dst[r * dst_cols + c] = meta.clamp(u8, result);
-        }
-    }
-}
-
-/// Optimized Mitchell-Netravali resize for u8 planes using integer arithmetic.
-pub fn resizePlaneMitchellU8(
-    src: []const u8,
-    dst: []u8,
-    src_rows: u32,
-    src_cols: u32,
-    dst_rows: u32,
-    dst_cols: u32,
-    r_start: usize,
-    r_end: usize,
-) void {
-    const s = 256;
-    // Mitchell-Netravali kernel function (b=1/3, c=1/3)
-    const mitchellKernel = struct {
-        fn eval(t: i32) i32 {
-            const at: i64 = @intCast(@abs(t));
-            const s2 = s * s;
-            const s3 = s2 * s;
-
-            if (at < s) {
-                const at2 = at * at;
-                const at3 = at2 * at;
-                return @intCast(@divTrunc(21 * at3 - 36 * at2 * s + 16 * s3, 18 * s2));
-            } else if (at < 2 * s) {
-                const at2 = at * at;
-                const at3 = at2 * at;
-                return @intCast(@divTrunc(-7 * at3 + 36 * at2 * s - 60 * at * s2 + 32 * s3, 18 * s2));
-            }
-            return 0;
-        }
-    }.eval;
-
-    const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
-    const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
-
-    for (r_start..r_end) |r| {
-        const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-        const src_y: isize = @floor(src_y_f);
-        const fy: i32 = @trunc((src_y_f - @floor(src_y_f)) * s);
-
-        for (0..dst_cols) |c| {
-            const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-            const src_x: isize = @floor(src_x_f);
-            const fx: i32 = @trunc((src_x_f - @floor(src_x_f)) * s);
-
-            var sum: i32 = 0;
-            var weight_sum: i32 = 0;
-
-            // 4x4 kernel
-            for (0..4) |ky| {
-                const y_idx = src_y + @as(isize, @intCast(ky)) - 1;
-                const pixel_y = resolveIndex(y_idx, @intCast(src_rows), .mirror).?;
-                const wy = mitchellKernel(@as(i32, @intCast(ky)) * s - s - fy);
-
-                for (0..4) |kx| {
-                    const x_idx = src_x + @as(isize, @intCast(kx)) - 1;
-                    const pixel_x = resolveIndex(x_idx, @intCast(src_cols), .mirror).?;
-                    const wx = mitchellKernel(@as(i32, @intCast(kx)) * s - s - fx);
-                    const w = @divTrunc(wx * wy, s);
-
-                    const pixel_val = @as(i32, src[pixel_y * src_cols + pixel_x]);
-                    sum += pixel_val * w;
-                    weight_sum += w;
-                }
-            }
-
-            const result = if (weight_sum != 0) @divTrunc(sum, weight_sum) else 0;
-            dst[r * dst_cols + c] = meta.clamp(u8, result);
-        }
-    }
-}
-
-/// Lanczos3 resize for u8 planes with f32 kernel weights.
-pub fn resizePlaneLanczosU8(
-    src: []const u8,
-    dst: []u8,
-    src_rows: u32,
-    src_cols: u32,
-    dst_rows: u32,
-    dst_cols: u32,
-    r_start: usize,
-    r_end: usize,
-) void {
-    const lanczosKernel = struct {
-        fn eval(x: f32) f32 {
-            if (x == 0) return 1.0;
-            const a = 3.0;
-            if (@abs(x) >= a) return 0.0;
-            const pi_x = std.math.pi * x;
-            return (a * @sin(pi_x) * @sin(pi_x / a)) / (pi_x * pi_x);
-        }
-    }.eval;
-
-    const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
-    const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
-
-    for (r_start..r_end) |r| {
-        const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-        const src_y: isize = @floor(src_y_f);
-        const fy = src_y_f - @floor(src_y_f);
-
-        for (0..dst_cols) |c| {
-            const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-            const src_x: isize = @floor(src_x_f);
-            const fx = src_x_f - @floor(src_x_f);
-
+        for (0..dst_len) |i| {
+            const center = (@as(f32, @floatFromInt(i)) + 0.5) * ratio - 0.5;
+            const base: isize = @as(isize, @intFromFloat(@floor(center))) - @as(isize, @intCast(taps / 2 - 1));
+            var raw: [max_taps]f32 = undefined;
             var sum: f32 = 0;
-            var weight_sum: f32 = 0;
-
-            // 6x6 kernel for Lanczos3
-            for (0..6) |ky| {
-                const y_idx = src_y + @as(isize, @intCast(ky)) - 2;
-                const pixel_y = resolveIndex(y_idx, @intCast(src_rows), .mirror).?;
-                const wy = lanczosKernel(@as(f32, @floatFromInt(@as(isize, @intCast(ky)) - 2)) - fy);
-
-                for (0..6) |kx| {
-                    const x_idx = src_x + @as(isize, @intCast(kx)) - 2;
-                    const pixel_x = resolveIndex(x_idx, @intCast(src_cols), .mirror).?;
-                    const wx = lanczosKernel(@as(f32, @floatFromInt(@as(isize, @intCast(kx)) - 2)) - fx);
-                    const w = wx * wy;
-
-                    sum += @as(f32, @floatFromInt(src[pixel_y * src_cols + pixel_x])) * w;
-                    weight_sum += w;
-                }
+            for (0..taps) |t| {
+                const x = base + @as(isize, @intCast(t));
+                raw[t] = interpolation.kernelWeight(method, center - @as(f32, @floatFromInt(x)));
+                sum += raw[t];
+                indices[i * taps + t] = @intCast(resolveIndex(x, @intCast(src_len), .mirror).?);
             }
+            // Quantize to unit gain; the rounding residual lands on the largest tap.
+            const w = weights[i * taps ..][0..taps];
+            var quantized_sum: i32 = 0;
+            var largest: usize = 0;
+            for (w, 0..) |*q, t| {
+                q.* = @intFromFloat(@round(raw[t] / sum * @as(f32, @floatFromInt(weight_scale))));
+                quantized_sum += q.*;
+                if (@abs(q.*) > @abs(w[largest])) largest = t;
+            }
+            w[largest] += weight_scale - quantized_sum;
+        }
+        return .{ .taps = taps, .indices = indices, .weights = weights };
+    }
 
-            const result = if (weight_sum != 0) sum / weight_sum else 0;
-            dst[r * dst_cols + c] = meta.clamp(u8, result);
+    pub fn deinit(self: AxisTaps, allocator: std.mem.Allocator) void {
+        allocator.free(self.indices);
+        allocator.free(self.weights);
+    }
+};
+
+/// Horizontal pass: source rows `[r_start, r_end)` of `src` (`src_cols` wide) resampled
+/// through `x_taps` into `mid` (`dst_cols` wide) as unnormalized i32 sums.
+pub fn resizeRowsU8(src: []const u8, src_cols: u32, x_taps: AxisTaps, mid: []i32, dst_cols: u32, r_start: usize, r_end: usize) void {
+    const taps = x_taps.taps;
+    for (r_start..r_end) |r| {
+        const row = src[r * src_cols ..][0..src_cols];
+        const out = mid[r * dst_cols ..][0..dst_cols];
+        for (out, 0..) |*o, c| {
+            var acc: i32 = 0;
+            for (x_taps.indices[c * taps ..][0..taps], x_taps.weights[c * taps ..][0..taps]) |idx, w| {
+                acc += w * @as(i32, row[idx]);
+            }
+            o.* = acc;
+        }
+    }
+}
+
+/// Vertical pass: output rows `[r_start, r_end)` of `dst` from `mid` through `y_taps`,
+/// rounded and clamped to u8.
+pub fn resizeColumnsU8(mid: []const i32, dst_cols: u32, y_taps: AxisTaps, dst: []u8, r_start: usize, r_end: usize) void {
+    const vec_len = std.simd.suggestVectorLength(i32) orelse 1;
+    const V = @Vector(vec_len, i32);
+    const taps = y_taps.taps;
+    const shift = 2 * weight_shift;
+    const half: i32 = 1 << (shift - 1);
+
+    for (r_start..r_end) |r| {
+        const rows = y_taps.indices[r * taps ..][0..taps];
+        const weights = y_taps.weights[r * taps ..][0..taps];
+        const out = dst[r * dst_cols ..][0..dst_cols];
+        var c: usize = 0;
+        while (c + vec_len <= dst_cols) : (c += vec_len) {
+            var acc: V = @splat(half);
+            for (rows, weights) |row, w| {
+                acc += @as(V, @splat(w)) * @as(V, mid[row * dst_cols + c ..][0..vec_len].*);
+            }
+            const scaled = acc >> @splat(shift);
+            const clamped = @max(@as(V, @splat(0)), @min(@as(V, @splat(255)), scaled));
+            const bytes: @Vector(vec_len, u8) = @intCast(clamped);
+            out[c..][0..vec_len].* = bytes;
+        }
+        while (c < dst_cols) : (c += 1) {
+            var acc: i32 = half;
+            for (rows, weights) |row, w| acc += w * mid[row * dst_cols + c];
+            out[c] = meta.clamp(u8, acc >> shift);
+        }
+    }
+}
+
+test "axis taps sum to unit gain and stay in bounds" {
+    const allocator = std.testing.allocator;
+    for ([_]Interpolation{ .bilinear, .bicubic, .catmull_rom, .{ .mitchell = .default }, .lanczos }) |method| {
+        for ([_][2]u32{ .{ 640, 97 }, .{ 13, 401 }, .{ 5, 5 } }) |lens| {
+            const taps: AxisTaps = try .init(allocator, lens[0], lens[1], method);
+            defer taps.deinit(allocator);
+            for (0..lens[1]) |i| {
+                var sum: i32 = 0;
+                for (taps.weights[i * taps.taps ..][0..taps.taps]) |w| sum += w;
+                try std.testing.expectEqual(weight_scale, sum);
+                for (taps.indices[i * taps.taps ..][0..taps.taps]) |idx| try std.testing.expect(idx < lens[0]);
+            }
         }
     }
 }

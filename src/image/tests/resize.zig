@@ -7,6 +7,7 @@ const expectError = std.testing.expectError;
 
 const color = @import("../../color.zig");
 const Image = @import("../../image.zig").Image;
+const Interpolation = @import("../../root.zig").Interpolation;
 
 const Rgb = color.Rgb(u8);
 
@@ -296,4 +297,38 @@ test "scale image" {
     var tiny_img = try Image(u8).init(allocator, 2, 2);
     defer tiny_img.deinit(allocator);
     try expectError(error.InvalidDimensions, tiny_img.scale(io, allocator, 0.1, .bilinear));
+}
+
+// The separable fixed-point u8 resizers must stay within rounding of the float per-pixel path.
+test "separable u8 resize matches the float path" {
+    const allocator = std.testing.allocator;
+    var prng = std.Random.DefaultPrng.init(0xc0ffee);
+    const random = prng.random();
+
+    var src: Image(u8) = try .init(allocator, 97, 131);
+    defer src.deinit(allocator);
+    for (0..src.rows) |r| {
+        for (0..src.cols) |c| {
+            // Ramp plus noise: gain errors and ringing both show up.
+            const ramp: i32 = @intCast(40 + (r * 100) / src.rows + (c * 80) / src.cols);
+            src.at(r, c).* = @intCast(std.math.clamp(ramp + random.intRangeAtMost(i32, -30, 30), 0, 255));
+        }
+    }
+    var src_f: Image(f32) = try .init(allocator, src.rows, src.cols);
+    defer src_f.deinit(allocator);
+    for (src_f.data, src.data) |*f, v| f.* = @as(f32, v);
+
+    for ([_]Interpolation{ .bilinear, .bicubic, .catmull_rom, .{ .mitchell = .default }, .lanczos }) |method| {
+        for ([_][2]u32{ .{ 61, 47 }, .{ 200, 150 }, .{ 97, 131 } }) |shape| {
+            var out: Image(u8) = try .init(allocator, shape[0], shape[1]);
+            defer out.deinit(allocator);
+            var out_f: Image(f32) = try .init(allocator, shape[0], shape[1]);
+            defer out_f.deinit(allocator);
+            src.resize(io, allocator, out, method);
+            src_f.resize(io, allocator, out_f, method);
+            var max_err: f32 = 0;
+            for (out.data, out_f.data) |v, f| max_err = @max(max_err, @abs(@as(f32, v) - std.math.clamp(f, 0, 255)));
+            try std.testing.expect(max_err <= 3);
+        }
+    }
 }
