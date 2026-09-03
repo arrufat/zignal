@@ -7,7 +7,7 @@ const Rgba = zignal.Rgba(u8);
 const Rgb = zignal.Rgb(u8);
 
 const python = @import("../python.zig");
-const allocator = python.ctx.allocator;
+const allocator = python.allocator;
 const c = python.c;
 
 const PyImage = @import("../PyImage.zig");

@@ -8,7 +8,7 @@ const enum_utils = @import("enum_utils.zig");
 const matrix_module = @import("matrix.zig");
 const MatrixObject = matrix_module.MatrixObject;
 const python = @import("python.zig");
-const allocator = python.ctx.allocator;
+const allocator = python.allocator;
 const c = python.c;
 
 // ============================================================================

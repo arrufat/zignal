@@ -4,8 +4,7 @@ const zignal = @import("zignal");
 const Font = zignal.Font;
 
 const python = @import("python.zig");
-const ctx = python.ctx;
-const allocator = ctx.allocator;
+const allocator = python.allocator;
 const c = python.c;
 
 pub const FontObject = extern struct {
@@ -95,7 +94,7 @@ fn font_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
         return null;
     }
 
-    const font = Font.loadFace(ctx.io, allocator, path, @intCast(params.face)) catch |err| {
+    const font = Font.loadFace(python.io, allocator, path, @intCast(params.face)) catch |err| {
         python.setErrorWithPath(err, path);
         return null;
     };
@@ -129,7 +128,7 @@ fn font_save(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
     const path = std.mem.span(params.path);
 
     switch (font.*) {
-        .bitmap => |b| b.save(ctx.io, allocator, path) catch |err| {
+        .bitmap => |b| b.save(python.io, allocator, path) catch |err| {
             python.setErrorWithPath(err, path);
             return null;
         },

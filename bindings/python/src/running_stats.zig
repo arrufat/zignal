@@ -3,7 +3,7 @@ const std = @import("std");
 const zignal = @import("zignal");
 
 const python = @import("python.zig");
-const allocator = python.ctx.allocator;
+const allocator = python.allocator;
 pub const registerType = python.register;
 const c = python.c;
 const stub_metadata = @import("stub_metadata.zig");

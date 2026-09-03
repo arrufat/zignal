@@ -6,6 +6,7 @@
 //! the grid to the decoder. See qrcode.zig for the supported input range.
 
 const std = @import("std");
+const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
 const ProjectiveTransform = @import("../geometry.zig").ProjectiveTransform;
@@ -710,7 +711,7 @@ fn photoSimulate(allocator: Allocator, clean: Image(u8), opts: struct {
     if (opts.sigma > 0) {
         var blurred = try Image(u8).initLike(allocator, out);
         errdefer blurred.deinit(allocator);
-        try out.gaussianBlur(allocator, blurred, opts.sigma);
+        try out.gaussianBlur(Io.Threaded.global_single_threaded.io(), allocator, blurred, opts.sigma);
         out.deinit(allocator);
         return blurred;
     }

@@ -7,7 +7,7 @@ const enum_utils = @import("enum_utils.zig");
 const image = @import("image.zig");
 const python = @import("python.zig");
 const stub_metadata = @import("stub_metadata.zig");
-const allocator = python.ctx.allocator;
+const allocator = python.allocator;
 const c = python.c;
 
 // ============================================================================

@@ -14,12 +14,12 @@ pub fn main(init: std.process.Init) !void {
     var edges: Image(u8) = try .init(init.gpa, image.rows, image.cols);
     defer edges.deinit(init.gpa);
 
-    try image.sobel(init.gpa, edges);
+    try image.sobel(init.io, init.gpa, edges);
     try edges.save(init.io, init.gpa, "image-demo-sobel.png");
 
     var blurred: Image(Rgba) = try .init(init.gpa, image.rows, image.cols);
     defer blurred.deinit(init.gpa);
-    try image.gaussianBlur(init.gpa, blurred, 5.0);
+    try image.gaussianBlur(init.io, init.gpa, blurred, 5.0);
     try blurred.save(init.io, init.gpa, "image-demo-gaussian.png");
 
     var resized: Image(Rgba) = try .init(init.gpa, image.rows / 2, image.cols / 2);

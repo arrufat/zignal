@@ -626,7 +626,7 @@ pub fn Image(comptime T: type) type {
         /// Computes a blurred version of `self` using a box blur. The `radius` parameter
         /// determines the size of the box window. The output image must be pre-allocated
         /// with the same dimensions as the input.
-        pub fn boxBlur(self: Self, allocator: Allocator, out: Self, radius: u32) !void {
+        pub fn boxBlur(self: Self, io: Io, allocator: Allocator, out: Self, radius: u32) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
@@ -635,7 +635,7 @@ pub fn Image(comptime T: type) type {
                 return;
             }
 
-            try box_blur.boxBlur(T, self, out, allocator, radius);
+            try box_blur.boxBlur(T, io, self, out, allocator, radius);
         }
 
         /// Applies a median blur using a square window with the given radius.
@@ -773,7 +773,7 @@ pub fn Image(comptime T: type) type {
         /// `sharpened = 2 * original - blurred`, where `blurred` is a box-blurred version
         /// of the original image. The `radius` parameter controls the size of the blur.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn sharpen(self: Self, allocator: Allocator, out: Self, radius: usize) !void {
+        pub fn sharpen(self: Self, io: Io, allocator: Allocator, out: Self, radius: usize) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
@@ -782,7 +782,7 @@ pub fn Image(comptime T: type) type {
                 return;
             }
 
-            try box_blur.sharpen(T, self, out, allocator, radius);
+            try box_blur.sharpen(T, io, self, out, allocator, radius);
         }
 
         /// Stretches the intensity range so the darkest/brightest pixels map to 0/255, modifying
@@ -901,6 +901,7 @@ pub fn Image(comptime T: type) type {
         /// Applies a 2D convolution with the given kernel to the image.
         pub fn convolve(
             self: Self,
+            io: Io,
             allocator: Allocator,
             /// The output image (must be pre-allocated with same dimensions).
             out: Self,
@@ -912,13 +913,14 @@ pub fn Image(comptime T: type) type {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            return convolution.convolve(T, self, out, allocator, kernel, border);
+            return convolution.convolve(T, io, self, out, allocator, kernel, border);
         }
 
         /// Performs separable convolution using two 1D kernels (horizontal and vertical).
         /// This is much more efficient for separable filters like Gaussian blur.
         pub fn convolveSeparable(
             self: Self,
+            io: Io,
             allocator: Allocator,
             /// The output image (must be pre-allocated with same dimensions).
             out: Self,
@@ -932,12 +934,13 @@ pub fn Image(comptime T: type) type {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            return convolution.convolveSeparable(T, self, out, allocator, kernel_x, kernel_y, border);
+            return convolution.convolveSeparable(T, io, self, out, allocator, kernel_x, kernel_y, border);
         }
 
         /// Applies Gaussian blur to the image using separable convolution.
         pub fn gaussianBlur(
             self: Self,
+            io: Io,
             allocator: Allocator,
             /// The output blurred image (must be pre-allocated with same dimensions).
             out: Self,
@@ -954,28 +957,9 @@ pub fn Image(comptime T: type) type {
             }
             if (sigma < 0) return error.InvalidSigma;
 
-            // Calculate kernel size (3 sigma on each side)
-            const radius: usize = @ceil(3.0 * sigma);
-            const kernel_size = 2 * radius + 1;
-
-            // Generate 1D Gaussian kernel
-            var kernel = try allocator.alloc(f32, kernel_size);
+            const kernel = try convolution.gaussianKernel(allocator, sigma);
             defer allocator.free(kernel);
-
-            var sum: f32 = 0;
-            for (0..kernel_size) |i| {
-                const x = @as(f32, @floatFromInt(i)) - @as(f32, @floatFromInt(radius));
-                kernel[i] = @exp(-(x * x) / (2.0 * sigma * sigma));
-                sum += kernel[i];
-            }
-
-            // Normalize kernel
-            for (kernel) |*k| {
-                k.* /= sum;
-            }
-
-            // Apply separable convolution
-            try convolution.convolveSeparable(T, self, out, allocator, kernel, kernel, .mirror);
+            try convolution.convolveSeparable(T, io, self, out, allocator, kernel, kernel, .mirror);
         }
 
         /// Applies the Sobel filter to `self` to perform edge detection.
@@ -983,6 +967,7 @@ pub fn Image(comptime T: type) type {
         /// The output image must be pre-allocated with the same dimensions as the input.
         pub fn sobel(
             self: Self,
+            io: Io,
             allocator: Allocator,
             /// Output image that will be filled with the Sobel magnitude image.
             out: Image(u8),
@@ -990,7 +975,7 @@ pub fn Image(comptime T: type) type {
             if (self.rows != out.rows or self.cols != out.cols) {
                 return error.DimensionMismatch;
             }
-            return Edges(T).sobel(self, out, allocator);
+            return Edges(T).sobel(self, io, allocator, out);
         }
 
         /// Applies the Shen-Castan edge detection algorithm using the Infinite Symmetric
@@ -999,6 +984,7 @@ pub fn Image(comptime T: type) type {
         /// The output image must be pre-allocated with the same dimensions as the input.
         pub fn shenCastan(
             self: Self,
+            io: Io,
             allocator: Allocator,
             /// Output edge map as binary image (0 or 255).
             out: Image(u8),
@@ -1008,7 +994,7 @@ pub fn Image(comptime T: type) type {
             if (self.rows != out.rows or self.cols != out.cols) {
                 return error.DimensionMismatch;
             }
-            return Edges(T).shenCastan(self, out, allocator, opts);
+            return Edges(T).shenCastan(self, io, allocator, out, opts);
         }
 
         /// Applies the Canny edge detection algorithm, a classic multi-stage edge detector.
@@ -1031,6 +1017,7 @@ pub fn Image(comptime T: type) type {
         /// ```
         pub fn canny(
             self: Self,
+            io: Io,
             allocator: Allocator,
             /// Output edge map as binary image (0 or 255).
             out: Image(u8),
@@ -1044,7 +1031,7 @@ pub fn Image(comptime T: type) type {
             if (self.rows != out.rows or self.cols != out.cols) {
                 return error.DimensionMismatch;
             }
-            return Edges(T).canny(self, out, allocator, sigma, low_threshold, high_threshold);
+            return Edges(T).canny(self, io, allocator, out, sigma, low_threshold, high_threshold);
         }
 
         /// Applies motion blur effect to the image.
@@ -1061,6 +1048,7 @@ pub fn Image(comptime T: type) type {
         /// ```
         pub fn motionBlur(
             self: Self,
+            io: Io,
             allocator: Allocator,
             /// Output image containing the motion blurred result.
             out: Self,
@@ -1071,7 +1059,7 @@ pub fn Image(comptime T: type) type {
                 return error.DimensionMismatch;
             }
             switch (motion) {
-                .linear => |params| try MotionBlurOps(T).linear(self, out, allocator, params.angle, params.distance),
+                .linear => |params| try MotionBlurOps(T).linear(io, self, out, allocator, params.angle, params.distance),
                 .radial_zoom => |params| try MotionBlurOps(T).radial(self, out, allocator, params.center_x, params.center_y, params.strength, .zoom),
                 .radial_spin => |params| try MotionBlurOps(T).radial(self, out, allocator, params.center_x, params.center_y, params.strength, .spin),
             }

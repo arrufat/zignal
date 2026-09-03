@@ -1,6 +1,7 @@
 //! Motion blur effects for images
 
 const std = @import("std");
+const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
 const Image = @import("../image.zig").Image;
@@ -96,7 +97,7 @@ pub fn MotionBlurOps(comptime T: type) type {
 
         /// Applies linear motion blur by averaging pixels along a line at the given `angle`
         /// (radians, 0 = horizontal) and `distance` (pixels).
-        pub fn linear(image: Image(T), out: Image(T), allocator: Allocator, angle: f32, distance: usize) !void {
+        pub fn linear(io: Io, image: Image(T), out: Image(T), allocator: Allocator, angle: f32, distance: usize) !void {
             if (distance == 0) {
                 image.copy(out);
                 return;
@@ -128,7 +129,7 @@ pub fn MotionBlurOps(comptime T: type) type {
                 const identity = [_]f32{1.0};
 
                 // Apply separable convolution (horizontal blur only)
-                try image.convolveSeparable(allocator, out, kernel, &identity, .replicate);
+                try image.convolveSeparable(io, allocator, out, kernel, &identity, .replicate);
             } else if (is_vertical) {
                 // Use separable convolution for vertical motion blur
                 const kernel_size = distance;
@@ -145,7 +146,7 @@ pub fn MotionBlurOps(comptime T: type) type {
                 const identity = [_]f32{1.0};
 
                 // Apply separable convolution (vertical blur only)
-                try image.convolveSeparable(allocator, out, &identity, kernel, .replicate);
+                try image.convolveSeparable(io, allocator, out, &identity, kernel, .replicate);
             } else {
                 // General diagonal motion blur
                 switch (@typeInfo(T)) {

@@ -17,8 +17,7 @@ const PyImageMod = @import("../PyImage.zig");
 const PyImage = PyImageMod.PyImage;
 const python = @import("../python.zig");
 const enum_utils = @import("../enum_utils.zig");
-const ctx = python.ctx;
-const allocator = ctx.allocator;
+const allocator = python.allocator;
 const c = python.c;
 
 const Rgba = zignal.Rgba(u8);
@@ -166,7 +165,7 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         readLimit(file_bmp_limits.max_bmp_bytes),
         readLimit(file_gif_limits.max_gif_bytes),
     });
-    const data = Io.Dir.cwd().readFileAlloc(ctx.io, path_slice, allocator, .limited(read_cap)) catch |err| {
+    const data = Io.Dir.cwd().readFileAlloc(python.io, path_slice, allocator, .limited(read_cap)) catch |err| {
         python.setErrorWithPath(err, path_slice);
         return null;
     };
@@ -348,7 +347,7 @@ pub fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     return self.py_image.?.dispatch(.{path_slice}, struct {
         fn apply(img: anytype, path: []const u8) ?*c.PyObject {
-            img.save(ctx.io, allocator, path) catch |err| {
+            img.save(python.io, allocator, path) catch |err| {
                 if (err == error.UnsupportedImageFormat) {
                     python.setValueError("Unsupported image format. File must have a valid PNG, JPEG, BMP, or GIF extension.", .{});
                     return null;

@@ -3,7 +3,7 @@ const FeatureDistributionMatching = zignal.FeatureDistributionMatching;
 
 const image = @import("image.zig");
 const python = @import("python.zig");
-const allocator = python.ctx.allocator;
+const allocator = python.allocator;
 const c = python.c;
 const stub_metadata = @import("stub_metadata.zig");
 

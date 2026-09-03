@@ -19,8 +19,7 @@ const makeRgbProxy = @import("pixel_proxy.zig").makeRgbProxy;
 const pixel_iterator = @import("pixel_iterator.zig");
 const PyImage = @import("PyImage.zig");
 const python = @import("python.zig");
-const ctx = python.ctx;
-const allocator = ctx.allocator;
+const allocator = python.allocator;
 pub const registerType = python.register;
 const c = python.c;
 const stub_metadata = @import("stub_metadata.zig");
@@ -312,8 +311,8 @@ fn image_dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
     // Free PyImage if present
     if (self.py_image) |pimg| {
         var tmp = pimg.*;
-        tmp.deinit(python.ctx.allocator);
-        python.ctx.allocator.destroy(pimg);
+        tmp.deinit(python.allocator);
+        python.allocator.destroy(pimg);
         self.py_image = null;
     }
 
@@ -836,7 +835,7 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
 
         switch (pimg.data) {
             .gray => |*img| {
-                const formatted = std.fmt.allocPrint(allocator, "{f}", .{img.display(ctx.io, display_format)}) catch |err| {
+                const formatted = std.fmt.allocPrint(allocator, "{f}", .{img.display(python.io, display_format)}) catch |err| {
                     if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
                 };
@@ -847,7 +846,7 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
                 };
             },
             .rgb => |*img| {
-                const formatted = std.fmt.allocPrint(allocator, "{f}", .{img.display(ctx.io, display_format)}) catch |err| {
+                const formatted = std.fmt.allocPrint(allocator, "{f}", .{img.display(python.io, display_format)}) catch |err| {
                     if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
                 };
@@ -858,7 +857,7 @@ fn image_format(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) 
                 };
             },
             .rgba => |*img| {
-                const formatted = std.fmt.allocPrint(allocator, "{f}", .{img.display(ctx.io, display_format)}) catch |err| {
+                const formatted = std.fmt.allocPrint(allocator, "{f}", .{img.display(python.io, display_format)}) catch |err| {
                     if (err == error.OutOfMemory) c.PyErr_SetString(c.PyExc_MemoryError, "Out of memory");
                     return null;
                 };

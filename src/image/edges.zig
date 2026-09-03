@@ -1,4 +1,5 @@
 const std = @import("std");
+const Io = std.Io;
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
@@ -8,6 +9,7 @@ const meta = @import("../meta.zig");
 const as = meta.as;
 const isScalar = meta.isScalar;
 const convolvePair = @import("convolution.zig").convolvePair;
+const parallel = @import("parallel.zig");
 const ShenCastan = @import("ShenCastan.zig");
 
 /// Sobel X gradient kernel (horizontal edges)
@@ -30,45 +32,57 @@ pub fn Edges(comptime T: type) type {
     return struct {
         /// Applies the Sobel filter, writing the per-pixel gradient magnitude into `out` as a
         /// grayscale image.
-        pub fn sobel(self: Image(T), out: Image(u8), allocator: Allocator) !void {
-            // For now, use float path for all types to ensure correctness
-            {
-                // Convert input to grayscale float if needed
-                var gray_float: Image(f32) = undefined;
-                const needs_conversion = !isScalar(T) or @typeInfo(T) != .float;
-                if (needs_conversion) {
-                    gray_float = try Image(f32).init(allocator, self.rows, self.cols);
-                    for (0..self.rows) |r| {
-                        for (0..self.cols) |c| {
-                            gray_float.at(r, c).* = as(f32, convertColor(u8, self.at(r, c).*));
-                        }
-                    }
-                } else {
-                    gray_float = self;
-                }
-                defer if (needs_conversion) gray_float.deinit(allocator);
+        pub fn sobel(self: Image(T), io: Io, allocator: Allocator, out: Image(u8)) !void {
+            // Grayscale f32 working copy unless the input already is one.
+            const needs_conversion = !isScalar(T) or @typeInfo(T) != .float;
+            var gray_float: Image(f32) = if (needs_conversion) try .init(allocator, self.rows, self.cols) else self;
+            defer if (needs_conversion) gray_float.deinit(allocator);
+            if (needs_conversion) toGrayF32(io, self, gray_float);
 
-                // Apply Sobel X and Y filters
-                var grad_x = try Image(f32).initLike(allocator, gray_float);
-                var grad_y = try Image(f32).initLike(allocator, gray_float);
-                defer grad_x.deinit(allocator);
-                defer grad_y.deinit(allocator);
+            var grad_x = try Image(f32).initLike(allocator, gray_float);
+            defer grad_x.deinit(allocator);
+            var grad_y = try Image(f32).initLike(allocator, gray_float);
+            defer grad_y.deinit(allocator);
+            convolvePair(f32, io, gray_float, grad_x, grad_y, sobel_x, sobel_y, .replicate);
 
-                convolvePair(f32, gray_float, grad_x, grad_y, sobel_x, sobel_y, .replicate);
+            const ctx: Magnitude = .{ .grad_x = grad_x, .grad_y = grad_y, .out = out };
+            parallel.forRowBands(io, self.rows, parallel.bandCount(self.rows, self.cols), &ctx, Magnitude.band);
+        }
 
-                // Compute gradient magnitude
-                for (0..self.rows) |r| {
-                    for (0..self.cols) |c| {
-                        const gx = grad_x.at(r, c).*;
-                        const gy = grad_y.at(r, c).*;
-                        const magnitude = @sqrt(gx * gx + gy * gy);
-                        // Scale by 1/4 to match typical Sobel output range
-                        // Max theoretical magnitude is ~1442, so /4 maps to ~360 max
-                        const scaled = magnitude / 4.0;
-                        out.at(r, c).* = @trunc(@max(0, @min(255, scaled)));
+        /// Gradient magnitude scaled by 1/4 (max ~1442 -> ~360) and clamped to u8.
+        const Magnitude = struct {
+            grad_x: Image(f32),
+            grad_y: Image(f32),
+            out: Image(u8),
+
+            fn band(ctx: *const Magnitude, _: usize, r0: usize, r1: usize) void {
+                for (r0..r1) |r| {
+                    for (0..ctx.out.cols) |c| {
+                        const gx = ctx.grad_x.at(r, c).*;
+                        const gy = ctx.grad_y.at(r, c).*;
+                        const scaled = @sqrt(gx * gx + gy * gy) / 4.0;
+                        ctx.out.at(r, c).* = @trunc(@max(0, @min(255, scaled)));
                     }
                 }
             }
+        };
+
+        /// Grayscale `src` into an f32 plane on the 0-255 scale, in row bands.
+        fn toGrayF32(io: Io, src: Image(T), dst: Image(f32)) void {
+            const Ctx = struct {
+                src: Image(T),
+                dst: Image(f32),
+
+                fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
+                    for (r0..r1) |r| {
+                        for (0..ctx.src.cols) |c| {
+                            ctx.dst.at(r, c).* = as(f32, convertColor(u8, ctx.src.at(r, c).*));
+                        }
+                    }
+                }
+            };
+            const ctx: Ctx = .{ .src = src, .dst = dst };
+            parallel.forRowBands(io, src.rows, parallel.bandCount(src.rows, src.cols), &ctx, Ctx.band);
         }
 
         /// Applies the Shen-Castan edge detection algorithm using the Infinite Symmetric
@@ -81,8 +95,9 @@ pub fn Edges(comptime T: type) type {
         /// - Thresholds apply to raw luminance differences (0..255 scale).
         pub fn shenCastan(
             self: Image(T),
-            out: Image(u8),
+            io: Io,
             allocator: Allocator,
+            out: Image(u8),
             opts: ShenCastan,
         ) !void {
             try opts.validate();
@@ -90,12 +105,7 @@ pub fn Edges(comptime T: type) type {
             // Convert to grayscale float for processing
             var gray_float = try Image(f32).init(allocator, self.rows, self.cols);
             defer gray_float.deinit(allocator);
-            for (0..self.rows) |r| {
-                for (0..self.cols) |c| {
-                    const gray_val = convertColor(u8, self.at(r, c).*);
-                    gray_float.at(r, c).* = as(f32, gray_val);
-                }
-            }
+            toGrayF32(io, self, gray_float);
 
             // Apply ISEF filter for smoothing
             var smoothed = try Image(f32).init(allocator, self.rows, self.cols);
@@ -210,8 +220,9 @@ pub fn Edges(comptime T: type) type {
         /// 2–3× `low_threshold`. `out` receives a binary edge map (0 or 255).
         pub fn canny(
             self: Image(T),
-            out: Image(u8),
+            io: Io,
             allocator: Allocator,
+            out: Image(u8),
             sigma: f32,
             low_threshold: f32,
             high_threshold: f32,
@@ -227,12 +238,7 @@ pub fn Edges(comptime T: type) type {
             // Step 1: Convert to grayscale float for processing
             var gray_float = try Image(f32).init(allocator, self.rows, self.cols);
             defer gray_float.deinit(allocator);
-            for (0..self.rows) |r| {
-                for (0..self.cols) |c| {
-                    const gray_val = convertColor(u8, self.at(r, c).*);
-                    gray_float.at(r, c).* = as(f32, gray_val);
-                }
-            }
+            toGrayF32(io, self, gray_float);
 
             // Step 2: Apply Gaussian blur (or skip if sigma == 0)
             var blurred = try Image(f32).init(allocator, self.rows, self.cols);
@@ -240,7 +246,7 @@ pub fn Edges(comptime T: type) type {
             if (sigma == 0) {
                 gray_float.copy(blurred);
             } else {
-                try blurGaussian(gray_float, sigma, blurred, allocator);
+                try blurGaussian(gray_float, io, allocator, blurred, sigma);
             }
 
             // Step 3: Compute gradients using Sobel operators
@@ -249,7 +255,7 @@ pub fn Edges(comptime T: type) type {
             defer grad_x.deinit(allocator);
             defer grad_y.deinit(allocator);
 
-            convolvePair(f32, blurred, grad_x, grad_y, sobel_x, sobel_y, .replicate);
+            convolvePair(f32, io, blurred, grad_x, grad_y, sobel_x, sobel_y, .replicate);
 
             // Compute gradient magnitude
             var magnitude = try Image(f32).init(allocator, self.rows, self.cols);
@@ -658,30 +664,11 @@ fn nonMaxSuppressEdges(
 // ============================================================================
 
 /// Applies Gaussian blur to an image for Canny edge detection preprocessing.
-fn blurGaussian(src: Image(f32), sigma: f32, dst: Image(f32), allocator: Allocator) !void {
-    // Calculate kernel size (3 sigma on each side)
-    const radius: usize = @ceil(3.0 * sigma);
-    const kernel_size = 2 * radius + 1;
-
-    // Generate 1D Gaussian kernel
-    var kernel = try allocator.alloc(f32, kernel_size);
-    defer allocator.free(kernel);
-
-    var sum: f32 = 0;
-    for (0..kernel_size) |i| {
-        const x = @as(f32, @floatFromInt(i)) - @as(f32, @floatFromInt(radius));
-        kernel[i] = @exp(-(x * x) / (2.0 * sigma * sigma));
-        sum += kernel[i];
-    }
-
-    // Normalize kernel
-    for (kernel) |*k| {
-        k.* /= sum;
-    }
-
-    // Apply separable convolution
+fn blurGaussian(src: Image(f32), io: Io, allocator: Allocator, dst: Image(f32), sigma: f32) !void {
     const convolution_mod = @import("convolution.zig");
-    try convolution_mod.convolveSeparable(f32, src, dst, allocator, kernel, kernel, .replicate);
+    const kernel = try convolution_mod.gaussianKernel(allocator, sigma);
+    defer allocator.free(kernel);
+    try convolution_mod.convolveSeparable(f32, io, src, dst, allocator, kernel, kernel, .replicate);
 }
 
 /// Non-maximum suppression specifically for Canny edge detection.

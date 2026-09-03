@@ -1,4 +1,5 @@
 const std = @import("std");
+const Io = std.Io;
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const expectEqual = std.testing.expectEqual;
@@ -29,6 +30,7 @@ pub fn ImagePyramid(comptime T: type) type {
 
         /// Build an image pyramid from the source image
         pub fn build(
+            io: Io,
             allocator: Allocator,
             source: Image(T),
             n_levels: u8,
@@ -80,7 +82,7 @@ pub fn ImagePyramid(comptime T: type) type {
                 // Apply Gaussian blur if sigma > 0.5
                 if (sigma > 0.5) {
                     blurred = try .initLike(allocator, source);
-                    try source.gaussianBlur(allocator, blurred, sigma);
+                    try source.gaussianBlur(io, allocator, blurred, sigma);
                 }
 
                 // Allocate and resize to create the new level
@@ -101,8 +103,8 @@ pub fn ImagePyramid(comptime T: type) type {
         }
 
         /// Build a pyramid with default ORB parameters
-        pub fn buildDefault(allocator: Allocator, source: Image(T)) !Self {
-            return build(allocator, source, 8, 1.2, 1.6);
+        pub fn buildDefault(io: Io, allocator: Allocator, source: Image(T)) !Self {
+            return build(io, allocator, source, 8, 1.2, 1.6);
         }
 
         /// Free all allocated pyramid levels (except the first which is not owned)
@@ -178,7 +180,7 @@ test "ImagePyramid basic construction" {
     }
 
     // Build pyramid
-    var pyramid = try ImagePyramid(u8).build(allocator, image, 5, 1.5, 1.0);
+    var pyramid = try ImagePyramid(u8).build(std.Io.Threaded.global_single_threaded.io(), allocator, image, 5, 1.5, 1.0);
     defer pyramid.deinit();
 
     try expectEqual(@as(u8, 5), pyramid.n_levels);
@@ -213,7 +215,7 @@ test "ImagePyramid scale calculations" {
     var image = try Image(u8).init(allocator, 100, 100);
     defer image.deinit(allocator);
 
-    var pyramid = try ImagePyramid(u8).build(allocator, image, 4, 1.2, 1.0);
+    var pyramid = try ImagePyramid(u8).build(std.Io.Threaded.global_single_threaded.io(), allocator, image, 4, 1.2, 1.0);
     defer pyramid.deinit();
 
     // Test scale factors
@@ -240,7 +242,7 @@ test "ImagePyramid truncation for small images" {
     defer image.deinit(allocator);
 
     // Request many levels but expect truncation
-    var pyramid = try ImagePyramid(u8).build(allocator, image, 10, 2.0, 1.0);
+    var pyramid = try ImagePyramid(u8).build(std.Io.Threaded.global_single_threaded.io(), allocator, image, 10, 2.0, 1.0);
     defer pyramid.deinit();
 
     // Should have fewer levels due to minimum size constraint
@@ -258,7 +260,7 @@ test "ImagePyramid memory usage" {
     var image = try Image(u8).init(allocator, 256, 256);
     defer image.deinit(allocator);
 
-    var pyramid = try ImagePyramid(u8).build(allocator, image, 4, 1.5, 1.0);
+    var pyramid = try ImagePyramid(u8).build(std.Io.Threaded.global_single_threaded.io(), allocator, image, 4, 1.5, 1.0);
     defer pyramid.deinit();
 
     const total_pixels = pyramid.totalPixels();
