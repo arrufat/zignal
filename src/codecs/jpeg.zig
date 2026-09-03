@@ -1296,109 +1296,22 @@ pub const JpegState = struct {
         }
     }
 
-    // Decode a Huffman symbol using the fast lookup table
+    /// Progressive-scan symbol read; reports consumption past the data as truncation.
     pub fn readCode(self: *JpegState, table: *const HuffmanTable) !u8 {
-        const fast_bits = 9;
-        const fast_index = self.bit_reader.peekBits(fast_bits) catch 0;
-
-        if (self.bit_reader.bit_count >= fast_bits) {
-            const value = table.fast_table[fast_index];
-            if (value != 255) {
-                const length = table.fast_size[fast_index];
-                self.bit_reader.consumeBits(length);
-                return value;
-            }
-        }
-
-        // Slow path: canonical decode per ITU T.81 F.16
-        var code: u16 = 0;
-        var length: usize = 0;
-        if (self.bit_reader.bit_count >= fast_bits) {
-            // Fast-table miss with 9 valid bits: no code of length <= 9 matches.
-            self.bit_reader.consumeBits(fast_bits);
-            code = @intCast(fast_index);
-            length = fast_bits;
-        }
-        while (length < 16) {
-            // Preserve EOF distinctly so truncated streams can decode partially.
-            const bit = self.bit_reader.getBits(1) catch |err| switch (err) {
-                error.UnexpectedEndOfData => return err,
-                else => return error.InvalidHuffmanCode,
-            };
-            code = (code << 1) | @as(u16, @intCast(bit));
-            length += 1;
-            if (code <= table.max_code[length]) {
-                // Canonical construction guarantees code >= min_code at this length.
-                std.debug.assert(code >= table.min_code[length]);
-                const idx = @as(usize, table.val_ptr[length]) + code - table.min_code[length];
-                return table.huffval[idx];
-            }
-        }
-
-        return error.InvalidHuffmanCode;
+        self.bit_reader.ensure(32);
+        const symbol = self.bit_reader.decodeSymbol(table) catch |err| {
+            return if (self.bit_reader.overrun()) error.UnexpectedEndOfData else err;
+        };
+        if (self.bit_reader.overrun()) return error.UnexpectedEndOfData;
+        return symbol;
     }
 
     // Decode magnitude-coded coefficient (T.81 section F1.2.1)
     pub fn readMagnitudeCoded(self: *JpegState, magnitude: u5) !i32 {
-        if (magnitude == 0) return 0;
-
-        var coeff: i32 = @intCast(try self.bit_reader.peekBits(magnitude));
-        self.bit_reader.consumeBits(magnitude);
-
-        // Convert from unsigned to signed
-        if (coeff < @as(i32, 1) << @intCast(magnitude - 1)) {
-            coeff -= (@as(i32, 1) << @intCast(magnitude)) - 1;
-        }
-
-        return coeff;
-    }
-
-    // Decode AC coefficients (simple baseline implementation)
-    pub fn decodeAC(self: *JpegState, table: *const HuffmanTable, block: *[64]i32) !void {
-        var k: usize = 1; // Start after DC coefficient
-
-        while (k < 64) {
-            const symbol = try self.readCode(table);
-
-            if (symbol == 0) {
-                // End of block - zero fill remaining coefficients
-                while (k < 64) {
-                    block[zigzag[k]] = 0;
-                    k += 1;
-                }
-                return;
-            }
-
-            const run = symbol >> 4;
-            const size = symbol & 0x0F;
-
-            if (size == 0) {
-                if (run == 15) {
-                    // ZRL: skip 16 zeros
-                    for (0..16) |_| {
-                        if (k >= 64) break;
-                        block[zigzag[k]] = 0;
-                        k += 1;
-                    }
-                } else {
-                    return error.InvalidACCoefficient; // invalid stream
-                }
-            } else {
-                // Skip 'run' zeros
-                for (0..run) |_| {
-                    if (k >= 64) break;
-                    block[zigzag[k]] = 0;
-                    k += 1;
-                }
-
-                if (k >= 64) break;
-
-                // Decode AC coefficient using magnitude state
-                const value = try self.readMagnitudeCoded(@intCast(size));
-                block[zigzag[k]] = value;
-                k += 1;
-            }
-        }
+        self.bit_reader.ensure(32);
+        const value = self.bit_reader.receiveExtend(magnitude);
+        if (self.bit_reader.overrun()) return error.UnexpectedEndOfData;
+        return value;
     }
 
     // Parse Start of Frame (SOF0/SOF2) marker
@@ -1565,8 +1478,7 @@ pub const JpegState = struct {
             @memcpy(huffval[0..total_codes], data[pos .. pos + total_codes]);
             pos += total_codes;
 
-            var fast_table: [512]u8 = @splat(255);
-            var fast_size: [512]u5 = @splat(0);
+            var fast: [1 << HuffmanTable.fast_bits]u16 = @splat(0);
             var max_code: [17]i32 = @splat(-1);
             var min_code: [17]u16 = @splat(0);
             var val_ptr: [17]u16 = @splat(0);
@@ -1575,7 +1487,7 @@ pub const JpegState = struct {
             var code: u16 = 0;
             var huffval_index: usize = 0;
             for (bits, 0..) |count, i| {
-                const code_len = i + 1;
+                const code_len: u5 = @intCast(i + 1);
                 if (count > 0) {
                     val_ptr[code_len] = @intCast(huffval_index);
                     min_code[code_len] = code;
@@ -1583,21 +1495,20 @@ pub const JpegState = struct {
                 var j: usize = 0;
                 while (j < count) : (j += 1) {
                     // Check for invalid code (all 1s)
-                    if (code == (@as(u17, 1) << (@as(u5, @intCast(i)) + 1)) - 1) {
+                    if (code == (@as(u17, 1) << code_len) - 1) {
                         return error.InvalidHuffmanTable;
                     }
 
                     const byte = huffval[huffval_index];
                     huffval_index += 1;
 
-                    // Build fast lookup table for codes <= 9 bits
-                    if (code_len <= 9) {
-                        const first_index = code << 9 - @as(u4, @intCast(code_len));
-                        const num_indexes = @as(usize, 1) << @as(u4, @intCast(9 - code_len));
+                    if (code_len <= HuffmanTable.fast_bits) {
+                        const spare: u4 = @intCast(HuffmanTable.fast_bits - code_len);
+                        const first_index = @as(usize, code) << spare;
+                        const num_indexes = @as(usize, 1) << spare;
                         for (0..num_indexes) |index| {
-                            std.debug.assert(fast_table[first_index + index] == 255);
-                            fast_table[first_index + index] = byte;
-                            fast_size[first_index + index] = @intCast(code_len);
+                            std.debug.assert(fast[first_index + index] == 0);
+                            fast[first_index + index] = @as(u16, code_len) << 8 | byte;
                         }
                     }
 
@@ -1607,9 +1518,25 @@ pub const JpegState = struct {
                 code <<= 1;
             }
 
+            // Fold the magnitude bits into the lookup where code + magnitude fit the lookahead.
+            var fast_ac: [1 << HuffmanTable.fast_bits]i16 = @splat(0);
+            for (fast, 0..) |entry, idx| {
+                if (entry == 0) continue;
+                const code_len: u5 = @intCast(entry >> 8);
+                const symbol: u8 = @truncate(entry);
+                const run: u4 = @intCast(symbol >> 4);
+                const size: u4 = @intCast(symbol & 0x0F);
+                if (size == 0 or code_len + size > HuffmanTable.fast_bits) continue;
+                const total: u5 = code_len + size;
+                const magnitude: i32 = @intCast((idx >> (HuffmanTable.fast_bits - total)) & ((@as(usize, 1) << size) - 1));
+                const value = if (magnitude < @as(i32, 1) << (size - 1)) magnitude - (@as(i32, 1) << size) + 1 else magnitude;
+                if (value < -128 or value > 127) continue;
+                fast_ac[idx] = @intCast(value * 256 + @as(i32, run) * 16 + total);
+            }
+
             const table = HuffmanTable{
-                .fast_table = fast_table,
-                .fast_size = fast_size,
+                .fast = fast,
+                .fast_ac = fast_ac,
                 .max_code = max_code,
                 .min_code = min_code,
                 .val_ptr = val_ptr,
@@ -1741,89 +1668,144 @@ pub const JpegState = struct {
 
 // Huffman table for decoding; owns no allocations
 const HuffmanTable = struct {
-    // Fast lookup table for codes <= 9 bits (255 = not a short code)
-    fast_table: [512]u8, // 2^9 entries
-    fast_size: [512]u5,
+    /// Codes of up to `fast_bits` bits indexed by the next `fast_bits` of the stream:
+    /// `length << 8 | symbol`, 0 for longer codes.
+    fast: [1 << fast_bits]u16,
+    /// Coefficients whose code and magnitude bits both fit in the lookahead, stb_image style:
+    /// `value << 8 | run << 4 | total_length`, 0 when the slow path is needed.
+    fast_ac: [1 << fast_bits]i16,
     // Canonical decode arrays per ITU T.81 F.16, indexed by code length 1-16 (index 0 unused)
     max_code: [17]i32, // -1 for lengths with no codes
     min_code: [17]u16,
     val_ptr: [17]u16,
     huffval: [256]u8,
+
+    const fast_bits = 10;
 };
 
-// Bit reader for entropy-coded segments
+/// Zigzag order extended so a run can be added to the index without a bounds check; the
+/// overflow entries all land on the last coefficient.
+const dezigzag = zigzag ++ @as([16]u8, @splat(63));
+
+/// Bit reader for entropy-coded segments. Past a marker or the end of the data it feeds zero
+/// bits and counts them, so decoders can run without per-bit checks and detect afterwards
+/// whether they consumed anything that was not there.
 pub const BitReader = struct {
     data: []const u8,
     byte_pos: usize = 0,
+    /// Left-aligned: the next bit of the stream is bit 63.
     bit_buffer: u64 = 0,
-    bit_count: u7 = 0,
-    /// Set when a restart marker has been reached: the reader then feeds zero bits until
-    /// the scan loop consumes the marker with `consumeRestartMarker`.
+    bit_count: u32 = 0,
+    /// Zero bits appended after the data ran out or a marker was reached.
+    pad_bits: u32 = 0,
+    /// Set at a marker; `consumeRestartMarker` clears it at a restart interval boundary.
     marker_hit: bool = false,
 
     pub fn init(data: []const u8) BitReader {
         return .{ .data = data };
     }
 
-    pub fn peekBits(self: *BitReader, num_bits: u6) !u32 {
-        if (num_bits == 0) return 0;
-        if (num_bits > 32) return error.InvalidData;
-        try self.fillBits(@intCast(num_bits));
-        return @intCast(self.bit_buffer >> @intCast(64 - @as(u7, num_bits)));
-    }
-
-    pub fn fillBits(self: *BitReader, num_bits: u7) !void {
-        outer: while (self.bit_count <= 56 and self.bit_count < num_bits) {
-            if (self.marker_hit) {
-                // The interval's data is exhausted; pad so the last codes can be peeked.
+    /// Tops the buffer up to at least 57 bits.
+    fn fill(self: *BitReader) void {
+        // Common case: the next eight bytes hold neither stuffing nor a marker, so as many
+        // of them as fit go in at once.
+        if (!self.marker_hit and self.byte_pos + 8 <= self.data.len) {
+            const word = std.mem.readInt(u64, self.data[self.byte_pos..][0..8], .big);
+            const has_ff = (word & 0x7F7F7F7F7F7F7F7F) + 0x0101010101010101 & word & 0x8080808080808080;
+            if (has_ff == 0) {
+                const free = 64 - self.bit_count;
+                self.bit_buffer |= word >> @intCast(self.bit_count);
+                self.byte_pos += free / 8;
+                self.bit_count += free / 8 * 8;
+                return;
+            }
+        }
+        while (self.bit_count <= 56) {
+            if (self.marker_hit or self.byte_pos >= self.data.len) {
                 self.bit_count += 8;
+                self.pad_bits += 8;
                 continue;
             }
-            if (self.byte_pos >= self.data.len) return error.UnexpectedEndOfData;
-
-            const byte_curr: u64 = self.data[self.byte_pos];
+            const byte = self.data[self.byte_pos];
             self.byte_pos += 1;
-
-            if (byte_curr == 0xFF) {
-                // Rare case: byte stuffing (0xFF 0x00), fill bytes, or a marker
-                while (true) {
-                    if (self.byte_pos >= self.data.len) return error.UnexpectedEndOfData;
-                    const byte_next: u8 = self.data[self.byte_pos];
-                    if (byte_next == 0x00) {
-                        self.byte_pos += 1;
-                        break;
-                    }
-                    if (byte_next == 0xFF) {
-                        self.byte_pos += 1;
-                        continue;
-                    }
-                    // A marker: rewind to its 0xFF. RSTn is consumed by the scan loop at the
-                    // interval boundary; any other marker ends the scan.
-                    self.byte_pos -= 1;
-                    if (byte_next >= 0xD0 and byte_next <= 0xD7) {
-                        self.marker_hit = true;
-                        continue :outer;
-                    }
-                    return error.UnexpectedEndOfData;
+            if (byte == 0xFF) {
+                // Stuffed 0xFF 0x00, fill bytes before a marker, or the marker itself.
+                var pos = self.byte_pos;
+                while (pos < self.data.len and self.data[pos] == 0xFF) pos += 1;
+                if (pos < self.data.len and self.data[pos] == 0x00) {
+                    self.byte_pos = pos + 1;
+                } else {
+                    // Leave byte_pos on the marker's last 0xFF for consumeRestartMarker.
+                    self.byte_pos = if (pos < self.data.len) pos - 1 else pos;
+                    self.marker_hit = true;
+                    continue;
                 }
             }
-
-            self.bit_buffer |= byte_curr << @intCast(56 - self.bit_count);
+            self.bit_buffer |= @as(u64, byte) << @intCast(56 - self.bit_count);
             self.bit_count += 8;
         }
     }
 
-    pub fn consumeBits(self: *BitReader, num_bits: u6) void {
-        if (num_bits == 0) return;
-        std.debug.assert(num_bits <= self.bit_count and num_bits <= 32);
-        self.bit_buffer <<= @intCast(num_bits);
-        self.bit_count -= @intCast(num_bits);
+    inline fn ensure(self: *BitReader, comptime bits: u32) void {
+        if (self.bit_count < bits) self.fill();
     }
 
-    pub fn getBits(self: *BitReader, n: u5) !u32 {
-        const bits = try self.peekBits(n);
-        self.consumeBits(n);
-        return @intCast(bits);
+    /// The next `n` bits (1-32) without consuming them; the buffer must hold them.
+    inline fn peek(self: *const BitReader, n: u6) u32 {
+        std.debug.assert(n >= 1 and n <= self.bit_count);
+        return @truncate(self.bit_buffer >> @intCast(@as(u7, 64) - n));
+    }
+
+    inline fn consume(self: *BitReader, n: u6) void {
+        std.debug.assert(n <= self.bit_count);
+        self.bit_buffer <<= n;
+        self.bit_count -= n;
+    }
+
+    /// True once more bits were consumed than the data held.
+    inline fn overrun(self: *const BitReader) bool {
+        return self.bit_count < self.pad_bits;
+    }
+
+    /// Decodes one Huffman symbol; needs 16 buffered bits.
+    inline fn decodeSymbol(self: *BitReader, table: *const HuffmanTable) !u8 {
+        const entry = table.fast[self.peek(HuffmanTable.fast_bits)];
+        if (entry != 0) {
+            self.consume(@intCast(entry >> 8));
+            return @truncate(entry);
+        }
+        // Canonical decode per ITU T.81 F.16 for codes longer than the lookahead.
+        var length: u6 = HuffmanTable.fast_bits + 1;
+        while (length <= 16) : (length += 1) {
+            const code: i32 = @intCast(self.peek(length));
+            if (code <= table.max_code[length]) {
+                self.consume(length);
+                const idx = @as(usize, table.val_ptr[length]) + @as(usize, @intCast(code)) - table.min_code[length];
+                return table.huffval[idx];
+            }
+        }
+        return error.InvalidHuffmanCode;
+    }
+
+    /// Magnitude-coded value of `size` bits (T.81 F.2.2.1), branch-free sign extension.
+    inline fn receiveExtend(self: *BitReader, size: u5) i32 {
+        if (size == 0) return 0;
+        const bits: i32 = @intCast(self.peek(size));
+        self.consume(size);
+        const threshold = @as(i32, 1) << (size - 1);
+        return bits + (((bits - threshold) >> 31) & ((@as(i32, -1) << size) + 1));
+    }
+
+    pub fn peekBits(self: *BitReader, num_bits: u6) u32 {
+        if (num_bits == 0) return 0;
+        self.ensure(32);
+        return self.peek(num_bits);
+    }
+
+    pub fn getBits(self: *BitReader, n: u6) u32 {
+        const bits = self.peekBits(n);
+        self.consume(n);
+        return bits;
     }
 
     /// At a restart-interval boundary: drop the buffered bits, skip to the RSTn marker and
@@ -1831,6 +1813,7 @@ pub const BitReader = struct {
     pub fn consumeRestartMarker(self: *BitReader) bool {
         self.bit_buffer = 0;
         self.bit_count = 0;
+        self.pad_bits = 0;
         self.marker_hit = false;
         // Resync: tolerate stray bytes before the marker, as libjpeg does.
         while (self.byte_pos + 1 < self.data.len) : (self.byte_pos += 1) {
@@ -1881,14 +1864,13 @@ fn performProgressiveScan(state: *JpegState, scan_info: ScanInfo) !void {
                         const block_id = (y + v) * state.block_width_actual + (x + h);
                         const block = &state.block_storage.?[block_id][component_index];
 
-                        // Fill bits
-                        state.bit_reader.fillBits(24) catch {};
-
                         decodeBlockProgressive(state, scan_info, scan_comp, block, &state.dc_prediction_values[component_index], &skips) catch |err| switch (err) {
                             // Truncated scan: keep the coefficients decoded so far.
                             error.UnexpectedEndOfData => return,
                             else => return err,
                         };
+                        // Refinement bits read past the data are zeros; stop at the first block that needed them.
+                        if (state.bit_reader.overrun()) return;
                     }
                 }
             }
@@ -1908,7 +1890,7 @@ fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: Sca
             dc_prediction.* = dc_coefficient;
             block[0] = dc_coefficient << @intCast(scan_info.approximation_low);
         } else if (scan_info.approximation_high != 0) {
-            const bit: u32 = try state.bit_reader.getBits(1);
+            const bit: u32 = state.bit_reader.getBits(1);
             block[0] += @as(i32, @intCast(bit)) << @intCast(scan_info.approximation_low);
         }
     } else if (scan_info.start_of_spectral_selection != 0) {
@@ -1925,7 +1907,7 @@ fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: Sca
 
                     if (maybe_magnitude == 0) {
                         if (zero_run_length < 15) {
-                            const extra_skips: u32 = try state.bit_reader.getBits(@intCast(zero_run_length));
+                            const extra_skips: u32 = state.bit_reader.getBits(@intCast(zero_run_length));
                             skips.* = (@as(u32, 1) << @intCast(zero_run_length));
                             skips.* += extra_skips;
                             break; // process skips
@@ -1966,12 +1948,12 @@ fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: Sca
                     if (maybe_magnitude == 0) {
                         if (zero_run_length < 15) {
                             skips.* = (@as(u32, 1) << @intCast(zero_run_length));
-                            const extra_skips: u32 = try state.bit_reader.getBits(@intCast(zero_run_length));
+                            const extra_skips: u32 = state.bit_reader.getBits(@intCast(zero_run_length));
                             skips.* += extra_skips;
                             break; // start processing skips
                         } // no special treatment for zero_run_length == 15
                     } else if (maybe_magnitude != 0) {
-                        const sign_bit: u32 = try state.bit_reader.getBits(1);
+                        const sign_bit: u32 = state.bit_reader.getBits(1);
                         coeff = if (sign_bit == 1) bit else -bit;
                     }
 
@@ -1987,7 +1969,7 @@ fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: Sca
                                 break;
                             }
                         } else {
-                            const sign_bit: u32 = try state.bit_reader.getBits(1);
+                            const sign_bit: u32 = state.bit_reader.getBits(1);
                             if (sign_bit != 0) {
                                 block[zigzag[ac]] += if (block[zigzag[ac]] > 0) bit else -bit;
                             }
@@ -2001,7 +1983,7 @@ fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: Sca
             if (skips.* > 0) {
                 while (ac <= scan_info.end_of_spectral_selection and ac < 64) : (ac += 1) {
                     if (block[zigzag[ac]] != 0) {
-                        const sign_bit: u32 = try state.bit_reader.getBits(1);
+                        const sign_bit: u32 = state.bit_reader.getBits(1);
                         if (sign_bit != 0) {
                             block[zigzag[ac]] += if (block[zigzag[ac]] > 0) bit else -bit;
                         }
@@ -2013,25 +1995,62 @@ fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: Sca
     }
 }
 
-// Decode a single block in baseline mode
+/// Decodes one baseline block into `block` (natural order). A block that consumed bits past
+/// the data reports `UnexpectedEndOfData`, whatever the padding decoded as.
 fn decodeBlockBaseline(state: *JpegState, scan_comp: ScanComponent, block: *[64]i32, dc_prediction: *i32) !void {
-    // For baseline, clear the block
-    @memset(block, 0);
-
-    // Decode DC coefficient
     const dc_table = if (state.dc_tables[scan_comp.dc_table_id]) |*t| t else return error.MissingHuffmanTable;
-    const dc_symbol = try state.readCode(dc_table);
+    const ac_table = if (state.ac_tables[scan_comp.ac_table_id]) |*t| t else return error.MissingHuffmanTable;
+    @memset(block, 0);
+    // Work on a local copy so the hot loop keeps the reader in registers.
+    var br = state.bit_reader;
+    defer state.bit_reader = br;
+    decodeBlockBits(&br, dc_table, ac_table, block, dc_prediction) catch |err| {
+        return if (br.overrun()) error.UnexpectedEndOfData else err;
+    };
+    if (br.overrun()) return error.UnexpectedEndOfData;
+}
 
-    if (dc_symbol > 11) return error.InvalidDCCoefficient;
-
-    const dc_diff = try state.readMagnitudeCoded(@intCast(dc_symbol));
-
-    dc_prediction.* += dc_diff;
+/// Every symbol plus its magnitude needs at most 27 bits, so one top-up per coefficient
+/// keeps the lookups check-free.
+fn decodeBlockBits(br: *BitReader, dc_table: *const HuffmanTable, ac_table: *const HuffmanTable, block: *[64]i32, dc_prediction: *i32) !void {
+    br.ensure(27);
+    const dc_entry = dc_table.fast_ac[br.peek(HuffmanTable.fast_bits)];
+    var diff: i32 = undefined;
+    if (dc_entry != 0 and dc_entry & 0xF0 == 0) {
+        br.consume(@intCast(dc_entry & 15));
+        diff = dc_entry >> 8;
+    } else {
+        const symbol = try br.decodeSymbol(dc_table);
+        if (symbol > 11) return error.InvalidDCCoefficient;
+        diff = br.receiveExtend(@intCast(symbol));
+    }
+    dc_prediction.* += diff;
     block[0] = dc_prediction.*;
 
-    // Decode AC coefficients using the existing function
-    const ac_table = if (state.ac_tables[scan_comp.ac_table_id]) |*t| t else return error.MissingHuffmanTable;
-    try state.decodeAC(ac_table, block);
+    var k: usize = 1;
+    while (k < 64) {
+        br.ensure(27);
+        const entry = ac_table.fast_ac[br.peek(HuffmanTable.fast_bits)];
+        if (entry != 0) {
+            br.consume(@intCast(entry & 15));
+            k += @intCast((entry >> 4) & 15);
+            block[dezigzag[k]] = entry >> 8;
+            k += 1;
+            continue;
+        }
+        const symbol = try br.decodeSymbol(ac_table);
+        const run = symbol >> 4;
+        const size: u4 = @intCast(symbol & 0x0F);
+        if (size == 0) {
+            if (symbol == 0) return; // EOB: the block is pre-zeroed
+            if (run != 15) return error.InvalidACCoefficient;
+            k += 16;
+            continue;
+        }
+        k += run;
+        block[dezigzag[k]] = br.receiveExtend(size);
+        k += 1;
+    }
 }
 
 // Parse JPEG file and decode image
@@ -2433,7 +2452,6 @@ fn performBlockScan(comptime T: type, state: *JpegState, band: *RenderBand, img:
                             const in_bounds = (actual_y < state.block_height and actual_x < state.block_width);
                             const block_ptr: *[64]i32 = if (in_bounds) &blocks[v * bw + actual_x][component_index] else &tmp_block;
 
-                            _ = state.bit_reader.fillBits(24) catch {};
                             decodeBlockBaseline(state, scan_comp, block_ptr, &prediction_values[component_index]) catch |err| switch (err) {
                                 error.UnexpectedEndOfData => {
                                     truncated = true;
@@ -3031,15 +3049,15 @@ test "BitReader basic operations" {
     var reader: BitReader = .init(&data);
 
     // Read first 4 bits
-    const bits1 = try reader.getBits(4);
+    const bits1 = reader.getBits(4);
     try testing.expectEqual(@as(u16, 0b1011), bits1);
 
     // Read next 4 bits
-    const bits2 = try reader.getBits(4);
+    const bits2 = reader.getBits(4);
     try testing.expectEqual(@as(u16, 0b0011), bits2);
 
     // Read next 8 bits
-    const bits3 = try reader.getBits(8);
+    const bits3 = reader.getBits(8);
     try testing.expectEqual(@as(u16, 0b01010101), bits3);
 }
 
