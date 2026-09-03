@@ -1217,10 +1217,11 @@ pub const JpegState = struct {
     block_height_actual: u16 = 0,
 
     // Block storage for all components (persistent across scans)
-    /// Coefficient blocks indexed `block_row * block_width_actual + block_col`, one `[64]i32`
-    /// per component: the whole image for progressive frames, one MCU row (`max_v` block
-    /// rows) for baseline frames, which stream to the output row band by row band.
-    block_storage: ?[][4][64]i32 = null,
+    /// Coefficient blocks indexed `block_row * block_width_actual + block_col`, one `[64]i16`
+    /// per component (natural order, before dequantization): the whole image for progressive
+    /// frames, one MCU row (`max_v` block rows) for baseline frames, which stream to the
+    /// output row band by row band. Blocks past the image edge are decoded too.
+    block_storage: ?[][4][64]i16 = null,
 
     // Separate RGB storage to avoid overwriting chroma data
 
@@ -1428,17 +1429,11 @@ pub const JpegState = struct {
         if (exceeds(limits.max_blocks, total_blocks)) {
             return error.BlockMemoryLimitExceeded;
         }
-        if (frame_type == .progressive) {
-            // Scans accumulate into zeroed whole-image storage.
-            self.block_storage = try self.allocator.alloc([4][64]i32, total_blocks);
-            for (self.block_storage.?) |*block_set| {
-                for (block_set) |*block| @memset(block, 0);
-            }
-        } else {
-            // Baseline streams one MCU row; decoding clears each block first.
-            _, const max_v = self.maxSamplingFactors();
-            self.block_storage = try self.allocator.alloc([4][64]i32, @as(usize, self.block_width_actual) * max_v);
-        }
+        // Progressive scans accumulate into the whole-image store; baseline streams one MCU row.
+        _, const max_v = self.maxSamplingFactors();
+        const count = if (frame_type == .progressive) total_blocks else @as(usize, self.block_width_actual) * max_v;
+        self.block_storage = try self.allocator.alloc([4][64]i16, count);
+        @memset(std.mem.sliceAsBytes(self.block_storage.?), 0);
     }
 
     // Parse Define Huffman Table (DHT) marker
@@ -1879,7 +1874,7 @@ fn performProgressiveScan(state: *JpegState, scan_info: ScanInfo) !void {
 }
 
 // Decode a single block in progressive mode
-fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: ScanComponent, block: *[64]i32, dc_prediction: *i32, skips: *u32) !void {
+fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: ScanComponent, block: *[64]i16, dc_prediction: *i32, skips: *u32) !void {
     if (scan_info.start_of_spectral_selection == 0) {
         const dc_table = if (state.dc_tables[scan_comp.dc_table_id]) |*t| t else return error.MissingHuffmanTable;
         if (scan_info.approximation_high == 0) {
@@ -1888,10 +1883,10 @@ fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: Sca
             const diff = try state.readMagnitudeCoded(@intCast(maybe_magnitude));
             const dc_coefficient = diff + dc_prediction.*;
             dc_prediction.* = dc_coefficient;
-            block[0] = dc_coefficient << @intCast(scan_info.approximation_low);
+            block[0] = @truncate(dc_coefficient << @intCast(scan_info.approximation_low));
         } else if (scan_info.approximation_high != 0) {
             const bit: u32 = state.bit_reader.getBits(1);
-            block[0] += @as(i32, @intCast(bit)) << @intCast(scan_info.approximation_low);
+            block[0] +%= @as(i16, @intCast(bit)) << @intCast(scan_info.approximation_low);
         }
     } else if (scan_info.start_of_spectral_selection != 0) {
         const ac_table = if (state.ac_tables[scan_comp.ac_table_id]) |*t| t else return error.MissingHuffmanTable;
@@ -1923,7 +1918,7 @@ fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: Sca
                         ac += 1;
                     }
                     if (ac >= 64) break;
-                    block[zigzag[ac]] = coeff << @intCast(scan_info.approximation_low);
+                    block[zigzag[ac]] = @truncate(coeff << @intCast(scan_info.approximation_low));
                     ac += 1;
                 }
             }
@@ -1936,11 +1931,11 @@ fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: Sca
                 }
             }
         } else if (scan_info.approximation_high != 0) {
-            const bit: i32 = @as(i32, 1) << @intCast(scan_info.approximation_low);
+            const bit: i16 = @as(i16, 1) << @intCast(scan_info.approximation_low);
             var ac: usize = scan_info.start_of_spectral_selection;
             if (skips.* == 0) {
                 while (ac <= scan_info.end_of_spectral_selection and ac < 64) {
-                    var coeff: i32 = 0;
+                    var coeff: i16 = 0;
                     const zero_run_length_and_magnitude = try state.readCode(ac_table);
                     var zero_run_length = zero_run_length_and_magnitude >> 4;
                     const maybe_magnitude = zero_run_length_and_magnitude & 0x0F;
@@ -1971,7 +1966,7 @@ fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: Sca
                         } else {
                             const sign_bit: u32 = state.bit_reader.getBits(1);
                             if (sign_bit != 0) {
-                                block[zigzag[ac]] += if (block[zigzag[ac]] > 0) bit else -bit;
+                                block[zigzag[ac]] +%= if (block[zigzag[ac]] > 0) bit else -bit;
                             }
                             ac += 1;
                         }
@@ -1985,7 +1980,7 @@ fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: Sca
                     if (block[zigzag[ac]] != 0) {
                         const sign_bit: u32 = state.bit_reader.getBits(1);
                         if (sign_bit != 0) {
-                            block[zigzag[ac]] += if (block[zigzag[ac]] > 0) bit else -bit;
+                            block[zigzag[ac]] +%= if (block[zigzag[ac]] > 0) bit else -bit;
                         }
                     }
                 }
@@ -1997,7 +1992,7 @@ fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: Sca
 
 /// Decodes one baseline block into `block` (natural order). A block that consumed bits past
 /// the data reports `UnexpectedEndOfData`, whatever the padding decoded as.
-fn decodeBlockBaseline(state: *JpegState, scan_comp: ScanComponent, block: *[64]i32, dc_prediction: *i32) !void {
+fn decodeBlockBaseline(state: *JpegState, scan_comp: ScanComponent, block: *[64]i16, dc_prediction: *i32) !void {
     const dc_table = if (state.dc_tables[scan_comp.dc_table_id]) |*t| t else return error.MissingHuffmanTable;
     const ac_table = if (state.ac_tables[scan_comp.ac_table_id]) |*t| t else return error.MissingHuffmanTable;
     @memset(block, 0);
@@ -2012,7 +2007,7 @@ fn decodeBlockBaseline(state: *JpegState, scan_comp: ScanComponent, block: *[64]
 
 /// Every symbol plus its magnitude needs at most 27 bits, so one top-up per coefficient
 /// keeps the lookups check-free.
-fn decodeBlockBits(br: *BitReader, dc_table: *const HuffmanTable, ac_table: *const HuffmanTable, block: *[64]i32, dc_prediction: *i32) !void {
+fn decodeBlockBits(br: *BitReader, dc_table: *const HuffmanTable, ac_table: *const HuffmanTable, block: *[64]i16, dc_prediction: *i32) !void {
     br.ensure(27);
     const dc_entry = dc_table.fast_ac[br.peek(HuffmanTable.fast_bits)];
     var diff: i32 = undefined;
@@ -2025,7 +2020,7 @@ fn decodeBlockBits(br: *BitReader, dc_table: *const HuffmanTable, ac_table: *con
         diff = br.receiveExtend(@intCast(symbol));
     }
     dc_prediction.* += diff;
-    block[0] = dc_prediction.*;
+    block[0] = @truncate(dc_prediction.*);
 
     var k: usize = 1;
     while (k < 64) {
@@ -2048,7 +2043,7 @@ fn decodeBlockBits(br: *BitReader, dc_table: *const HuffmanTable, ac_table: *con
             continue;
         }
         k += run;
-        block[dezigzag[k]] = br.receiveExtend(size);
+        block[dezigzag[k]] = @intCast(br.receiveExtend(size));
         k += 1;
     }
 }
@@ -2056,28 +2051,20 @@ fn decodeBlockBits(br: *BitReader, dc_table: *const HuffmanTable, ac_table: *con
 // Parse JPEG file and decode image
 // Helper function to find the end of entropy-coded scan data
 fn findScanEnd(data: []const u8, start_pos: usize) usize {
-    var scan_end = start_pos;
-    while (scan_end < data.len - 1) {
-        if (data[scan_end] == 0xFF) {
-            if (scan_end + 1 < data.len) {
-                const next_byte = data[scan_end + 1];
-                // 0xFF00 is byte stuffing, not a marker
-                if (next_byte == 0x00) {
-                    scan_end += 2;
-                    continue;
-                }
-                // Check if it's a restart marker (can appear in entropy data)
-                if (next_byte >= 0xD0 and next_byte <= 0xD7) {
-                    scan_end += 2;
-                    continue;
-                }
-                // Any other marker ends the entropy-coded segment
-                break;
-            }
+    if (data.len == 0) return 0;
+    var pos = start_pos;
+    // Only 0xFF can start a marker; stuffed zeros and RSTn stay inside the scan.
+    while (pos < data.len - 1) {
+        const ff = std.mem.indexOfScalarPos(u8, data, pos, 0xFF) orelse break;
+        if (ff >= data.len - 1) return ff;
+        const next = data[ff + 1];
+        if (next == 0x00 or (next >= 0xD0 and next <= 0xD7)) {
+            pos = ff + 2;
+            continue;
         }
-        scan_end += 1;
+        return ff;
     }
-    return scan_end;
+    return @max(start_pos, data.len - 1);
 }
 
 // Helper function to read marker length from data
@@ -2256,158 +2243,151 @@ pub fn decode(allocator: Allocator, data: []const u8, limits: DecodeLimits) !Jpe
     return error.NoScanData;
 }
 
-// IDCT implementation based on stb_image
-fn f2f(comptime x: f32) i32 {
-    // 4096 = 1 << 12
-    return @round(x * 4096);
-}
+// Inverse DCT: the stb_image SSE2 formulation of the libjpeg "islow" transform on 16-lane
+// vectors, two blocks side by side (lanes 0-7 block A, 8-15 block B). Every 16-bit
+// interleave stays within 128-bit lanes, so the two blocks never mix and the pair transposes
+// as two independent 8x8 tiles. Bit-exact with the 32-bit scalar transform.
+const Idct = struct {
+    const V16 = @Vector(16, i16);
+    const V8 = @Vector(8, i32);
 
-fn idct8x8(block: *[64]i32) void {
-    const V = @Vector(8, i32);
-    var rows: [8]V = undefined;
+    fn f2f(comptime x: f32) i16 {
+        return @intFromFloat(@round(x * 4096));
+    }
+    /// Alternating constants for the paired multiply-add.
+    fn pair(comptime a: i16, comptime b: i16) V16 {
+        var v: [16]i16 = undefined;
+        for (0..8) |i| {
+            v[2 * i] = a;
+            v[2 * i + 1] = b;
+        }
+        return v;
+    }
+    const rot0_0 = pair(f2f(0.5411961), f2f(0.5411961) + f2f(-1.847759065));
+    const rot0_1 = pair(f2f(0.5411961) + f2f(0.765366865), f2f(0.5411961));
+    const rot1_0 = pair(f2f(1.175875602) + f2f(-0.899976223), f2f(1.175875602));
+    const rot1_1 = pair(f2f(1.175875602), f2f(1.175875602) + f2f(-2.562915447));
+    const rot2_0 = pair(f2f(-1.961570560) + f2f(0.298631336), f2f(-1.961570560));
+    const rot2_1 = pair(f2f(-1.961570560), f2f(-1.961570560) + f2f(3.072711026));
+    const rot3_0 = pair(f2f(-0.390180644) + f2f(2.053119869), f2f(-0.390180644));
+    const rot3_1 = pair(f2f(-0.390180644), f2f(-0.390180644) + f2f(1.501321110));
 
-    // Load 8 rows as vectors
-    for (0..8) |i| {
-        rows[i] = block[i * 8 ..][0..8].*;
+    const lo16 = [16]i32{ 0, -1, 1, -2, 2, -3, 3, -4, 8, -9, 9, -10, 10, -11, 11, -12 };
+    const hi16 = [16]i32{ 4, -5, 5, -6, 6, -7, 7, -8, 12, -13, 13, -14, 14, -15, 15, -16 };
+    const even = [8]i32{ 0, 2, 4, 6, 8, 10, 12, 14 };
+    const odd = [8]i32{ 1, 3, 5, 7, 9, 11, 13, 15 };
+    const low_half = [8]i32{ 0, 1, 2, 3, 8, 9, 10, 11 };
+    const high_half = [8]i32{ 4, 5, 6, 7, 12, 13, 14, 15 };
+    const pack_mask = [16]i32{ 0, 1, 2, 3, -1, -2, -3, -4, 4, 5, 6, 7, -5, -6, -7, -8 };
+    const concat = [16]i32{ 0, 1, 2, 3, 4, 5, 6, 7, -1, -2, -3, -4, -5, -6, -7, -8 };
+
+    inline fn unpacklo(a: V16, b: V16) V16 {
+        return @shuffle(i16, a, b, lo16);
+    }
+    inline fn unpackhi(a: V16, b: V16) V16 {
+        return @shuffle(i16, a, b, hi16);
+    }
+    /// `x[2i] * c[2i] + x[2i+1] * c[2i+1]` as i32 (pmaddwd).
+    inline fn madd(x: V16, c: V16) V8 {
+        const xe: V8 = @intCast(@shuffle(i16, x, undefined, even));
+        const xo: V8 = @intCast(@shuffle(i16, x, undefined, odd));
+        const ce: V8 = @intCast(@shuffle(i16, c, undefined, even));
+        const co: V8 = @intCast(@shuffle(i16, c, undefined, odd));
+        return xe * ce + xo * co;
+    }
+    /// 32-bit intermediates: `l` holds elements 0-3 and 8-11, `h` the rest, the unpack order.
+    const Wide = struct { l: V8, h: V8 };
+    inline fn rot(x: V16, y: V16, c0: V16, c1: V16) struct { Wide, Wide } {
+        const lo = unpacklo(x, y);
+        const hi = unpackhi(x, y);
+        return .{ .{ .l = madd(lo, c0), .h = madd(hi, c0) }, .{ .l = madd(lo, c1), .h = madd(hi, c1) } };
+    }
+    inline fn widen(x: V16) Wide {
+        const l: V8 = @intCast(@shuffle(i16, x, undefined, low_half));
+        const h: V8 = @intCast(@shuffle(i16, x, undefined, high_half));
+        return .{ .l = l << @splat(12), .h = h << @splat(12) };
+    }
+    inline fn wadd(a: Wide, b: Wide) Wide {
+        return .{ .l = a.l + b.l, .h = a.h + b.h };
+    }
+    inline fn wsub(a: Wide, b: Wide) Wide {
+        return .{ .l = a.l - b.l, .h = a.h - b.h };
+    }
+    /// Saturating pack of the two halves back into element order.
+    inline fn packs(l: V8, h: V8) V16 {
+        const wide = @shuffle(i32, l, h, pack_mask);
+        return @intCast(std.math.clamp(wide, @as(@Vector(16, i32), @splat(-32768)), @as(@Vector(16, i32), @splat(32767))));
+    }
+    inline fn bfly(a: Wide, b: Wide, comptime bias: i32, comptime shift: u5) struct { V16, V16 } {
+        const ab: Wide = .{ .l = a.l + @as(V8, @splat(bias)), .h = a.h + @as(V8, @splat(bias)) };
+        const sum = wadd(ab, b);
+        const dif = wsub(ab, b);
+        return .{ packs(sum.l >> @splat(shift), sum.h >> @splat(shift)), packs(dif.l >> @splat(shift), dif.h >> @splat(shift)) };
     }
 
-    // All-AC-zero block: (dc + 4) >> 3 matches the full two-pass descale exactly.
-    var acc = rows[0];
-    acc[0] = 0;
-    inline for (1..8) |i| acc |= rows[i];
-    if (@reduce(.Or, acc) == 0) {
-        @memset(block, (block[0] + 4) >> 3);
-        return;
+    /// One 1-D pass over the eight vectors, with libjpeg's even/odd butterflies.
+    inline fn pass(r: *[8]V16, comptime bias: i32, comptime shift: u5) void {
+        const t2e, const t3e = rot(r[2], r[6], rot0_0, rot0_1);
+        const t0e = widen(r[0] +| r[4]);
+        const t1e = widen(r[0] -| r[4]);
+        const x0 = wadd(t0e, t3e);
+        const x3 = wsub(t0e, t3e);
+        const x1 = wadd(t1e, t2e);
+        const x2 = wsub(t1e, t2e);
+        const y0o, const y2o = rot(r[7], r[3], rot2_0, rot2_1);
+        const y1o, const y3o = rot(r[5], r[1], rot3_0, rot3_1);
+        const y4o, const y5o = rot(r[1] +| r[7], r[3] +| r[5], rot1_0, rot1_1);
+        const x4 = wadd(y0o, y4o);
+        const x5 = wadd(y1o, y5o);
+        const x6 = wadd(y2o, y5o);
+        const x7 = wadd(y3o, y4o);
+        r[0], r[7] = bfly(x0, x7, bias, shift);
+        r[1], r[6] = bfly(x1, x6, bias, shift);
+        r[2], r[5] = bfly(x2, x5, bias, shift);
+        r[3], r[4] = bfly(x3, x4, bias, shift);
     }
 
-    // Pass 1: process rows (vectorize across 8 rows)
-    const res1 = idct1DVec(rows);
-
-    const v512: V = @splat(512);
-    const x0_1 = res1.x0 + v512;
-    const x1_1 = res1.x1 + v512;
-    const x2_1 = res1.x2 + v512;
-    const x3_1 = res1.x3 + v512;
-
-    rows[0] = (x0_1 + res1.t3) >> @splat(10);
-    rows[1] = (x1_1 + res1.t2) >> @splat(10);
-    rows[2] = (x2_1 + res1.t1) >> @splat(10);
-    rows[3] = (x3_1 + res1.t0) >> @splat(10);
-    rows[4] = (x3_1 - res1.t0) >> @splat(10);
-    rows[5] = (x2_1 - res1.t1) >> @splat(10);
-    rows[6] = (x1_1 - res1.t2) >> @splat(10);
-    rows[7] = (x0_1 - res1.t3) >> @splat(10);
-
-    // Transpose to process columns in Pass 2
-    const tr = transpose8x8(rows);
-
-    // Pass 2: process columns (vectorize across 8 columns)
-    const res2 = idct1DVec(tr);
-
-    const vHalf: V = @splat((1 << 17) / 2);
-    const x0_2 = res2.x0 + vHalf;
-    const x1_2 = res2.x1 + vHalf;
-    const x2_2 = res2.x2 + vHalf;
-    const x3_2 = res2.x3 + vHalf;
-
-    const r0_f = (x0_2 + res2.t3) >> @splat(17);
-    const r1_f = (x1_2 + res2.t2) >> @splat(17);
-    const r2_f = (x2_2 + res2.t1) >> @splat(17);
-    const r3_f = (x3_2 + res2.t0) >> @splat(17);
-    const r4_f = (x3_2 - res2.t0) >> @splat(17);
-    const r5_f = (x2_2 - res2.t1) >> @splat(17);
-    const r6_f = (x1_2 - res2.t2) >> @splat(17);
-    const r7_f = (x0_2 - res2.t3) >> @splat(17);
-
-    // Transpose back to row-major
-    const final = transpose8x8(.{ r0_f, r1_f, r2_f, r3_f, r4_f, r5_f, r6_f, r7_f });
-
-    // Store back
-    for (0..8) |i| {
-        block[i * 8 ..][0..8].* = final[i];
-    }
-}
-
-fn idct1DVec(s: [8]@Vector(8, i32)) struct {
-    x0: @Vector(8, i32),
-    x1: @Vector(8, i32),
-    x2: @Vector(8, i32),
-    x3: @Vector(8, i32),
-    t0: @Vector(8, i32),
-    t1: @Vector(8, i32),
-    t2: @Vector(8, i32),
-    t3: @Vector(8, i32),
-} {
-    // Note: We use i32 for intermediate calculations.
-    // For 8-bit JPEGs, the maximum intermediate value is roughly 10^8, which fits
-    // comfortably within i32 (limit ~2*10^9). Using i64 would double register
-    // pressure and halve throughput on AVX2, which is not worth the theoretical
-    // safety margin for 12-bit images (which we don't support yet).
-    const V = @Vector(8, i32);
-    const v541: V = @splat(f2f(0.5411961));
-    const v184: V = @splat(f2f(-1.847759065));
-    const v076: V = @splat(f2f(0.765366865));
-    const v117: V = @splat(f2f(1.175875602));
-    const v029: V = @splat(f2f(0.298631336));
-    const v205: V = @splat(f2f(2.053119869));
-    const v307: V = @splat(f2f(3.072711026));
-    const v150: V = @splat(f2f(1.501321110));
-    const v089: V = @splat(f2f(-0.899976223));
-    const v256: V = @splat(f2f(-2.562915447));
-    const v196: V = @splat(f2f(-1.961570560));
-    const v039: V = @splat(f2f(-0.390180644));
-
-    var p2 = s[2];
-    var p3 = s[6];
-
-    var p1 = (p2 + p3) * v541;
-    const t2 = p1 + p3 * v184;
-    const t3 = p1 + p2 * v076;
-    p2 = s[0];
-    p3 = s[4];
-    const t0 = (p2 + p3) * @as(V, @splat(4096));
-    const t1 = (p2 - p3) * @as(V, @splat(4096));
-    const x0 = t0 + t3;
-    const x3 = t0 - t3;
-    const x1 = t1 + t2;
-    const x2 = t1 - t2;
-
-    var w0 = s[7];
-    var w1 = s[5];
-    var w2 = s[3];
-    var w3 = s[1];
-    p3 = w0 + w2;
-    var p4 = w1 + w3;
-    p1 = w0 + w3;
-    p2 = w1 + w2;
-    const p5 = (p3 + p4) * v117;
-    w0 = w0 * v029;
-    w1 = w1 * v205;
-    w2 = w2 * v307;
-    w3 = w3 * v150;
-    p1 = p5 + p1 * v089;
-    p2 = p5 + p2 * v256;
-    p3 = p3 * v196;
-    p4 = p4 * v039;
-    w3 += p1 + p4;
-    w2 += p2 + p3;
-    w1 += p2 + p4;
-    w0 += p1 + p3;
-
-    return .{ .x0 = x0, .x1 = x1, .x2 = x2, .x3 = x3, .t0 = w0, .t1 = w1, .t2 = w2, .t3 = w3 };
-}
-
-fn transpose8x8(rows: [8]@Vector(8, i32)) [8]@Vector(8, i32) {
-    var res = rows;
-    inline for (0..8) |i| {
-        inline for (i + 1..8) |j| {
-            const tmp = res[i][j];
-            res[i][j] = res[j][i];
-            res[j][i] = tmp;
+    /// Transposes both 8x8 tiles in place.
+    inline fn transpose(r: *[8]V16) void {
+        inline for ([_][2]usize{ .{ 0, 4 }, .{ 1, 5 }, .{ 2, 6 }, .{ 3, 7 }, .{ 0, 2 }, .{ 1, 3 }, .{ 4, 6 }, .{ 5, 7 }, .{ 0, 1 }, .{ 2, 3 }, .{ 4, 5 }, .{ 6, 7 } }) |p| {
+            const a = r[p[0]];
+            r[p[0]] = unpacklo(a, r[p[1]]);
+            r[p[1]] = unpackhi(a, r[p[1]]);
         }
     }
-    return res;
-}
+
+    /// Dequantizes and inverse-transforms blocks `a` and `b` (the same component) into
+    /// level-shifted samples at `dst`, block A's rows at columns 0-7 and B's at 8-15; with
+    /// `single` only A is stored. Both blocks pass through the transform, so a DC-only block
+    /// next to a full one comes out exactly as the shortcut would produce.
+    fn pairInto(a: *const [64]i16, b: *const [64]i16, dequant: *const [64]i16, dst: [*]u8, stride: usize, single: bool) void {
+        var r: [8]V16 = undefined;
+        for (0..8) |i| {
+            const q: @Vector(8, i16) = dequant[i * 8 ..][0..8].*;
+            const scale = @shuffle(i16, q, q, concat);
+            r[i] = @shuffle(i16, @as(@Vector(8, i16), a[i * 8 ..][0..8].*), @as(@Vector(8, i16), b[i * 8 ..][0..8].*), concat) *% scale;
+        }
+        var ac = r[0] & @as(V16, [_]i16{ 0, -1, -1, -1, -1, -1, -1, -1, 0, -1, -1, -1, -1, -1, -1, -1 });
+        inline for (1..8) |i| ac |= r[i];
+        if (@reduce(.Or, ac) == 0) {
+            // DC only: (dc + 4) >> 3 + 128 for every sample, exactly the two-pass result.
+            const dc = std.math.clamp(((r[0] + @as(V16, @splat(4))) >> @splat(3)) + @as(V16, @splat(128)), @as(V16, @splat(0)), @as(V16, @splat(255)));
+            const bytes: [16]u8 = @as(@Vector(16, u8), @intCast(@shuffle(i16, dc, undefined, [16]i32{ 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8, 8, 8, 8, 8 })));
+            for (0..8) |i| {
+                if (single) dst[i * stride ..][0..8].* = bytes[0..8].* else dst[i * stride ..][0..16].* = bytes;
+            }
+            return;
+        }
+        pass(&r, 512, 10);
+        transpose(&r);
+        pass(&r, 65536 + (128 << 17), 17);
+        transpose(&r);
+        for (0..8) |i| {
+            const bytes: [16]u8 = @as(@Vector(16, u8), @intCast(std.math.clamp(r[i], @as(V16, @splat(0)), @as(V16, @splat(255)))));
+            if (single) dst[i * stride ..][0..8].* = bytes[0..8].* else dst[i * stride ..][0..16].* = bytes;
+        }
+    }
+};
 
 // Decode the baseline scan into block storage
 /// Baseline scan, one MCU row at a time: decode into the band store, render, repeat.
@@ -2446,13 +2426,8 @@ fn performBlockScan(comptime T: type, state: *JpegState, band: *RenderBand, img:
 
                     for (0..v_max) |v| {
                         for (0..h_max) |h| {
-                            const actual_x = x + h;
-                            const actual_y = y + v;
-                            var tmp_block: [64]i32 = undefined;
-                            const in_bounds = (actual_y < state.block_height and actual_x < state.block_width);
-                            const block_ptr: *[64]i32 = if (in_bounds) &blocks[v * bw + actual_x][component_index] else &tmp_block;
-
-                            decodeBlockBaseline(state, scan_comp, block_ptr, &prediction_values[component_index]) catch |err| switch (err) {
+                            const block = &blocks[v * bw + x + h][component_index];
+                            decodeBlockBaseline(state, scan_comp, block, &prediction_values[component_index]) catch |err| switch (err) {
                                 error.UnexpectedEndOfData => {
                                     truncated = true;
                                     break :scan;
@@ -2489,8 +2464,8 @@ const RenderBand = struct {
     crows: [2][]u8,
     /// Converted row for output types other than `Rgb`.
     rgb_row: []Rgb,
-    /// Each component's quantization table, widened once.
-    dequant: [4][64]i32,
+    /// Each component's quantization table as `i16` for the fused dequantize-and-transform.
+    dequant: [4][64]i16,
 
     const lanes = 16;
     const V = @Vector(lanes, i32);
@@ -2514,7 +2489,7 @@ const RenderBand = struct {
         for (0..nc) |c| {
             const comp = state.components[c];
             const quant_table = state.quant_tables[comp.quant_table_id] orelse return error.MissingQuantTable;
-            for (&self.dequant[c], quant_table) |*d, q| d.* = q;
+            for (&self.dequant[c], quant_table) |*d, q| d.* = @intCast(@min(q, std.math.maxInt(i16)));
             self.strides[c] = mcus_x * @as(usize, comp.h_sampling) * 8;
             self.planes[c] = try allocator.alloc(u8, self.strides[c] * @as(usize, comp.v_sampling) * 8 + padded);
         }
@@ -2536,18 +2511,6 @@ const RenderBand = struct {
     /// Plane row `r` of component `c`, running to the end of the plane's slack.
     fn row(self: *const RenderBand, c: usize, r: usize) []u8 {
         return self.planes[c][r * self.strides[c] ..];
-    }
-
-    /// Level-shifts, clamps and stores an inverse-transformed block at plane row `r`, column `x`.
-    fn storeBlock(self: *RenderBand, c: usize, r: usize, x: usize, block: *const [64]i32) void {
-        const S = @Vector(8, i32);
-        const stride = self.strides[c];
-        const dst = self.planes[c][r * stride + x ..];
-        for (0..8) |i| {
-            const v: S = block[i * 8 ..][0..8].*;
-            const shifted = std.math.clamp(v + @as(S, @splat(128)), @as(S, @splat(0)), @as(S, @splat(255)));
-            dst[i * stride ..][0..8].* = @as(@Vector(8, u8), @intCast(shifted));
-        }
     }
 
     /// Chroma component `c` for luma row `py` at luma resolution: bilinear between the two
@@ -2690,30 +2653,29 @@ const RenderBand = struct {
 /// Dequantizes, inverse-transforms and colour-converts block rows `[block_row0, block_row0 +
 /// block_rows)` into `img`. `blocks` holds those rows from index 0, `block_width_actual` wide,
 /// as whole MCU rows so chroma is upsampled within its MCU row.
-fn renderBlockRows(comptime T: type, state: *JpegState, band: *RenderBand, blocks: [][4][64]i32, block_row0: usize, block_rows: usize, img: *Image(T)) !void {
+fn renderBlockRows(comptime T: type, state: *JpegState, band: *RenderBand, blocks: [][4][64]i16, block_row0: usize, block_rows: usize, img: *Image(T)) !void {
     const nc: usize = state.header.num_components;
     const bw: usize = state.block_width_actual;
     const max_h, const max_v = state.maxSamplingFactors();
     const rgb_model = nc == 3 and state.isRgbColorModel();
 
-    // A component only has blocks at band rows below its vertical factor and MCU columns
-    // below its horizontal one.
+    // A component's blocks sit at MCU columns below its horizontal factor; consecutive
+    // blocks of one component are adjacent in its plane, so they transform in pairs.
     for (0..block_rows) |v| {
-        for (0..state.block_width) |bx| {
-            const set = &blocks[v * bw + bx];
-            for (0..nc) |c| {
-                const comp = state.components[c];
-                const hc: usize = comp.h_sampling;
-                if (v >= comp.v_sampling or bx % max_h >= hc) continue;
-                const block = &set[c];
-                const S = @Vector(8, i32);
-                for (0..8) |i| {
-                    const coefs: S = block[i * 8 ..][0..8].*;
-                    const scale: S = band.dequant[c][i * 8 ..][0..8].*;
-                    block[i * 8 ..][0..8].* = coefs * scale;
-                }
-                idct8x8(block);
-                band.storeBlock(c, v * 8, (bx / max_h * hc + bx % max_h) * 8, block);
+        for (0..nc) |c| {
+            const comp = state.components[c];
+            if (v >= comp.v_sampling) continue;
+            const hc: usize = comp.h_sampling;
+            const stride = band.strides[c];
+            const count = stride / 8;
+            const dst = band.planes[c][v * 8 * stride ..].ptr;
+            var j: usize = 0;
+            while (j < count) : (j += 2) {
+                const single = j + 1 == count;
+                const j1 = if (single) j else j + 1;
+                const a = &blocks[v * bw + (j / hc) * max_h + j % hc][c];
+                const b = &blocks[v * bw + (j1 / hc) * max_h + j1 % hc][c];
+                Idct.pairInto(a, b, &band.dequant[c], dst + j * 8, stride, single);
             }
         }
     }
