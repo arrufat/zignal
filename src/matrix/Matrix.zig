@@ -17,7 +17,7 @@
 //! at most two matrices regardless of chain length.
 //!
 //! ```zig
-//! var p = matrix.chain();
+//! var p = matrix.chain(std.Io.Threaded.global_single_threaded.io());
 //! defer p.deinit();
 //! const result = try p.transpose().dot(other).inv().toOwned();
 //! defer result.deinit();
@@ -35,6 +35,7 @@
 //! - Extraction: `row()`, `col()`, `subMatrix()`
 
 const std = @import("std");
+const parallel = @import("../parallel.zig");
 const Io = std.Io;
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
@@ -179,8 +180,8 @@ pub fn Matrix(comptime T: type) type {
 
         /// Lift this matrix into a `Chain(T)` for fluent chaining of multiple ops.
         /// The matrix is borrowed — callers retain ownership and must still `deinit` it.
-        pub fn chain(self: Self) Chain(T) {
-            return Chain(T).from(self);
+        pub fn chain(self: Self, io: Io) Chain(T) {
+            return Chain(T).from(io, self);
         }
 
         /// Cast the underlying items of the matrix from T to U.
@@ -377,8 +378,8 @@ pub fn Matrix(comptime T: type) type {
         }
 
         /// Matrix multiplication (dot product) - changes dimensions
-        pub fn dot(self: Self, other: Self) MatrixError!Self {
-            return self.gemm(false, other, false, 1.0, 0.0, null);
+        pub fn dot(self: Self, io: Io, other: Self) MatrixError!Self {
+            return self.gemm(io, false, other, false, 1.0, 0.0, null);
         }
 
         /// Inverts the matrix using analytical formulas for small matrices (≤3x3)
@@ -532,7 +533,8 @@ pub fn Matrix(comptime T: type) type {
                 rank_ptr.* = effective_rank;
             }
 
-            return v_sigma.dotTranspose(svd_result.u);
+            // The SVD dominates; the product runs on the inline io.
+            return v_sigma.dotTranspose(parallel.inline_io, svd_result.u);
         }
 
         /// Extract a submatrix - changes dimensions
@@ -569,45 +571,67 @@ pub fn Matrix(comptime T: type) type {
         /// Compute Gram matrix: X * X^T
         /// Useful for kernel methods and when rows < columns
         /// The resulting matrix is rows × rows
-        pub fn gram(self: Self) MatrixError!Self {
-            return self.gemm(false, self, true, 1.0, 0.0, null);
+        pub fn gram(self: Self, io: Io) MatrixError!Self {
+            return self.gemm(io, false, self, true, 1.0, 0.0, null);
         }
 
         /// Compute covariance matrix: X^T * X
         /// Useful for statistical analysis and when rows > columns
         /// The resulting matrix is columns × columns
-        pub fn covariance(self: Self) MatrixError!Self {
-            return self.gemm(true, self, false, 1.0, 0.0, null);
+        pub fn covariance(self: Self, io: Io) MatrixError!Self {
+            return self.gemm(io, true, self, false, 1.0, 0.0, null);
         }
 
         /// C += alpha * A * B for row-major A (m×k) and B (k×n).
         /// Blocked over k and n so the B block stays in L2 while every row of A streams past it,
         /// with a `micro_rows` × `2·vec_len` register tile so each B load feeds `2·micro_rows` FMAs.
-        fn blockedGemm(comptime VecType: type, c: *Matrix(T), a: Matrix(T), b: Matrix(T), alpha: T) void {
-            const vec_len = @typeInfo(VecType).vector.len;
-            const tile_cols = 2 * vec_len;
-            const block_k: usize = 256;
-            // ~512 KB of B per block, rounded to whole register tiles.
-            const block_n: usize = @max(tile_cols, (512 * 1024 / @sizeOf(T)) / block_k / tile_cols * tile_cols);
-            const m: usize = a.rows;
-            const k: usize = a.cols;
-            const n: usize = b.cols;
+        fn blockedGemm(comptime VecType: type, io: Io, c: *Matrix(T), a: Matrix(T), b: Matrix(T), alpha: T) void {
+            // Bands are groups of `micro_rows` rows of C: disjoint outputs, read-only inputs,
+            // and the same k order per element, so the result does not depend on the split.
+            const groups = (@as(usize, a.rows) + micro_rows - 1) / micro_rows;
+            const ctx: GemmBands(VecType) = .{ .c = c.*, .a = a, .b = b, .alpha = alpha };
+            parallel.forRowBands(io, groups, parallel.bandCount(a.rows, b.cols), &ctx, GemmBands(VecType).band);
+        }
 
-            var j0: usize = 0;
-            while (j0 < n) : (j0 += block_n) {
-                const j1 = @min(j0 + block_n, n);
-                var k0: usize = 0;
-                while (k0 < k) : (k0 += block_k) {
-                    const k1 = @min(k0 + block_k, k);
-                    var i: usize = 0;
-                    while (i < m) : (i += micro_rows) {
-                        switch (@min(micro_rows, m - i)) {
-                            inline 1...micro_rows => |rows| microTile(VecType, rows, c, a, b, alpha, i, k0, k1, j0, j1),
-                            else => unreachable,
+        fn GemmBands(comptime VecType: type) type {
+            return struct {
+                c: Matrix(T),
+                a: Matrix(T),
+                b: Matrix(T),
+                alpha: T,
+
+                /// Rows `[g0 * micro_rows, min(g1 * micro_rows, m))` of C through the blocked
+                /// j0/k0/i loop nest.
+                fn band(ctx: *const @This(), _: usize, g0: usize, g1: usize) void {
+                    const vec_len = @typeInfo(VecType).vector.len;
+                    const tile_cols = 2 * vec_len;
+                    const block_k: usize = 256;
+                    // ~512 KB of B per block, rounded to whole register tiles.
+                    const block_n: usize = @max(tile_cols, (512 * 1024 / @sizeOf(T)) / block_k / tile_cols * tile_cols);
+                    const m: usize = ctx.a.rows;
+                    const k: usize = ctx.a.cols;
+                    const n: usize = ctx.b.cols;
+                    const i_start = g0 * micro_rows;
+                    const i_end = @min(g1 * micro_rows, m);
+                    var c = ctx.c;
+
+                    var j0: usize = 0;
+                    while (j0 < n) : (j0 += block_n) {
+                        const j1 = @min(j0 + block_n, n);
+                        var k0: usize = 0;
+                        while (k0 < k) : (k0 += block_k) {
+                            const k1 = @min(k0 + block_k, k);
+                            var i: usize = i_start;
+                            while (i < i_end) : (i += micro_rows) {
+                                switch (@min(micro_rows, i_end - i)) {
+                                    inline 1...micro_rows => |rows| microTile(VecType, rows, &c, ctx.a, ctx.b, ctx.alpha, i, k0, k1, j0, j1),
+                                    else => unreachable,
+                                }
+                            }
                         }
                     }
                 }
-            }
+            };
         }
 
         const micro_rows = 4;
@@ -679,6 +703,8 @@ pub fn Matrix(comptime T: type) type {
         /// - Accumulation: gemm(false, B, false, 1.0, 1.0, C) -> A * B + C
         pub fn gemm(
             self: Self,
+            /// Runs the row bands of the product; a single-threaded io computes them inline.
+            io: Io,
             /// If true, use A^T (transpose of self) instead of A.
             trans_a: bool,
             other: Self,
@@ -728,7 +754,7 @@ pub fn Matrix(comptime T: type) type {
                     defer if (a_t) |*t| t.deinit();
                     var b_t: ?Matrix(T) = if (trans_b) try other.transpose() else null;
                     defer if (b_t) |*t| t.deinit();
-                    blockedGemm(@Vector(vec_len, T), &result, a_t orelse self, b_t orelse other, alpha);
+                    blockedGemm(@Vector(vec_len, T), io, &result, a_t orelse self, b_t orelse other, alpha);
                 } else {
                     for (0..a_rows) |i| {
                         for (0..b_cols) |j| {
@@ -749,20 +775,20 @@ pub fn Matrix(comptime T: type) type {
 
         /// Scaled matrix multiplication: α * A * B
         /// Convenience method for common GEMM use case
-        pub fn scaledDot(self: Self, other: Self, alpha: T) MatrixError!Self {
-            return self.gemm(false, other, false, alpha, 0.0, null);
+        pub fn scaledDot(self: Self, io: Io, other: Self, alpha: T) MatrixError!Self {
+            return self.gemm(io, false, other, false, alpha, 0.0, null);
         }
 
         /// Matrix multiplication with transpose: A * B^T
         /// Convenience method for common GEMM use case
-        pub fn dotTranspose(self: Self, other: Self) MatrixError!Self {
-            return self.gemm(false, other, true, 1.0, 0.0, null);
+        pub fn dotTranspose(self: Self, io: Io, other: Self) MatrixError!Self {
+            return self.gemm(io, false, other, true, 1.0, 0.0, null);
         }
 
         /// Transpose matrix multiplication: A^T * B
         /// Convenience method for common GEMM use case
-        pub fn transposeDot(self: Self, other: Self) MatrixError!Self {
-            return self.gemm(true, other, false, 1.0, 0.0, null);
+        pub fn transposeDot(self: Self, io: Io, other: Self) MatrixError!Self {
+            return self.gemm(io, true, other, false, 1.0, 0.0, null);
         }
 
         /// Apply a function to all matrix elements with optional arguments
@@ -1587,7 +1613,7 @@ test "matrix surfaces errors at the source op" {
     try expectError(MatrixError.DimensionMismatch, a.hadamard(b));
 
     // Chains short-circuit at the failing step and free intermediates.
-    var p = a.chain();
+    var p = a.chain(std.Io.Threaded.global_single_threaded.io());
     defer p.deinit();
     try expectError(MatrixError.DimensionMismatch, p.add(b).scale(2.0).toOwned());
 }

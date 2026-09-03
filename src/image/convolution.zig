@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
-const parallel = @import("parallel.zig");
+const parallel = @import("../parallel.zig");
 
 const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");

@@ -9,6 +9,7 @@
 //! trust-region hard case); the rest is self-contained.
 
 const std = @import("std");
+const parallel = @import("../parallel.zig");
 const Allocator = std.mem.Allocator;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
@@ -439,7 +440,7 @@ fn fitQuadraticMse(
 
     var pinv = try wt.pinv(.{});
     defer pinv.deinit();
-    var z_mat = try pinv.dot(ycol);
+    var z_mat = try pinv.dot(parallel.inline_io, ycol);
     defer z_mat.deinit();
 
     return unpackQuadratic(z_mat.items, dims, h, g);
@@ -482,7 +483,7 @@ fn fitQuadraticInterp(
 
     var pinv = try w.pinv(.{});
     defer pinv.deinit();
-    var z = try pinv.dot(rcol);
+    var z = try pinv.dot(parallel.inline_io, rcol);
     defer z.deinit();
 
     const c = z.at(m, 0).*;

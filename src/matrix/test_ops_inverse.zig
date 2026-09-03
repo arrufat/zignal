@@ -1,4 +1,5 @@
 const std = @import("std");
+const io = std.Io.Threaded.global_single_threaded.io();
 const Matrix = @import("Matrix.zig").Matrix;
 
 test "Matrix inverse - small matrices" {
@@ -15,7 +16,7 @@ test "Matrix inverse - small matrices" {
     const inv2 = try mat2.inv();
 
     // Verify A * A^(-1) = I
-    const identity2 = try mat2.dot(inv2);
+    const identity2 = try mat2.dot(io, inv2);
 
     const eps = 1e-10;
     try std.testing.expect(@abs(identity2.at(0, 0).* - 1.0) < eps);
@@ -38,7 +39,7 @@ test "Matrix inverse - small matrices" {
     const inv3 = try mat3.inv();
 
     // Verify A * A^(-1) = I
-    const identity3 = try mat3.dot(inv3);
+    const identity3 = try mat3.dot(io, inv3);
 
     for (0..3) |i| {
         for (0..3) |j| {
@@ -75,7 +76,7 @@ test "Matrix inverse - large matrices using Gauss-Jordan" {
     const inv4 = try mat4.inv();
 
     // Verify A * A^(-1) = I
-    const identity4 = try mat4.dot(inv4);
+    const identity4 = try mat4.dot(io, inv4);
 
     const eps = 1e-10;
     for (0..4) |i| {
@@ -101,7 +102,7 @@ test "Matrix inverse - large matrices using Gauss-Jordan" {
     const inv5 = try mat5.inv();
 
     // Verify A * A^(-1) = I
-    const identity5 = try mat5.dot(inv5);
+    const identity5 = try mat5.dot(io, inv5);
 
     for (0..5) |i| {
         for (0..5) |j| {
@@ -170,11 +171,11 @@ test "Matrix pseudo-inverse handles tall and wide matrices" {
     var tall_rank: u32 = undefined;
     var tall_pinv = try tall.pinv(.{ .effective_rank = &tall_rank });
     defer tall_pinv.deinit();
-    var tall_recon_chain = tall.chain();
+    var tall_recon_chain = tall.chain(io);
     defer tall_recon_chain.deinit();
     var tall_recon = try tall_recon_chain.dot(tall_pinv).dot(tall).toOwned();
     defer tall_recon.deinit();
-    var tall_pinv_recon_chain = tall_pinv.chain();
+    var tall_pinv_recon_chain = tall_pinv.chain(io);
     defer tall_pinv_recon_chain.deinit();
     var tall_pinv_recon = try tall_pinv_recon_chain.dot(tall).dot(tall_pinv).toOwned();
     defer tall_pinv_recon.deinit();
@@ -213,11 +214,11 @@ test "Matrix pseudo-inverse handles tall and wide matrices" {
     var wide_rank: u32 = undefined;
     var wide_pinv = try wide.pinv(.{ .effective_rank = &wide_rank });
     defer wide_pinv.deinit();
-    var wide_recon_chain = wide.chain();
+    var wide_recon_chain = wide.chain(io);
     defer wide_recon_chain.deinit();
     var wide_recon = try wide_recon_chain.dot(wide_pinv).dot(wide).toOwned();
     defer wide_recon.deinit();
-    var wide_pinv_recon_chain = wide_pinv.chain();
+    var wide_pinv_recon_chain = wide_pinv.chain(io);
     defer wide_pinv_recon_chain.deinit();
     var wide_pinv_recon = try wide_pinv_recon_chain.dot(wide).dot(wide_pinv).toOwned();
     defer wide_pinv_recon.deinit();
@@ -269,7 +270,7 @@ test "Matrix inverse/solve - singularity is relative to the matrix scale" {
         for (0..n) |i| a.at(i, i).* = 1e-9 * @as(f32, @floatFromInt(i + 1));
         a.at(0, n - 1).* = 2e-9;
         const a_inv = try a.inv();
-        const prod = try a.dot(a_inv);
+        const prod = try a.dot(io, a_inv);
         for (0..n) |i| for (0..n) |j| {
             const want: f32 = if (i == j) 1 else 0;
             try std.testing.expectApproxEqAbs(want, prod.at(i, j).*, 1e-5);
@@ -277,7 +278,7 @@ test "Matrix inverse/solve - singularity is relative to the matrix scale" {
         // solve() goes through lu(); it must not skip small pivots.
         const b: Matrix(f32) = try .initAll(gpa, n, 1, 1e-9);
         const x = try a.solve(b);
-        const ax = try a.dot(x);
+        const ax = try a.dot(io, x);
         for (0..n) |i| try std.testing.expectApproxEqAbs(1e-9, ax.at(i, 0).*, 1e-14);
     }
 

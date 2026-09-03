@@ -8,7 +8,7 @@
 //! ## Usage
 //!
 //! ```zig
-//! var p = m.chain();
+//! var p = m.chain(std.Io.Threaded.global_single_threaded.io());
 //! defer p.deinit();
 //! const result = try p.dot(b).transpose().scale(0.5).toOwned();
 //! defer result.deinit();
@@ -31,6 +31,7 @@
 //! address.
 
 const std = @import("std");
+const Io = std.Io;
 const matrix_module = @import("Matrix.zig");
 const Matrix = matrix_module.Matrix;
 const MatrixError = matrix_module.MatrixError;
@@ -45,13 +46,16 @@ pub fn Chain(comptime T: type) type {
         /// True iff `current` is heap-owned by Chain. The initial input is
         /// borrowed (false); every chainable op produces an owned result (true).
         owns_current: bool,
+        io: Io,
         /// Deferred error from any chainable op; surfaced by `toOwned()`.
         err: ?MatrixError = null,
 
         /// Lift a `Matrix(T)` into a `Chain(T)`. The matrix is borrowed —
         /// callers retain ownership and remain responsible for its `deinit`.
-        pub fn from(matrix: Matrix(T)) Self {
+        /// `io` runs the row bands of the products (`dot`, `dotTranspose`, `gemm`).
+        pub fn from(io: Io, matrix: Matrix(T)) Self {
             return .{
+                .io = io,
                 .current = matrix,
                 .owns_current = false,
             };
@@ -177,7 +181,7 @@ pub fn Chain(comptime T: type) type {
 
         /// Matrix multiplication (dot product).
         pub fn dot(self: *Self, other: Matrix(T)) *Self {
-            return self.dispatch("dot", .{other});
+            return self.dispatch("dot", .{ self.io, other });
         }
 
         /// Scaled matrix multiplication: α * A * B.
@@ -187,7 +191,7 @@ pub fn Chain(comptime T: type) type {
 
         /// Matrix multiplication with right-side transpose: A * B^T.
         pub fn dotTranspose(self: *Self, other: Matrix(T)) *Self {
-            return self.dispatch("dotTranspose", .{other});
+            return self.dispatch("dotTranspose", .{ self.io, other });
         }
 
         /// Matrix multiplication with left-side transpose: A^T * B.
@@ -205,7 +209,7 @@ pub fn Chain(comptime T: type) type {
             beta: T,
             c: ?Matrix(T),
         ) *Self {
-            return self.dispatch("gemm", .{ trans_a, other, trans_b, alpha, beta, c });
+            return self.dispatch("gemm", .{ self.io, trans_a, other, trans_b, alpha, beta, c });
         }
 
         /// Gram matrix: A · A^T.
@@ -265,7 +269,7 @@ test "Chain: single-op success" {
     var a: Matrix(f64) = try .initAll(allocator, 2, 2, 1.0);
     defer a.deinit();
 
-    var p = a.chain();
+    var p = a.chain(std.Io.Threaded.global_single_threaded.io());
     defer p.deinit();
     var r = try p.scale(2.0).toOwned();
     defer r.deinit();
@@ -281,7 +285,7 @@ test "Chain: multi-op chain frees intermediates" {
     a.at(1, 0).* = 3.0;
     a.at(1, 1).* = 4.0;
 
-    var p = a.chain();
+    var p = a.chain(std.Io.Threaded.global_single_threaded.io());
     defer p.deinit();
     var r = try p.scale(2.0).offset(1.0).transpose().toOwned();
     defer r.deinit();
@@ -299,7 +303,7 @@ test "Chain: error short-circuits and toOwned surfaces it" {
     var b: Matrix(f64) = try .initAll(allocator, 4, 5, 1.0);
     defer b.deinit();
 
-    var p = a.chain();
+    var p = a.chain(std.Io.Threaded.global_single_threaded.io());
     defer p.deinit();
     try std.testing.expectError(error.DimensionMismatch, p.add(b).scale(2.0).toOwned());
 }
@@ -309,7 +313,7 @@ test "Chain: zero-op chain returns a duplicate" {
     var a: Matrix(f64) = try .initAll(allocator, 2, 2, 7.0);
     defer a.deinit();
 
-    var p = a.chain();
+    var p = a.chain(std.Io.Threaded.global_single_threaded.io());
     defer p.deinit();
     var r = try p.toOwned();
     defer r.deinit();
@@ -324,7 +328,7 @@ test "Chain: post-toOwned state is safe to reuse and deinit" {
     var a: Matrix(f64) = try .initAll(allocator, 2, 2, 1.0);
     defer a.deinit();
 
-    var p = a.chain();
+    var p = a.chain(std.Io.Threaded.global_single_threaded.io());
     defer p.deinit();
     var first = try p.scale(2.0).toOwned();
     // Free the result; the chain must not retain a live pointer into it.
@@ -347,7 +351,7 @@ test "Chain: abandoned chain (no toOwned) leaks nothing" {
     defer b.deinit();
 
     {
-        var p = a.chain();
+        var p = a.chain(std.Io.Threaded.global_single_threaded.io());
         defer p.deinit();
         _ = p.add(b).scale(3.0); // never toOwned
     }
@@ -359,7 +363,7 @@ test "Chain: in-place optimization" {
     var a: Matrix(f64) = try .initAll(allocator, 2, 2, 1.0);
     defer a.deinit();
 
-    var p = a.chain();
+    var p = a.chain(std.Io.Threaded.global_single_threaded.io());
     defer p.deinit();
 
     // First op creates an owned matrix.
@@ -382,7 +386,7 @@ test "Chain: sumRows and sumCols" {
     var a: Matrix(f64) = try .initAll(allocator, 2, 3, 1.0);
     defer a.deinit();
 
-    var p = a.chain();
+    var p = a.chain(std.Io.Threaded.global_single_threaded.io());
     defer p.deinit();
 
     var r_rows = try p.sumRows().toOwned();
@@ -391,7 +395,7 @@ test "Chain: sumRows and sumCols" {
     try std.testing.expectEqual(@as(u32, 3), r_rows.cols);
     try std.testing.expectEqual(@as(f64, 2.0), r_rows.at(0, 0).*);
 
-    var q = a.chain();
+    var q = a.chain(std.Io.Threaded.global_single_threaded.io());
     defer q.deinit();
     var r_cols = try q.sumCols().toOwned();
     defer r_cols.deinit();

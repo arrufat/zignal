@@ -7,6 +7,11 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Io = std.Io;
 
+/// Io for products far below the band floor (fixed-size fits, 3x3 colour statistics): no
+/// band is ever spawned, so the value is never used; `failing` also rejects any accidental
+/// real I/O and works on freestanding targets.
+pub const inline_io: Io = .failing;
+
 /// Below this many pixels per band the task hand-off costs more than the work.
 const min_pixels_per_band: usize = 32 * 1024;
 

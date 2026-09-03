@@ -9,7 +9,7 @@ const meta = @import("../meta.zig");
 const as = meta.as;
 const isScalar = meta.isScalar;
 const convolvePair = @import("convolution.zig").convolvePair;
-const parallel = @import("parallel.zig");
+const parallel = @import("../parallel.zig");
 const ShenCastan = @import("ShenCastan.zig");
 
 /// Sobel X gradient kernel (horizontal edges)
