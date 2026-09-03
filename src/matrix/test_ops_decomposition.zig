@@ -1,4 +1,5 @@
 const std = @import("std");
+const io = std.Io.Threaded.global_single_threaded.io();
 const expectEqual = std.testing.expectEqual;
 const Matrix = @import("Matrix.zig").Matrix;
 
@@ -79,7 +80,7 @@ test "Matrix LU decomposition" {
     defer p_mat.deinit();
 
     // Compute P * A
-    var pa_from_mat = try p_mat.dot(mat);
+    var pa_from_mat = try p_mat.dot(io, mat);
     defer pa_from_mat.deinit();
 
     // Re-verify that rows of PA match rows of L*U (or permuted rows of A)
@@ -224,7 +225,7 @@ test "Matrix QR decomposition" {
     defer p_mat.deinit();
 
     // Compute A * P
-    var ap_from_mat = try mat.dot(p_mat);
+    var ap_from_mat = try mat.dot(io, p_mat);
     defer ap_from_mat.deinit();
 
     // Re-verify that columns of AP match permuted columns of A
@@ -509,7 +510,7 @@ test "Matrix Cholesky decomposition" {
     // Verify L * L^T = A
     var lt = try chol.transpose();
     defer lt.deinit();
-    var recon = try chol.dot(lt);
+    var recon = try chol.dot(io, lt);
     defer recon.deinit();
 
     for (0..3) |i| {
@@ -547,7 +548,7 @@ test "Matrix solve single right-hand side" {
     try std.testing.expectApproxEqAbs(@as(f64, 2), x.at(1, 0).*, eps);
     try std.testing.expectApproxEqAbs(@as(f64, 3), x.at(2, 0).*, eps);
 
-    const recon = try a.dot(x);
+    const recon = try a.dot(io, x);
     for (0..3) |i| try std.testing.expectApproxEqAbs(b.at(i, 0).*, recon.at(i, 0).*, eps);
 }
 
@@ -571,7 +572,7 @@ test "Matrix solve multiple right-hand sides via reused factorization" {
     defer lu_result.deinit();
     const x = try lu_result.solve(b);
 
-    const recon = try a.dot(x);
+    const recon = try a.dot(io, x);
     for (0..2) |i| {
         for (0..2) |j| {
             const expected: f64 = if (i == j) 1 else 0;

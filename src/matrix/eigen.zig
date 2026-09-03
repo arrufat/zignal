@@ -284,9 +284,9 @@ test "eigh: reconstructs A = V diag(λ) Vᵀ" {
     // Rebuild via the diagonal constructor: V · diag(λ) · Vᵀ.
     var d: Matrix(f64) = try .diagonal(allocator, eig.values.items);
     defer d.deinit();
-    var vd = try eig.vectors.dot(d);
+    var vd = try eig.vectors.dot(std.Io.Threaded.global_single_threaded.io(), d);
     defer vd.deinit();
-    var recon = try vd.dotTranspose(eig.vectors);
+    var recon = try vd.dotTranspose(std.Io.Threaded.global_single_threaded.io(), eig.vectors);
     defer recon.deinit();
 
     for (0..3) |i| {

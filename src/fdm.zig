@@ -1,4 +1,5 @@
 const std = @import("std");
+const parallel = @import("parallel.zig");
 const assert = std.debug.assert;
 const clamp = std.math.clamp;
 const testing = std.testing;
@@ -231,11 +232,11 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
                 defer u_target_t.deinit();
 
                 // w_temp = u_source * sigma_combined
-                var w_temp = try u_source.dot(sigma_combined);
+                var w_temp = try u_source.dot(parallel.inline_io, sigma_combined);
                 defer w_temp.deinit();
 
                 // w = w_temp * u_target_t
-                var w = try w_temp.dot(u_target_t);
+                var w = try w_temp.dot(parallel.inline_io, u_target_t);
                 defer w.deinit();
 
                 // Apply W to every pixel

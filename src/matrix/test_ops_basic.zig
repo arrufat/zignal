@@ -1,4 +1,5 @@
 const std = @import("std");
+const io = std.Io.Threaded.global_single_threaded.io();
 const expectEqual = std.testing.expectEqual;
 const Matrix = @import("Matrix.zig").Matrix;
 const SMatrix = @import("SMatrix.zig").SMatrix;
@@ -18,7 +19,7 @@ test "complex operation chaining" {
     const dynamic_a = try static_a.toMatrix(arena.allocator());
     const dynamic_b = try static_b.toMatrix(arena.allocator());
 
-    var p = dynamic_a.chain();
+    var p = dynamic_a.chain(io);
     defer p.deinit();
     const dynamic_result = try p
         .dot(dynamic_b)

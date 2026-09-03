@@ -11,7 +11,7 @@ const Allocator = std.mem.Allocator;
 const Image = @import("../image.zig").Image;
 const BorderMode = @import("border.zig").BorderMode;
 const convolution = @import("convolution.zig");
-const parallel = @import("parallel.zig");
+const parallel = @import("../parallel.zig");
 
 /// Below this the fit is visibly off the exact kernel (mean error ~2 units at sigma 0.5).
 pub const min_sigma: f32 = 1;

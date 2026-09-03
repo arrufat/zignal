@@ -23,7 +23,7 @@
 //!
 //! var pca: Pca(f64) = try .init(allocator, 2);
 //! defer pca.deinit();
-//! try pca.fit(data, null); // keep all possible components
+//! try pca.fit(std.Io.Threaded.global_single_threaded.io(), data, null); // keep all possible components
 //!
 //! // Project a single point (allocates a slice owned by caller)
 //! const test_point = [_]f64{2.0, 3.0};
@@ -33,11 +33,12 @@
 //! defer allocator.free(reconstructed);
 //!
 //! // Batch transform (m × k matrix)
-//! var coeffs_mat = try pca.transform(data);
+//! var coeffs_mat = try pca.transform(std.Io.Threaded.global_single_threaded.io(), data);
 //! defer coeffs_mat.deinit();
 //! ```
 
 const std = @import("std");
+const Io = std.Io;
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 
@@ -103,6 +104,7 @@ pub fn Pca(
         /// - Returns `error.InsufficientData` for `n < 2` and `error.InvalidComponents` for `0`.
         pub fn fit(
             self: *Self,
+            io: Io,
             /// Training samples matrix (n_samples × dim).
             data_matrix: Matrix(T),
             /// Number of components to retain; when null keeps `min(n-1, dim)`.
@@ -156,10 +158,10 @@ pub fn Pca(
             // Choose computation path based on data dimensions
             if (n_samples <= self.dim) {
                 // Few samples: use Gram matrix approach (n_samples × n_samples)
-                try self.computeComponentsFromGram(&centered_matrix, actual_components);
+                try self.computeComponentsFromGram(io, &centered_matrix, actual_components);
             } else {
                 // Many samples: use covariance matrix approach (dim × dim)
-                try self.computeComponentsFromCovariance(&centered_matrix, actual_components);
+                try self.computeComponentsFromCovariance(io, &centered_matrix, actual_components);
             }
         }
 
@@ -290,6 +292,7 @@ pub fn Pca(
         /// Returns the transformed matrix (n_samples × num_components).
         pub fn transform(
             self: Self,
+            io: Io,
             /// Samples matrix (n_samples × dim).
             data_matrix: Matrix(T),
         ) !Matrix(T) {
@@ -308,7 +311,7 @@ pub fn Pca(
             }
 
             // Compute centered * components
-            return centered_matrix.gemm(false, self.components, false, 1.0, 0.0, null);
+            return centered_matrix.gemm(io, false, self.components, false, 1.0, 0.0, null);
         }
 
         /// Get the mean vector
@@ -328,14 +331,14 @@ pub fn Pca(
         ///
         /// Example: For 1000 RGB images (1000×3 matrix), we compute a 3×3 covariance
         /// matrix instead of a 1000×1000 Gram matrix, making it much more efficient.
-        fn computeComponentsFromCovariance(self: *Self, data_matrix: *Matrix(T), num_components: u32) !void {
+        fn computeComponentsFromCovariance(self: *Self, io: Io, data_matrix: *Matrix(T), num_components: u32) !void {
             // Compute scaled covariance matrix (X^T * X) / (n-1) in single GEMM operation
             const n_samples = data_matrix.rows;
             const scale = 1.0 / @as(T, @floatFromInt(n_samples - 1));
 
             // Use GEMM directly: scale * (X^T * X) + 0 * C
             // This combines matrix multiplication and scaling in one optimized operation
-            var cov_matrix = try data_matrix.gemm(true, data_matrix.*, false, scale, 0.0, null);
+            var cov_matrix = try data_matrix.gemm(io, true, data_matrix.*, false, scale, 0.0, null);
             defer cov_matrix.deinit();
 
             // Prepare outputs
@@ -377,14 +380,14 @@ pub fn Pca(
         ///
         /// Example: For 10 high-dimensional vectors (10×1000 matrix), we compute a
         /// 10×10 Gram matrix instead of a 1000×1000 covariance matrix.
-        fn computeComponentsFromGram(self: *Self, data_matrix: *Matrix(T), num_components: u32) !void {
+        fn computeComponentsFromGram(self: *Self, io: Io, data_matrix: *Matrix(T), num_components: u32) !void {
             // Compute scaled Gram matrix (X * X^T) / (n-1) in single GEMM operation
             const n_samples = data_matrix.rows;
             const scale = 1.0 / @as(T, @floatFromInt(n_samples - 1));
 
             // Use GEMM directly: scale * (X * X^T) + 0 * C
             // This combines matrix multiplication and scaling in one optimized operation
-            var gram_matrix = try data_matrix.gemm(false, data_matrix.*, true, scale, 0.0, null);
+            var gram_matrix = try data_matrix.gemm(io, false, data_matrix.*, true, scale, 0.0, null);
             defer gram_matrix.deinit();
 
             const n = gram_matrix.rows;
@@ -458,7 +461,7 @@ test "PCA on 2D vectors" {
     var pca = try Pca(f64).init(allocator);
     defer pca.deinit();
 
-    try pca.fit(data, null);
+    try pca.fit(std.Io.Threaded.global_single_threaded.io(), data, null);
 
     // Should have fitted successfully
     try std.testing.expect(pca.num_components > 0);
@@ -503,7 +506,7 @@ test "PCA on image color data using Point conversion" {
     var pca: Pca(f64) = try .init(allocator);
     defer pca.deinit();
 
-    try pca.fit(color_matrix, 1); // Keep only 1 component
+    try pca.fit(std.Io.Threaded.global_single_threaded.io(), color_matrix, 1); // Keep only 1 component
 
     // Test basic functionality
     try std.testing.expect(pca.num_components == 1);
@@ -533,7 +536,7 @@ test "PCA Gram path normalization and direction" {
 
     var pca: Pca(f64) = try .init(allocator);
     defer pca.deinit();
-    try pca.fit(data, 1);
+    try pca.fit(std.Io.Threaded.global_single_threaded.io(), data, 1);
 
     // First eigenvalue should be 2 (since covariance on centered data has [[2,0,0],...])
     try std.testing.expect(@abs(pca.eigenvalues[0] - 2.0) < 1e-9);
@@ -547,7 +550,7 @@ test "PCA Gram path normalization and direction" {
     try std.testing.expect(@abs(c0z) < 1e-12);
 
     // Batch transform should match per-vector projection
-    var coeffs_matrix = try pca.transform(data);
+    var coeffs_matrix = try pca.transform(std.Io.Threaded.global_single_threaded.io(), data);
     defer coeffs_matrix.deinit();
 
     const test_vec = [_]f64{ 1.0, 0.0, 0.0 };
@@ -572,7 +575,7 @@ test "PCA SIMD path on larger dimensions" {
 
     var pca: Pca(f64) = try .init(allocator);
     defer pca.deinit();
-    try pca.fit(data, null);
+    try pca.fit(std.Io.Threaded.global_single_threaded.io(), data, null);
 
     // Test projection and reconstruction on larger dim
     var test_vec: [10]f64 = undefined;
@@ -603,7 +606,7 @@ test "PCA edge case: minimum samples (n=2)" {
     var pca: Pca(f64) = try .init(allocator);
     defer pca.deinit();
 
-    try pca.fit(data, null); // Should fit with 1 component
+    try pca.fit(std.Io.Threaded.global_single_threaded.io(), data, null); // Should fit with 1 component
     try std.testing.expectEqual(@as(u32, 1), pca.num_components);
 
     // Test projection
@@ -627,7 +630,7 @@ test "PCA edge case: zero variance data" {
     var pca: Pca(f64) = try .init(allocator);
     defer pca.deinit();
 
-    try pca.fit(data, null); // Should fit, but eigenvalues near zero
+    try pca.fit(std.Io.Threaded.global_single_threaded.io(), data, null); // Should fit, but eigenvalues near zero
     try std.testing.expect(pca.num_components > 0);
 
     // All eigenvalues should be very small
@@ -661,7 +664,7 @@ test "PCA error cases: invalid inputs" {
     data.at(0, 1).* = 2.0;
     data.at(1, 0).* = 3.0;
     data.at(1, 1).* = 4.0;
-    try pca.fit(data, null);
+    try pca.fit(std.Io.Threaded.global_single_threaded.io(), data, null);
 
     // Wrong dimension
     const wrong_dim_vec = [_]f64{1.0}; // 1D instead of 2D

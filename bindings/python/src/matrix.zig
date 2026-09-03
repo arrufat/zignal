@@ -700,7 +700,7 @@ fn matrix_matmul(left: ?*c.PyObject, right: ?*c.PyObject) callconv(.c) ?*c.PyObj
     const self_ptr = python.unwrap(MatrixObject, "matrix_ptr", left, "Matrix") orelse return null;
     const other_ptr = python.unwrap(MatrixObject, "matrix_ptr", right, "Matrix") orelse return null;
 
-    const result_matrix = self_ptr.dot(other_ptr.*);
+    const result_matrix = python.withoutGil(@TypeOf(self_ptr.*).dot, .{ self_ptr.*, python.io, other_ptr.* });
     return matrixToObject(result_matrix);
 }
 
@@ -1325,7 +1325,7 @@ fn matrix_gram_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
     _ = args;
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
-    const result_matrix = ptr.gram();
+    const result_matrix = python.withoutGil(@TypeOf(ptr.*).gram, .{ ptr.*, python.io });
     return matrixToObject(result_matrix);
 }
 
@@ -1340,7 +1340,7 @@ fn matrix_covariance_method(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv
     _ = args;
     const ptr = python.unwrap(MatrixObject, "matrix_ptr", self_obj, "Matrix") orelse return null;
 
-    const result_matrix = ptr.covariance();
+    const result_matrix = python.withoutGil(@TypeOf(ptr.*).covariance, .{ ptr.*, python.io });
     return matrixToObject(result_matrix);
 }
 

@@ -11,7 +11,7 @@ const Io = std.Io;
 const Image = @import("../image.zig").Image;
 const channel_ops = @import("channel_ops.zig");
 const meta = @import("../meta.zig");
-const parallel = @import("parallel.zig");
+const parallel = @import("../parallel.zig");
 
 const Mode = enum { blur, sharpen };
 

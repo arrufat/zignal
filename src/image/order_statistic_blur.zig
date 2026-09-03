@@ -9,7 +9,7 @@ const percentileRank = histogram.percentileRank;
 const border_module = @import("border.zig");
 const BorderMode = border_module.BorderMode;
 const channel_ops = @import("channel_ops.zig");
-const parallel = @import("parallel.zig");
+const parallel = @import("../parallel.zig");
 const meta = @import("../meta.zig");
 
 pub const Error = error{

@@ -1,4 +1,5 @@
 const std = @import("std");
+const parallel = @import("../parallel.zig");
 const assert = std.debug.assert;
 
 const SMatrix = @import("../matrix.zig").SMatrix;
@@ -176,7 +177,7 @@ pub fn AffineTransform(comptime T: type) type {
             }
 
             // Calculate m = q * p^+
-            var m = try q.dot(pinv);
+            var m = try q.dot(parallel.inline_io, pinv);
             defer m.deinit();
 
             // Extract the 2x2 matrix

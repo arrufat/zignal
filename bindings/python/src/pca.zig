@@ -148,7 +148,7 @@ fn pca_fit(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callc
     const components: ?u32 = if (num_components < 0) null else @intCast(num_components);
 
     // Fit the PCA model
-    self.pca_ptr.?.fit(matrix_struct.matrix_ptr.?.*, components) catch |err| {
+    python.withoutGil(@TypeOf(self.pca_ptr.?.*).fit, .{ self.pca_ptr.?, python.io, matrix_struct.matrix_ptr.?.*, components }) catch |err| {
         switch (err) {
             error.NoVectors => {
                 python.setValueError("No data provided", .{});
@@ -304,7 +304,7 @@ fn pca_transform(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     }
 
     // Transform the data
-    var transformed = self.pca_ptr.?.transform(matrix_struct.matrix_ptr.?.*) catch |err| {
+    var transformed = python.withoutGil(@TypeOf(self.pca_ptr.?.*).transform, .{ self.pca_ptr.?.*, python.io, matrix_struct.matrix_ptr.?.* }) catch |err| {
         switch (err) {
             error.NotFitted => {
                 python.setRuntimeError("PCA has not been fitted yet", .{});

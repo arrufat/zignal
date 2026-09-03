@@ -38,7 +38,7 @@ const as = meta.as;
 const clamp = meta.clamp;
 const BorderMode = @import("border.zig").BorderMode;
 const channel_ops = @import("channel_ops.zig");
-const parallel = @import("parallel.zig");
+const parallel = @import("../parallel.zig");
 const resolveIndex = @import("border.zig").resolveIndex;
 
 /// Interpolation method for image resizing and sampling

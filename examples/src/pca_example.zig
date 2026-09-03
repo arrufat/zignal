@@ -168,7 +168,7 @@ fn drawPcaAxes(canvas: Canvas(Rgb), pca: Pca(f64), bounds: Bounds) !void {
 /// Project points using PCA and create new aligned dataset
 fn projectAndAlign(pca: Pca(f64), original_points: Matrix(f64)) !Matrix(f64) {
     // Use the batch transform method to project all points at once
-    return try pca.transform(original_points);
+    return try pca.transform(Io.Threaded.global_single_threaded.io(), original_points);
 }
 
 pub fn main() !void {
@@ -200,7 +200,7 @@ pub fn main() !void {
     var pca: Pca(f64) = try .init(gpa);
     defer pca.deinit();
 
-    try pca.fit(original_points, null); // Keep all components
+    try pca.fit(io, original_points, null); // Keep all components
 
     // Draw PCA axes on original image
     try drawPcaAxes(original_canvas, pca, original_bounds);

@@ -8,7 +8,7 @@ const std = @import("std");
 const Io = std.Io;
 const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
-const parallel = @import("parallel.zig");
+const parallel = @import("../parallel.zig");
 const resolveIndex = @import("border.zig").resolveIndex;
 
 /// Find the uniform value of a channel if all values are the same.
