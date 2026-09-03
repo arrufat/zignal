@@ -54,7 +54,7 @@ fn applyInto(comptime T: type, comptime mode: Mode, io: Io, image: Image(T), out
             } else {
                 const num_channels = comptime Image(T).channels();
                 const P = channel_ops.FieldTypeOf(T);
-                const planes = try channel_ops.splitChannels(T, image, allocator);
+                const planes = try channel_ops.splitChannels(T, io, image, allocator);
                 defer inline for (planes) |p| allocator.free(p);
 
                 const plane_size = @as(usize, image.rows) * image.cols;
@@ -67,7 +67,7 @@ fn applyInto(comptime T: type, comptime mode: Mode, io: Io, image: Image(T), out
                     try plane(P, mode, io, src_plane, dst_plane, allocator, radius);
                 }
 
-                channel_ops.mergeChannels(T, dst_planes, out);
+                channel_ops.mergeChannels(T, io, dst_planes, out);
             }
         },
         else => @compileError("boxBlur/sharpen do not support " ++ @typeName(T)),
@@ -119,8 +119,9 @@ fn plane(comptime P: type, comptime mode: Mode, io: Io, src: Image(P), dst: Imag
     const cols: usize = src.cols;
 
     // Integer sums are exact, so bands seeded mid-image match one sweep; f64 sums would
-    // round differently, so f32 planes stay a single band.
-    const bands = if (@typeInfo(SumT(P)) == .int) bandsFor(rows, cols, radius) else 1;
+    // round differently, so f32 planes stay a single band. Bands stay four windows tall
+    // because each re-seeds `2·radius + 1` rows.
+    const bands = if (@typeInfo(SumT(P)) == .int) parallel.bandCountFor(rows, cols, 4 * (2 * radius + 1)) else 1;
     const ctx: BandContext(P, SumT(P), InvT(P), planeRows(P, mode)) = .{
         .src = src,
         .dst = dst,
@@ -132,12 +133,6 @@ fn plane(comptime P: type, comptime mode: Mode, io: Io, src: Image(P), dst: Imag
     defer allocator.free(ctx.col_sums);
     defer allocator.free(ctx.inv_widths);
     parallel.forRowBands(io, rows, bands, &ctx, @TypeOf(ctx).rowBand);
-}
-
-/// Every band re-seeds `2·radius + 1` rows of column sums, so bands stay at least four
-/// windows tall.
-fn bandsFor(rows: usize, cols: usize, radius: usize) usize {
-    return @max(1, @min(parallel.bandCount(rows, cols), rows / (4 * (2 * radius + 1))));
 }
 
 /// Read-only state shared by the row bands; `width` is the element count of one row of
@@ -261,7 +256,7 @@ inline fn emitAndSlide(
 /// ran, two elsewhere — so outputs match the plane-split path bit for bit.
 fn interleavedU8(comptime T: type, comptime mode: Mode, io: Io, image: Image(T), out: Image(T), allocator: Allocator, radius: usize) !void {
     const width_e = @as(usize, image.cols) * comptime Image(T).channels();
-    const bands = bandsFor(image.rows, image.cols, radius);
+    const bands = parallel.bandCountFor(image.rows, image.cols, 4 * (2 * radius + 1));
     const ctx: BandContext(T, u32, f32, interleavedRows(T, mode)) = .{
         .src = image,
         .dst = out,

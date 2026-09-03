@@ -124,7 +124,7 @@ pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options
                 std.log.err("median blur radius {d} exceeds maximum limit of 256.", .{radius});
                 return error.InvalidArguments;
             }
-            try img.medianBlur(gpa, out, radius);
+            try img.medianBlur(io, gpa, out, radius);
         },
         .motion_linear => {
             const angle_deg = options.angle orelse 0.0;

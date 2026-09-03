@@ -5,8 +5,10 @@
 //! processing using SIMD and integer arithmetic.
 
 const std = @import("std");
+const Io = std.Io;
 const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
+const parallel = @import("parallel.zig");
 const resolveIndex = @import("border.zig").resolveIndex;
 
 /// Find the uniform value of a channel if all values are the same.
@@ -66,26 +68,44 @@ pub fn allocPlanes(comptime P: type, comptime N: usize, allocator: std.mem.Alloc
 }
 
 /// Separate all channels from a struct image into individual planes while tracking uniform channels.
-pub fn splitChannelsWithUniform(comptime T: type, image: Image(T), allocator: std.mem.Allocator) !struct {
+pub fn splitChannelsWithUniform(comptime T: type, io: Io, image: Image(T), allocator: std.mem.Allocator) !struct {
     channels: [Image(T).channels()][]FieldTypeOf(T),
     uniforms: [Image(T).channels()]?FieldTypeOf(T),
 } {
     const num_channels = comptime Image(T).channels();
     const FieldType = FieldTypeOf(T);
 
-    const channels = try splitChannels(T, image, allocator);
+    const channels = try splitChannels(T, io, image, allocator);
+    errdefer for (channels) |plane| allocator.free(plane);
 
     // Detecting uniformity on the split planes (SIMD, early-exit) is far cheaper than
-    // tracking it with per-pixel flag branches inside the deinterleave loop.
-    var uniforms: [num_channels]?FieldType = undefined;
-    inline for (&uniforms, channels) |*slot, plane| {
-        slot.* = findUniformValue(FieldType, plane);
-    }
+    // tracking it with per-pixel flag branches inside the deinterleave loop. Each band
+    // scans its rows; a plane is uniform when every band found the same value.
+    const bands = parallel.bandCount(image.rows, image.cols);
+    const band_uniforms = try allocator.alloc(?FieldType, bands * num_channels);
+    defer allocator.free(band_uniforms);
+    const Ctx = struct {
+        channels: [num_channels][]FieldType,
+        cols: usize,
+        band_uniforms: []?FieldType,
 
-    return .{
-        .channels = channels,
-        .uniforms = uniforms,
+        fn band(ctx: *const @This(), b: usize, r0: usize, r1: usize) void {
+            for (ctx.channels, 0..) |plane, i| {
+                ctx.band_uniforms[b * num_channels + i] = findUniformValue(FieldType, plane[r0 * ctx.cols .. r1 * ctx.cols]);
+            }
+        }
     };
+    const ctx: Ctx = .{ .channels = channels, .cols = image.cols, .band_uniforms = band_uniforms };
+    parallel.forRowBands(io, image.rows, bands, &ctx, Ctx.band);
+
+    var uniforms: [num_channels]?FieldType = undefined;
+    for (&uniforms, 0..) |*slot, i| {
+        slot.* = band_uniforms[i];
+        for (1..bands) |b| {
+            if (slot.* == null or band_uniforms[b * num_channels + i] != slot.*) slot.* = null;
+        }
+    }
+    return .{ .channels = channels, .uniforms = uniforms };
 }
 
 /// SIMD lanes for (de)interleaving a padding-free struct row viewed as a flat field array;
@@ -103,70 +123,85 @@ fn fieldSlots(comptime T: type) [Image(T).channels()]usize {
     return slots;
 }
 
-/// Separate all channels from a struct image into individual planes.
+/// Separate all channels from a struct image into individual planes, in row bands on `io`.
 /// Allocates and fills channel planes for all fields.
 /// The caller is responsible for freeing the returned slices.
-pub fn splitChannels(comptime T: type, image: Image(T), allocator: std.mem.Allocator) ![Image(T).channels()][]FieldTypeOf(T) {
+pub fn splitChannels(comptime T: type, io: Io, image: Image(T), allocator: std.mem.Allocator) ![Image(T).channels()][]FieldTypeOf(T) {
     const num_channels = comptime Image(T).channels();
-    const fields = comptime meta.structFields(T);
-    const FieldType = FieldTypeOf(T);
     const plane_size = @as(usize, image.rows) * image.cols;
-
-    const channels = try allocPlanes(FieldType, num_channels, allocator, plane_size);
-
-    // One contiguous row at a time (rows handle views): SIMD deinterleave, scalar tail.
-    var idx: usize = 0;
-    for (0..image.rows) |r| {
-        const row = image.data[r * image.stride ..][0..image.cols];
-        var c: usize = 0;
-        if (comptime interleaveLanes(T)) |lanes| {
-            const slots = comptime fieldSlots(T);
-            const flat: [*]const FieldType = @ptrCast(row.ptr);
-            while (c + lanes <= row.len) : (c += lanes) {
-                const v: @Vector(num_channels * lanes, FieldType) = flat[c * num_channels ..][0 .. num_channels * lanes].*;
-                const planes = std.simd.deinterlace(num_channels, v);
-                inline for (slots, 0..) |slot, i| channels[i][idx + c ..][0..lanes].* = planes[slot];
-            }
-        }
-        for (row[c..], c..) |pixel, cc| {
-            inline for (fields, 0..) |field, i| {
-                channels[i][idx + cc] = @field(pixel, field.name);
-            }
-        }
-        idx += row.len;
-    }
-
+    const channels = try allocPlanes(FieldTypeOf(T), num_channels, allocator, plane_size);
+    const ctx: PlaneBands(T, []FieldTypeOf(T)) = .{ .image = image, .channels = channels };
+    parallel.forRowBands(io, image.rows, parallel.bandCount(image.rows, image.cols), &ctx, @TypeOf(ctx).split);
     return channels;
 }
 
-/// Combine channels back into struct image.
-pub fn mergeChannels(comptime T: type, channels: [Image(T).channels()][]const FieldTypeOf(T), out: Image(T)) void {
-    const num_channels = comptime Image(T).channels();
-    const fields = comptime meta.structFields(T);
-    const FieldType = FieldTypeOf(T);
+/// Combine channels back into a struct image, in row bands on `io`.
+pub fn mergeChannels(comptime T: type, io: Io, channels: [Image(T).channels()][]const FieldTypeOf(T), out: Image(T)) void {
+    const ctx: PlaneBands(T, []const FieldTypeOf(T)) = .{ .image = out, .channels = channels };
+    parallel.forRowBands(io, out.rows, parallel.bandCount(out.rows, out.cols), &ctx, @TypeOf(ctx).merge);
+}
 
-    var idx: usize = 0;
-    for (0..out.rows) |r| {
-        const row = out.data[r * out.stride ..][0..out.cols];
-        var c: usize = 0;
-        if (comptime interleaveLanes(T)) |lanes| {
-            const slots = comptime fieldSlots(T);
-            const flat: [*]FieldType = @ptrCast(row.ptr);
-            while (c + lanes <= row.len) : (c += lanes) {
-                var planes: [num_channels]@Vector(lanes, FieldType) = undefined;
-                inline for (slots, 0..) |slot, i| planes[slot] = channels[i][idx + c ..][0..lanes].*;
-                flat[c * num_channels ..][0 .. num_channels * lanes].* = std.simd.interlace(planes);
+/// Row bands of the (de)interleave passes: one contiguous row at a time (rows handle views),
+/// SIMD (de)interleave, scalar tail. Plane index of row `r` is `r * cols`.
+fn PlaneBands(comptime T: type, comptime Plane: type) type {
+    return struct {
+        const num_channels = Image(T).channels();
+        const fields = meta.structFields(T);
+        const FieldType = FieldTypeOf(T);
+
+        image: Image(T),
+        channels: [num_channels]Plane,
+
+        fn split(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
+            const image = ctx.image;
+            const channels = ctx.channels;
+            for (r0..r1) |r| {
+                const idx = r * image.cols;
+                const row = image.data[r * image.stride ..][0..image.cols];
+                var c: usize = 0;
+                if (comptime interleaveLanes(T)) |lanes| {
+                    const slots = comptime fieldSlots(T);
+                    const flat: [*]const FieldType = @ptrCast(row.ptr);
+                    while (c + lanes <= row.len) : (c += lanes) {
+                        const v: @Vector(num_channels * lanes, FieldType) = flat[c * num_channels ..][0 .. num_channels * lanes].*;
+                        const planes = std.simd.deinterlace(num_channels, v);
+                        inline for (slots, 0..) |slot, i| channels[i][idx + c ..][0..lanes].* = planes[slot];
+                    }
+                }
+                for (row[c..], c..) |pixel, cc| {
+                    inline for (fields, 0..) |field, i| {
+                        channels[i][idx + cc] = @field(pixel, field.name);
+                    }
+                }
             }
         }
-        for (row[c..], c..) |*pixel, cc| {
-            var result_pixel: T = undefined;
-            inline for (fields, 0..) |field, i| {
-                @field(result_pixel, field.name) = channels[i][idx + cc];
+
+        fn merge(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
+            const out = ctx.image;
+            const channels = ctx.channels;
+            for (r0..r1) |r| {
+                const idx = r * out.cols;
+                const row = out.data[r * out.stride ..][0..out.cols];
+                var c: usize = 0;
+                if (comptime interleaveLanes(T)) |lanes| {
+                    const slots = comptime fieldSlots(T);
+                    const flat: [*]FieldType = @ptrCast(row.ptr);
+                    while (c + lanes <= row.len) : (c += lanes) {
+                        var planes: [num_channels]@Vector(lanes, FieldType) = undefined;
+                        inline for (slots, 0..) |slot, i| planes[slot] = channels[i][idx + c ..][0..lanes].*;
+                        flat[c * num_channels ..][0 .. num_channels * lanes].* = std.simd.interlace(planes);
+                    }
+                }
+                for (row[c..], c..) |*pixel, cc| {
+                    var result_pixel: T = undefined;
+                    inline for (fields, 0..) |field, i| {
+                        @field(result_pixel, field.name) = channels[i][idx + cc];
+                    }
+                    pixel.* = result_pixel;
+                }
             }
-            pixel.* = result_pixel;
         }
-        idx += row.len;
-    }
+    };
 }
 
 // ============================================================================

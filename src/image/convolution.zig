@@ -325,14 +325,13 @@ pub fn convolve(comptime T: type, io: Io, self: Image(T), out: Image(T), allocat
                     const Kernel = ConvolutionKernel(u8, kernel_height, kernel_width);
                     const kernel_int = Kernel.flatten(kernel);
                     const PlaneCtx = struct {
-                        io: Io,
                         kernel: [Kernel.size]i32,
 
-                        fn convolvePlane(ctx: @This(), src: Image(u8), dst: Image(u8), mode: BorderMode) !void {
-                            Kernel.convolveMulti(1, ctx.io, src, .{dst}, .{ctx.kernel}, mode);
+                        fn convolvePlane(ctx: @This(), plane_io: Io, src: Image(u8), dst: Image(u8), mode: BorderMode) !void {
+                            Kernel.convolveMulti(1, plane_io, src, .{dst}, .{ctx.kernel}, mode);
                         }
                     };
-                    try convolvePlanes(T, self, out, allocator, sumTaps(&kernel_int), fixed_point_scale, border_mode, PlaneCtx{ .io = io, .kernel = kernel_int });
+                    try convolvePlanes(T, io, self, out, allocator, sumTaps(&kernel_int), fixed_point_scale, border_mode, PlaneCtx{ .kernel = kernel_int });
                 } else {
                     @compileError("Convolution only supports structs where all fields are u8. Type " ++ @typeName(T) ++ " is not supported.");
                 }
@@ -349,6 +348,7 @@ const ChannelStrategy = enum { normalized, scaled, non_uniform };
 /// and merges the results into `out`.
 pub fn convolvePlanes(
     comptime T: type,
+    io: Io,
     image: Image(T),
     out: Image(T),
     allocator: Allocator,
@@ -359,7 +359,7 @@ pub fn convolvePlanes(
 ) !void {
     const plane_size = image.rows * image.cols;
 
-    const split = try channel_ops.splitChannelsWithUniform(T, image, allocator);
+    const split = try channel_ops.splitChannelsWithUniform(T, io, image, allocator);
     const channels = split.channels;
     const uniforms = split.uniforms;
     defer for (channels) |channel| allocator.free(channel);
@@ -397,11 +397,11 @@ pub fn convolvePlanes(
             } else {
                 const src_plane = Image(u8).initFromSlice(image.rows, image.cols, src_data);
                 const dst_plane = Image(u8).initFromSlice(image.rows, image.cols, dst_data);
-                try ctx.convolvePlane(src_plane, dst_plane, border_mode);
+                try ctx.convolvePlane(io, src_plane, dst_plane, border_mode);
             }
         }
     }
-    channel_ops.mergeChannels(T, final_channels, out);
+    channel_ops.mergeChannels(T, io, final_channels, out);
 }
 
 fn scaleKernelToInt(allocator: Allocator, kernel: []const f32) ![]i32 {
@@ -496,9 +496,8 @@ fn convolveSeparableAutoImpl(
             try SinglePass.vertical(io, src, dst, allocator, kernel_y, border_mode);
         }
     } else if (useFusedSeparable(TempT, src.rows, src.cols, kernel_y.len, border_mode)) {
-        // Each band re-runs the horizontal pass over `kernel_y.len` halo rows, so bands stay at
-        // least four kernel heights tall.
-        const bands = @max(1, @min(parallel.bandCount(src.rows, src.cols), src.rows / (4 * kernel_y.len)));
+        // Each band re-runs the horizontal pass over `kernel_y.len` halo rows.
+        const bands = parallel.bandCountFor(src.rows, src.cols, 4 * kernel_y.len);
         try convolveSeparablePlaneFused(PixelT, TempT, AccumIntT, io, bands, src, dst, allocator, kernel_x, kernel_y, border_mode);
     } else {
         var owned: []TempT = &.{};
@@ -541,21 +540,20 @@ pub fn convolveSeparable(
             try convolveSeparableAuto(u8, i32, io, image, out, allocator, kernel_x_int, kernel_y_int, border_mode, null);
         } else {
             const PlaneCtx = struct {
-                io: Io,
                 allocator: Allocator,
                 kernel_x: []const i32,
                 kernel_y: []const i32,
                 temp: []i32 = &.{},
 
-                fn convolvePlane(ctx: *@This(), src: Image(u8), dst: Image(u8), mode: BorderMode) !void {
-                    try convolveSeparableAuto(u8, i32, ctx.io, src, dst, ctx.allocator, ctx.kernel_x, ctx.kernel_y, mode, &ctx.temp);
+                fn convolvePlane(ctx: *@This(), plane_io: Io, src: Image(u8), dst: Image(u8), mode: BorderMode) !void {
+                    try convolveSeparableAuto(u8, i32, plane_io, src, dst, ctx.allocator, ctx.kernel_x, ctx.kernel_y, mode, &ctx.temp);
                 }
             };
-            var ctx: PlaneCtx = .{ .io = io, .allocator = allocator, .kernel_x = kernel_x_int, .kernel_y = kernel_y_int };
+            var ctx: PlaneCtx = .{ .allocator = allocator, .kernel_x = kernel_x_int, .kernel_y = kernel_y_int };
             defer allocator.free(ctx.temp);
             // The separable kernel sum is the product of the 1D sums, one `fixed_point_scale` each.
             const kernel_sum = sumTaps(kernel_x_int) * sumTaps(kernel_y_int);
-            try convolvePlanes(T, image, out, allocator, kernel_sum, fixed_point_scale_sq, border_mode, &ctx);
+            try convolvePlanes(T, io, image, out, allocator, kernel_sum, fixed_point_scale_sq, border_mode, &ctx);
         }
     }
 }

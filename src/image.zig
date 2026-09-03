@@ -661,11 +661,11 @@ pub fn Image(comptime T: type) type {
         /// Applies a median blur using a square window with the given radius.
         /// Radius specifies half the window size; window size = `radius * 2 + 1`.
         /// The output image must be pre-allocated with the same dimensions as the input.
-        pub fn medianBlur(self: Self, allocator: Allocator, out: Self, radius: usize) !void {
+        pub fn medianBlur(self: Self, io: Io, allocator: Allocator, out: Self, radius: usize) !void {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            try OrderStatisticBlurOps(T).medianBlur(self, out, allocator, radius);
+            try OrderStatisticBlurOps(T).medianBlur(self, io, out, allocator, radius);
         }
 
         /// Applies a percentile blur (order-statistic filter) with the given percentile fraction.
@@ -682,6 +682,7 @@ pub fn Image(comptime T: type) type {
         /// ```
         pub fn percentileBlur(
             self: Self,
+            io: Io,
             allocator: Allocator,
             out: Self,
             radius: usize,
@@ -691,7 +692,7 @@ pub fn Image(comptime T: type) type {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            try OrderStatisticBlurOps(T).percentileBlur(self, out, allocator, radius, percentile, border);
+            try OrderStatisticBlurOps(T).percentileBlur(self, io, out, allocator, radius, percentile, border);
         }
 
         /// Applies a minimum blur (percentile zero) over a square window with the given radius.
@@ -706,6 +707,7 @@ pub fn Image(comptime T: type) type {
         /// ```
         pub fn minBlur(
             self: Self,
+            io: Io,
             allocator: Allocator,
             out: Self,
             radius: usize,
@@ -714,7 +716,7 @@ pub fn Image(comptime T: type) type {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            try OrderStatisticBlurOps(T).minBlur(self, out, allocator, radius, border);
+            try OrderStatisticBlurOps(T).minBlur(self, io, out, allocator, radius, border);
         }
 
         /// Applies a maximum blur (percentile one) over a square window with the given radius.
@@ -729,6 +731,7 @@ pub fn Image(comptime T: type) type {
         /// ```
         pub fn maxBlur(
             self: Self,
+            io: Io,
             allocator: Allocator,
             out: Self,
             radius: usize,
@@ -737,7 +740,7 @@ pub fn Image(comptime T: type) type {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            try OrderStatisticBlurOps(T).maxBlur(self, out, allocator, radius, border);
+            try OrderStatisticBlurOps(T).maxBlur(self, io, out, allocator, radius, border);
         }
 
         /// Applies a midpoint blur that averages the minimum and maximum values within the window.
@@ -752,6 +755,7 @@ pub fn Image(comptime T: type) type {
         /// ```
         pub fn midpointBlur(
             self: Self,
+            io: Io,
             allocator: Allocator,
             out: Self,
             radius: usize,
@@ -760,7 +764,7 @@ pub fn Image(comptime T: type) type {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            try OrderStatisticBlurOps(T).midpointBlur(self, out, allocator, radius, border);
+            try OrderStatisticBlurOps(T).midpointBlur(self, io, out, allocator, radius, border);
         }
 
         /// Applies an alpha-trimmed mean blur, discarding a fraction of the lowest and highest pixels.
@@ -777,6 +781,7 @@ pub fn Image(comptime T: type) type {
         /// ```
         pub fn alphaTrimmedMeanBlur(
             self: Self,
+            io: Io,
             allocator: Allocator,
             out: Self,
             radius: usize,
@@ -786,7 +791,7 @@ pub fn Image(comptime T: type) type {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
-            try OrderStatisticBlurOps(T).alphaTrimmedMeanBlur(self, out, allocator, radius, trim_fraction, border);
+            try OrderStatisticBlurOps(T).alphaTrimmedMeanBlur(self, io, out, allocator, radius, trim_fraction, border);
         }
 
         /// Computes a sharpened version of `self` by enhancing edges using the formula

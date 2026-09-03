@@ -1,4 +1,5 @@
 const std = @import("std");
+const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
 const Image = @import("../image.zig").Image;
@@ -8,6 +9,7 @@ const percentileRank = histogram.percentileRank;
 const border_module = @import("border.zig");
 const BorderMode = border_module.BorderMode;
 const channel_ops = @import("channel_ops.zig");
+const parallel = @import("parallel.zig");
 const meta = @import("../meta.zig");
 
 pub const Error = error{
@@ -83,6 +85,7 @@ inline fn scanFine(rank: usize, cum_below: u32, bucket: usize, fine_win: Vec16) 
 /// selected bucket is maintained incrementally alongside the coarse window and only
 /// rebuilt (O(window)) when the selected bucket changes between adjacent pixels.
 fn applyScalarOpTwoLevel(
+    io: Io,
     image: Image(u8),
     allocator: Allocator,
     radius: usize,
@@ -95,82 +98,122 @@ fn applyScalarOpTwoLevel(
     const window = radius * 2 + 1;
     const rows = image.rows;
     const cols = image.cols;
-
-    const column_hists = try allocator.alloc(TwoLevelColumn, cols);
-    defer allocator.free(column_hists);
-
-    const radius_isize: isize = @intCast(radius);
-    for (column_hists) |*hist| hist.* = .{};
-    for (0..window) |offset| {
-        const row_idx = @as(isize, @intCast(offset)) - radius_isize;
-        if (border_module.resolveIndex(row_idx, @intCast(rows), border)) |rr| {
-            for (column_hists, 0..) |*hist, col| hist.addValue(image.at(rr, col).*);
-        } else {
-            for (column_hists) |*hist| hist.addValue(0);
-        }
-    }
+    // Every band seeds `window` rows of column histograms (O(1) per sample), so bands only
+    // need to be one window tall.
+    const bands = parallel.bandCountFor(rows, cols, window);
 
     // Out-of-range horizontal window positions contribute `window` zeros, matching the
-    // flat path's zero_column; the pointer table hoists all border resolution (which is
-    // row-invariant for columns) out of the per-pixel loops.
+    // flat path's zero_column.
     var zero_col: TwoLevelColumn = .{};
     zero_col.coarse[0] = @intCast(window);
     zero_col.fine[0][0] = @intCast(window);
 
-    const col_ptrs = try allocator.alloc(*const TwoLevelColumn, cols + window - 1);
-    defer allocator.free(col_ptrs);
-    for (col_ptrs, 0..) |*ptr, i| {
-        const idx = @as(isize, @intCast(i)) - radius_isize;
-        ptr.* = if (border_module.resolveIndex(idx, @intCast(cols), border)) |resolved|
-            &column_hists[resolved]
-        else
-            &zero_col;
-    }
-
-    for (0..rows) |row| {
-        // The fine-row cache is per-row: the vertical slide below mutates the column
-        // histograms, so it must not survive across rows.
-        var coarse_win: Vec16 = @splat(0);
-        for (col_ptrs[0..window]) |ptr| coarse_win += @as(Vec16, ptr.coarse);
-
-        var sel = pickBucket(rank, coarse_win);
-        var cached_bucket = sel.bucket;
-        var fine_win = buildFineRow(cached_bucket, col_ptrs[0..window]);
-        out.at(row, 0).* = scanFine(rank, sel.cum, cached_bucket, fine_win);
-
-        for (1..cols) |col| {
-            const leaving = col_ptrs[col - 1];
-            const entering = col_ptrs[col + window - 1];
-            coarse_win -= @as(Vec16, leaving.coarse);
-            coarse_win += @as(Vec16, entering.coarse);
-            // Unconditional: fine_win must track the window for cached_bucket on
-            // every slide, even when the bucket changes below, or the cache goes
-            // stale. The leaving column's row is contained in fine_win by this
-            // invariant, so the lane-wise subtraction cannot underflow.
-            fine_win -= @as(Vec16, leaving.fine[cached_bucket]);
-            fine_win += @as(Vec16, entering.fine[cached_bucket]);
-
-            sel = pickBucket(rank, coarse_win);
-            if (sel.bucket != cached_bucket) {
-                cached_bucket = sel.bucket;
-                fine_win = buildFineRow(cached_bucket, col_ptrs[col .. col + window]);
-            }
-            std.debug.assert(@reduce(.Add, fine_win) == @as([16]u16, coarse_win)[cached_bucket]);
-            out.at(row, col).* = scanFine(rank, sel.cum, cached_bucket, fine_win);
-        }
-
-        if (row + 1 == rows) break;
-
-        const remove_row = border_module.resolveIndex(@as(isize, @intCast(row)) - radius_isize, @intCast(rows), border);
-        const add_row = border_module.resolveIndex(@as(isize, @intCast(row)) + radius_isize + 1, @intCast(rows), border);
-        for (column_hists, 0..) |*hist, col| {
-            hist.removeValue(if (remove_row) |rr| image.at(rr, col).* else 0);
-            hist.addValue(if (add_row) |ar| image.at(ar, col).* else 0);
-        }
-    }
+    const ctx: TwoLevelBands = .{
+        .image = image,
+        .out = out,
+        .radius = radius,
+        .border = border,
+        .rank = rank,
+        .zero_col = &zero_col,
+        .column_hists = try allocator.alloc(TwoLevelColumn, bands * cols),
+        .col_ptrs = try allocator.alloc(*const TwoLevelColumn, bands * (cols + window - 1)),
+    };
+    defer allocator.free(ctx.column_hists);
+    defer allocator.free(ctx.col_ptrs);
+    parallel.forRowBands(io, rows, bands, &ctx, TwoLevelBands.band);
 }
 
+const TwoLevelBands = struct {
+    image: Image(u8),
+    out: Image(u8),
+    radius: usize,
+    border: BorderMode,
+    rank: usize,
+    zero_col: *const TwoLevelColumn,
+    /// `cols` column histograms per band.
+    column_hists: []TwoLevelColumn,
+    /// `cols + window - 1` window-position pointers per band.
+    col_ptrs: []*const TwoLevelColumn,
+
+    fn band(ctx: *const TwoLevelBands, b: usize, r0: usize, r1: usize) void {
+        const image = ctx.image;
+        const out = ctx.out;
+        const border = ctx.border;
+        const rank = ctx.rank;
+        const window = ctx.radius * 2 + 1;
+        const rows = image.rows;
+        const cols = image.cols;
+        const radius_isize: isize = @intCast(ctx.radius);
+        const column_hists = ctx.column_hists[b * cols ..][0..cols];
+        const col_ptrs = ctx.col_ptrs[b * (cols + window - 1) ..][0 .. cols + window - 1];
+
+        // Column histograms of the window centred on the band's first row.
+        for (column_hists) |*hist| hist.* = .{};
+        for (0..window) |offset| {
+            const row_idx = @as(isize, @intCast(r0 + offset)) - radius_isize;
+            if (border_module.resolveIndex(row_idx, @intCast(rows), border)) |rr| {
+                for (column_hists, 0..) |*hist, col| hist.addValue(image.at(rr, col).*);
+            } else {
+                for (column_hists) |*hist| hist.addValue(0);
+            }
+        }
+
+        // The pointer table hoists all border resolution (which is row-invariant for
+        // columns) out of the per-pixel loops.
+        for (col_ptrs, 0..) |*ptr, i| {
+            const idx = @as(isize, @intCast(i)) - radius_isize;
+            ptr.* = if (border_module.resolveIndex(idx, @intCast(cols), border)) |resolved|
+                &column_hists[resolved]
+            else
+                ctx.zero_col;
+        }
+
+        for (r0..r1) |row| {
+            // The fine-row cache is per-row: the vertical slide below mutates the column
+            // histograms, so it must not survive across rows.
+            var coarse_win: Vec16 = @splat(0);
+            for (col_ptrs[0..window]) |ptr| coarse_win += @as(Vec16, ptr.coarse);
+
+            var sel = pickBucket(rank, coarse_win);
+            var cached_bucket = sel.bucket;
+            var fine_win = buildFineRow(cached_bucket, col_ptrs[0..window]);
+            out.at(row, 0).* = scanFine(rank, sel.cum, cached_bucket, fine_win);
+
+            for (1..cols) |col| {
+                const leaving = col_ptrs[col - 1];
+                const entering = col_ptrs[col + window - 1];
+                coarse_win -= @as(Vec16, leaving.coarse);
+                coarse_win += @as(Vec16, entering.coarse);
+                // Unconditional: fine_win must track the window for cached_bucket on
+                // every slide, even when the bucket changes below, or the cache goes
+                // stale. The leaving column's row is contained in fine_win by this
+                // invariant, so the lane-wise subtraction cannot underflow.
+                fine_win -= @as(Vec16, leaving.fine[cached_bucket]);
+                fine_win += @as(Vec16, entering.fine[cached_bucket]);
+
+                sel = pickBucket(rank, coarse_win);
+                if (sel.bucket != cached_bucket) {
+                    cached_bucket = sel.bucket;
+                    fine_win = buildFineRow(cached_bucket, col_ptrs[col .. col + window]);
+                }
+                std.debug.assert(@reduce(.Add, fine_win) == @as([16]u16, coarse_win)[cached_bucket]);
+                out.at(row, col).* = scanFine(rank, sel.cum, cached_bucket, fine_win);
+            }
+
+            if (row + 1 == r1) break;
+
+            const remove_row = border_module.resolveIndex(@as(isize, @intCast(row)) - radius_isize, @intCast(rows), border);
+            const add_row = border_module.resolveIndex(@as(isize, @intCast(row)) + radius_isize + 1, @intCast(rows), border);
+            for (column_hists, 0..) |*hist, col| {
+                hist.removeValue(if (remove_row) |rr| image.at(rr, col).* else 0);
+                hist.addValue(if (add_row) |ar| image.at(ar, col).* else 0);
+            }
+        }
+    }
+};
+
 fn applyScalarOp(
+    io: Io,
     image: Image(u8),
     allocator: Allocator,
     radius: usize,
@@ -184,12 +227,13 @@ fn applyScalarOp(
     // window^2, so the rank is constant for the whole plane.
     const window = radius * 2 + 1;
     if (@hasDecl(@TypeOf(reducer_in), "rankFor") and window <= TwoLevelColumn.max_window) {
-        return applyScalarOpTwoLevel(image, allocator, radius, out, border, reducer_in.rankFor(window * window));
+        return applyScalarOpTwoLevel(io, image, allocator, radius, out, border, reducer_in.rankFor(window * window));
     }
-    return applyScalarOpFlat(image, allocator, radius, out, border, reducer_in);
+    return applyScalarOpFlat(io, image, allocator, radius, out, border, reducer_in);
 }
 
 fn applyScalarOpFlat(
+    io: Io,
     image: Image(u8),
     allocator: Allocator,
     radius: usize,
@@ -203,80 +247,113 @@ fn applyScalarOpFlat(
     // Aliasing is resolved by the `run` dispatcher.
     std.debug.assert(out.data.ptr != image.data.ptr);
 
-    var column_hists = try allocator.alloc(Histogram(u8), image.cols);
-    defer allocator.free(column_hists);
+    const bands = parallel.bandCountFor(image.rows, image.cols, window);
+    const Bands = FlatBands(@TypeOf(reducer_in));
+    const ctx: Bands = .{
+        .image = image,
+        .out = out,
+        .radius = radius,
+        .border = border,
+        .reducer = reducer_in,
+        .column_hists = try allocator.alloc(Histogram(u8), bands * image.cols),
+        .errors = try allocator.alloc(?Error, bands),
+    };
+    defer allocator.free(ctx.column_hists);
+    defer allocator.free(ctx.errors);
+    @memset(ctx.errors, null);
+    parallel.forRowBands(io, image.rows, bands, &ctx, Bands.band);
+    for (ctx.errors) |err| if (err) |e| return e;
+}
 
-    for (column_hists) |*hist| hist.* = Histogram(u8).init();
+fn FlatBands(comptime Reducer: type) type {
+    return struct {
+        image: Image(u8),
+        out: Image(u8),
+        radius: usize,
+        border: BorderMode,
+        reducer: Reducer,
+        /// `cols` column histograms per band.
+        column_hists: []Histogram(u8),
+        /// First reducer error per band, reported after the group.
+        errors: []?Error,
 
-    const zero_column = constantHistogram(window, 0);
-    const radius_isize: isize = @intCast(radius);
-    var reducer = reducer_in;
-
-    for (0..image.cols) |col| {
-        var hist = Histogram(u8).init();
-        for (0..window) |offset| {
-            const row_idx = @as(isize, @intCast(offset)) - radius_isize;
-            const sample = border_module.getPixel(u8, image, row_idx, @intCast(col), border);
-            hist.addValue(sample);
-        }
-        column_hists[col] = hist;
-    }
-
-    for (0..image.rows) |row| {
-        var window_hist = Histogram(u8).init();
-        for (0..window) |offset| {
-            const col_idx = @as(isize, @intCast(offset)) - radius_isize;
-            if (border_module.resolveIndex(col_idx, @intCast(image.cols), border)) |resolved| {
-                window_hist.addCounts(&column_hists[resolved]);
-            } else {
-                window_hist.addCounts(&zero_column);
-            }
-        }
-
-        // Border samples are counted into the histograms, so the population is
-        // always exactly window*window; no per-pixel bin scan needed.
-        const area = window * window;
-        out.at(row, 0).* = try reducer.compute(&window_hist, area);
-
-        for (1..image.cols) |col| {
-            const left_idx = @as(isize, @intCast(col)) - radius_isize - 1;
-            if (border_module.resolveIndex(left_idx, @intCast(image.cols), border)) |resolved| {
-                window_hist.subtractCounts(&column_hists[resolved]);
-            } else {
-                window_hist.subtractCounts(&zero_column);
-            }
-
-            const right_idx = @as(isize, @intCast(col)) + radius_isize;
-            if (border_module.resolveIndex(right_idx, @intCast(image.cols), border)) |resolved| {
-                window_hist.addCounts(&column_hists[resolved]);
-            } else {
-                window_hist.addCounts(&zero_column);
-            }
-
-            out.at(row, col).* = try reducer.compute(&window_hist, area);
+        fn band(ctx: *const @This(), b: usize, r0: usize, r1: usize) void {
+            ctx.errors[b] = if (ctx.bandRows(b, r0, r1)) null else |err| err;
         }
 
-        if (row + 1 == image.rows) break;
+        fn bandRows(ctx: *const @This(), b: usize, r0: usize, r1: usize) Error!void {
+            const image = ctx.image;
+            const out = ctx.out;
+            const border = ctx.border;
+            const window = ctx.radius * 2 + 1;
+            const radius_isize: isize = @intCast(ctx.radius);
+            const column_hists = ctx.column_hists[b * image.cols ..][0..image.cols];
+            const zero_column = constantHistogram(window, 0);
+            var reducer = ctx.reducer;
 
-        const remove_row = @as(isize, @intCast(row)) - radius_isize;
-        const add_row = @as(isize, @intCast(row)) + radius_isize + 1;
-
-        for (0..image.cols) |col| {
-            if (border_module.resolveIndex(remove_row, @intCast(image.rows), border)) |resolved| {
-                const value = image.at(resolved, col).*;
-                column_hists[col].removeValue(value);
-            } else {
-                column_hists[col].removeValue(0);
+            for (column_hists, 0..) |*hist, col| {
+                hist.* = Histogram(u8).init();
+                for (0..window) |offset| {
+                    const row_idx = @as(isize, @intCast(r0 + offset)) - radius_isize;
+                    hist.addValue(border_module.getPixel(u8, image, row_idx, @intCast(col), border));
+                }
             }
 
-            if (border_module.resolveIndex(add_row, @intCast(image.rows), border)) |resolved| {
-                const value = image.at(resolved, col).*;
-                column_hists[col].addValue(value);
-            } else {
-                column_hists[col].addValue(0);
+            for (r0..r1) |row| {
+                var window_hist = Histogram(u8).init();
+                for (0..window) |offset| {
+                    const col_idx = @as(isize, @intCast(offset)) - radius_isize;
+                    if (border_module.resolveIndex(col_idx, @intCast(image.cols), border)) |resolved| {
+                        window_hist.addCounts(&column_hists[resolved]);
+                    } else {
+                        window_hist.addCounts(&zero_column);
+                    }
+                }
+
+                // Border samples are counted into the histograms, so the population is
+                // always exactly window*window; no per-pixel bin scan needed.
+                const area = window * window;
+                out.at(row, 0).* = try reducer.compute(&window_hist, area);
+
+                for (1..image.cols) |col| {
+                    const left_idx = @as(isize, @intCast(col)) - radius_isize - 1;
+                    if (border_module.resolveIndex(left_idx, @intCast(image.cols), border)) |resolved| {
+                        window_hist.subtractCounts(&column_hists[resolved]);
+                    } else {
+                        window_hist.subtractCounts(&zero_column);
+                    }
+
+                    const right_idx = @as(isize, @intCast(col)) + radius_isize;
+                    if (border_module.resolveIndex(right_idx, @intCast(image.cols), border)) |resolved| {
+                        window_hist.addCounts(&column_hists[resolved]);
+                    } else {
+                        window_hist.addCounts(&zero_column);
+                    }
+
+                    out.at(row, col).* = try reducer.compute(&window_hist, area);
+                }
+
+                if (row + 1 == r1) break;
+
+                const remove_row = @as(isize, @intCast(row)) - radius_isize;
+                const add_row = @as(isize, @intCast(row)) + radius_isize + 1;
+
+                for (0..image.cols) |col| {
+                    if (border_module.resolveIndex(remove_row, @intCast(image.rows), border)) |resolved| {
+                        column_hists[col].removeValue(image.at(resolved, col).*);
+                    } else {
+                        column_hists[col].removeValue(0);
+                    }
+
+                    if (border_module.resolveIndex(add_row, @intCast(image.rows), border)) |resolved| {
+                        column_hists[col].addValue(image.at(resolved, col).*);
+                    } else {
+                        column_hists[col].addValue(0);
+                    }
+                }
             }
         }
-    }
+    };
 }
 
 fn constantHistogram(count: usize, value: u8) Histogram(u8) {
@@ -361,15 +438,17 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
 
         pub fn medianBlur(
             image: Image(T),
+            io: Io,
             out: Image(T),
             allocator: Allocator,
             radius: usize,
         ) !void {
-            try Self.percentileBlur(image, out, allocator, radius, 0.5, .mirror);
+            try Self.percentileBlur(image, io, out, allocator, radius, 0.5, .mirror);
         }
 
         pub fn percentileBlur(
             image: Image(T),
+            io: Io,
             out: Image(T),
             allocator: Allocator,
             radius: usize,
@@ -389,31 +468,34 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 return Error.InvalidPercentile;
             }
 
-            try run(image, out, allocator, radius, border, PercentileReducer{ .percentile = percentile });
+            try run(image, io, out, allocator, radius, border, PercentileReducer{ .percentile = percentile });
         }
 
         pub fn minBlur(
             image: Image(T),
+            io: Io,
             out: Image(T),
             allocator: Allocator,
             radius: usize,
             border: BorderMode,
         ) !void {
-            try Self.percentileBlur(image, out, allocator, radius, 0.0, border);
+            try Self.percentileBlur(image, io, out, allocator, radius, 0.0, border);
         }
 
         pub fn maxBlur(
             image: Image(T),
+            io: Io,
             out: Image(T),
             allocator: Allocator,
             radius: usize,
             border: BorderMode,
         ) !void {
-            try Self.percentileBlur(image, out, allocator, radius, 1.0, border);
+            try Self.percentileBlur(image, io, out, allocator, radius, 1.0, border);
         }
 
         pub fn midpointBlur(
             image: Image(T),
+            io: Io,
             out: Image(T),
             allocator: Allocator,
             radius: usize,
@@ -428,11 +510,12 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 return;
             }
 
-            try run(image, out, allocator, radius, border, MidpointReducer{});
+            try run(image, io, out, allocator, radius, border, MidpointReducer{});
         }
 
         pub fn alphaTrimmedMeanBlur(
             image: Image(T),
+            io: Io,
             out: Image(T),
             allocator: Allocator,
             radius: usize,
@@ -452,13 +535,14 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
                 return;
             }
 
-            try run(image, out, allocator, radius, border, AlphaTrimmedMeanReducer{ .trim_fraction = trim_fraction });
+            try run(image, io, out, allocator, radius, border, AlphaTrimmedMeanReducer{ .trim_fraction = trim_fraction });
         }
 
         /// Alias-safe dispatch shared by every entry point: route through a temp image
         /// when out aliases image, then pick the scalar or per-plane path by pixel type.
         fn run(
             image: Image(T),
+            io: Io,
             out: Image(T),
             allocator: Allocator,
             radius: usize,
@@ -479,11 +563,11 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             switch (@typeInfo(T)) {
                 .int => {
                     if (T != u8) return Error.UnsupportedPixelType;
-                    try applyScalarOp(image, allocator, radius, target, border, reducer);
+                    try applyScalarOp(io, image, allocator, radius, target, border, reducer);
                 },
                 .@"struct" => {
                     if (!comptime meta.allFieldsAreU8(T)) return Error.UnsupportedPixelType;
-                    try applyStructOp(image, allocator, radius, target, border, reducer);
+                    try applyStructOp(image, io, allocator, radius, target, border, reducer);
                 },
                 else => return Error.UnsupportedPixelType,
             }
@@ -495,6 +579,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
 
         fn applyStructOp(
             image: Image(T),
+            io: Io,
             allocator: Allocator,
             radius: usize,
             target: Image(T),
@@ -504,7 +589,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             const num_channels = comptime Image(T).channels();
             const plane_size = image.rows * image.cols;
 
-            const src_planes = try channel_ops.splitChannels(T, image, allocator);
+            const src_planes = try channel_ops.splitChannels(T, io, image, allocator);
             defer inline for (src_planes) |plane| allocator.free(plane);
 
             const dst_planes = try channel_ops.allocPlanes(u8, num_channels, allocator, plane_size);
@@ -513,10 +598,10 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             inline for (src_planes, dst_planes) |src_data, dst_data| {
                 const src_plane = Image(u8).initFromSlice(image.rows, image.cols, src_data);
                 const dst_plane = Image(u8).initFromSlice(image.rows, image.cols, dst_data);
-                try applyScalarOp(src_plane, allocator, radius, dst_plane, border, reducer);
+                try applyScalarOp(io, src_plane, allocator, radius, dst_plane, border, reducer);
             }
 
-            channel_ops.mergeChannels(T, dst_planes, target);
+            channel_ops.mergeChannels(T, io, dst_planes, target);
         }
     };
 }
@@ -547,8 +632,8 @@ test "two-level rank filter matches flat histogram path" {
                 for (percentiles) |p| {
                     const window = radius * 2 + 1;
                     const flat_reducer = PercentileReducer{ .percentile = p };
-                    try applyScalarOpFlat(img, allocator, radius, flat, mode, flat_reducer);
-                    try applyScalarOpTwoLevel(img, allocator, radius, two, mode, flat_reducer.rankFor(window * window));
+                    try applyScalarOpFlat(std.Io.Threaded.global_single_threaded.io(), img, allocator, radius, flat, mode, flat_reducer);
+                    try applyScalarOpTwoLevel(std.Io.Threaded.global_single_threaded.io(), img, allocator, radius, two, mode, flat_reducer.rankFor(window * window));
                     try testing.expectEqualSlices(u8, flat.data, two.data);
                 }
             }
@@ -581,8 +666,8 @@ test "two-level rank filter matches flat histogram path" {
                 for ([_]f64{ 0.0, 0.5, 1.0 }) |p| {
                     const window = radius * 2 + 1;
                     const flat_reducer = PercentileReducer{ .percentile = p };
-                    try applyScalarOpFlat(img, allocator, radius, flat, mode, flat_reducer);
-                    try applyScalarOpTwoLevel(img, allocator, radius, two, mode, flat_reducer.rankFor(window * window));
+                    try applyScalarOpFlat(std.Io.Threaded.global_single_threaded.io(), img, allocator, radius, flat, mode, flat_reducer);
+                    try applyScalarOpTwoLevel(std.Io.Threaded.global_single_threaded.io(), img, allocator, radius, two, mode, flat_reducer.rankFor(window * window));
                     try testing.expectEqualSlices(u8, flat.data, two.data);
                 }
             }
@@ -595,7 +680,7 @@ test "two-level rank filter matches flat histogram path" {
     for (img.data) |*px| px.* = random.int(u8);
     var expected = try Image(u8).initLike(allocator, img);
     defer expected.deinit(allocator);
-    try OrderStatisticBlurOps(u8).medianBlur(img, expected, allocator, 2);
-    try OrderStatisticBlurOps(u8).medianBlur(img, img, allocator, 2);
+    try OrderStatisticBlurOps(u8).medianBlur(img, std.Io.Threaded.global_single_threaded.io(), expected, allocator, 2);
+    try OrderStatisticBlurOps(u8).medianBlur(img, std.Io.Threaded.global_single_threaded.io(), img, allocator, 2);
     try testing.expectEqualSlices(u8, expected.data, img.data);
 }
