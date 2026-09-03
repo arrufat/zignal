@@ -56,19 +56,18 @@ pub fn blur(comptime T: type, io: Io, src: Image(T), dst: Image(T), allocator: A
         u8, f32 => try blurPlane(T, io, src, dst, allocator, coeffs, null),
         else => {
             const PlaneCtx = struct {
-                io: Io,
                 allocator: Allocator,
                 coeffs: Coefficients,
                 temp: []f32 = &.{},
 
-                pub fn convolvePlane(ctx: *@This(), plane_src: Image(u8), plane_dst: Image(u8), _: BorderMode) !void {
-                    try blurPlane(u8, ctx.io, plane_src, plane_dst, ctx.allocator, ctx.coeffs, &ctx.temp);
+                pub fn convolvePlane(ctx: *@This(), plane_io: Io, plane_src: Image(u8), plane_dst: Image(u8), _: BorderMode) !void {
+                    try blurPlane(u8, plane_io, plane_src, plane_dst, ctx.allocator, ctx.coeffs, &ctx.temp);
                 }
             };
-            var ctx: PlaneCtx = .{ .io = io, .allocator = allocator, .coeffs = coeffs };
+            var ctx: PlaneCtx = .{ .allocator = allocator, .coeffs = coeffs };
             defer allocator.free(ctx.temp);
             // Unit kernel sum: uniform channels pass straight through the plane split.
-            try convolution.convolvePlanes(T, src, dst, allocator, 1, 1, .replicate, &ctx);
+            try convolution.convolvePlanes(T, io, src, dst, allocator, 1, 1, .replicate, &ctx);
         },
     }
 }

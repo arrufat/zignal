@@ -195,8 +195,8 @@ fn benchMedian(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std
         dst: Image(T),
         gpa: std.mem.Allocator,
         radius: usize,
-        fn run(self: @This(), _: std.Io) !void {
-            try self.src.medianBlur(self.gpa, self.dst, self.radius);
+        fn run(self: @This(), run_io: std.Io) !void {
+            try self.src.medianBlur(run_io, self.gpa, self.dst, self.radius);
         }
     };
     try benchOp(io, name, rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa, .radius = radius });

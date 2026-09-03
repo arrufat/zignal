@@ -825,7 +825,7 @@ test "medianBlur removes impulse noise" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.medianBlur(std.testing.allocator, blurred, 1);
+    try image.medianBlur(io, std.testing.allocator, blurred, 1);
 
     try expectEqual(@as(u8, 0), blurred.at(2, 2).*);
     try expectEqual(@as(u8, 0), blurred.at(2, 1).*);
@@ -846,7 +846,7 @@ test "percentileBlur max filter" {
 
     var out = try Image(u8).initLike(std.testing.allocator, image);
     defer out.deinit(std.testing.allocator);
-    try image.percentileBlur(std.testing.allocator, out, 1, 1.0, BorderMode.zero);
+    try image.percentileBlur(io, std.testing.allocator, out, 1, 1.0, BorderMode.zero);
 
     try expectEqual(@as(u8, 8), out.at(1, 1).*);
     try expectEqual(@as(u8, 4), out.at(0, 0).*);
@@ -862,7 +862,7 @@ test "medianBlur preserves dominant RGB color" {
 
     var blurred = try Image(Rgb).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.medianBlur(std.testing.allocator, blurred, 1);
+    try image.medianBlur(io, std.testing.allocator, blurred, 1);
 
     try expectEqualDeep(base, blurred.at(1, 1).*);
     try expectEqualDeep(base, blurred.at(0, 0).*);
@@ -885,8 +885,8 @@ test "minBlur matches percentile zero" {
     var percentile = try Image(u8).initLike(std.testing.allocator, image);
     defer percentile.deinit(std.testing.allocator);
 
-    try image.minBlur(std.testing.allocator, min_blur, 1, BorderMode.replicate);
-    try image.percentileBlur(std.testing.allocator, percentile, 1, 0.0, BorderMode.replicate);
+    try image.minBlur(io, std.testing.allocator, min_blur, 1, BorderMode.replicate);
+    try image.percentileBlur(io, std.testing.allocator, percentile, 1, 0.0, BorderMode.replicate);
 
     for (0..image.rows) |r| {
         for (0..image.cols) |c| {
@@ -910,8 +910,8 @@ test "maxBlur matches percentile one" {
     var percentile = try Image(u8).initLike(std.testing.allocator, image);
     defer percentile.deinit(std.testing.allocator);
 
-    try image.maxBlur(std.testing.allocator, max_blur, 1, BorderMode.replicate);
-    try image.percentileBlur(std.testing.allocator, percentile, 1, 1.0, BorderMode.replicate);
+    try image.maxBlur(io, std.testing.allocator, max_blur, 1, BorderMode.replicate);
+    try image.percentileBlur(io, std.testing.allocator, percentile, 1, 1.0, BorderMode.replicate);
 
     for (0..image.rows) |r| {
         for (0..image.cols) |c| {
@@ -934,7 +934,7 @@ test "midpointBlur averages extremes" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.midpointBlur(std.testing.allocator, blurred, 1, BorderMode.replicate);
+    try image.midpointBlur(io, std.testing.allocator, blurred, 1, BorderMode.replicate);
 
     try expectEqual(@as(u8, 4), blurred.at(1, 1).*);
 }
@@ -953,7 +953,7 @@ test "alphaTrimmedMeanBlur drops extremes" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.alphaTrimmedMeanBlur(std.testing.allocator, blurred, 1, 0.12, BorderMode.replicate);
+    try image.alphaTrimmedMeanBlur(io, std.testing.allocator, blurred, 1, 0.12, BorderMode.replicate);
 
     try expectEqual(@as(u8, 4), blurred.at(1, 1).*);
 }
@@ -965,7 +965,7 @@ test "alphaTrimmedMeanBlur invalid trim" {
     var out = try Image(u8).initLike(std.testing.allocator, image);
     defer out.deinit(std.testing.allocator);
 
-    try expectError(error.InvalidTrim, image.alphaTrimmedMeanBlur(std.testing.allocator, out, 1, 0.6, BorderMode.replicate));
+    try expectError(error.InvalidTrim, image.alphaTrimmedMeanBlur(io, std.testing.allocator, out, 1, 0.6, BorderMode.replicate));
 }
 
 test "linearMotionBlur horizontal" {
@@ -1503,12 +1503,24 @@ test "filters are identical on a thread pool" {
             fn motionV(s: Image(T), run_io: std.Io, o: Image(T)) !void {
                 try s.motionBlur(run_io, allocator, o, .{ .linear = .{ .angle = std.math.pi / 2.0, .distance = 11 } });
             }
+            fn median(s: Image(T), run_io: std.Io, o: Image(T)) !void {
+                try s.medianBlur(run_io, allocator, o, 3);
+            }
+            fn percentileWide(s: Image(T), run_io: std.Io, o: Image(T)) !void {
+                // Radius 130 (window 261) exceeds the two-level limit and takes the flat path.
+                try s.percentileBlur(run_io, allocator, o, 130, 0.2, .zero);
+            }
             fn sobel(s: Image(T), run_io: std.Io, o: Image(u8)) !void {
                 try s.sobel(run_io, allocator, o);
             }
         };
         inline for (.{ F.box, F.sharp, F.gauss, F.gaussWide, F.gaussIir, F.conv, F.sep, F.motionH, F.motionV }) |filter| {
             try Check.run(filter, src, a, b, serial_io, pool_io);
+        }
+        // Order-statistic filters take u8 planes only.
+        if (T != f32) {
+            try Check.run(F.median, src, a, b, serial_io, pool_io);
+            try Check.run(F.percentileWide, src, a, b, serial_io, pool_io);
         }
         try Check.run(F.sobel, src, gray_a, gray_b, serial_io, pool_io);
     }

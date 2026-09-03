@@ -18,6 +18,12 @@ pub fn bandCount(rows: usize, cols: usize) usize {
     return @min(cpus, by_size, rows);
 }
 
+/// `bandCount` with bands at least `min_band_rows` tall, for passes that re-seed per-band
+/// state (column sums, histograms, halo rows) at the top of every band.
+pub fn bandCountFor(rows: usize, cols: usize, min_band_rows: usize) usize {
+    return @max(1, @min(bandCount(rows, cols), rows / @max(1, min_band_rows)));
+}
+
 /// Runs `func(ctx, band, row_start, row_end)` for `bands` contiguous row bands of `[0, rows)`.
 pub fn forRowBands(io: Io, rows: usize, bands: usize, ctx: anytype, comptime func: anytype) void {
     if (bands <= 1 or rows == 0) return func(ctx, 0, 0, rows);

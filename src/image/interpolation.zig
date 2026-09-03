@@ -115,7 +115,8 @@ pub fn resize(comptime T: type, self: Image(T), out: Image(T), allocator: Alloca
         };
 
         if (has_optimized_plane_op) {
-            const channels = channel_ops.splitChannels(T, self, allocator) catch {
+            // Resize has no Io parameter yet: the plane split and merge run inline.
+            const channels = channel_ops.splitChannels(T, .failing, self, allocator) catch {
                 // Fallback to generic implementation on allocation failure
                 resizeGeneric(T, self, out, method);
                 return;
@@ -164,7 +165,7 @@ pub fn resize(comptime T: type, self: Image(T), out: Image(T), allocator: Alloca
             }
 
             // Combine channels back
-            channel_ops.mergeChannels(T, out_channels, out);
+            channel_ops.mergeChannels(T, .failing, out_channels, out);
             return;
         }
     }
