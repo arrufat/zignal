@@ -79,6 +79,10 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
         const size = rows * cols;
         const half_h = rows / 2;
         const half_w = cols / 2;
+        /// Small kernels unroll both axes at comptime; larger ones keep the column axis
+        /// unrolled and loop over rows at runtime, which stays within the comptime branch
+        /// quota and keeps code size linear in the kernel width.
+        const unroll_rows = rows <= 7;
 
         /// Load/store policy shared with the single separable pass (same src/dst type).
         const Pixels = SeparablePass(T, T, i32);
@@ -91,8 +95,8 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
         /// `fixed_point_scale`, rounded, and sum-corrected to preserve the kernel's gain.
         fn flatten(kernel: anytype) [size]Scalar {
             var weights: [size]f32 = undefined;
-            inline for (0..rows) |kr| {
-                inline for (0..cols) |kx| {
+            for (0..rows) |kr| {
+                for (0..cols) |kx| {
                     weights[kr * cols + kx] = as(f32, kernel[kr][kx]);
                 }
             }
@@ -107,8 +111,8 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
 
         fn colTaps(c: usize, src_cols: usize, border_mode: BorderMode) ColTaps {
             var taps: ColTaps = undefined;
-            inline for (0..cols) |kx| {
-                taps[kx] = border.resolveIndex(@as(isize, @intCast(c)) + @as(isize, kx) - half_w, @intCast(src_cols), border_mode);
+            for (&taps, 0..) |*tap, kx| {
+                tap.* = border.resolveIndex(@as(isize, @intCast(c)) + @as(isize, @intCast(kx)) - half_w, @intCast(src_cols), border_mode);
             }
             return taps;
         }
@@ -116,20 +120,25 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
         /// One border-column pixel from pre-resolved row offsets and column taps.
         fn convolveBorderPixel(comptime n: usize, src: Image(T), dsts: [n]Image(T), row_offsets: RowOffsets(true), col_taps: ColTaps, kernels: [n][size]Scalar, r: usize, c: usize) void {
             var results: [n]Scalar = @splat(0);
-            inline for (0..rows) |ky| {
-                if (row_offsets[ky]) |base| {
-                    inline for (0..cols) |kx| {
-                        if (col_taps[kx]) |sc| {
-                            const pixel_val = Pixels.promote(src.data[base + sc]);
-                            inline for (0..n) |i| {
-                                results[i] += pixel_val * kernels[i][ky * cols + kx];
-                            }
-                        }
-                    }
-                }
+            if (unroll_rows) {
+                inline for (0..rows) |ky| borderRowTaps(n, src, row_offsets, col_taps, kernels, ky, &results);
+            } else {
+                for (0..rows) |ky| borderRowTaps(n, src, row_offsets, col_taps, kernels, ky, &results);
             }
             inline for (0..n) |i| {
                 dsts[i].data[r * dsts[i].stride + c] = Pixels.store(results[i]);
+            }
+        }
+
+        inline fn borderRowTaps(comptime n: usize, src: Image(T), row_offsets: RowOffsets(true), col_taps: ColTaps, kernels: [n][size]Scalar, ky: usize, results: *[n]Scalar) void {
+            const base = row_offsets[ky] orelse return;
+            inline for (0..cols) |kx| {
+                if (col_taps[kx]) |sc| {
+                    const pixel_val = Pixels.promote(src.data[base + sc]);
+                    inline for (0..n) |i| {
+                        results[i] += pixel_val * kernels[i][ky * cols + kx];
+                    }
+                }
             }
         }
 
@@ -158,18 +167,10 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
 
             while (c + vec_len <= c_end) : (c += vec_len) {
                 var result_vecs: [n]@Vector(vec_len, Scalar) = @splat(@splat(0));
-                inline for (0..rows) |ky| {
-                    // Runtime `continue` is not allowed in an inline for; the wrapping
-                    // `if` folds away at comptime when `maybe_zero` is false.
-                    if (if (maybe_zero) row_offsets[ky] != null else true) {
-                        const base = if (maybe_zero) row_offsets[ky].? else row_offsets[ky];
-                        inline for (0..cols) |kx| {
-                            const pixel_vec = Pixels.loadVec(src.data[base + c + kx - half_w ..].ptr);
-                            inline for (0..n) |i| {
-                                result_vecs[i] += pixel_vec * kernel_vecs[i][ky * cols + kx];
-                            }
-                        }
-                    }
+                if (unroll_rows) {
+                    inline for (0..rows) |ky| rowTapsVec(n, maybe_zero, src, row_offsets, kernel_vecs, ky, c, &result_vecs);
+                } else {
+                    for (0..rows) |ky| rowTapsVec(n, maybe_zero, src, row_offsets, kernel_vecs, ky, c, &result_vecs);
                 }
                 inline for (0..n) |i| {
                     Pixels.storeVec(result_vecs[i], dsts[i].data[r * dsts[i].stride + c ..].ptr);
@@ -178,19 +179,37 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
 
             while (c < c_end) : (c += 1) {
                 var results: [n]Scalar = @splat(0);
-                inline for (0..rows) |ky| {
-                    if (if (maybe_zero) row_offsets[ky] != null else true) {
-                        const base = if (maybe_zero) row_offsets[ky].? else row_offsets[ky];
-                        inline for (0..cols) |kx| {
-                            const pixel_val = Pixels.promote(src.data[base + c + kx - half_w]);
-                            inline for (0..n) |i| {
-                                results[i] += pixel_val * kernels[i][ky * cols + kx];
-                            }
-                        }
-                    }
+                if (unroll_rows) {
+                    inline for (0..rows) |ky| rowTaps(n, maybe_zero, src, row_offsets, kernels, ky, c, &results);
+                } else {
+                    for (0..rows) |ky| rowTaps(n, maybe_zero, src, row_offsets, kernels, ky, c, &results);
                 }
                 inline for (0..n) |i| {
                     dsts[i].data[r * dsts[i].stride + c] = Pixels.store(results[i]);
+                }
+            }
+        }
+
+        /// One kernel row's taps for `vec_len` output columns starting at `c`. The `maybe_zero`
+        /// check folds away at comptime on the interior path.
+        inline fn rowTapsVec(comptime n: usize, comptime maybe_zero: bool, src: Image(T), row_offsets: RowOffsets(maybe_zero), kernel_vecs: *const [n][size]@Vector(vec_len, Scalar), ky: usize, c: usize, result_vecs: *[n]@Vector(vec_len, Scalar)) void {
+            if (maybe_zero and row_offsets[ky] == null) return;
+            const base = if (maybe_zero) row_offsets[ky].? else row_offsets[ky];
+            inline for (0..cols) |kx| {
+                const pixel_vec = Pixels.loadVec(src.data[base + c + kx - half_w ..].ptr);
+                inline for (0..n) |i| {
+                    result_vecs[i] += pixel_vec * kernel_vecs[i][ky * cols + kx];
+                }
+            }
+        }
+
+        inline fn rowTaps(comptime n: usize, comptime maybe_zero: bool, src: Image(T), row_offsets: RowOffsets(maybe_zero), kernels: [n][size]Scalar, ky: usize, c: usize, results: *[n]Scalar) void {
+            if (maybe_zero and row_offsets[ky] == null) return;
+            const base = if (maybe_zero) row_offsets[ky].? else row_offsets[ky];
+            inline for (0..cols) |kx| {
+                const pixel_val = Pixels.promote(src.data[base + c + kx - half_w]);
+                inline for (0..n) |i| {
+                    results[i] += pixel_val * kernels[i][ky * cols + kx];
                 }
             }
         }
@@ -213,9 +232,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                 .col_taps = undefined,
             };
             inline for (0..n) |i| {
-                inline for (0..size) |j| {
-                    ctx.kernel_vecs[i][j] = @splat(kernels[i][j]);
-                }
+                for (0..size) |j| ctx.kernel_vecs[i][j] = @splat(kernels[i][j]);
             }
             for (0..low_end) |c| ctx.col_taps[c] = colTaps(c, src.cols, border_mode);
             for (high_start..src.cols) |c| ctx.col_taps[low_end + c - high_start] = colTaps(c, src.cols, border_mode);
@@ -240,9 +257,9 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                     for (r0..r1) |r| {
                         const ir: isize = @intCast(r);
                         var offs: RowOffsets(true) = undefined;
-                        inline for (0..rows) |ky| {
-                            const resolved = border.resolveIndex(ir + @as(isize, ky) - half_h, @intCast(src.rows), ctx.border_mode);
-                            offs[ky] = if (resolved) |sr| sr * src.stride else null;
+                        for (&offs, 0..) |*off, ky| {
+                            const resolved = border.resolveIndex(ir + @as(isize, @intCast(ky)) - half_h, @intCast(src.rows), ctx.border_mode);
+                            off.* = if (resolved) |sr| sr * src.stride else null;
                         }
 
                         for (0..ctx.low_end) |c| {
@@ -250,7 +267,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
                         }
                         if (r >= half_h and r + half_h < src.rows) {
                             var in_band: RowOffsets(false) = undefined;
-                            inline for (0..rows) |ky| in_band[ky] = offs[ky].?;
+                            for (&in_band, offs) |*dst_off, off| dst_off.* = off.?;
                             convolveRowSpan(n, false, src, ctx.dsts, in_band, ctx.kernels, &ctx.kernel_vecs, r, ctx.low_end, ctx.high_start);
                         } else {
                             convolveRowSpan(n, true, src, ctx.dsts, offs, ctx.kernels, &ctx.kernel_vecs, r, ctx.low_end, ctx.high_start);

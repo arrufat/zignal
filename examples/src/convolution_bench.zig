@@ -19,6 +19,7 @@ const sharpen_3x3: [3][3]f32 = .{
     .{ 0, -1, 0 },
 };
 const box_7x7: [7][7]f32 = @splat(@splat(1.0 / 49.0));
+const box_15x15: [15][15]f32 = @splat(@splat(1.0 / 225.0));
 const gaussian_9: [9]f32 = .{ 0.05, 0.09, 0.12, 0.15, 0.18, 0.15, 0.12, 0.09, 0.05 };
 
 fn itersFor(rows: usize, cols: usize) usize {
@@ -237,6 +238,8 @@ pub fn main(init: std.process.Init) !void {
     try benchConvolve2D(u8, io, gpa, random, filter, 480, 640, sharpen_3x3, "3x3", .mirror);
     try benchConvolve2D(f32, io, gpa, random, filter, 480, 640, sharpen_3x3, "3x3", .mirror);
     try benchConvolve2D(u8, io, gpa, random, filter, 480, 640, box_7x7, "7x7", .mirror);
+    try benchConvolve2D(u8, io, gpa, random, filter, 480, 640, box_15x15, "15x15", .mirror);
+    try benchConvolve2D(f32, io, gpa, random, filter, 480, 640, box_15x15, "15x15", .mirror);
     try benchConvolve2D(f32, io, gpa, random, filter, 480, 640, box_7x7, "7x7", .mirror);
     try benchConvolve2D(u8, io, gpa, random, filter, 64, 64, box_7x7, "7x7", .mirror);
     try benchConvolve2D(u8, io, gpa, random, filter, 64, 64, box_7x7, "7x7", .zero);
