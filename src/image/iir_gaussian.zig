@@ -119,7 +119,7 @@ fn Pass(comptime T: type) type {
         fn rowBand(ctx: *const @This(), band: usize, r0: usize, r1: usize) void {
             var r = r0;
             while (r + lanes <= r1) : (r += lanes) {
-                filterLine(lanes, RowLanes(T, lanes){ .src = ctx.src, .temp = ctx.temp, .r0 = r }, ctx.src.cols, ctx.coeffs, ctx.bandPad(band, lanes));
+                filterRowBlock(T, ctx.src, ctx.temp, r, ctx.coeffs, ctx.bandPad(band, lanes));
             }
             while (r < r1) : (r += 1) {
                 filterLine(1, RowLanes(T, 1){ .src = ctx.src, .temp = ctx.temp, .r0 = r }, ctx.src.cols, ctx.coeffs, ctx.bandPad(band, 1));
@@ -198,6 +198,99 @@ fn filterLine(comptime W: usize, acc: anytype, len: usize, c: Coefficients, pad:
     }
 }
 
+/// `lanes` consecutive rows from `r0` through both passes. Columns go `lanes` at a time: a
+/// square block is loaded as row vectors, transposed in registers so each vector holds one
+/// column across the rows, stepped, and transposed back for row stores. The last partial
+/// block uses per-lane loads.
+fn filterRowBlock(comptime T: type, src: Image(T), temp: Image(f32), r0: usize, c: Coefficients, pad: []f32) void {
+    const W = lanes;
+    const V = @Vector(W, f32);
+    const cols = src.cols;
+    const full = cols / W * W;
+    const tail = RowLanes(T, W){ .src = src, .temp = temp, .r0 = r0 };
+
+    const first = tail.loadSrc(0);
+    const last = tail.loadSrc(cols - 1);
+    var rec: Recursion(W) = .init(c, first);
+
+    var n0: usize = 0;
+    while (n0 < full) : (n0 += W) {
+        var block: [W]V = undefined;
+        inline for (0..W) |i| block[i] = loadRowVec(T, W, src, r0 + i, n0);
+        var by_col = transpose(W, block);
+        inline for (0..W) |j| by_col[j] = rec.step(by_col[j]);
+        const by_row = transpose(W, by_col);
+        inline for (0..W) |i| temp.data[(r0 + i) * temp.stride + n0 ..][0..W].* = by_row[i];
+    }
+    for (full..cols) |n| tail.storeMid(n, rec.step(tail.loadSrc(n)));
+
+    rec.turnAround(last, pad);
+
+    var n = cols;
+    while (n > full) {
+        n -= 1;
+        tail.storeDst(n, rec.step(tail.loadMid(n)));
+    }
+    n0 = full;
+    while (n0 > 0) {
+        n0 -= W;
+        var block: [W]V = undefined;
+        inline for (0..W) |i| block[i] = temp.data[(r0 + i) * temp.stride + n0 ..][0..W].*;
+        var by_col = transpose(W, block);
+        inline for (0..W) |jj| {
+            const j = W - 1 - jj;
+            by_col[j] = rec.step(by_col[j]);
+        }
+        const by_row = transpose(W, by_col);
+        inline for (0..W) |i| temp.data[(r0 + i) * temp.stride + n0 ..][0..W].* = by_row[i];
+    }
+}
+
+inline fn loadRowVec(comptime T: type, comptime W: usize, img: Image(T), row: usize, col: usize) @Vector(W, f32) {
+    const v: @Vector(W, T) = img.data[row * img.stride + col ..][0..W].*;
+    return if (T == f32) v else @floatFromInt(v);
+}
+
+/// In-register transpose of a `W`×`W` block (`W` a power of two): `log2(W)` rounds of
+/// pairwise shuffles that swap `s`-wide sub-blocks between rows `i` and `i + s`.
+fn transpose(comptime W: usize, m: [W]@Vector(W, f32)) [W]@Vector(W, f32) {
+    comptime std.debug.assert(std.math.isPowerOfTwo(W));
+    var rows = m;
+    comptime var s: usize = 1;
+    inline while (s < W) : (s *= 2) {
+        const lo, const hi = comptime blockMasks(W, s);
+        comptime var i: usize = 0;
+        inline while (i < W) : (i += 1) {
+            if (i & s == 0) {
+                const a = rows[i];
+                const b = rows[i + s];
+                rows[i] = @shuffle(f32, a, b, lo);
+                rows[i + s] = @shuffle(f32, a, b, hi);
+            }
+        }
+    }
+    return rows;
+}
+
+/// Shuffle masks for one transpose round: `lo` keeps the lower `s`-wide half of every `2s`
+/// block from `a` and takes the corresponding half from `b`; `hi` does the upper halves.
+fn blockMasks(comptime W: usize, comptime s: usize) struct { @Vector(W, i32), @Vector(W, i32) } {
+    var lo: [W]i32 = undefined;
+    var hi: [W]i32 = undefined;
+    for (0..W) |k| {
+        const block = k / (2 * s) * (2 * s);
+        const t = k % (2 * s);
+        if (t < s) {
+            lo[k] = @intCast(block + t);
+            hi[k] = @intCast(block + s + t);
+        } else {
+            lo[k] = ~@as(i32, @intCast(block + t - s));
+            hi[k] = ~@as(i32, @intCast(block + t));
+        }
+    }
+    return .{ lo, hi };
+}
+
 /// `W` consecutive rows from `r0` as lanes, indexed by column; intermediate and final stores
 /// both land in `temp`.
 fn RowLanes(comptime T: type, comptime W: usize) type {
@@ -265,6 +358,23 @@ fn ColumnLanes(comptime T: type, comptime W: usize) type {
             }
         }
     };
+}
+
+test "register transpose" {
+    var m: [lanes]@Vector(lanes, f32) = undefined;
+    for (&m, 0..) |*row, i| {
+        var v: [lanes]f32 = undefined;
+        for (&v, 0..) |*x, j| x.* = @floatFromInt(i * lanes + j);
+        row.* = v;
+    }
+    const t = transpose(lanes, m);
+    for (0..lanes) |i| {
+        const row: [lanes]f32 = m[i];
+        for (0..lanes) |j| {
+            const col: [lanes]f32 = t[j];
+            try std.testing.expectEqual(row[j], col[i]);
+        }
+    }
 }
 
 test "iir gaussian approximates the exact kernel" {
