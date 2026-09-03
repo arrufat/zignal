@@ -506,7 +506,7 @@ test "gaussianBlur basic" {
 
     var blurred = try Image(u8).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.gaussianBlur(io, std.testing.allocator, blurred, 1.0);
+    try image.gaussianBlur(io, std.testing.allocator, blurred, 1.0, .default);
 
     // Check that blur has smoothed the edges
     const edge_sharp = image.at(2, 5).*; // Just outside the square
@@ -531,11 +531,11 @@ test "gaussianBlur sigma variations" {
     // Test with different sigmas
     var blur_small = try Image(f32).initLike(std.testing.allocator, image);
     defer blur_small.deinit(std.testing.allocator);
-    try image.gaussianBlur(io, std.testing.allocator, blur_small, 0.5);
+    try image.gaussianBlur(io, std.testing.allocator, blur_small, 0.5, .default);
 
     var blur_large = try Image(f32).initLike(std.testing.allocator, image);
     defer blur_large.deinit(std.testing.allocator);
-    try image.gaussianBlur(io, std.testing.allocator, blur_large, 2.0);
+    try image.gaussianBlur(io, std.testing.allocator, blur_large, 2.0, .default);
 
     // Larger sigma should spread more
     const center_small = blur_small.at(7, 7).*;
@@ -799,7 +799,7 @@ test "gaussianBlur preserves color" {
 
     var blurred = try Image(Rgb).initLike(std.testing.allocator, image);
     defer blurred.deinit(std.testing.allocator);
-    try image.gaussianBlur(io, std.testing.allocator, blurred, 1.0);
+    try image.gaussianBlur(io, std.testing.allocator, blurred, 1.0, .default);
 
     // Center should still be red (though not pure 255)
     const center = blurred.at(3, 3).*;
@@ -1171,7 +1171,7 @@ test "gaussianBlur with sigma=0" {
 
     var result = try Image(f32).initLike(std.testing.allocator, image);
     defer result.deinit(std.testing.allocator);
-    try image.gaussianBlur(io, std.testing.allocator, result, 0);
+    try image.gaussianBlur(io, std.testing.allocator, result, 0, .default);
 
     // With sigma=0, result should be identical to input
     for (0..image.rows) |r| {
@@ -1470,10 +1470,13 @@ test "filters are identical on a thread pool" {
                 try s.sharpen(run_io, allocator, o, 2);
             }
             fn gauss(s: Image(T), run_io: std.Io, o: Image(T)) !void {
-                try s.gaussianBlur(run_io, allocator, o, 2.5);
+                try s.gaussianBlur(run_io, allocator, o, 2.5, .default);
             }
             fn gaussWide(s: Image(T), run_io: std.Io, o: Image(T)) !void {
-                try s.gaussianBlur(run_io, allocator, o, 9);
+                try s.gaussianBlur(run_io, allocator, o, 9, .default);
+            }
+            fn gaussIir(s: Image(T), run_io: std.Io, o: Image(T)) !void {
+                try s.gaussianBlur(run_io, allocator, o, 9, .{ .method = .iir });
             }
             fn conv(s: Image(T), run_io: std.Io, o: Image(T)) !void {
                 const k = [7][7]f32{
@@ -1504,7 +1507,7 @@ test "filters are identical on a thread pool" {
                 try s.sobel(run_io, allocator, o);
             }
         };
-        inline for (.{ F.box, F.sharp, F.gauss, F.gaussWide, F.conv, F.sep, F.motionH, F.motionV }) |filter| {
+        inline for (.{ F.box, F.sharp, F.gauss, F.gaussWide, F.gaussIir, F.conv, F.sep, F.motionH, F.motionV }) |filter| {
             try Check.run(filter, src, a, b, serial_io, pool_io);
         }
         try Check.run(F.sobel, src, gray_a, gray_b, serial_io, pool_io);

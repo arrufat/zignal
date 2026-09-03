@@ -92,7 +92,7 @@ pub fn main(init: std.process.Init) !void {
     defer gaussian.deinit(init.gpa);
 
     const start_gaussian = std.Io.Clock.awake.now(init.io);
-    try original.gaussianBlur(init.io, init.gpa, gaussian, sigma);
+    try original.gaussianBlur(init.io, init.gpa, gaussian, sigma, .default);
     const end_gaussian = std.Io.Clock.awake.now(init.io);
     const gaussian_ns = start_gaussian.durationTo(end_gaussian).toNanoseconds();
     try gaussian.save(init.io, init.gpa, "blur_gaussian.png");

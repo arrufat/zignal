@@ -887,6 +887,21 @@ pub const threshold_mode_values = [_]stub_metadata.EnumValueDoc{
     .{ .name = "NEIGHBOR", .doc = "Compare against the neighbor pixel" },
 };
 
+pub const gaussian_method_doc =
+    \\How `Image.gaussian_blur` computes the blur.
+    \\
+    \\FIR is the exact separable kernel (radius 3·sigma, mirrored borders); its cost grows with sigma.
+    \\IIR is a recursive approximation (replicated borders) with constant cost per pixel, within a
+    \\few 8-bit units of FIR; use it for large sigma. Sigma below 1 always uses FIR.
+    \\AUTO picks FIR below sigma 4 and IIR from there on.
+;
+
+pub const gaussian_method_values = [_]stub_metadata.EnumValueDoc{
+    .{ .name = "FIR", .doc = "Exact kernel, cost grows with sigma" },
+    .{ .name = "IIR", .doc = "Recursive approximation, constant cost, for large sigma" },
+    .{ .name = "AUTO", .doc = "FIR below sigma 4, IIR from there on" },
+};
+
 // Aggregate method metadata from all sub-modules
 pub const image_methods_metadata = blk: {
     // ========================================================================
@@ -1180,7 +1195,7 @@ pub const image_methods_metadata = blk: {
             .meth = @ptrCast(&filtering.image_gaussian_blur),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = filtering.image_gaussian_blur_doc,
-            .params = "self, sigma: float",
+            .params = "self, sigma: float, method: GaussianMethod = GaussianMethod.FIR",
             .returns = "Image",
         },
         .{

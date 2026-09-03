@@ -116,7 +116,7 @@ pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options
                 std.log.err("sigma must be a non-negative finite number.", .{});
                 return error.InvalidArguments;
             }
-            try img.gaussianBlur(io, gpa, out, sigma);
+            try img.gaussianBlur(io, gpa, out, sigma, .default);
         },
         .median => {
             const radius = options.radius orelse 1;
