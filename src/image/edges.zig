@@ -56,12 +56,25 @@ pub fn Edges(comptime T: type) type {
             out: Image(u8),
 
             fn band(ctx: *const Magnitude, _: usize, r0: usize, r1: usize) void {
+                const vec_len = std.simd.suggestVectorLength(f32) orelse 1;
+                const V = @Vector(vec_len, f32);
+                const cols = ctx.out.cols;
                 for (r0..r1) |r| {
-                    for (0..ctx.out.cols) |c| {
-                        const gx = ctx.grad_x.at(r, c).*;
-                        const gy = ctx.grad_y.at(r, c).*;
-                        const scaled = @sqrt(gx * gx + gy * gy) / 4.0;
-                        ctx.out.at(r, c).* = @trunc(@max(0, @min(255, scaled)));
+                    const gx_row = ctx.grad_x.data[r * ctx.grad_x.stride ..][0..cols];
+                    const gy_row = ctx.grad_y.data[r * ctx.grad_y.stride ..][0..cols];
+                    const out_row = ctx.out.data[r * ctx.out.stride ..][0..cols];
+                    var c: usize = 0;
+                    while (c + vec_len <= cols) : (c += vec_len) {
+                        const gx: V = gx_row[c..][0..vec_len].*;
+                        const gy: V = gy_row[c..][0..vec_len].*;
+                        const scaled = @sqrt(gx * gx + gy * gy) / @as(V, @splat(4.0));
+                        const clamped = @max(@as(V, @splat(0)), @min(@as(V, @splat(255)), scaled));
+                        const bytes: @Vector(vec_len, u8) = @trunc(clamped);
+                        out_row[c..][0..vec_len].* = bytes;
+                    }
+                    while (c < cols) : (c += 1) {
+                        const scaled = @sqrt(gx_row[c] * gx_row[c] + gy_row[c] * gy_row[c]) / 4.0;
+                        out_row[c] = @trunc(@max(0, @min(255, scaled)));
                     }
                 }
             }

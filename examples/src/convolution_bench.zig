@@ -137,9 +137,9 @@ fn benchSobel(io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[
     try benchOp(io, "sobel f32", rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa });
 }
 
-fn benchMotionBlur(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: usize, cols: usize, distance: usize) !void {
+fn benchMotionBlur(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: usize, cols: usize, distance: usize, comptime axis: enum { horizontal, vertical }) !void {
     var name_buf: [64]u8 = undefined;
-    const name = try std.fmt.bufPrint(&name_buf, "motionBlur linear horizontal {s} d={d}", .{ @typeName(T), distance });
+    const name = try std.fmt.bufPrint(&name_buf, "motionBlur linear {t} {s} d={d}", .{ axis, @typeName(T), distance });
     if (skipped(name, filter)) return;
 
     var src = try initRandom(T, gpa, random, rows, cols);
@@ -153,7 +153,7 @@ fn benchMotionBlur(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random:
         gpa: std.mem.Allocator,
         distance: usize,
         fn run(self: @This(), run_io: std.Io) !void {
-            try self.src.motionBlur(run_io, self.gpa, self.dst, .{ .linear = .{ .angle = 0, .distance = self.distance } });
+            try self.src.motionBlur(run_io, self.gpa, self.dst, .{ .linear = .{ .angle = if (axis == .horizontal) 0 else std.math.pi / 2.0, .distance = self.distance } });
         }
     };
     try benchOp(io, name, rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa, .distance = distance });
@@ -221,6 +221,8 @@ pub fn main(init: std.process.Init) !void {
     try benchGaussian(u8, io, gpa, random, filter, 480, 640, 1, .default);
     try benchGaussian(u8, io, gpa, random, filter, 480, 640, 3, .default);
     try benchGaussian(u8, io, gpa, random, filter, 480, 640, 8, .default);
+    // Below the fused-path threshold: two-pass separable with a banded vertical pass
+    try benchGaussian(u8, io, gpa, random, filter, 320, 480, 8, .default);
     try benchGaussian(u8, io, gpa, random, filter, 2048, 2048, 3, .default);
     try benchGaussian(u8, io, gpa, random, filter, 2160, 3840, 3, .default);
     try benchGaussian(Rgb, io, gpa, random, filter, 480, 640, 3, .default);
@@ -244,8 +246,9 @@ pub fn main(init: std.process.Init) !void {
     try benchSobel(io, gpa, random, filter, 2160, 3840);
 
     // Axis-aligned motion blur (separable with an identity 1-tap vertical kernel)
-    try benchMotionBlur(Rgb, io, gpa, random, filter, 480, 640, 15);
-    try benchMotionBlur(u8, io, gpa, random, filter, 480, 640, 15);
+    try benchMotionBlur(Rgb, io, gpa, random, filter, 480, 640, 15, .horizontal);
+    try benchMotionBlur(u8, io, gpa, random, filter, 480, 640, 15, .horizontal);
+    try benchMotionBlur(u8, io, gpa, random, filter, 480, 640, 15, .vertical);
 
     // Separable f32
     try benchSeparable(f32, io, gpa, random, filter, 480, 640);
