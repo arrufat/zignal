@@ -11,6 +11,7 @@ const Blending = @import("../blending.zig").Blending;
 const Rectangle = @import("../geometry.zig").Rectangle;
 const Point = @import("../geometry/Point.zig").Point;
 const parallel = @import("../parallel.zig");
+const interpolation = @import("interpolation.zig");
 const Image = @import("../image.zig").Image;
 const assignPixel = @import("../image.zig").assignPixel;
 const BorderMode = @import("border.zig").BorderMode;
@@ -52,7 +53,6 @@ pub fn Transform(comptime T: type) type {
         /// The image is centered with black/zero padding around it (letterboxing).
         /// Returns a rectangle describing the area containing the actual image content.
         pub fn letterbox(self: Self, io: Io, out: Self, allocator: Allocator, method: Interpolation) Rectangle(u32) {
-            const interpolation = @import("interpolation.zig");
 
             // Ensure output has valid dimensions
             if (out.rows == 0 or out.cols == 0) {
@@ -199,10 +199,8 @@ pub fn Transform(comptime T: type) type {
             const offset_y = (@as(f32, @floatFromInt(out.rows)) - @as(f32, @floatFromInt(self.rows))) / 2.0;
 
             const ctx: Resample = .{
-                .src = self,
+                .sampler = .init(self, method, border),
                 .out = out,
-                .method = method,
-                .border = border,
                 .cos = cos,
                 .sin = sin,
                 .dst_cx = center.x() + offset_x,
@@ -216,10 +214,8 @@ pub fn Transform(comptime T: type) type {
         /// Inverse-mapped resampling shared by the general rotate and extract paths: output
         /// pixel (c, r) maps to `dst -> rotate by (cos, sin) about the centres -> src`.
         const Resample = struct {
-            src: Self,
+            sampler: interpolation.Sampler(T),
             out: Self,
-            method: Interpolation,
-            border: BorderMode,
             cos: f32,
             sin: f32,
             /// Rotation centre in output coordinates and its image in source coordinates.
@@ -240,7 +236,7 @@ pub fn Transform(comptime T: type) type {
                         const dx = @as(f32, @floatFromInt(c)) - ctx.dst_cx;
                         const src_x = ctx.cos * dx - ctx.sin * dy + ctx.src_cx;
                         const src_y = ctx.sin * dx + ctx.cos * dy + ctx.src_cy;
-                        ctx.out.at(r, c).* = if (interpolate(T, ctx.src, src_x, src_y, ctx.method, ctx.border)) |val| val else std.mem.zeroes(T);
+                        ctx.out.at(r, c).* = ctx.sampler.sample(src_x, src_y);
                     }
                 }
             }
@@ -255,7 +251,7 @@ pub fn Transform(comptime T: type) type {
                         const dx = x_rect - ctx.src_cx;
                         const src_x = ctx.src_cx + ctx.cos * dx - ctx.sin * dy;
                         const src_y = ctx.src_cy + ctx.sin * dx + ctx.cos * dy;
-                        ctx.out.at(r, c).* = if (interpolate(T, ctx.src, src_x, src_y, ctx.method, ctx.border)) |val| val else std.mem.zeroes(T);
+                        ctx.out.at(r, c).* = ctx.sampler.sample(src_x, src_y);
                     }
                 }
             }
@@ -308,10 +304,8 @@ pub fn Transform(comptime T: type) type {
             const cy: f32 = (rect.t + rect.b) * 0.5 - 0.5;
 
             const ctx: Resample = .{
-                .src = self,
+                .sampler = .init(self, method, border),
                 .out = out,
-                .method = method,
-                .border = border,
                 .cos = @cos(angle),
                 .sin = @sin(angle),
                 .dst_cx = cx,
@@ -573,22 +567,21 @@ pub fn Transform(comptime T: type) type {
         /// For each pixel in the output, applies the transform to find the corresponding source pixel.
         pub fn warp(self: Self, io: Io, out: Self, transform: anytype, method: Interpolation) void {
             const Ctx = struct {
-                src: Self,
+                sampler: interpolation.Sampler(T),
                 out: Self,
                 transform: @TypeOf(transform),
-                method: Interpolation,
 
                 fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
                     for (r0..r1) |r| {
                         for (0..ctx.out.cols) |c| {
                             const out_point: Point(2, f32) = .init(.{ @as(f32, @floatFromInt(c)), @as(f32, @floatFromInt(r)) });
                             const src_point = ctx.transform.project(out_point);
-                            ctx.out.at(r, c).* = interpolate(T, ctx.src, src_point.x(), src_point.y(), ctx.method, .mirror) orelse std.mem.zeroes(T);
+                            ctx.out.at(r, c).* = ctx.sampler.sample(src_point.x(), src_point.y());
                         }
                     }
                 }
             };
-            const ctx: Ctx = .{ .src = self, .out = out, .transform = transform, .method = method };
+            const ctx: Ctx = .{ .sampler = .init(self, method, .mirror), .out = out, .transform = transform };
             parallel.forRowBands(io, out.rows, parallel.bandCount(out.rows, out.cols), &ctx, Ctx.band);
         }
     };

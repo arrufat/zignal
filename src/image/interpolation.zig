@@ -254,6 +254,183 @@ fn bicubicKernel(t: f32) f32 {
     return 0;
 }
 
+/// Repeated sampling of one image with one method and border mode, for the geometric
+/// transforms. Built once per call: kernel weights come from a 256-entry table over the
+/// fractional position, and taps whose whole window lies inside the image index the data
+/// directly. Border pixels take the general `interpolate` path, so results there are unchanged.
+pub fn Sampler(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        const Kind = enum { nearest, bilinear, cubic4, lanczos6 };
+        const lut_size = 256;
+        const max_taps = 6;
+
+        image: Image(T),
+        method: Interpolation,
+        border: BorderMode,
+        kind: Kind,
+        /// Per-axis kernel weights for fractional position `i / lut_size`, normalized to unit
+        /// gain; unused for nearest and bilinear.
+        lut: [lut_size][max_taps]f32,
+
+        pub fn init(image: Image(T), method: Interpolation, border: BorderMode) Self {
+            var self: Self = .{
+                .image = image,
+                .method = method,
+                .border = border,
+                .kind = switch (method) {
+                    .nearest => .nearest,
+                    .bilinear => .bilinear,
+                    .bicubic, .catmull_rom, .mitchell => .cubic4,
+                    .lanczos => .lanczos6,
+                },
+                .lut = undefined,
+            };
+            if (self.kind == .cubic4 or self.kind == .lanczos6) {
+                const taps = kernelTaps(method);
+                for (&self.lut, 0..) |*row, i| {
+                    const frac = @as(f32, @floatFromInt(i)) / lut_size;
+                    var sum: f32 = 0;
+                    for (row[0..taps], 0..) |*w, t| {
+                        // Tap t sits at offset t - (taps/2 - 1) from the floor position.
+                        const offset = @as(f32, @floatFromInt(t)) - @as(f32, @floatFromInt(taps / 2 - 1));
+                        w.* = kernelWeight(method, offset - frac);
+                        sum += w.*;
+                    }
+                    for (row[0..taps]) |*w| w.* /= sum;
+                }
+            }
+            return self;
+        }
+
+        /// The pixel at (`x`, `y`); zeroes where `interpolate` would return null.
+        pub inline fn sample(self: *const Self, x: f32, y: f32) T {
+            return switch (self.kind) {
+                .nearest => self.sampleNearest(x, y),
+                .bilinear => self.sampleBilinear(x, y),
+                .cubic4 => self.sampleKernel(4, x, y),
+                .lanczos6 => self.sampleKernel(6, x, y),
+            };
+        }
+
+        inline fn fallback(self: *const Self, x: f32, y: f32) T {
+            // A zero border and a window entirely outside the image is just zeroes; rotated
+            // outputs have whole corners of those.
+            if (self.border == .zero) {
+                const reach: f32 = max_taps;
+                if (x < -reach or y < -reach or x > @as(f32, @floatFromInt(self.image.cols)) + reach or y > @as(f32, @floatFromInt(self.image.rows)) + reach) {
+                    return std.mem.zeroes(T);
+                }
+            }
+            return interpolate(T, self.image, x, y, self.method, self.border) orelse std.mem.zeroes(T);
+        }
+
+        inline fn sampleNearest(self: *const Self, x: f32, y: f32) T {
+            const img = self.image;
+            const rx = @round(x);
+            const ry = @round(y);
+            if (rx >= 0 and ry >= 0 and rx < @as(f32, @floatFromInt(img.cols)) and ry < @as(f32, @floatFromInt(img.rows))) {
+                const c: usize = @intFromFloat(rx);
+                const r: usize = @intFromFloat(ry);
+                return img.data[r * img.stride + c];
+            }
+            return self.fallback(x, y);
+        }
+
+        inline fn sampleBilinear(self: *const Self, x: f32, y: f32) T {
+            const img = self.image;
+            const fx_floor = @floor(x);
+            const fy_floor = @floor(y);
+            // Interior: the 2x2 window lies inside the image.
+            if (!(fx_floor >= 0 and fy_floor >= 0 and fx_floor + 1 < @as(f32, @floatFromInt(img.cols)) and fy_floor + 1 < @as(f32, @floatFromInt(img.rows)))) {
+                return self.fallback(x, y);
+            }
+            const left: usize = @intFromFloat(fx_floor);
+            const top: usize = @intFromFloat(fy_floor);
+            const base = top * img.stride + left;
+            const tl = img.data[base];
+            const tr = img.data[base + 1];
+            const bl = img.data[base + img.stride];
+            const br = img.data[base + img.stride + 1];
+            const lr_frac = x - fx_floor;
+            const tb_frac = y - fy_floor;
+            // Same fixed-point lerp as `interpolateBilinear`, so interior pixels are identical.
+            const scale = 256;
+            const fx: i32 = @round(lr_frac * scale);
+            const fy: i32 = @round(tb_frac * scale);
+
+            var out: T = undefined;
+            switch (@typeInfo(T)) {
+                .int, .float => out = lerpField(T, tl, tr, bl, br, fx, fy, lr_frac, tb_frac),
+                .@"struct" => {
+                    inline for (comptime meta.structFields(T)) |f| {
+                        @field(out, f.name) = lerpField(f.type, @field(tl, f.name), @field(tr, f.name), @field(bl, f.name), @field(br, f.name), fx, fy, lr_frac, tb_frac);
+                    }
+                },
+                else => @compileError("Unsupported type for bilinear sampling: " ++ @typeName(T)),
+            }
+            return out;
+        }
+
+        inline fn lerpField(comptime P: type, tl: P, tr: P, bl: P, br: P, fx: i32, fy: i32, lr_frac: f32, tb_frac: f32) P {
+            const info = @typeInfo(P);
+            if (info == .int and info.int.bits <= 16) {
+                const scale = 256;
+                const Intermediate = if (info.int.bits <= 8) i32 else i64;
+                const top_val = @as(Intermediate, tl) * (scale - fx) + @as(Intermediate, tr) * fx;
+                const bottom_val = @as(Intermediate, bl) * (scale - fx) + @as(Intermediate, br) * fx;
+                return clamp(P, @divTrunc(top_val * (scale - fy) + bottom_val * fy + (scale * scale / 2), scale * scale));
+            }
+            return clamp(P, (1 - tb_frac) * ((1 - lr_frac) * as(f32, tl) + lr_frac * as(f32, tr)) +
+                tb_frac * ((1 - lr_frac) * as(f32, bl) + lr_frac * as(f32, br)));
+        }
+
+        inline fn sampleKernel(self: *const Self, comptime taps: usize, x: f32, y: f32) T {
+            const img = self.image;
+            const fx_floor = @floor(x);
+            const fy_floor = @floor(y);
+            const lead: f32 = taps / 2 - 1;
+            // Interior: the taps x taps window lies inside the image.
+            if (!(fx_floor - lead >= 0 and fy_floor - lead >= 0 and fx_floor - lead + taps <= @as(f32, @floatFromInt(img.cols)) and fy_floor - lead + taps <= @as(f32, @floatFromInt(img.rows)))) {
+                return self.fallback(x, y);
+            }
+            const left: usize = @intFromFloat(fx_floor - lead);
+            const top: usize = @intFromFloat(fy_floor - lead);
+            const wx = self.lut[@intFromFloat((x - fx_floor) * lut_size)][0..taps];
+            const wy = self.lut[@intFromFloat((y - fy_floor) * lut_size)][0..taps];
+
+            var out: T = undefined;
+            switch (@typeInfo(T)) {
+                .int, .float => {
+                    var sum: f32 = 0;
+                    inline for (0..taps) |j| {
+                        const row = img.data[(top + j) * img.stride + left ..][0..taps];
+                        var row_sum: f32 = 0;
+                        inline for (0..taps) |i| row_sum += as(f32, row[i]) * wx[i];
+                        sum += row_sum * wy[j];
+                    }
+                    out = clamp(T, sum);
+                },
+                .@"struct" => {
+                    const fields = comptime meta.structFields(T);
+                    var sums: [fields.len]f32 = @splat(0);
+                    inline for (0..taps) |j| {
+                        const row = img.data[(top + j) * img.stride + left ..][0..taps];
+                        var row_sums: [fields.len]f32 = @splat(0);
+                        inline for (0..taps) |i| {
+                            inline for (fields, 0..) |f, fi| row_sums[fi] += as(f32, @field(row[i], f.name)) * wx[i];
+                        }
+                        inline for (0..fields.len) |fi| sums[fi] += row_sums[fi] * wy[j];
+                    }
+                    inline for (fields, 0..) |f, fi| @field(out, f.name) = clamp(f.type, sums[fi]);
+                },
+                else => @compileError("Unsupported type for kernel sampling: " ++ @typeName(T)),
+            }
+            return out;
+        }
+    };
+}
+
 /// Support of a separable kernel along one axis, for the plane resizers.
 pub fn kernelTaps(method: Interpolation) usize {
     return switch (method) {
@@ -562,4 +739,46 @@ fn interpolateWithKernel(
     }
 
     return result;
+}
+
+test "sampler matches interpolate away from the borders" {
+    const allocator = std.testing.allocator;
+    const Rgb = @import("../color.zig").Rgb(u8);
+    var prng = std.Random.DefaultPrng.init(0x5a);
+    const random = prng.random();
+
+    inline for ([_]type{ u8, f32, Rgb }) |T| {
+        var img: Image(T) = try .init(allocator, 40, 50);
+        defer img.deinit(allocator);
+        for (img.data) |*px| px.* = switch (T) {
+            u8 => random.int(u8),
+            f32 => 255 * random.float(f32),
+            else => .{ .r = random.int(u8), .g = random.int(u8), .b = random.int(u8) },
+        };
+        const methods = [_]Interpolation{ .nearest, .bilinear, .bicubic, .catmull_rom, .{ .mitchell = .default }, .lanczos };
+        for (methods) |method| {
+            for ([_]BorderMode{ .zero, .mirror, .replicate }) |border| {
+                const sampler: Sampler(T) = .init(img, method, border);
+                for (0..300) |_| {
+                    // Anywhere from just outside to well inside: border pixels share the general path.
+                    const x = random.float(f32) * 56 - 3;
+                    const y = random.float(f32) * 46 - 3;
+                    const expected = interpolate(T, img, x, y, method, border) orelse std.mem.zeroes(T);
+                    const got = sampler.sample(x, y);
+                    const exact = method == .nearest or method == .bilinear;
+                    switch (T) {
+                        u8 => try std.testing.expect(if (exact) got == expected else @abs(@as(i32, got) - @as(i32, expected)) <= 2),
+                        f32 => try std.testing.expect(if (exact) got == expected else @abs(got - expected) <= 0.02 * 255),
+                        else => {
+                            inline for (.{ "r", "g", "b" }) |f| {
+                                const g = @field(got, f);
+                                const e = @field(expected, f);
+                                try std.testing.expect(if (exact) g == e else @abs(@as(i32, g) - @as(i32, e)) <= 2);
+                            }
+                        },
+                    }
+                }
+            }
+        }
+    }
 }
