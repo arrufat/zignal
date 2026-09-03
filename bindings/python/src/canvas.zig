@@ -361,7 +361,7 @@ fn canvas_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
             .rgb => "Rgb",
             .rgba => "Rgba",
         };
-        const formatted = std.fmt.bufPrintSentinel(&buffer, "Canvas({d}x{d}, dtype={s})", .{ canvas.rows(), canvas.cols(), dtype_str }, 0) catch return null;
+        const formatted = std.mem.printSentinel(&buffer, "Canvas({d}x{d}, dtype={s})", .{ canvas.rows(), canvas.cols(), dtype_str }, 0) catch return null;
         return python.create(formatted);
     } else {
         return python.create("Canvas(uninitialized)");

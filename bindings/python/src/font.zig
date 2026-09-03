@@ -52,8 +52,8 @@ fn font_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const font = self.font orelse return python.create("Font()");
     var buffer: [256]u8 = undefined;
     const repr_str = switch (font.*) {
-        .bitmap => |b| std.fmt.bufPrintSentinel(&buffer, "Font(kind=\"bitmap\", name=\"{s}\", width={d}, height={d})", .{ b.name, b.char_width, b.char_height }, 0),
-        .vector => |v| std.fmt.bufPrintSentinel(&buffer, "Font(kind=\"vector\", units_per_em={d}, glyphs={d})", .{ v.units_per_em, v.num_glyphs }, 0),
+        .bitmap => |b| std.mem.printSentinel(&buffer, "Font(kind=\"bitmap\", name=\"{s}\", width={d}, height={d})", .{ b.name, b.char_width, b.char_height }, 0),
+        .vector => |v| std.mem.printSentinel(&buffer, "Font(kind=\"vector\", units_per_em={d}, glyphs={d})", .{ v.units_per_em, v.num_glyphs }, 0),
     } catch return python.create("Font(...)");
     return python.create(repr_str);
 }

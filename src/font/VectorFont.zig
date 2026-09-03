@@ -458,7 +458,7 @@ test "collections" {
     try testing.expectError(error.InvalidFormat, VectorFont.loadFromBytesFace(plain, 1));
 
     var text: [128]u8 = undefined;
-    const printed = try std.fmt.bufPrint(&text, "{f}", .{first});
+    const printed = try std.mem.print(&text, "{f}", .{first});
     try testing.expectEqualStrings("VectorFont{ .units_per_em = 1000, .glyphs = 7, .ascent = 900, .descent = -250, .faces = 2 }", printed);
 
     // Truncated collections fail cleanly too.
@@ -485,7 +485,7 @@ test "loading from a file" {
     try testing.expectEqual(@as(u16, 2), font.glyphIndex('B'));
 
     var text: [128]u8 = undefined;
-    const printed = try std.fmt.bufPrint(&text, "{f}", .{font});
+    const printed = try std.mem.print(&text, "{f}", .{font});
     try testing.expectEqualStrings("VectorFont{ .units_per_em = 1000, .glyphs = 7, .ascent = 900, .descent = -250 }", printed);
 }
 

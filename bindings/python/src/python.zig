@@ -563,7 +563,7 @@ pub fn convertWithValidation(
                     const min_val = std.math.minInt(T);
                     const max_val = std.math.maxInt(T);
                     var buffer: [256]u8 = undefined;
-                    const msg = std.fmt.bufPrintSentinel(&buffer, "{s} value is out of range for {s} (valid range: {} to {})", .{ field_name, @typeName(T), min_val, max_val }, 0) catch "Value out of range";
+                    const msg = std.mem.printSentinel(&buffer, "{s} value is out of range for {s} (valid range: {} to {})", .{ field_name, @typeName(T), min_val, max_val }, 0) catch "Value out of range";
                     c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
                 } else {
                     c.PyErr_SetString(c.PyExc_ValueError, "Value out of range");
@@ -896,7 +896,7 @@ pub fn setErrorWithPath(err: anyerror, path: []const u8) void {
 
     // Format error message with path and error name for debugging
     var buffer: [Io.Dir.max_path_bytes + 128]u8 = undefined;
-    const msg = std.fmt.bufPrintSentinel(&buffer, "Could not load '{s}': {s}", .{ path, @errorName(err) }, 0) catch "Could not load file";
+    const msg = std.mem.printSentinel(&buffer, "Could not load '{s}': {s}", .{ path, @errorName(err) }, 0) catch "Could not load file";
     c.PyErr_SetString(exc_type, msg.ptr);
 }
 
@@ -912,11 +912,11 @@ pub fn validateRange(comptime T: type, value: anytype, min: T, max: T, name: []c
             if (value < 0) {
                 var buffer: [256]u8 = undefined;
                 const msg = if (min == 0)
-                    std.fmt.bufPrintSentinel(&buffer, "{s} must be non-negative", .{name}, 0) catch "Value out of range"
+                    std.mem.printSentinel(&buffer, "{s} must be non-negative", .{name}, 0) catch "Value out of range"
                 else if (min == 1)
-                    std.fmt.bufPrintSentinel(&buffer, "{s} must be positive", .{name}, 0) catch "Value out of range"
+                    std.mem.printSentinel(&buffer, "{s} must be positive", .{name}, 0) catch "Value out of range"
                 else
-                    std.fmt.bufPrintSentinel(&buffer, "{s} must be at least {}", .{ name, min }, 0) catch "Value out of range";
+                    std.mem.printSentinel(&buffer, "{s} must be at least {}", .{ name, min }, 0) catch "Value out of range";
                 c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
                 return error.OutOfRange;
             }
@@ -932,18 +932,18 @@ pub fn validateRange(comptime T: type, value: anytype, min: T, max: T, name: []c
                 const msg = blk: {
                     // For infinity or max integer values, simplify the message
                     if (info == .float and std.math.isInf(max)) {
-                        break :blk std.fmt.bufPrintSentinel(&buffer, "{s} must be at least {}", .{ name, min }, 0) catch "Value out of range";
+                        break :blk std.mem.printSentinel(&buffer, "{s} must be at least {}", .{ name, min }, 0) catch "Value out of range";
                     } else if (info == .int and max == std.math.maxInt(T) and T != u8) {
                         // Don't simplify for u8 since 255 is often a specific limit (e.g., color values)
                         if (min == 0) {
-                            break :blk std.fmt.bufPrintSentinel(&buffer, "{s} must be non-negative", .{name}, 0) catch "Value out of range";
+                            break :blk std.mem.printSentinel(&buffer, "{s} must be non-negative", .{name}, 0) catch "Value out of range";
                         } else if (min == 1) {
-                            break :blk std.fmt.bufPrintSentinel(&buffer, "{s} must be positive", .{name}, 0) catch "Value out of range";
+                            break :blk std.mem.printSentinel(&buffer, "{s} must be positive", .{name}, 0) catch "Value out of range";
                         } else {
-                            break :blk std.fmt.bufPrintSentinel(&buffer, "{s} must be at least {}", .{ name, min }, 0) catch "Value out of range";
+                            break :blk std.mem.printSentinel(&buffer, "{s} must be at least {}", .{ name, min }, 0) catch "Value out of range";
                         }
                     } else {
-                        break :blk std.fmt.bufPrintSentinel(&buffer, "{s} must be between {} and {}", .{ name, min, max }, 0) catch "Value out of range";
+                        break :blk std.mem.printSentinel(&buffer, "{s} must be between {} and {}", .{ name, min, max }, 0) catch "Value out of range";
                     }
                 };
                 c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
@@ -955,7 +955,7 @@ pub fn validateRange(comptime T: type, value: anytype, min: T, max: T, name: []c
             const max_f64 = if (info == .float) @as(f64, max) else @as(f64, @floatFromInt(max));
             if (value < min_f64 or value > max_f64) {
                 var buffer: [512]u8 = undefined;
-                const msg = std.fmt.bufPrintSentinel(&buffer, "{s} must be between {} and {}", .{ name, min, max }, 0) catch "Value out of range";
+                const msg = std.mem.printSentinel(&buffer, "{s} must be between {} and {}", .{ name, min, max }, 0) catch "Value out of range";
                 c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
                 return error.OutOfRange;
             }
@@ -1160,7 +1160,7 @@ pub fn parseArgs(comptime T: type, args: ?*c.PyObject, kwds: ?*c.PyObject, out: 
 /// Simple helper for memory errors with context
 pub fn setMemoryError(context: []const u8) void {
     var buffer: [256]u8 = undefined;
-    const msg = std.fmt.bufPrintSentinel(&buffer, "Failed to allocate {s}", .{context}, 0) catch "Out of memory";
+    const msg = std.mem.printSentinel(&buffer, "Failed to allocate {s}", .{context}, 0) catch "Out of memory";
     c.PyErr_SetString(c.PyExc_MemoryError, msg.ptr);
 }
 
@@ -1182,7 +1182,7 @@ pub fn setTypeError(expected: []const u8, got: ?*c.PyObject) void {
         break :blk tp_name[last_dot..i];
     } else "None";
 
-    const msg = std.fmt.bufPrintSentinel(&buffer, "Expected {s}, got {s}", .{ expected, type_name }, 0) catch "Type error";
+    const msg = std.mem.printSentinel(&buffer, "Expected {s}, got {s}", .{ expected, type_name }, 0) catch "Type error";
     c.PyErr_SetString(c.PyExc_TypeError, msg.ptr);
 }
 
@@ -1194,7 +1194,7 @@ fn setFormattedError(
     args: anytype,
 ) void {
     var buffer: [256]u8 = undefined;
-    const msg = std.fmt.bufPrintSentinel(&buffer, fmt, args, 0) catch fallback;
+    const msg = std.mem.printSentinel(&buffer, fmt, args, 0) catch fallback;
     c.PyErr_SetString(exc_type, msg.ptr);
 }
 
@@ -1234,7 +1234,7 @@ pub fn setZigError(err: anyerror) void {
         else => c.PyExc_RuntimeError,
     };
     var buffer: [256]u8 = undefined;
-    const msg = std.fmt.bufPrintSentinel(&buffer, "Operation failed: {s}", .{@errorName(err)}, 0) catch "Operation failed";
+    const msg = std.mem.printSentinel(&buffer, "Operation failed: {s}", .{@errorName(err)}, 0) catch "Operation failed";
     c.PyErr_SetString(exc_type, msg.ptr);
 }
 
@@ -1266,7 +1266,7 @@ pub fn unwrap(comptime ObjectType: type, comptime field_name: []const u8, self_o
     if (@field(self, field_name)) |ptr| return ptr;
 
     var buffer: [256]u8 = undefined;
-    const msg = std.fmt.bufPrintSentinel(&buffer, "{s} not initialized", .{name}, 0) catch "Object not initialized";
+    const msg = std.mem.printSentinel(&buffer, "{s} not initialized", .{name}, 0) catch "Object not initialized";
     c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
 
     return null;

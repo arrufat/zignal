@@ -20,7 +20,7 @@ fn formatWidths(widths: []const usize, buffer: []u8) ![]const u8 {
             index += 2;
         }
 
-        const written = try std.fmt.bufPrint(buffer[index..], "{d}", .{width});
+        const written = try std.mem.print(buffer[index..], "{d}", .{width});
         index += written.len;
     }
 
@@ -150,7 +150,7 @@ pub fn main(init: std.process.Init) !void {
         const widths_text = try formatWidths(widths, &widths_buf);
 
         var name_buf: [48]u8 = undefined;
-        const output_name = try std.fmt.bufPrint(&name_buf, "blur_box_pass_{d}.png", .{passes});
+        const output_name = try std.mem.print(&name_buf, "blur_box_pass_{d}.png", .{passes});
         try last_result.save(init.io, init.gpa, output_name);
 
         std.debug.print(

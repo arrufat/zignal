@@ -79,7 +79,7 @@ fn qr_decode_result_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     const self = python.safeCast(QrDecodeResultObject, self_obj);
     const len = if (self.data) |obj| c.PyBytes_Size(obj) else 0;
     var buffer: [128]u8 = undefined;
-    const slice = std.fmt.bufPrintSentinel(&buffer, "QrDecodeResult(version={d}, ec_level={d}, data={d} bytes)", .{
+    const slice = std.mem.printSentinel(&buffer, "QrDecodeResult(version={d}, ec_level={d}, data={d} bytes)", .{
         self.version, self.ec_level, len,
     }, 0) catch return python.create("QrDecodeResult(...)");
     return python.create(slice);
