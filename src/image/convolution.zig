@@ -765,65 +765,63 @@ fn SeparablePass(comptime SrcT: type, comptime DstT: type, comptime AccumIntT: t
             parallel.forRowBands(io, src.rows, parallel.bandCount(src.rows, src.cols), &ctx, BandContext.horizontalBand);
         }
 
-        /// Read-only state shared by the row bands of the 1-D passes; `table` resolves the
-        /// border columns and is only needed by the horizontal passes.
+        /// Read-only state shared by the row bands of the 1-D passes. `table` resolves the
+        /// border positions of the pass axis (columns for horizontal, rows for vertical);
+        /// the vertical passes also get `kernel.len` tap base offsets per band in `bases`.
         const BandContext = struct {
             src: Image(SrcT),
             dst: Image(DstT),
             kernel: []const KernelT,
-            table: ?BorderIndexTable = null,
+            table: BorderIndexTable,
+            bases: []usize = &.{},
 
             fn horizontalBand(ctx: *const BandContext, _: usize, r0: usize, r1: usize) void {
                 const folded = isSymmetric(ctx.kernel);
                 const dense = isDense(ctx.kernel);
                 for (r0..r1) |r| {
                     const dst_row = ctx.dst.data[r * ctx.dst.stride ..][0..ctx.src.cols];
-                    if (dense) horizontalRow(true, ctx.src, dst_row, r, ctx.kernel, ctx.table.?, folded) else horizontalRow(false, ctx.src, dst_row, r, ctx.kernel, ctx.table.?, folded);
+                    if (dense) horizontalRow(true, ctx.src, dst_row, r, ctx.kernel, ctx.table, folded) else horizontalRow(false, ctx.src, dst_row, r, ctx.kernel, ctx.table, folded);
                 }
             }
 
-            /// Bands cover the interior rows `[half, rows - half)`, offset here.
-            fn verticalBand(ctx: *const BandContext, _: usize, r0: usize, r1: usize) void {
-                const half = ctx.kernel.len / 2;
+            fn verticalBand(ctx: *const BandContext, band: usize, r0: usize, r1: usize) void {
                 const folded = isSymmetric(ctx.kernel);
-                if (isDense(ctx.kernel)) {
-                    verticalTiles(true, ctx.src, ctx.dst, ctx.kernel, folded, half + r0, half + r1);
-                } else {
-                    verticalTiles(false, ctx.src, ctx.dst, ctx.kernel, folded, half + r0, half + r1);
+                const dense = isDense(ctx.kernel);
+                ctx.verticalBorderRows(band, r0, @min(r1, ctx.table.low_end));
+                const inner0 = @max(r0, ctx.table.low_end);
+                const inner1 = @min(r1, ctx.table.high_start);
+                if (inner0 < inner1) {
+                    if (dense) verticalTiles(true, ctx.src, ctx.dst, ctx.kernel, folded, inner0, inner1) else verticalTiles(false, ctx.src, ctx.dst, ctx.kernel, folded, inner0, inner1);
                 }
+                ctx.verticalBorderRows(band, @max(r0, ctx.table.high_start), r1);
             }
 
             fn horizontalBoxBand(ctx: *const BandContext, _: usize, r0: usize, r1: usize) void {
-                horizontalBoxRows(ctx.src, ctx.dst, ctx.kernel, ctx.table.?, r0, r1);
+                horizontalBoxRows(ctx.src, ctx.dst, ctx.kernel, ctx.table, r0, r1);
             }
 
-            fn verticalBoxBand(ctx: *const BandContext, _: usize, r0: usize, r1: usize) void {
-                const half = ctx.kernel.len / 2;
-                verticalBoxRows(ctx.src, ctx.dst, ctx.kernel, half + r0, half + r1);
+            fn verticalBoxBand(ctx: *const BandContext, band: usize, r0: usize, r1: usize) void {
+                ctx.verticalBorderRows(band, r0, @min(r1, ctx.table.low_end));
+                const inner0 = @max(r0, ctx.table.low_end);
+                const inner1 = @min(r1, ctx.table.high_start);
+                if (inner0 < inner1) verticalBoxRows(ctx.src, ctx.dst, ctx.kernel, inner0, inner1);
+                ctx.verticalBorderRows(band, @max(r0, ctx.table.high_start), r1);
             }
-        };
 
-        /// Emits the top/bottom border rows from a row-resolved table; shared by the
-        /// dense and box vertical passes.
-        fn verticalBorderRows(src: Image(SrcT), dst: Image(DstT), allocator: Allocator, kernel: []const KernelT, border_mode: BorderMode) !void {
-            const table: BorderIndexTable = try .init(allocator, src.rows, kernel.len, border_mode);
-            defer table.deinit(allocator);
-            const bases = try allocator.alloc(usize, kernel.len);
-            defer allocator.free(bases);
-
-            const border_rows = [_][2]usize{
-                .{ 0, table.low_end },
-                .{ table.high_start, src.rows },
-            };
-            for (border_rows) |range| {
-                for (range[0]..range[1]) |r| {
-                    for (bases, table.taps(table.ordinalOf(r))) |*b, idx| {
-                        b.* = if (idx == BorderIndexTable.zero_sentinel) idx else idx * src.stride;
+            /// Top/bottom border rows `[r0, r1)` from the row-resolved table; shared by the
+            /// dense and box vertical passes.
+            fn verticalBorderRows(ctx: *const BandContext, band: usize, r0: usize, r1: usize) void {
+                if (r0 >= r1) return;
+                const klen = ctx.kernel.len;
+                const bases = ctx.bases[band * klen ..][0..klen];
+                for (r0..r1) |r| {
+                    for (bases, ctx.table.taps(ctx.table.ordinalOf(r))) |*b, idx| {
+                        b.* = if (idx == BorderIndexTable.zero_sentinel) idx else idx * ctx.src.stride;
                     }
-                    verticalRowFromBases(true, false, src.data, bases, dst, r, kernel, false);
+                    verticalRowFromBases(true, false, ctx.src.data, bases, ctx.dst, r, ctx.kernel, false);
                 }
             }
-        }
+        };
 
         /// One vertical-pass output row combined from per-tap source row base offsets
         /// (`BorderIndexTable.zero_sentinel` = row of zeros). Border rows keep the full
@@ -883,14 +881,19 @@ fn SeparablePass(comptime SrcT: type, comptime DstT: type, comptime AccumIntT: t
         /// Column-tiled 1D pass along rows (src -> dst); tiling keeps the working set cache-resident
         /// and, unlike per-row bases, lets LLVM hoist the tap offsets (row-major measured 0.9x on f32).
         fn vertical(io: Io, src: Image(SrcT), dst: Image(DstT), allocator: Allocator, kernel: []const KernelT, border_mode: BorderMode) !void {
-            const half = kernel.len / 2;
-            if (src.rows > 2 * half) {
-                // Interior rows [half, rows - half) in bands; each band tiles its columns.
-                const interior = src.rows - 2 * half;
-                const ctx: BandContext = .{ .src = src, .dst = dst, .kernel = kernel };
-                parallel.forRowBands(io, interior, parallel.bandCount(interior, src.cols), &ctx, BandContext.verticalBand);
-            }
-            try verticalBorderRows(src, dst, allocator, kernel, border_mode);
+            try verticalPass(io, src, dst, allocator, kernel, border_mode, BandContext.verticalBand);
+        }
+
+        /// Bands cover every row; each band emits its border rows from the row table and its
+        /// interior rows through `band_fn`'s fast path, so no rows wait on the caller thread.
+        fn verticalPass(io: Io, src: Image(SrcT), dst: Image(DstT), allocator: Allocator, kernel: []const KernelT, border_mode: BorderMode, comptime band_fn: anytype) !void {
+            const table: BorderIndexTable = try .init(allocator, src.rows, kernel.len, border_mode);
+            defer table.deinit(allocator);
+            const bands = parallel.bandCount(src.rows, src.cols);
+            const bases = try allocator.alloc(usize, bands * kernel.len);
+            defer allocator.free(bases);
+            const ctx: BandContext = .{ .src = src, .dst = dst, .kernel = kernel, .table = table, .bases = bases };
+            parallel.forRowBands(io, src.rows, bands, &ctx, band_fn);
         }
 
         /// Column-tiled interior rows `[r_start, r_end)`; tiling keeps the working set
@@ -1015,13 +1018,7 @@ fn SeparablePass(comptime SrcT: type, comptime DstT: type, comptime AccumIntT: t
         /// O(1)-per-pixel vertical pass for uniform-body kernels: SIMD column sums slide
         /// down the rows. Same exactness contract as `horizontalBox`.
         fn verticalBox(io: Io, src: Image(SrcT), dst: Image(DstT), allocator: Allocator, kernel: []const KernelT, border_mode: BorderMode) !void {
-            const half = kernel.len / 2;
-            if (src.rows > 2 * half) {
-                const interior = src.rows - 2 * half;
-                const ctx: BandContext = .{ .src = src, .dst = dst, .kernel = kernel };
-                parallel.forRowBands(io, interior, parallel.bandCount(interior, src.cols), &ctx, BandContext.verticalBoxBand);
-            }
-            try verticalBorderRows(src, dst, allocator, kernel, border_mode);
+            try verticalPass(io, src, dst, allocator, kernel, border_mode, BandContext.verticalBoxBand);
         }
 
         /// Interior rows `[r_start, r_end)` of the vertical box pass; the column sums are

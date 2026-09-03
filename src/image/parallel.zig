@@ -10,10 +10,21 @@ const Io = std.Io;
 /// Below this many pixels per band the task hand-off costs more than the work.
 const min_pixels_per_band: usize = 32 * 1024;
 
+var cpu_count: std.atomic.Value(usize) = .init(0);
+
+/// Logical CPUs, queried once (`getCpuCount` is a syscall) and cached.
+fn cpuCount() usize {
+    const cached = cpu_count.load(.monotonic);
+    if (cached != 0) return cached;
+    const n = std.Thread.getCpuCount() catch 1;
+    cpu_count.store(n, .monotonic);
+    return n;
+}
+
 /// Bands for a `rows`×`cols` job: one per CPU, at least `min_pixels_per_band` each.
 pub fn bandCount(rows: usize, cols: usize) usize {
     if (builtin.single_threaded or rows == 0) return 1;
-    const cpus = std.Thread.getCpuCount() catch 1;
+    const cpus = cpuCount();
     const by_size = @max(1, (rows * cols) / min_pixels_per_band);
     return @min(cpus, by_size, rows);
 }
