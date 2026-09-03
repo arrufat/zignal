@@ -205,7 +205,7 @@ fn PlaneBands(comptime T: type, comptime Plane: type) type {
 }
 
 // ============================================================================
-// Optimized Plane Resize Functions
+// Optimized Plane Resize Functions: output rows [r_start, r_end) of a dst_rows x dst_cols plane
 // ============================================================================
 
 /// Optimized bilinear resize for u8 planes using integer arithmetic.
@@ -217,6 +217,8 @@ pub fn resizePlaneBilinearU8(
     src_cols: u32,
     dst_rows: u32,
     dst_cols: u32,
+    r_start: usize,
+    r_end: usize,
 ) void {
     const s = 256;
     const sf: f32 = s;
@@ -226,7 +228,7 @@ pub fn resizePlaneBilinearU8(
     const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
 
     // Process each output pixel
-    for (0..dst_rows) |r| {
+    for (r_start..r_end) |r| {
         const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
         const src_y_i: isize = @floor(src_y_f);
         const fy: i32 = @trunc((src_y_f - @floor(src_y_f)) * sf);
@@ -266,11 +268,13 @@ pub fn resizePlaneNearestU8(
     src_cols: u32,
     dst_rows: u32,
     dst_cols: u32,
+    r_start: usize,
+    r_end: usize,
 ) void {
     const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
     const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
 
-    for (0..dst_rows) |r| {
+    for (r_start..r_end) |r| {
         const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
         const src_y = @max(0, @min(src_rows - 1, @as(u32, @round(src_y_f))));
 
@@ -290,6 +294,8 @@ pub fn resizePlaneBicubicU8(
     src_cols: u32,
     dst_rows: u32,
     dst_cols: u32,
+    r_start: usize,
+    r_end: usize,
 ) void {
     const SCALE = 256;
 
@@ -315,7 +321,7 @@ pub fn resizePlaneBicubicU8(
     const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
     const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
 
-    for (0..dst_rows) |r| {
+    for (r_start..r_end) |r| {
         const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
         const src_y: isize = @floor(src_y_f);
         const fy: i32 = @trunc((src_y_f - @floor(src_y_f)) * SCALE);
@@ -365,6 +371,8 @@ pub fn resizePlaneCatmullRomU8(
     src_cols: u32,
     dst_rows: u32,
     dst_cols: u32,
+    r_start: usize,
+    r_end: usize,
 ) void {
     const SCALE = 256;
 
@@ -390,7 +398,7 @@ pub fn resizePlaneCatmullRomU8(
     const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
     const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
 
-    for (0..dst_rows) |r| {
+    for (r_start..r_end) |r| {
         const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
         const src_y: isize = @floor(src_y_f);
         const fy: i32 = @trunc((src_y_f - @floor(src_y_f)) * SCALE);
@@ -441,6 +449,8 @@ pub fn resizePlaneMitchellU8(
     src_cols: u32,
     dst_rows: u32,
     dst_cols: u32,
+    r_start: usize,
+    r_end: usize,
 ) void {
     const s = 256;
     // Mitchell-Netravali kernel function (b=1/3, c=1/3)
@@ -466,7 +476,7 @@ pub fn resizePlaneMitchellU8(
     const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
     const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
 
-    for (0..dst_rows) |r| {
+    for (r_start..r_end) |r| {
         const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
         const src_y: isize = @floor(src_y_f);
         const fy: i32 = @trunc((src_y_f - @floor(src_y_f)) * s);
@@ -511,6 +521,8 @@ pub fn resizePlaneLanczosU8(
     src_cols: u32,
     dst_rows: u32,
     dst_cols: u32,
+    r_start: usize,
+    r_end: usize,
 ) void {
     const lanczosKernel = struct {
         fn eval(x: f32) f32 {
@@ -525,7 +537,7 @@ pub fn resizePlaneLanczosU8(
     const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
     const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
 
-    for (0..dst_rows) |r| {
+    for (r_start..r_end) |r| {
         const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
         const src_y: isize = @floor(src_y_f);
         const fy = src_y_f - @floor(src_y_f);

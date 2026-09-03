@@ -33,11 +33,12 @@ pub const Options = struct {
 /// Converts an image to iTerm2 inline image protocol format
 pub fn fromImage(
     comptime T: type,
+    io: std.Io,
     image: Image(T),
     gpa: Allocator,
     options: Options,
 ) ![]u8 {
-    const png_data = try payload.scaledPng(T, image, gpa, options.width, options.height, options.interpolation);
+    const png_data = try payload.scaledPng(T, io, image, gpa, options.width, options.height, options.interpolation);
     defer gpa.free(png_data);
 
     const encoder = std.base64.standard.Encoder;
@@ -80,7 +81,7 @@ test "imageToIterm2 basic functionality" {
     img.at(1, 0).* = Rgb{ .r = 0, .g = 0, .b = 255 };
     img.at(1, 1).* = Rgb{ .r = 255, .g = 255, .b = 255 };
 
-    const data = try fromImage(Rgb, img, allocator, .default);
+    const data = try fromImage(Rgb, std.Io.Threaded.global_single_threaded.io(), img, allocator, .default);
     defer allocator.free(data);
 
     // Starts with the OSC 1337 File preamble
@@ -107,7 +108,7 @@ test "imageToIterm2 with scaling" {
     }
 
     const options: Options = .{ .width = 16, .height = 16 };
-    const data = try fromImage(Rgb, img, allocator, options);
+    const data = try fromImage(Rgb, std.Io.Threaded.global_single_threaded.io(), img, allocator, options);
     defer allocator.free(data);
 
     try testing.expect(std.mem.startsWith(u8, data, "\x1b]1337;File="));
@@ -125,7 +126,7 @@ test "imageToIterm2 declared size matches decoded payload" {
         img.at(y, x).* = Rgb{ .r = @intCast(x * 80), .g = @intCast(y * 80), .b = 40 };
     };
 
-    const data = try fromImage(Rgb, img, allocator, .default);
+    const data = try fromImage(Rgb, std.Io.Threaded.global_single_threaded.io(), img, allocator, .default);
     defer allocator.free(data);
 
     // Parse the declared size and the base64 payload, then verify size ==

@@ -29,6 +29,7 @@
 //! - Mitchell: ~22 Mpix/s
 
 const std = @import("std");
+const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
 const Image = @import("../image.zig").Image;
@@ -37,6 +38,7 @@ const as = meta.as;
 const clamp = meta.clamp;
 const BorderMode = @import("border.zig").BorderMode;
 const channel_ops = @import("channel_ops.zig");
+const parallel = @import("parallel.zig");
 const resolveIndex = @import("border.zig").resolveIndex;
 
 /// Interpolation method for image resizing and sampling
@@ -83,10 +85,10 @@ pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Int
     };
 }
 
-/// Resizes `self` into the pre-allocated `out` image using the given interpolation `method`.
-/// For RGB/RGBA pixel types, processing is channel-separated and uses `allocator` for
-/// temporary buffers; other pixel types do not allocate.
-pub fn resize(comptime T: type, self: Image(T), out: Image(T), allocator: Allocator, method: Interpolation) void {
+/// Resizes `self` into the pre-allocated `out` image using the given interpolation `method`,
+/// in output-row bands on `io`. For RGB/RGBA pixel types, processing is channel-separated and
+/// uses `allocator` for temporary buffers; other pixel types do not allocate.
+pub fn resize(comptime T: type, io: Io, self: Image(T), out: Image(T), allocator: Allocator, method: Interpolation) void {
     // Check for scale = 1 (just copy)
     if (self.rows == out.rows and self.cols == out.cols) {
         if (self.data.ptr == out.data.ptr) return;
@@ -115,86 +117,95 @@ pub fn resize(comptime T: type, self: Image(T), out: Image(T), allocator: Alloca
         };
 
         if (has_optimized_plane_op) {
-            // Resize has no Io parameter yet: the plane split and merge run inline.
-            const channels = channel_ops.splitChannels(T, .failing, self, allocator) catch {
+            const channels = channel_ops.splitChannels(T, io, self, allocator) catch {
                 // Fallback to generic implementation on allocation failure
-                resizeGeneric(T, self, out, method);
+                resizeGeneric(T, io, self, out, method);
                 return;
             };
             defer for (channels) |channel| allocator.free(channel);
 
             const out_plane_size = @as(usize, out.rows) * out.cols;
             const out_channels = channel_ops.allocPlanes(u8, channels.len, allocator, out_plane_size) catch {
-                resizeGeneric(T, self, out, method);
+                resizeGeneric(T, io, self, out, method);
                 return;
             };
             defer for (out_channels) |ch| allocator.free(ch);
 
             // Resize each channel using optimized plane functions
-            switch (method) {
-                .nearest => {
-                    inline for (channels, out_channels) |src_ch, dst_ch| {
-                        channel_ops.resizePlaneNearestU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
-                    }
-                },
-                .bilinear => {
-                    inline for (channels, out_channels) |src_ch, dst_ch| {
-                        channel_ops.resizePlaneBilinearU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
-                    }
-                },
-                .bicubic => {
-                    inline for (channels, out_channels) |src_ch, dst_ch| {
-                        channel_ops.resizePlaneBicubicU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
-                    }
-                },
-                .catmull_rom => {
-                    inline for (channels, out_channels) |src_ch, dst_ch| {
-                        channel_ops.resizePlaneCatmullRomU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
-                    }
-                },
-                .mitchell => {
-                    inline for (channels, out_channels) |src_ch, dst_ch| {
-                        channel_ops.resizePlaneMitchellU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
-                    }
-                },
-                .lanczos => {
-                    inline for (channels, out_channels) |src_ch, dst_ch| {
-                        channel_ops.resizePlaneLanczosU8(src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols);
-                    }
-                },
+            const bands = parallel.bandCount(out.rows, out.cols);
+            inline for (channels, out_channels) |src_ch, dst_ch| {
+                const ctx: PlaneResize = .{ .src = src_ch, .dst = dst_ch, .src_rows = self.rows, .src_cols = self.cols, .dst_rows = out.rows, .dst_cols = out.cols, .method = method };
+                parallel.forRowBands(io, out.rows, bands, &ctx, PlaneResize.band);
             }
 
             // Combine channels back
-            channel_ops.mergeChannels(T, .failing, out_channels, out);
+            channel_ops.mergeChannels(T, io, out_channels, out);
             return;
         }
     }
 
     // Fall back to generic implementation
-    resizeGeneric(T, self, out, method);
+    resizeGeneric(T, io, self, out, method);
 }
 
-/// Generic per-pixel resize fallback.
-fn resizeGeneric(comptime T: type, self: Image(T), out: Image(T), method: Interpolation) void {
-    const scale_x = @as(f32, @floatFromInt(self.cols)) / @as(f32, @floatFromInt(out.cols));
-    const scale_y = @as(f32, @floatFromInt(self.rows)) / @as(f32, @floatFromInt(out.rows));
+/// One u8 plane through the fixed-point resizers, a band of output rows at a time.
+const PlaneResize = struct {
+    src: []const u8,
+    dst: []u8,
+    src_rows: u32,
+    src_cols: u32,
+    dst_rows: u32,
+    dst_cols: u32,
+    method: Interpolation,
 
-    for (0..out.rows) |r| {
-        const src_y = (@as(f32, @floatFromInt(r)) + 0.5) * scale_y - 0.5;
-        for (0..out.cols) |c| {
-            const src_x = (@as(f32, @floatFromInt(c)) + 0.5) * scale_x - 0.5;
-            if (interpolate(T, self, src_x, src_y, method, .mirror)) |val| {
-                out.at(r, c).* = val;
-            } else {
-                // Fallback for failed interpolation (e.g., boundary conditions)
-                out.at(r, c).* = switch (@typeInfo(T)) {
-                    .int, .float => 0,
-                    .@"struct" => std.mem.zeroes(T),
-                    else => @compileError("Unsupported type for fallback in resizeGeneric: " ++ @typeName(T)),
-                };
-            }
+    fn band(ctx: *const PlaneResize, _: usize, r0: usize, r1: usize) void {
+        const args = .{ ctx.src, ctx.dst, ctx.src_rows, ctx.src_cols, ctx.dst_rows, ctx.dst_cols, r0, r1 };
+        switch (ctx.method) {
+            .nearest => @call(.auto, channel_ops.resizePlaneNearestU8, args),
+            .bilinear => @call(.auto, channel_ops.resizePlaneBilinearU8, args),
+            .bicubic => @call(.auto, channel_ops.resizePlaneBicubicU8, args),
+            .catmull_rom => @call(.auto, channel_ops.resizePlaneCatmullRomU8, args),
+            .mitchell => @call(.auto, channel_ops.resizePlaneMitchellU8, args),
+            .lanczos => @call(.auto, channel_ops.resizePlaneLanczosU8, args),
         }
     }
+};
+
+/// Generic per-pixel resize fallback, in output-row bands.
+fn resizeGeneric(comptime T: type, io: Io, self: Image(T), out: Image(T), method: Interpolation) void {
+    const ctx: GenericResize(T) = .{ .src = self, .out = out, .method = method };
+    parallel.forRowBands(io, out.rows, parallel.bandCount(out.rows, out.cols), &ctx, GenericResize(T).band);
+}
+
+fn GenericResize(comptime T: type) type {
+    return struct {
+        src: Image(T),
+        out: Image(T),
+        method: Interpolation,
+
+        fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
+            const self = ctx.src;
+            const out = ctx.out;
+            const scale_x = @as(f32, @floatFromInt(self.cols)) / @as(f32, @floatFromInt(out.cols));
+            const scale_y = @as(f32, @floatFromInt(self.rows)) / @as(f32, @floatFromInt(out.rows));
+            for (r0..r1) |r| {
+                const src_y = (@as(f32, @floatFromInt(r)) + 0.5) * scale_y - 0.5;
+                for (0..out.cols) |c| {
+                    const src_x = (@as(f32, @floatFromInt(c)) + 0.5) * scale_x - 0.5;
+                    if (interpolate(T, self, src_x, src_y, ctx.method, .mirror)) |val| {
+                        out.at(r, c).* = val;
+                    } else {
+                        // Fallback for failed interpolation (e.g., boundary conditions)
+                        out.at(r, c).* = switch (@typeInfo(T)) {
+                            .int, .float => 0,
+                            .@"struct" => std.mem.zeroes(T),
+                            else => @compileError("Unsupported type for fallback in resizeGeneric: " ++ @typeName(T)),
+                        };
+                    }
+                }
+            }
+        }
+    };
 }
 
 // ============================================================================

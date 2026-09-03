@@ -90,7 +90,7 @@ pub fn ImagePyramid(comptime T: type) type {
 
                 // Use bilinear interpolation for downsampling from original or blurred
                 const source_to_use = if (blurred.rows > 0) blurred else source;
-                source_to_use.resize(allocator, levels[i], .bilinear);
+                source_to_use.resize(io, allocator, levels[i], .bilinear);
             }
 
             return .{

@@ -60,11 +60,12 @@ fn writeControlHeader(output: *std.ArrayList(u8), gpa: Allocator, options: Optio
 /// Converts an image to Kitty graphics protocol format
 pub fn fromImage(
     comptime T: type,
+    io: std.Io,
     image: Image(T),
     gpa: Allocator,
     options: Options,
 ) ![]u8 {
-    const png_data = try payload.scaledPng(T, image, gpa, options.width, options.height, options.interpolation);
+    const png_data = try payload.scaledPng(T, io, image, gpa, options.width, options.height, options.interpolation);
     defer gpa.free(png_data);
 
     const encoder = std.base64.standard.Encoder;
@@ -126,7 +127,7 @@ test "imageToKitty basic functionality" {
     img.at(1, 1).* = Rgb{ .r = 255, .g = 255, .b = 255 };
 
     // Convert to Kitty format
-    const kitty_data = try fromImage(Rgb, img, allocator, .default);
+    const kitty_data = try fromImage(Rgb, std.Io.Threaded.global_single_threaded.io(), img, allocator, .default);
     defer allocator.free(kitty_data);
 
     // Basic validation - should start with Kitty escape sequence
@@ -159,7 +160,7 @@ test "imageToKitty with options" {
         .delete_after = true,
     };
 
-    const kitty_data = try fromImage(u8, img, allocator, options);
+    const kitty_data = try fromImage(u8, std.Io.Threaded.global_single_threaded.io(), img, allocator, options);
     defer allocator.free(kitty_data);
 
     // Check that options are included
@@ -188,7 +189,7 @@ test "imageToKitty with scaling" {
     // Test scaling up to 16x16
     const options: Options = .{ .width = 16, .height = 16 };
 
-    const kitty_data = try fromImage(Rgb, img, allocator, options);
+    const kitty_data = try fromImage(Rgb, std.Io.Threaded.global_single_threaded.io(), img, allocator, options);
     defer allocator.free(kitty_data);
 
     // Should produce valid kitty output
@@ -224,7 +225,7 @@ test "imageToKitty with chunking enabled" {
         .height = 512,
     };
 
-    const kitty_data = try fromImage(Rgb, img, allocator, options);
+    const kitty_data = try fromImage(Rgb, std.Io.Threaded.global_single_threaded.io(), img, allocator, options);
     defer allocator.free(kitty_data);
 
     // Expect multiple escape sequences when chunking is active
