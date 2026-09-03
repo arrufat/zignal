@@ -13,7 +13,7 @@ const getImageType = @import("../image.zig").getImageType;
 const enum_utils = @import("../enum_utils.zig");
 const colormaps = @import("../colormaps.zig");
 const python = @import("../python.zig");
-const allocator = python.ctx.allocator;
+const allocator = python.allocator;
 const c = python.c;
 
 // Filtering functions
@@ -106,7 +106,7 @@ pub fn image_box_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
                 python.setMemoryError("image operation");
                 return null;
             };
-            img.boxBlur(allocator, out, @intCast(r)) catch {
+            img.boxBlur(python.io, allocator, out, @intCast(r)) catch {
                 python.setMemoryError("image operation");
                 return null;
             };
@@ -469,7 +469,7 @@ pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
                 python.setMemoryError("image operation");
                 return null;
             };
-            img.gaussianBlur(allocator, out, @floatCast(s)) catch |err| {
+            img.gaussianBlur(python.io, allocator, out, @floatCast(s)) catch |err| {
                 if (err == error.InvalidSigma) {
                     python.setValueError("Invalid sigma value", .{});
                 } else {
@@ -548,7 +548,7 @@ pub fn image_sharpen(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
                 python.setMemoryError("image operation");
                 return null;
             };
-            img.sharpen(allocator, out, @intCast(r)) catch {
+            img.sharpen(python.io, allocator, out, @intCast(r)) catch {
                 python.setMemoryError("image operation");
                 return null;
             };
@@ -756,7 +756,7 @@ pub fn image_motion_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
                 },
             };
 
-            img.motionBlur(allocator, out, blur_config) catch {
+            img.motionBlur(python.io, allocator, out, blur_config) catch {
                 python.setMemoryError("image operation");
                 return null;
             };
@@ -790,7 +790,7 @@ pub fn image_sobel(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.
                 python.setMemoryError("image operation");
                 return null;
             };
-            img.sobel(allocator, out) catch {
+            img.sobel(python.io, allocator, out) catch {
                 python.setMemoryError("image operation");
                 return null;
             };
@@ -904,7 +904,7 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
                 python.setMemoryError("image operation");
                 return null;
             };
-            img.shenCastan(allocator, out, o) catch |err| {
+            img.shenCastan(python.io, allocator, out, o) catch |err| {
                 if (err == error.InvalidBParameter) {
                     c.PyErr_SetString(c.PyExc_ValueError, "smooth parameter must be between 0 and 1");
                 } else if (err == error.WindowSizeMustBeOdd) {
@@ -1001,7 +1001,7 @@ pub fn image_canny(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
                 python.setMemoryError("image operation");
                 return null;
             };
-            img.canny(allocator, out, s, l, h) catch |err| {
+            img.canny(python.io, allocator, out, s, l, h) catch |err| {
                 if (err == error.InvalidParameter) {
                     python.setValueError("parameters must be finite numbers", .{});
                 } else if (err == error.InvalidSigma) {

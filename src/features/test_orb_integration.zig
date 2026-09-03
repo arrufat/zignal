@@ -27,11 +27,11 @@ test "ORB full pipeline - detection, description, and matching" {
     };
 
     // Detect and compute features for both images
-    const result1 = try orb.detectAndCompute(allocator, image1);
+    const result1 = try orb.detectAndCompute(std.Io.Threaded.global_single_threaded.io(), allocator, image1);
     defer allocator.free(result1.keypoints);
     defer allocator.free(result1.descriptors);
 
-    const result2 = try orb.detectAndCompute(allocator, image2);
+    const result2 = try orb.detectAndCompute(std.Io.Threaded.global_single_threaded.io(), allocator, image2);
     defer allocator.free(result2.keypoints);
     defer allocator.free(result2.descriptors);
 
@@ -81,11 +81,11 @@ test "ORB rotation invariance" {
     };
 
     // Detect features in both
-    const orig_result = try orb.detectAndCompute(allocator, original);
+    const orig_result = try orb.detectAndCompute(std.Io.Threaded.global_single_threaded.io(), allocator, original);
     defer allocator.free(orig_result.keypoints);
     defer allocator.free(orig_result.descriptors);
 
-    const rot_result = try orb.detectAndCompute(allocator, rotated);
+    const rot_result = try orb.detectAndCompute(std.Io.Threaded.global_single_threaded.io(), allocator, rotated);
     defer allocator.free(rot_result.keypoints);
     defer allocator.free(rot_result.descriptors);
 
@@ -127,11 +127,11 @@ test "ORB scale invariance" {
     };
 
     // Detect features
-    const orig_result = try orb.detectAndCompute(allocator, original);
+    const orig_result = try orb.detectAndCompute(std.Io.Threaded.global_single_threaded.io(), allocator, original);
     defer allocator.free(orig_result.keypoints);
     defer allocator.free(orig_result.descriptors);
 
-    const scaled_result = try orb.detectAndCompute(allocator, scaled);
+    const scaled_result = try orb.detectAndCompute(std.Io.Threaded.global_single_threaded.io(), allocator, scaled);
     defer allocator.free(scaled_result.keypoints);
     defer allocator.free(scaled_result.descriptors);
 
@@ -171,11 +171,11 @@ test "ORB kNN matching" {
         .fast_threshold = 10,
     };
 
-    const result1 = try orb.detectAndCompute(allocator, image1);
+    const result1 = try orb.detectAndCompute(std.Io.Threaded.global_single_threaded.io(), allocator, image1);
     defer allocator.free(result1.keypoints);
     defer allocator.free(result1.descriptors);
 
-    const result2 = try orb.detectAndCompute(allocator, image2);
+    const result2 = try orb.detectAndCompute(std.Io.Threaded.global_single_threaded.io(), allocator, image2);
     defer allocator.free(result2.keypoints);
     defer allocator.free(result2.descriptors);
 

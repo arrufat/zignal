@@ -1,6 +1,7 @@
 //! ORB (Oriented FAST and Rotated BRIEF) feature detector and descriptor
 
 const std = @import("std");
+const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const expectEqual = std.testing.expectEqual;
@@ -113,8 +114,9 @@ pub const ScoreType = enum {
 };
 
 /// Detect keypoints in the image at multiple scales
-pub fn detect(self: Orb, allocator: Allocator, image: Image(u8)) ![]KeyPoint {
+pub fn detect(self: Orb, io: Io, allocator: Allocator, image: Image(u8)) ![]KeyPoint {
     var pyramid = try ImagePyramid(u8).build(
+        io,
         allocator,
         image,
         self.n_levels,
@@ -127,8 +129,9 @@ pub fn detect(self: Orb, allocator: Allocator, image: Image(u8)) ![]KeyPoint {
 }
 
 /// Compute descriptors for detected keypoints
-pub fn compute(self: Orb, allocator: Allocator, image: Image(u8), keypoints: []const KeyPoint) ![]BinaryDescriptor {
+pub fn compute(self: Orb, io: Io, allocator: Allocator, image: Image(u8), keypoints: []const KeyPoint) ![]BinaryDescriptor {
     var pyramid = try ImagePyramid(u8).build(
+        io,
         allocator,
         image,
         self.n_levels,
@@ -246,11 +249,13 @@ fn computeWithPyramid(self: Orb, allocator: Allocator, pyramid: ImagePyramid(u8)
 /// Detect keypoints and compute their descriptors
 pub fn detectAndCompute(
     self: Orb,
+    io: Io,
     allocator: Allocator,
     image: Image(u8),
 ) !struct { keypoints: []KeyPoint, descriptors: []BinaryDescriptor } {
     // Build pyramid once for both detection and description
     var pyramid = try ImagePyramid(u8).build(
+        io,
         allocator,
         image,
         self.n_levels,
@@ -579,7 +584,7 @@ test "ORB detect and compute on synthetic image" {
         .fast_threshold = 10, // Lower threshold for test image
     };
 
-    const result = try orb.detectAndCompute(allocator, image);
+    const result = try orb.detectAndCompute(std.Io.Threaded.global_single_threaded.io(), allocator, image);
     defer allocator.free(result.keypoints);
     defer allocator.free(result.descriptors);
 
@@ -651,7 +656,7 @@ test "ORB on an image smaller than the requested pyramid" {
         image.at(r, c).* = 250;
     };
     const orb = Orb{ .n_features = 20, .fast_threshold = 10 };
-    const result = try orb.detectAndCompute(allocator, image);
+    const result = try orb.detectAndCompute(std.Io.Threaded.global_single_threaded.io(), allocator, image);
     defer allocator.free(result.keypoints);
     defer allocator.free(result.descriptors);
     try expectEqual(result.keypoints.len, result.descriptors.len);

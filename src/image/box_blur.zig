@@ -6,23 +6,25 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 
 const Image = @import("../image.zig").Image;
 const channel_ops = @import("channel_ops.zig");
 const meta = @import("../meta.zig");
+const parallel = @import("parallel.zig");
 
 const Mode = enum { blur, sharpen };
 
-pub fn boxBlur(comptime T: type, image: Image(T), out: Image(T), allocator: Allocator, radius: usize) !void {
-    try apply(T, .blur, image, out, allocator, radius);
+pub fn boxBlur(comptime T: type, io: Io, image: Image(T), out: Image(T), allocator: Allocator, radius: usize) !void {
+    try apply(T, .blur, io, image, out, allocator, radius);
 }
 
 /// Unsharp sharpen: `2 * original - box_blur(original)`, saturating.
-pub fn sharpen(comptime T: type, image: Image(T), out: Image(T), allocator: Allocator, radius: usize) !void {
-    try apply(T, .sharpen, image, out, allocator, radius);
+pub fn sharpen(comptime T: type, io: Io, image: Image(T), out: Image(T), allocator: Allocator, radius: usize) !void {
+    try apply(T, .sharpen, io, image, out, allocator, radius);
 }
 
-fn apply(comptime T: type, comptime mode: Mode, image: Image(T), out: Image(T), allocator: Allocator, radius: usize) !void {
+fn apply(comptime T: type, comptime mode: Mode, io: Io, image: Image(T), out: Image(T), allocator: Allocator, radius: usize) !void {
     if (image.rows == 0 or image.cols == 0) return;
     if (radius == 0) {
         image.copy(out);
@@ -34,21 +36,21 @@ fn apply(comptime T: type, comptime mode: Mode, image: Image(T), out: Image(T), 
     if (out.data.ptr == image.data.ptr) {
         var temp = try Image(T).initLike(allocator, image);
         defer temp.deinit(allocator);
-        try applyInto(T, mode, image, temp, allocator, radius);
+        try applyInto(T, mode, io, image, temp, allocator, radius);
         temp.copy(out);
         return;
     }
-    try applyInto(T, mode, image, out, allocator, radius);
+    try applyInto(T, mode, io, image, out, allocator, radius);
 }
 
-fn applyInto(comptime T: type, comptime mode: Mode, image: Image(T), out: Image(T), allocator: Allocator, radius: usize) !void {
+fn applyInto(comptime T: type, comptime mode: Mode, io: Io, image: Image(T), out: Image(T), allocator: Allocator, radius: usize) !void {
     switch (@typeInfo(T)) {
-        .int, .float => try plane(T, mode, image, out, allocator, radius),
+        .int, .float => try plane(T, mode, io, image, out, allocator, radius),
         .@"struct" => {
             if (comptime meta.allFieldsAreU8(T)) {
                 // All channels share the same pixel window, so the filter runs directly
                 // on the interleaved bytes — no channel split/merge passes.
-                try interleavedU8(T, mode, image, out, allocator, radius);
+                try interleavedU8(T, mode, io, image, out, allocator, radius);
             } else {
                 const num_channels = comptime Image(T).channels();
                 const P = channel_ops.FieldTypeOf(T);
@@ -62,7 +64,7 @@ fn applyInto(comptime T: type, comptime mode: Mode, image: Image(T), out: Image(
                 inline for (planes, dst_planes) |src_data, dst_data| {
                     const src_plane = Image(P).initFromSlice(image.rows, image.cols, src_data);
                     const dst_plane = Image(P).initFromSlice(image.rows, image.cols, dst_data);
-                    try plane(P, mode, src_plane, dst_plane, allocator, radius);
+                    try plane(P, mode, io, src_plane, dst_plane, allocator, radius);
                 }
 
                 channel_ops.mergeChannels(T, dst_planes, out);
@@ -111,25 +113,71 @@ fn InvT(comptime P: type) type {
 /// One scalar plane. Column sums slide down the rows; a horizontal running sum
 /// slides across each row. The per-pixel division is two reciprocal multiplies,
 /// since window heights are row-invariant and widths are column-invariant.
-fn plane(comptime P: type, comptime mode: Mode, src: Image(P), dst: Image(P), allocator: Allocator, radius: usize) !void {
+fn plane(comptime P: type, comptime mode: Mode, io: Io, src: Image(P), dst: Image(P), allocator: Allocator, radius: usize) !void {
     if (P != u8 and P != f32) @compileError("box filters support u8 and f32 planes");
     const rows: usize = src.rows;
     const cols: usize = src.cols;
 
-    const col_sums = try allocator.alloc(SumT(P), cols);
-    defer allocator.free(col_sums);
+    // Integer sums are exact, so bands seeded mid-image match one sweep; f64 sums would
+    // round differently, so f32 planes stay a single band.
+    const bands = if (@typeInfo(SumT(P)) == .int) bandsFor(rows, cols, radius) else 1;
+    const ctx: BandContext(P, SumT(P), InvT(P), planeRows(P, mode)) = .{
+        .src = src,
+        .dst = dst,
+        .radius = radius,
+        .width = cols,
+        .col_sums = try allocator.alloc(SumT(P), bands * cols),
+        .inv_widths = try invWidthTable(InvT(P), allocator, cols, radius),
+    };
+    defer allocator.free(ctx.col_sums);
+    defer allocator.free(ctx.inv_widths);
+    parallel.forRowBands(io, rows, bands, &ctx, @TypeOf(ctx).rowBand);
+}
+
+/// Every band re-seeds `2·radius + 1` rows of column sums, so bands stay at least four
+/// windows tall.
+fn bandsFor(rows: usize, cols: usize, radius: usize) usize {
+    return @max(1, @min(parallel.bandCount(rows, cols), rows / (4 * (2 * radius + 1))));
+}
+
+/// Read-only state shared by the row bands; `width` is the element count of one row of
+/// column sums (`cols`, or `cols * channels` for the interleaved path).
+fn BandContext(comptime P: type, comptime Sum: type, comptime Inv: type, comptime rowsFn: anytype) type {
+    return struct {
+        src: Image(P),
+        dst: Image(P),
+        radius: usize,
+        width: usize,
+        col_sums: []Sum,
+        inv_widths: []const Inv,
+
+        fn rowBand(ctx: *const @This(), band: usize, r0: usize, r1: usize) void {
+            rowsFn(ctx.src, ctx.dst, ctx.col_sums[band * ctx.width ..][0..ctx.width], ctx.inv_widths, ctx.radius, r0, r1);
+        }
+    };
+}
+
+/// Rows `[r_start, r_end)` of one plane; `col_sums` is seeded for `r_start` here.
+fn planeRows(comptime P: type, comptime mode: Mode) fn (Image(P), Image(P), []SumT(P), []const InvT(P), usize, usize, usize) void {
+    return struct {
+        fn run(src: Image(P), dst: Image(P), col_sums: []SumT(P), inv_widths: []const InvT(P), radius: usize, r_start: usize, r_end: usize) void {
+            planeRowsImpl(P, mode, src, dst, col_sums, inv_widths, radius, r_start, r_end);
+        }
+    }.run;
+}
+
+fn planeRowsImpl(comptime P: type, comptime mode: Mode, src: Image(P), dst: Image(P), col_sums: []SumT(P), inv_widths: []const InvT(P), radius: usize, r_start: usize, r_end: usize) void {
+    const rows: usize = src.rows;
+    const cols: usize = src.cols;
+
     @memset(col_sums, 0);
-
-    const inv_widths = try invWidthTable(InvT(P), allocator, cols, radius);
-    defer allocator.free(inv_widths);
-
-    for (0..@min(radius + 1, rows)) |rr| {
+    for (r_start -| radius..@min(r_start + radius + 1, rows)) |rr| {
         const row = src.data[rr * src.stride ..][0..cols];
         for (col_sums, row) |*s, v| s.* += v;
     }
 
-    for (0..rows) |r| {
-        if (r > 0) {
+    for (r_start..r_end) |r| {
+        if (r > r_start) {
             const has_add = r + radius < rows;
             const has_sub = r >= radius + 1;
             if (has_add and has_sub) {
@@ -211,21 +259,39 @@ inline fn emitAndSlide(
 /// N-lane vector window sum slides across each row (all channels of a pixel at once).
 /// Segmentation mirrors `plane` exactly — one reciprocal multiply where its SIMD interior
 /// ran, two elsewhere — so outputs match the plane-split path bit for bit.
-fn interleavedU8(comptime T: type, comptime mode: Mode, image: Image(T), out: Image(T), allocator: Allocator, radius: usize) !void {
+fn interleavedU8(comptime T: type, comptime mode: Mode, io: Io, image: Image(T), out: Image(T), allocator: Allocator, radius: usize) !void {
+    const width_e = @as(usize, image.cols) * comptime Image(T).channels();
+    const bands = bandsFor(image.rows, image.cols, radius);
+    const ctx: BandContext(T, u32, f32, interleavedRows(T, mode)) = .{
+        .src = image,
+        .dst = out,
+        .radius = radius,
+        .width = width_e,
+        .col_sums = try allocator.alloc(u32, bands * width_e),
+        .inv_widths = try invWidthTable(f32, allocator, image.cols, radius),
+    };
+    defer allocator.free(ctx.col_sums);
+    defer allocator.free(ctx.inv_widths);
+    parallel.forRowBands(io, image.rows, bands, &ctx, @TypeOf(ctx).rowBand);
+}
+
+/// Rows `[r_start, r_end)` of the interleaved path; `col_sums` is seeded for `r_start` here.
+fn interleavedRows(comptime T: type, comptime mode: Mode) fn (Image(T), Image(T), []u32, []const f32, usize, usize, usize) void {
+    return struct {
+        fn run(image: Image(T), out: Image(T), col_sums: []u32, inv_widths: []const f32, radius: usize, r_start: usize, r_end: usize) void {
+            interleavedRowsImpl(T, mode, image, out, col_sums, inv_widths, radius, r_start, r_end);
+        }
+    }.run;
+}
+
+fn interleavedRowsImpl(comptime T: type, comptime mode: Mode, image: Image(T), out: Image(T), col_sums: []u32, inv_widths: []const f32, radius: usize, r_start: usize, r_end: usize) void {
     const n = comptime Image(T).channels();
     const rows: usize = image.rows;
     const cols: usize = image.cols;
-    const width_e = cols * n;
     const Lane = @Vector(n, u32);
 
-    const col_sums = try allocator.alloc(u32, width_e);
-    defer allocator.free(col_sums);
     @memset(col_sums, 0);
-
-    const inv_widths = try invWidthTable(f32, allocator, cols, radius);
-    defer allocator.free(inv_widths);
-
-    for (0..@min(radius + 1, rows)) |rr| {
+    for (r_start -| radius..@min(r_start + radius + 1, rows)) |rr| {
         const row = std.mem.sliceAsBytes(image.data[rr * image.stride ..][0..cols]);
         for (col_sums, row) |*s, v| s.* += v;
     }
@@ -245,8 +311,8 @@ fn interleavedU8(comptime T: type, comptime mode: Mode, image: Image(T), out: Im
         break :blk m;
     };
 
-    for (0..rows) |r| {
-        if (r > 0) {
+    for (r_start..r_end) |r| {
+        if (r > r_start) {
             const has_add = r + radius < rows;
             const has_sub = r >= radius + 1;
             if (has_add and has_sub) {

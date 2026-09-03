@@ -1,5 +1,6 @@
 //! Convolution micro-benchmarks: gaussian blur, 2D convolve, sobel, motion blur, separable.
-//! Synthetic seeded-random images, no file I/O; reports median time over several iterations.
+//! Synthetic seeded-random images, no file I/O; reports median times over several iterations,
+//! serially and on the process thread pool.
 //! Optional CLI arg filters benchmarks by substring: `run-convolution-bench -- gaussian`
 
 const std = @import("std");
@@ -47,22 +48,29 @@ fn initRandom(comptime T: type, gpa: std.mem.Allocator, random: std.Random, rows
     return img;
 }
 
-/// Runs ctx.run() warmup + iters times and reports the median.
+/// Runs `ctx.run()` on a single-threaded `Io` and on `io`'s pool; reports both medians.
 fn benchOp(io: std.Io, name: []const u8, rows: usize, cols: usize, ctx: anytype) !void {
+    const serial_ns = try medianNs(io, std.Io.Threaded.global_single_threaded.io(), rows, cols, ctx);
+    const parallel_ns = try medianNs(io, io, rows, cols, ctx);
+
+    const serial_ms = @as(f64, @floatFromInt(serial_ns)) / std.time.ns_per_ms;
+    const parallel_ms = @as(f64, @floatFromInt(parallel_ns)) / std.time.ns_per_ms;
+    const mpix_s = @as(f64, @floatFromInt(rows * cols)) / @as(f64, @floatFromInt(parallel_ns)) * 1000.0;
+    std.debug.print("{s:<42} | {d:>4}x{d:<4} | {d:>9.3} | {d:>9.3} | {d:>6.2}x | {d:>8.1}\n", .{ name, rows, cols, serial_ms, parallel_ms, serial_ms / parallel_ms, mpix_s });
+}
+
+/// Median wall time of `ctx.run(run_io)` over warmup + `itersFor` iterations.
+fn medianNs(io: std.Io, run_io: std.Io, rows: usize, cols: usize, ctx: anytype) !u64 {
     var samples: [max_iters]u64 = undefined;
     const iters = itersFor(rows, cols);
-    for (0..warmup_iters) |_| try ctx.run();
+    for (0..warmup_iters) |_| try ctx.run(run_io);
     for (samples[0..iters]) |*s| {
         const start = std.Io.Clock.awake.now(io);
-        try ctx.run();
+        try ctx.run(run_io);
         s.* = @intCast(start.durationTo(std.Io.Clock.awake.now(io)).toNanoseconds());
     }
     std.mem.sort(u64, samples[0..iters], {}, std.sort.asc(u64));
-    const median_ns = samples[iters / 2];
-
-    const ms = @as(f64, @floatFromInt(median_ns)) / std.time.ns_per_ms;
-    const mpix_s = @as(f64, @floatFromInt(rows * cols)) / @as(f64, @floatFromInt(median_ns)) * 1000.0;
-    std.debug.print("{s:<42} | {d:>4}x{d:<4} | {d:>10.3} | {d:>8.1}\n", .{ name, rows, cols, ms, mpix_s });
+    return samples[iters / 2];
 }
 
 fn benchGaussian(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: usize, cols: usize, sigma: f32) !void {
@@ -80,8 +88,8 @@ fn benchGaussian(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: s
         dst: Image(T),
         gpa: std.mem.Allocator,
         sigma: f32,
-        fn run(self: @This()) !void {
-            try self.src.gaussianBlur(self.gpa, self.dst, self.sigma);
+        fn run(self: @This(), run_io: std.Io) !void {
+            try self.src.gaussianBlur(run_io, self.gpa, self.dst, self.sigma);
         }
     };
     try benchOp(io, name, rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa, .sigma = sigma });
@@ -102,8 +110,8 @@ fn benchConvolve2D(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random:
         dst: Image(T),
         gpa: std.mem.Allocator,
         border: BorderMode,
-        fn run(self: @This()) !void {
-            try self.src.convolve(self.gpa, self.dst, kernel, self.border);
+        fn run(self: @This(), run_io: std.Io) !void {
+            try self.src.convolve(run_io, self.gpa, self.dst, kernel, self.border);
         }
     };
     try benchOp(io, name, rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa, .border = border });
@@ -121,8 +129,8 @@ fn benchSobel(io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[
         src: Image(f32),
         dst: Image(u8),
         gpa: std.mem.Allocator,
-        fn run(self: @This()) !void {
-            try self.src.sobel(self.gpa, self.dst);
+        fn run(self: @This(), run_io: std.Io) !void {
+            try self.src.sobel(run_io, self.gpa, self.dst);
         }
     };
     try benchOp(io, "sobel f32", rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa });
@@ -143,8 +151,8 @@ fn benchMotionBlur(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random:
         dst: Image(T),
         gpa: std.mem.Allocator,
         distance: usize,
-        fn run(self: @This()) !void {
-            try self.src.motionBlur(self.gpa, self.dst, .{ .linear = .{ .angle = 0, .distance = self.distance } });
+        fn run(self: @This(), run_io: std.Io) !void {
+            try self.src.motionBlur(run_io, self.gpa, self.dst, .{ .linear = .{ .angle = 0, .distance = self.distance } });
         }
     };
     try benchOp(io, name, rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa, .distance = distance });
@@ -164,8 +172,8 @@ fn benchSeparable(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: 
         src: Image(T),
         dst: Image(T),
         gpa: std.mem.Allocator,
-        fn run(self: @This()) !void {
-            try self.src.convolveSeparable(self.gpa, self.dst, &gaussian_9, &gaussian_9, .mirror);
+        fn run(self: @This(), run_io: std.Io) !void {
+            try self.src.convolveSeparable(run_io, self.gpa, self.dst, &gaussian_9, &gaussian_9, .mirror);
         }
     };
     try benchOp(io, name, rows, cols, Ctx{ .src = src, .dst = dst, .gpa = gpa });
@@ -186,7 +194,7 @@ fn benchMedian(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std
         dst: Image(T),
         gpa: std.mem.Allocator,
         radius: usize,
-        fn run(self: @This()) !void {
+        fn run(self: @This(), _: std.Io) !void {
             try self.src.medianBlur(self.gpa, self.dst, self.radius);
         }
     };
@@ -205,8 +213,8 @@ pub fn main(init: std.process.Init) !void {
     var prng = std.Random.DefaultPrng.init(0x5eed_2026);
     const random = prng.random();
 
-    std.debug.print("{s:<42} | {s:^9} | {s:>10} | {s:>8}\n", .{ "benchmark", "size", "ms", "MPix/s" });
-    std.debug.print("{s:-<42}-+-{s:-<9}-+-{s:-<10}-+-{s:-<8}\n", .{ "", "", "", "" });
+    std.debug.print("{s:<42} | {s:^9} | {s:>9} | {s:>9} | {s:>7} | {s:>8}\n", .{ "benchmark", "size", "serial ms", "pool ms", "speedup", "MPix/s" });
+    std.debug.print("{s:-<42}-+-{s:-<9}-+-{s:-<9}-+-{s:-<9}-+-{s:-<7}-+-{s:-<8}\n", .{ "", "", "", "", "", "" });
 
     // Gaussian blur (separable u8 fixed-point and struct paths)
     try benchGaussian(u8, io, gpa, random, filter, 480, 640, 1);

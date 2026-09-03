@@ -6,7 +6,7 @@ const Image = zignal.Image;
 const BinaryKernel = zignal.BinaryKernel;
 
 const python = @import("../python.zig");
-const allocator = python.ctx.allocator;
+const allocator = python.allocator;
 const c = python.c;
 
 const ImageObject = @import("../image.zig").ImageObject;

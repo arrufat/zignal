@@ -4,13 +4,19 @@ const Io = std.Io;
 const zignal = @import("zignal");
 const Point = zignal.Point;
 
-pub const ctx = struct {
-    io: Io,
-    allocator: std.mem.Allocator,
-}{
-    .io = Io.Threaded.global_single_threaded.io(),
-    .allocator = std.heap.c_allocator,
-};
+pub const allocator = std.heap.c_allocator;
+
+/// Single-threaded until `initThreadedIo` swaps in the pool; read it at call time, never
+/// cache it in a file-scope const.
+pub var io: Io = Io.Threaded.global_single_threaded.io();
+var threaded: Io.Threaded = undefined;
+
+/// Called once from module init; the pool lives for the rest of the process and runs file
+/// I/O as well as the filters' row bands.
+pub fn initThreadedIo() void {
+    threaded = .init(allocator, .{});
+    io = threaded.io();
+}
 
 pub const c = @import("c");
 
@@ -507,7 +513,7 @@ fn toArrayList(comptime T: type, seq_obj: ?*c.PyObject) !std.ArrayList(T) {
     const size = c.PySequence_Size(seq_obj);
     if (size < 0) return error.PythonError;
 
-    var list = std.ArrayList(T).init(ctx.allocator);
+    var list = std.ArrayList(T).init(allocator);
     errdefer list.deinit();
     try list.ensureTotalCapacity(@intCast(size));
 
@@ -744,11 +750,11 @@ fn parsePointSlice(comptime T: type, list_obj: ?*c.PyObject) ![]Point(2, T) {
     }
 
     // Allocate memory for points
-    const points = ctx.allocator.alloc(Point(2, T), @intCast(size)) catch {
+    const points = allocator.alloc(Point(2, T), @intCast(size)) catch {
         c.PyErr_SetString(c.PyExc_MemoryError, "Failed to allocate memory for points");
         return error.OutOfMemory;
     };
-    errdefer ctx.allocator.free(points);
+    errdefer allocator.free(points);
 
     // Parse each point
     for (0..@intCast(size)) |i| {
@@ -771,8 +777,8 @@ pub fn PointPairs(comptime T: type) type {
         to_points: []Point(2, T),
 
         pub fn deinit(self: *@This()) void {
-            ctx.allocator.free(self.from_points);
-            ctx.allocator.free(self.to_points);
+            allocator.free(self.from_points);
+            allocator.free(self.to_points);
         }
     };
 }
@@ -785,10 +791,10 @@ pub fn parsePointPairs(
     comptime min_points_message: []const u8,
 ) !PointPairs(T) {
     const from_points = parsePointSlice(T, from_obj) catch |err| return err;
-    errdefer ctx.allocator.free(from_points);
+    errdefer allocator.free(from_points);
 
     const to_points = parsePointSlice(T, to_obj) catch |err| return err;
-    errdefer ctx.allocator.free(to_points);
+    errdefer allocator.free(to_points);
 
     if (from_points.len != to_points.len) {
         setValueError("from_points and to_points must have the same length", .{});
@@ -825,7 +831,7 @@ pub fn projectPoints2D(points_obj: ?*c.PyObject, point_ctx: anytype, comptime ap
 
     if (c.PySequence_Check(points_obj) != 0) {
         const points = parsePointSlice(f64, points_obj) catch return null;
-        defer ctx.allocator.free(points);
+        defer allocator.free(points);
 
         const result_list = c.PyList_New(@intCast(points.len)) orelse return null;
 
@@ -1380,7 +1386,7 @@ pub fn buildTypeObject(comptime config: TypeObjectConfig) c.PyTypeObject {
 
 /// Create a heap-allocated object with automatic memory management
 pub fn allocate(comptime T: type, args: anytype) !*T {
-    const obj = ctx.allocator.create(T) catch {
+    const obj = allocator.create(T) catch {
         setMemoryError(@typeName(T));
         return error.OutOfMemory;
     };
@@ -1388,7 +1394,7 @@ pub fn allocate(comptime T: type, args: anytype) !*T {
     const ResultType = @typeInfo(@TypeOf(T.init)).@"fn".return_type.?;
     if (@typeInfo(ResultType) == .error_union) {
         obj.* = @call(.auto, T.init, args) catch |err| {
-            ctx.allocator.destroy(obj);
+            allocator.destroy(obj);
             mapZigError(err, @typeName(T));
             return err;
         };
@@ -1403,7 +1409,7 @@ pub fn allocate(comptime T: type, args: anytype) !*T {
 pub fn destroyHeapObject(comptime T: type, ptr: ?*T) void {
     if (ptr) |p| {
         p.deinit();
-        ctx.allocator.destroy(p);
+        allocator.destroy(p);
     }
 }
 

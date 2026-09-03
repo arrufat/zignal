@@ -203,6 +203,7 @@ class TestImage:
         median = img.median_blur(1)
         assert isinstance(median, zignal.Image)
 
+
         percentile = img.percentile_blur(1, 1.0)
         assert isinstance(percentile, zignal.Image)
 
@@ -222,6 +223,19 @@ class TestImage:
 
         with pytest.raises(ValueError):
             img.alpha_trimmed_mean_blur(1, 0.6)
+
+    def test_gaussian_blur_iir_matches_fir(self):
+        rng = np.random.default_rng(7)
+        arr = rng.integers(0, 256, size=(96, 128, 1), dtype=np.uint8)
+        img = zignal.Image.from_numpy(arr)
+        fir = img.gaussian_blur(6.0).to_numpy().astype(np.int16)
+        iir = img.gaussian_blur(6.0, method=zignal.GaussianMethod.IIR).to_numpy().astype(np.int16)
+        # FIR mirrors the borders and IIR replicates them, so compare inside a 3-sigma margin.
+        diff = np.abs(fir - iir)[18:-18, 18:-18]
+        assert diff.max() <= 4
+        assert diff.mean() < 0.5
+        auto = img.gaussian_blur(6.0, method=zignal.GaussianMethod.AUTO).to_numpy()
+        assert np.array_equal(auto, iir.astype(np.uint8))
 
     def test_threshold_otsu_and_rgb_autoconvert(self):
         img = zignal.Image(4, 4, dtype=zignal.Gray)

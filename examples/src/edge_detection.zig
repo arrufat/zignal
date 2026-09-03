@@ -25,17 +25,17 @@ pub fn main(init: std.process.Init) !void {
     const font = zignal.font.font8x8.basic;
 
     const sobel = edges.view(.{ .t = 0, .l = 0, .r = scaled.cols, .b = scaled.rows });
-    try scaled.sobel(init.gpa, sobel);
+    try scaled.sobel(init.io, init.gpa, sobel);
     canvas = .init(init.gpa, sobel);
     try canvas.drawText("Sobel", p(.{ 0, 0 }), @as(u8, 255), .{ .bitmap = font }, 24, .fast);
 
     const shenCastan = edges.view(.{ .t = 0, .l = scaled.cols, .r = 2 * scaled.cols, .b = scaled.rows });
-    try scaled.shenCastan(init.gpa, shenCastan, .heavy_smooth);
+    try scaled.shenCastan(init.io, init.gpa, shenCastan, .heavy_smooth);
     canvas = .init(init.gpa, shenCastan);
     try canvas.drawText("Shen Castan", p(.{ 0, 0 }), @as(u8, 255), .{ .bitmap = font }, 24, .fast);
 
     const canny = edges.view(.{ .t = 0, .l = 2 * scaled.cols, .r = 3 * scaled.cols, .b = scaled.rows });
-    try scaled.canny(init.gpa, canny, 1.4, 75, 150);
+    try scaled.canny(init.io, init.gpa, canny, 1.4, 75, 150);
     canvas = .init(init.gpa, canny);
     try canvas.drawText("Canny", p(.{ 0, 0 }), @as(u8, 255), .{ .bitmap = font }, 24, .fast);
 

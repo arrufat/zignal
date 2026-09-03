@@ -17,7 +17,7 @@ const convex_hull_new = python.genericNew(ConvexHullObject);
 
 fn convex_hull_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
     const self = python.safeCast(ConvexHullObject, self_obj);
-    self.hull = python.allocate(ConvexHull, .{python.ctx.allocator}) catch return -1;
+    self.hull = python.allocate(ConvexHull, .{python.allocator}) catch return -1;
 
     // Parse optional points argument
     const Params = struct {
@@ -30,7 +30,7 @@ fn convex_hull_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 
     // Parse the point list
     const points = python.parse([]zignal.Point(2, f64), points_obj) catch return -1;
-    defer python.ctx.allocator.free(points);
+    defer python.allocator.free(points);
 
     // Find convex hull
     _ = self.hull.?.find(points) catch |err| {
@@ -102,7 +102,7 @@ fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         // Error already set by parsePointList
         return null;
     };
-    defer python.ctx.allocator.free(points);
+    defer python.allocator.free(points);
 
     // Find convex hull with improved error handling
     const hull_points = hull.find(points) catch |err| {

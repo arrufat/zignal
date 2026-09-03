@@ -1,4 +1,6 @@
 const std = @import("std");
+// No Io.Threaded on freestanding; `failing` runs filter bands inline and rejects real I/O.
+const serial_io: std.Io = .failing;
 
 const zignal = @import("zignal");
 const BruteForceMatcher = zignal.BruteForceMatcher;
@@ -51,11 +53,11 @@ fn createMatchVisualizationWithParams(
     };
 
     // Detect features in both images
-    const features1 = try orb.detectAndCompute(allocator, gray1);
+    const features1 = try orb.detectAndCompute(serial_io, allocator, gray1);
     defer allocator.free(features1.keypoints);
     defer allocator.free(features1.descriptors);
 
-    const features2 = try orb.detectAndCompute(allocator, gray2);
+    const features2 = try orb.detectAndCompute(serial_io, allocator, gray2);
     defer allocator.free(features2.keypoints);
     defer allocator.free(features2.descriptors);
 
@@ -293,14 +295,14 @@ pub export fn getMatchStats(
         .fast_threshold = fast_threshold,
     };
 
-    const features1 = orb.detectAndCompute(allocator, gray1) catch {
+    const features1 = orb.detectAndCompute(serial_io, allocator, gray1) catch {
         for (0..6) |i| stats_ptr[i] = 0;
         return;
     };
     defer allocator.free(features1.keypoints);
     defer allocator.free(features1.descriptors);
 
-    const features2 = orb.detectAndCompute(allocator, gray2) catch {
+    const features2 = orb.detectAndCompute(serial_io, allocator, gray2) catch {
         stats_ptr[0] = @floatFromInt(features1.keypoints.len);
         for (1..6) |i| stats_ptr[i] = 0;
         return;

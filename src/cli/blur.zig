@@ -108,7 +108,7 @@ pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options
     switch (blur_type) {
         .box => {
             const radius = options.radius orelse 1;
-            try img.boxBlur(gpa, out, radius);
+            try img.boxBlur(io, gpa, out, radius);
         },
         .gaussian => {
             const sigma = options.sigma orelse 1.0;
@@ -116,7 +116,7 @@ pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options
                 std.log.err("sigma must be a non-negative finite number.", .{});
                 return error.InvalidArguments;
             }
-            try img.gaussianBlur(gpa, out, sigma);
+            try img.gaussianBlur(io, gpa, out, sigma);
         },
         .median => {
             const radius = options.radius orelse 1;
@@ -147,7 +147,7 @@ pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options
             }
 
             const angle_rad = std.math.degreesToRadians(angle_deg);
-            try img.motionBlur(gpa, out, .{ .linear = .{ .angle = angle_rad, .distance = @trunc(dist) } });
+            try img.motionBlur(io, gpa, out, .{ .linear = .{ .angle = angle_rad, .distance = @trunc(dist) } });
         },
         .motion_zoom, .motion_spin => {
             const cx = options.center_x orelse 0.5;
@@ -173,7 +173,7 @@ pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options
             else
                 .{ .radial_spin = .{ .center_x = cx, .center_y = cy, .strength = strength } };
 
-            try img.motionBlur(gpa, out, motion);
+            try img.motionBlur(io, gpa, out, motion);
         },
     }
 

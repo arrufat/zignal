@@ -53,6 +53,7 @@ comptime {
 pub export fn PyInit__zignal() ?*c.PyObject {
     const m = c.PyModule_Create(&zignal_module);
     if (m == null) return null;
+    python.initThreadedIo();
 
     // ========================================================================
     // Consolidated Type Registration

@@ -1,4 +1,6 @@
 const std = @import("std");
+// No Io.Threaded on freestanding; `failing` runs filter bands inline and rejects real I/O.
+const serial_io: std.Io = .failing;
 const assert = std.debug.assert;
 const builtin = @import("builtin");
 
@@ -92,9 +94,9 @@ pub fn extractAlignedFace(
 
     // Perform blurring or sharpening to the aligned face.
     if (blurring > 0) {
-        try out.boxBlur(allocator, out.*, @intCast(blurring));
+        try out.boxBlur(serial_io, allocator, out.*, @intCast(blurring));
     } else if (blurring < 0) {
-        try out.sharpen(allocator, out.*, @intCast(-blurring));
+        try out.sharpen(serial_io, allocator, out.*, @intCast(-blurring));
     }
 }
 
