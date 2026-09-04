@@ -1272,34 +1272,37 @@ fn createIHDR(header: Header) ![13]u8 {
 }
 
 /// Apply PNG row filtering to scanlines
-fn filterScanlines(allocator: Allocator, data: []const u8, header: Header, filter_type: FilterType) ![]u8 {
+/// Every Nth row is analyzed for the adaptive filter on tall images; the rest reuse the
+/// last choice. Positional, so chunks and bands pick the same filters as one sweep.
+fn adaptiveSampleRate(header: Header) u32 {
+    return if (header.height > 512) 8 else 1;
+}
+
+/// Filters rows `[r0, r1)` of `data` into `filtered` (filter byte plus row each). Adaptive
+/// mode analyzes rows at the sample rate and the first and last three, reusing the last
+/// analyzed filter in between; `r0` must be on the sample rate.
+fn filterRows(filtered: []u8, data: []const u8, header: Header, mode: FilterMode, temp: []u8, r0: u32, r1: u32) void {
     const scanline_bytes = header.scanlineBytes();
     const bytes_per_pixel = header.bytesPerPixel();
-    const filtered_size = header.height * (scanline_bytes + 1); // +1 for filter byte
-
-    var filtered_data = try allocator.alloc(u8, filtered_size);
-
-    var y: u32 = 0;
-    while (y < header.height) : (y += 1) {
-        const src_row_start = y * scanline_bytes;
-        const dst_row_start = y * (scanline_bytes + 1);
-
-        const src_row = data[src_row_start .. src_row_start + scanline_bytes];
-        const dst_row = filtered_data[dst_row_start + 1 .. dst_row_start + 1 + scanline_bytes];
-
-        // Set filter type byte
-        filtered_data[dst_row_start] = @backingInt(filter_type);
-
-        // Apply filtering
-        const previous_row = if (y > 0)
-            data[(y - 1) * scanline_bytes .. (y - 1) * scanline_bytes + scanline_bytes]
-        else
-            null;
-
-        filterRow(filter_type, dst_row, src_row, previous_row, bytes_per_pixel);
+    const sample_rate = adaptiveSampleRate(header);
+    var last = FilterType.none;
+    for (r0..r1) |y| {
+        const src_row = data[y * scanline_bytes ..][0..scanline_bytes];
+        const dst_row = filtered[y * (scanline_bytes + 1) + 1 ..][0..scanline_bytes];
+        const previous_row: ?[]const u8 = if (y > 0) data[(y - 1) * scanline_bytes ..][0..scanline_bytes] else null;
+        const filter: FilterType = switch (mode) {
+            .none => .none,
+            .fixed => |fixed| fixed,
+            .adaptive => blk: {
+                if (y % sample_rate == 0 or y < 3 or y + 3 >= header.height) {
+                    last = selectBestFilter(src_row, previous_row, bytes_per_pixel, temp);
+                }
+                break :blk last;
+            },
+        };
+        filtered[y * (scanline_bytes + 1)] = @backingInt(filter);
+        filterRow(filter, dst_row, src_row, previous_row, bytes_per_pixel);
     }
-
-    return filtered_data;
 }
 
 // PNG encoding options
@@ -1341,8 +1344,133 @@ fn getColorType(comptime T: type) ColorType {
     };
 }
 
+/// Filtered bytes per deflate chunk. Chunks compress independently (each starts with an
+/// empty window) and their boundaries fix the output, so the size is chosen here rather
+/// than from the thread count: ~256 KiB keeps the window-reset loss under a percent.
+const deflate_chunk_bytes: usize = 256 * 1024;
+
+/// Rows per deflate chunk: whole rows of about `deflate_chunk_bytes`, a multiple of the
+/// adaptive sample rate so every chunk starts on an analyzed row.
+fn chunkRows(header: Header) u32 {
+    const row_bytes = header.scanlineBytes() + 1;
+    const sample_rate = adaptiveSampleRate(header);
+    const rows: u32 = @intCast(@max(sample_rate, deflate_chunk_bytes / row_bytes / sample_rate * sample_rate));
+    return @min(rows, @max(header.height, 1));
+}
+
+/// adler32 of `a ++ b` from the two checksums and `b`'s length (zlib's adler32_combine).
+fn adlerCombine(a: u32, b: u32, b_len: usize) u32 {
+    const base: u64 = 65521;
+    const rem: u64 = b_len % base;
+    const s1a: u64 = a & 0xffff;
+    const s2a: u64 = a >> 16;
+    const s1b: u64 = b & 0xffff;
+    const s2b: u64 = b >> 16;
+    const s1 = (s1a + s1b + base - 1) % base;
+    const s2 = (s2a + s2b + rem * (s1a + base - 1)) % base;
+    return @intCast(s1 | (s2 << 16));
+}
+
+/// The zlib stream of the filtered rows: chunks of `chunkRows` rows are filtered and
+/// deflated in bands on `io`, each chunk as an independent raw deflate run ended by a sync
+/// flush (byte-aligned, non-final block) so the runs concatenate; the last chunk finishes
+/// the stream, and the zlib header and adler32 over all rows are written here. The
+/// compression itself is `std.compress.flate`; only the chunking is ours.
+fn deflateRows(io: Io, gpa: Allocator, image_data: []const u8, header: Header, options: EncodeOptions) ![]u8 {
+    const row_bytes = header.scanlineBytes() + 1;
+    const rows_per_chunk: usize = chunkRows(header);
+    const chunks = @max(1, (@as(usize, header.height) + rows_per_chunk - 1) / rows_per_chunk);
+    const bands = @min(parallel.bandCount(header.height, header.scanlineBytes()), chunks);
+
+    const filtered = try gpa.alloc(u8, @as(usize, header.height) * row_bytes);
+    defer gpa.free(filtered);
+
+    const Band = struct {
+        out: Io.Writer.Allocating,
+        adler: u32 = 1,
+        len: usize = 0,
+        err: ?anyerror = null,
+    };
+    const Ctx = struct {
+        gpa: Allocator,
+        image_data: []const u8,
+        filtered: []u8,
+        header: Header,
+        options: EncodeOptions,
+        rows_per_chunk: usize,
+        chunks: usize,
+        bands: []Band,
+
+        fn run(ctx: *const @This(), k: usize, c0: usize, c1: usize) void {
+            ctx.bands[k].err = null;
+            ctx.encodeChunks(&ctx.bands[k], c0, c1) catch |err| {
+                ctx.bands[k].err = err;
+            };
+        }
+
+        fn encodeChunks(ctx: *const @This(), band: *Band, c0: usize, c1: usize) !void {
+            const hdr = ctx.header;
+            const rb = hdr.scanlineBytes() + 1;
+            const window = try ctx.gpa.alloc(u8, flate.max_window_len);
+            defer ctx.gpa.free(window);
+            const temp = try ctx.gpa.alloc(u8, hdr.scanlineBytes());
+            defer ctx.gpa.free(temp);
+            for (c0..c1) |chunk| {
+                const r0: u32 = @intCast(chunk * ctx.rows_per_chunk);
+                const r1: u32 = @intCast(@min(hdr.height, (chunk + 1) * ctx.rows_per_chunk));
+                filterRows(ctx.filtered, ctx.image_data, hdr, ctx.options.filter, temp, r0, r1);
+                const rows = ctx.filtered[r0 * rb .. r1 * rb];
+                // The compressor needs a sized output buffer; half the input is the usual ratio.
+                try band.out.ensureUnusedCapacity(rows.len / 2 + 64);
+                var compressor: flate.Compress = try .init(&band.out.writer, window, .raw, ctx.options.compress_options);
+                try compressor.writer.writeAll(rows);
+                if (chunk + 1 == ctx.chunks) try compressor.finish() else try compressor.writer.flush();
+                band.adler = adlerCombine(band.adler, std.hash.Adler32.hash(rows), rows.len);
+                band.len += rows.len;
+            }
+        }
+    };
+
+    const band_list = try gpa.alloc(Band, bands);
+    defer gpa.free(band_list);
+    for (band_list) |*band| band.* = .{ .out = .init(gpa) };
+    defer for (band_list) |*band| band.out.deinit();
+    const ctx: Ctx = .{
+        .gpa = gpa,
+        .image_data = image_data,
+        .filtered = filtered,
+        .header = header,
+        .options = options,
+        .rows_per_chunk = rows_per_chunk,
+        .chunks = chunks,
+        .bands = band_list,
+    };
+    parallel.forRowBands(io, chunks, bands, &ctx, Ctx.run);
+
+    var total: usize = flate.Container.zlib.size();
+    var adler: u32 = 1;
+    for (band_list) |*band| {
+        if (band.err) |err| return err;
+        total += band.out.written().len;
+        adler = adlerCombine(adler, band.adler, band.len);
+    }
+    var stream = try gpa.alloc(u8, total);
+    errdefer gpa.free(stream);
+    var pos: usize = 0;
+    const zlib_header = flate.Container.zlib.header();
+    @memcpy(stream[pos..][0..zlib_header.len], zlib_header);
+    pos += zlib_header.len;
+    for (band_list) |*band| {
+        const bytes = band.out.written();
+        @memcpy(stream[pos..][0..bytes.len], bytes);
+        pos += bytes.len;
+    }
+    std.mem.writeInt(u32, stream[pos..][0..4], adler, .big);
+    return stream;
+}
+
 // Encode raw image data to PNG format (internal use)
-fn encodeRaw(gpa: Allocator, image_data: []const u8, width: u32, height: u32, color_type: ColorType, bit_depth: u8, options: EncodeOptions) ![]u8 {
+fn encodeRaw(io: Io, gpa: Allocator, image_data: []const u8, width: u32, height: u32, color_type: ColorType, bit_depth: u8, options: EncodeOptions) ![]u8 {
     var writer = ChunkWriter.init(gpa);
     defer writer.deinit();
 
@@ -1374,27 +1502,7 @@ fn encodeRaw(gpa: Allocator, image_data: []const u8, width: u32, height: u32, co
         try writer.writeChunk("gAMA".*, &gama_data);
     }
 
-    // Apply row filtering based on options
-    const filtered_data = switch (options.filter) {
-        .none => try filterScanlines(gpa, image_data, header, .none),
-        .adaptive => try filterScanlinesAdaptive(gpa, image_data, header),
-        .fixed => |filter_type| try filterScanlines(gpa, image_data, header, filter_type),
-    };
-    defer gpa.free(filtered_data);
-
-    // Compress filtered data with zlib format (required for PNG IDAT)
-    var aw: Io.Writer.Allocating = .init(gpa);
-    defer aw.deinit();
-    try aw.ensureTotalCapacity(filtered_data.len / 2 + 64);
-
-    const buffer = try gpa.alloc(u8, flate.max_window_len);
-    defer gpa.free(buffer);
-
-    var compressor: flate.Compress = try .init(&aw.writer, buffer, .zlib, options.compress_options);
-    try compressor.writer.writeAll(filtered_data);
-    try compressor.finish();
-
-    const compressed_data = try aw.toOwnedSlice();
+    const compressed_data = try deflateRows(io, gpa, image_data, header, options);
     defer gpa.free(compressed_data);
 
     // Write IDAT chunk
@@ -1413,15 +1521,15 @@ pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), o
     switch (T) {
         u8, Rgb, Rgba => {
             // Views are packed into a contiguous copy first.
-            if (image.isContiguous()) return encodeRaw(allocator, image.asBytes(), image.cols, image.rows, color_type, 8, options);
+            if (image.isContiguous()) return encodeRaw(io, allocator, image.asBytes(), image.cols, image.rows, color_type, 8, options);
             var contiguous = try image.dupe(allocator);
             defer contiguous.deinit(allocator);
-            return encodeRaw(allocator, contiguous.asBytes(), image.cols, image.rows, color_type, 8, options);
+            return encodeRaw(io, allocator, contiguous.asBytes(), image.cols, image.rows, color_type, 8, options);
         },
         else => {
             var rgb_image = try image.convert(io, allocator, Rgb);
             defer rgb_image.deinit(allocator);
-            return encodeRaw(allocator, rgb_image.asBytes(), image.cols, image.rows, color_type, 8, options);
+            return encodeRaw(io, allocator, rgb_image.asBytes(), image.cols, image.rows, color_type, 8, options);
         },
     }
 }
@@ -1656,66 +1764,6 @@ fn selectBestFilter(
     }
 
     return best_filter;
-}
-
-/// Apply adaptive PNG row filtering to scanlines
-fn filterScanlinesAdaptive(allocator: Allocator, data: []const u8, header: Header) ![]u8 {
-    const scanline_bytes = header.scanlineBytes();
-    const bytes_per_pixel = header.bytesPerPixel();
-    const filtered_size = header.height * (scanline_bytes + 1); // +1 for filter byte
-
-    var filtered_data = try allocator.alloc(u8, filtered_size);
-
-    // Allocate temp buffer for filter testing
-    const temp_buffer = try allocator.alloc(u8, scanline_bytes);
-    defer allocator.free(temp_buffer);
-
-    // Adaptive sampling: analyze every Nth row for large images
-    const sample_rate: u32 = if (header.height > 512) 8 else 1;
-    var last_filter = FilterType.none;
-    var filter_streak: u32 = 0;
-
-    var y: u32 = 0;
-    while (y < header.height) : (y += 1) {
-        const src_row_start = y * scanline_bytes;
-        const dst_row_start = y * (scanline_bytes + 1);
-
-        const src_row = data[src_row_start .. src_row_start + scanline_bytes];
-        const dst_row = filtered_data[dst_row_start + 1 .. dst_row_start + 1 + scanline_bytes];
-
-        const previous_row = if (y > 0)
-            data[(y - 1) * scanline_bytes .. (y - 1) * scanline_bytes + scanline_bytes]
-        else
-            null;
-
-        // Decide whether to analyze this row
-        const should_analyze = (y % sample_rate == 0) or
-            (filter_streak == 0) or
-            (y < 3) or // Always analyze first few rows
-            (y >= header.height - 3); // And last few rows
-
-        const best_filter = if (should_analyze) blk: {
-            const filter = selectBestFilter(src_row, previous_row, bytes_per_pixel, temp_buffer);
-
-            // Track filter consistency
-            if (filter == last_filter) {
-                filter_streak = @min(filter_streak + 1, sample_rate);
-            } else {
-                filter_streak = 0;
-                last_filter = filter;
-            }
-
-            break :blk filter;
-        } else last_filter; // Reuse last filter
-
-        // Set filter type byte
-        filtered_data[dst_row_start] = @backingInt(best_filter);
-
-        // Apply the selected filter
-        filterRow(best_filter, dst_row, src_row, previous_row, bytes_per_pixel);
-    }
-
-    return filtered_data;
 }
 
 /// Apply defiltering to all scanlines after deflate decompression
@@ -2669,8 +2717,11 @@ test "PNG adaptive filter selection" {
     @memset(raw[scanline_bytes .. scanline_bytes * 2], 128);
 
     // Apply adaptive filtering and check filter bytes
-    const filtered = try filterScanlinesAdaptive(allocator, raw, header);
+    const filtered = try allocator.alloc(u8, (scanline_bytes + 1) * height);
     defer allocator.free(filtered);
+    const temp = try allocator.alloc(u8, scanline_bytes);
+    defer allocator.free(temp);
+    filterRows(filtered, raw, header, .adaptive, temp, 0, height);
 
     const stride = scanline_bytes + 1; // filter byte + scanline data
     try std.testing.expectEqual(@as(u8, @backingInt(FilterType.sub)), filtered[0]);
@@ -2684,6 +2735,47 @@ test "PNG adaptive filter selection" {
 
     try std.testing.expectEqualSlices(u8, raw[0..scanline_bytes], roundtrip[1 .. 1 + scanline_bytes]);
     try std.testing.expectEqualSlices(u8, raw[scanline_bytes .. scanline_bytes * 2], roundtrip[stride + 1 .. stride + 1 + scanline_bytes]);
+}
+
+test "chunked PNG encode is identical on a thread pool and round-trips" {
+    const gpa = std.testing.allocator;
+    var pool: std.Io.Threaded = .init(gpa, .{});
+    defer pool.deinit();
+    const pool_io = pool.io();
+    var prng = std.Random.DefaultPrng.init(0x9e6);
+    const random = prng.random();
+
+    // 700 rows x 160 px RGB: 8-row sampling, ~340 KB filtered -> two deflate chunks, both
+    // shared and split between bands; 20 rows: one chunk. The ramp keeps every filter in play.
+    for ([_][2]u32{ .{ 700, 160 }, .{ 20, 30 } }) |shape| {
+        var img: Image(Rgb) = try .init(gpa, shape[0], shape[1]);
+        defer img.deinit(gpa);
+        for (0..img.rows) |r| for (0..img.cols) |c| {
+            const ramp: u8 = @intCast((r * 3 + c * 5) % 256);
+            img.at(r, c).* = .{ .r = ramp, .g = random.int(u8) / 4 +% ramp, .b = @intCast(c % 256) };
+        };
+        const serial = try encode(Rgb, parallel.inline_io, gpa, img, .default);
+        defer gpa.free(serial);
+        const banded = try encode(Rgb, pool_io, gpa, img, .default);
+        defer gpa.free(banded);
+        try std.testing.expectEqualSlices(u8, serial, banded);
+        var back = try loadFromBytes(Rgb, parallel.inline_io, gpa, banded, .{});
+        defer back.deinit(gpa);
+        try std.testing.expectEqualSlices(u8, img.asBytes(), back.asBytes());
+    }
+}
+
+test "adler32 combine matches the checksum of the concatenation" {
+    var prng = std.Random.DefaultPrng.init(4);
+    const random = prng.random();
+    var buf: [70000]u8 = undefined;
+    random.bytes(&buf);
+    for ([_]usize{ 0, 1, 17, 65521, 65522, 70000 }) |split| {
+        const whole = std.hash.Adler32.hash(&buf);
+        const a = std.hash.Adler32.hash(buf[0..split]);
+        const b = std.hash.Adler32.hash(buf[split..]);
+        try std.testing.expectEqual(whole, adlerCombine(a, b, buf.len - split));
+    }
 }
 
 test "PNG fixed filters round-trip" {
