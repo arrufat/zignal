@@ -292,7 +292,7 @@ pub fn AxisTaps(comptime P: type) type {
             allocator.free(self.weights);
         }
 
-        fn weightsAt(self: Self, pos: usize) []const Accum(P) {
+        pub fn weightsAt(self: Self, pos: usize) []const Accum(P) {
             return self.weights[pos * self.taps ..][0..self.taps];
         }
     };
@@ -307,59 +307,48 @@ pub fn Accum(comptime P: type) type {
     };
 }
 
-/// Horizontal pass: source rows `[r_start, r_end)` of `src` (`src_cols` pixels wide, rows
-/// `src_stride` elements apart) resampled through `x_taps` into `mid` (`dst_cols` pixels
-/// wide) as unnormalized sums. `channels` > 1 means interleaved pixels; the taps index
-/// pixels, every channel of each.
-pub fn resizeRows(comptime P: type, comptime channels: usize, src: []const P, src_stride: usize, src_cols: u32, x_taps: AxisTaps(P), mid: []Accum(P), dst_cols: u32, r_start: usize, r_end: usize) void {
+/// Horizontal pass: one source row (`src_cols` pixels) resampled through `x_taps` into `out`
+/// (`dst_cols` pixels) as unnormalized sums. `channels` > 1 means interleaved pixels; the
+/// taps index pixels, every channel of each.
+pub fn resizeRow(comptime P: type, comptime channels: usize, row: []const P, x_taps: AxisTaps(P), out: []Accum(P), dst_cols: usize) void {
     const A = Accum(P);
     const taps = x_taps.taps;
-    for (r_start..r_end) |r| {
-        const row = src[r * src_stride ..][0 .. src_cols * channels];
-        const out = mid[r * dst_cols * channels ..][0 .. dst_cols * channels];
-        for (0..dst_cols) |c| {
-            var acc: [channels]A = @splat(0);
-            for (x_taps.indices[c * taps ..][0..taps], x_taps.weightsAt(c)) |idx, w| {
-                inline for (0..channels) |ch| acc[ch] += w * @as(A, row[idx * channels + ch]);
-            }
-            out[c * channels ..][0..channels].* = acc;
+    for (0..dst_cols) |c| {
+        var acc: [channels]A = @splat(0);
+        for (x_taps.indices[c * taps ..][0..taps], x_taps.weightsAt(c)) |idx, w| {
+            inline for (0..channels) |ch| acc[ch] += w * @as(A, row[idx * channels + ch]);
         }
+        out[c * channels ..][0..channels].* = acc;
     }
 }
 
-/// Vertical pass: output rows `[r_start, r_end)` of `dst` (`cols` elements wide, rows
-/// `dst_stride` apart) from `mid` through `y_taps`; u8 planes are rounded and clamped, f32
-/// planes stored as is.
-pub fn resizeColumns(comptime P: type, mid: []const Accum(P), cols: usize, y_taps: AxisTaps(P), dst: []P, dst_stride: usize, r_start: usize, r_end: usize) void {
+/// Vertical pass: one output row of `cols` elements as the weighted sum of the horizontally
+/// resampled `rows`; u8 planes are rounded and clamped, f32 planes stored as is.
+pub fn blendRows(comptime P: type, rows: []const [*]const Accum(P), weights: []const Accum(P), out: []P) void {
     const A = Accum(P);
     const vec_len = std.simd.suggestVectorLength(A) orelse 1;
     const V = @Vector(vec_len, A);
-    const taps = y_taps.taps;
     const shift = 2 * weight_shift;
     const half: A = if (P == u8) 1 << (shift - 1) else 0;
+    const cols = out.len;
 
-    for (r_start..r_end) |r| {
-        const rows = y_taps.indices[r * taps ..][0..taps];
-        const weights = y_taps.weightsAt(r);
-        const out = dst[r * dst_stride ..][0..cols];
-        var c: usize = 0;
-        while (c + vec_len <= cols) : (c += vec_len) {
-            var acc: V = @splat(half);
-            for (rows, weights) |row, w| {
-                acc += @as(V, @splat(w)) * @as(V, mid[row * cols + c ..][0..vec_len].*);
-            }
-            if (P == u8) {
-                const scaled = acc >> @splat(shift);
-                out[c..][0..vec_len].* = meta.narrowToBytes(std.math.clamp(scaled, @as(V, @splat(0)), @as(V, @splat(255))));
-            } else {
-                out[c..][0..vec_len].* = acc;
-            }
+    var c: usize = 0;
+    while (c + vec_len <= cols) : (c += vec_len) {
+        var acc: V = @splat(half);
+        for (rows, weights) |row, w| {
+            acc += @as(V, @splat(w)) * @as(V, row[c..][0..vec_len].*);
         }
-        while (c < cols) : (c += 1) {
-            var acc: A = half;
-            for (rows, weights) |row, w| acc += w * mid[row * cols + c];
-            out[c] = if (P == u8) meta.clamp(u8, acc >> shift) else acc;
+        if (P == u8) {
+            const scaled = acc >> @splat(shift);
+            out[c..][0..vec_len].* = meta.narrowToBytes(std.math.clamp(scaled, @as(V, @splat(0)), @as(V, @splat(255))));
+        } else {
+            out[c..][0..vec_len].* = acc;
         }
+    }
+    while (c < cols) : (c += 1) {
+        var acc: A = half;
+        for (rows, weights) |row, w| acc += w * row[c];
+        out[c] = if (P == u8) meta.clamp(u8, acc >> shift) else acc;
     }
 }
 
