@@ -9,7 +9,6 @@ const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
 const Image = @import("../image.zig").Image;
-const BorderMode = @import("border.zig").BorderMode;
 const convolution = @import("convolution.zig");
 const parallel = @import("../parallel.zig");
 
@@ -50,92 +49,91 @@ pub const Coefficients = struct {
 };
 
 /// Blurs `src` into `dst` (same shape, distinct buffers) for u8, f32 and struct-of-u8 pixels.
+/// Struct pixels run interleaved over their bytes (`convolution.elementView`): every
+/// channel is its own recursion, `channels` elements apart along the rows.
 pub fn blur(comptime T: type, io: Io, src: Image(T), dst: Image(T), allocator: Allocator, sigma: f32) !void {
     const coeffs: Coefficients = .init(sigma);
     switch (T) {
-        u8, f32 => try blurPlane(T, io, src, dst, allocator, coeffs, null),
-        else => {
-            const PlaneCtx = struct {
-                allocator: Allocator,
-                coeffs: Coefficients,
-                temp: []f32 = &.{},
-
-                pub fn convolvePlane(ctx: *@This(), plane_io: Io, plane_src: Image(u8), plane_dst: Image(u8), _: BorderMode) !void {
-                    try blurPlane(u8, plane_io, plane_src, plane_dst, ctx.allocator, ctx.coeffs, &ctx.temp);
-                }
-            };
-            var ctx: PlaneCtx = .{ .allocator = allocator, .coeffs = coeffs };
-            defer allocator.free(ctx.temp);
-            // Unit kernel sum: uniform channels pass straight through the plane split.
-            try convolution.convolvePlanes(T, io, src, dst, allocator, 1, 1, .replicate, &ctx);
-        },
+        u8, f32 => try blurPlane(T, 1, io, src, dst, allocator, coeffs),
+        else => try blurPlane(u8, comptime Image(T).channels(), io, convolution.elementView(T, src), convolution.elementView(T, dst), allocator, coeffs),
     }
 }
 
 /// Rows into an f32 temp plane, then columns from the temp plane into `dst`. f32 planes use
-/// `dst` itself as the temp; `cached_temp` lets struct-pixel callers share one across planes.
-fn blurPlane(comptime T: type, io: Io, src: Image(T), dst: Image(T), allocator: Allocator, coeffs: Coefficients, cached_temp: ?*[]f32) !void {
+/// `dst` itself as the temp.
+fn blurPlane(comptime T: type, comptime channels: usize, io: Io, src: Image(T), dst: Image(T), allocator: Allocator, coeffs: Coefficients) !void {
     const rows: usize = src.rows;
     const cols: usize = src.cols;
     if (rows == 0 or cols == 0) return;
 
-    var owned: []f32 = &.{};
-    defer allocator.free(owned);
-    const temp: Image(f32) = if (T == f32) dst else blk: {
-        const slot = cached_temp orelse &owned;
-        if (slot.len == 0) slot.* = try allocator.alloc(f32, rows * cols);
-        break :blk .initFromSlice(src.rows, src.cols, slot.*);
-    };
+    var temp: Image(f32) = if (T == f32) dst else try .init(allocator, src.rows, src.cols);
+    defer if (T != f32) temp.deinit(allocator);
 
     // Column tiles of `lanes` columns are the unit of vertical work.
     const tiles = (cols + lanes - 1) / lanes;
     const row_bands = parallel.bandCount(rows, cols);
     const col_bands = parallel.bandCount(tiles, rows * lanes);
-    const ctx: Pass(T) = .{
+    const ctx: Pass(T, channels) = .{
         .src = src,
         .temp = temp,
         .dst = dst,
         .coeffs = coeffs,
-        .pads = try allocator.alloc(f32, @max(row_bands, col_bands) * coeffs.pad * lanes),
+        .pads = try allocator.alloc(f32, @max(row_bands, col_bands) * coeffs.pad * lanes * channels),
     };
     defer allocator.free(ctx.pads);
-    parallel.forRowBands(io, rows, row_bands, &ctx, Pass(T).rowBand);
-    parallel.forRowBands(io, tiles, col_bands, &ctx, Pass(T).columnBand);
+    parallel.forRowBands(io, rows, row_bands, &ctx, Pass(T, channels).rowBand);
+    parallel.forRowBands(io, tiles, col_bands, &ctx, Pass(T, channels).columnBand);
 }
 
-fn Pass(comptime T: type) type {
+fn Pass(comptime T: type, comptime channels: usize) type {
     return struct {
         src: Image(T),
         temp: Image(f32),
         dst: Image(T),
         coeffs: Coefficients,
-        /// `pad * lanes` floats per band.
+        /// `pad * lanes * channels` floats per band.
         pads: []f32,
 
-        fn bandPad(ctx: *const @This(), band: usize, comptime width: usize) []f32 {
-            return ctx.pads[band * ctx.coeffs.pad * lanes ..][0 .. ctx.coeffs.pad * width];
+        fn bandPad(ctx: *const @This(), band: usize, comptime width: usize, comptime n: usize) []f32 {
+            return ctx.pads[band * ctx.coeffs.pad * lanes * channels ..][0 .. ctx.coeffs.pad * width * n];
         }
 
         fn rowBand(ctx: *const @This(), band: usize, r0: usize, r1: usize) void {
             var r = r0;
             while (r + lanes <= r1) : (r += lanes) {
-                filterRowBlock(T, ctx.src, ctx.temp, r, ctx.coeffs, ctx.bandPad(band, lanes));
+                filterRowBlock(T, channels, ctx.src, ctx.temp, r, ctx.coeffs, ctx.bandPad(band, lanes, channels));
             }
             while (r < r1) : (r += 1) {
-                filterLine(1, RowLanes(T, 1){ .src = ctx.src, .temp = ctx.temp, .r0 = r }, ctx.src.cols, ctx.coeffs, ctx.bandPad(band, 1));
+                filterLine(1, channels, RowLanes(T, 1){ .src = ctx.src, .temp = ctx.temp, .r0 = r }, ctx.src.cols, ctx.coeffs, ctx.bandPad(band, 1, channels));
             }
         }
 
+        /// Columns are channel-agnostic: a row of the element view is just `cols * channels` lanes.
         fn columnBand(ctx: *const @This(), band: usize, t0: usize, t1: usize) void {
             const cols = ctx.src.cols;
             for (t0..t1) |tile| {
                 const c0 = tile * lanes;
                 if (c0 + lanes <= cols) {
-                    filterLine(lanes, ColumnLanes(T, lanes){ .temp = ctx.temp, .dst = ctx.dst, .c0 = c0 }, ctx.src.rows, ctx.coeffs, ctx.bandPad(band, lanes));
+                    filterLine(lanes, 1, ColumnLanes(T, lanes){ .temp = ctx.temp, .dst = ctx.dst, .c0 = c0 }, ctx.src.rows, ctx.coeffs, ctx.bandPad(band, lanes, 1));
                 } else {
-                    for (c0..cols) |c| filterLine(1, ColumnLanes(T, 1){ .temp = ctx.temp, .dst = ctx.dst, .c0 = c }, ctx.src.rows, ctx.coeffs, ctx.bandPad(band, 1));
+                    for (c0..cols) |c| filterLine(1, 1, ColumnLanes(T, 1){ .temp = ctx.temp, .dst = ctx.dst, .c0 = c }, ctx.src.rows, ctx.coeffs, ctx.bandPad(band, 1, 1));
                 }
             }
+        }
+    };
+}
+
+/// Filter taps splatted across `W` lanes; shared by every chain of a line.
+fn Taps(comptime W: usize) type {
+    return struct {
+        const V = @Vector(W, f32);
+        b: V,
+        a1: V,
+        a2: V,
+        a3: V,
+
+        fn init(c: Coefficients) @This() {
+            return .{ .b = @splat(c.b), .a1 = @splat(c.a1), .a2 = @splat(c.a2), .a3 = @splat(c.a3) };
         }
     };
 }
@@ -145,20 +143,16 @@ fn Recursion(comptime W: usize) type {
     return struct {
         const V = @Vector(W, f32);
 
-        b: V,
-        a1: V,
-        a2: V,
-        a3: V,
         y1: V,
         y2: V,
         y3: V,
 
-        fn init(c: Coefficients, steady: V) @This() {
-            return .{ .b = @splat(c.b), .a1 = @splat(c.a1), .a2 = @splat(c.a2), .a3 = @splat(c.a3), .y1 = steady, .y2 = steady, .y3 = steady };
+        fn init(steady: V) @This() {
+            return .{ .y1 = steady, .y2 = steady, .y3 = steady };
         }
 
-        inline fn step(s: *@This(), x: V) V {
-            const y = s.b * x + s.a1 * s.y1 + s.a2 * s.y2 + s.a3 * s.y3;
+        inline fn step(s: *@This(), t: Taps(W), x: V) V {
+            const y = t.b * x + t.a1 * s.y1 + t.a2 * s.y2 + t.a3 * s.y3;
             s.y3 = s.y2;
             s.y2 = s.y1;
             s.y1 = y;
@@ -168,81 +162,127 @@ fn Recursion(comptime W: usize) type {
         /// Runs the forward recursion over `pad` copies of `last`, then primes the backward
         /// recursion over them from its steady state (b = 1 - a1 - a2 - a3, so a converged
         /// forward output is also the backward fixed point).
-        fn turnAround(s: *@This(), last: V, pad: []f32) void {
+        fn turnAround(s: *@This(), t: Taps(W), last: V, pad: []f32) void {
             const n = pad.len / W;
-            for (0..n) |k| pad[k * W ..][0..W].* = s.step(last);
+            for (0..n) |k| pad[k * W ..][0..W].* = s.step(t, last);
             s.y2 = s.y1;
             s.y3 = s.y1;
             var k = n;
             while (k > 0) {
                 k -= 1;
-                _ = s.step(pad[k * W ..][0..W].*);
+                _ = s.step(t, pad[k * W ..][0..W].*);
             }
         }
     };
 }
 
-/// One line of `len` samples through the forward and backward passes. `acc` provides the
+/// `channels` independent chains over one line of `len` elements (a multiple of `channels`);
+/// element `i` belongs to chain `i % channels`.
+fn Chains(comptime W: usize, comptime channels: usize) type {
+    return struct {
+        const V = @Vector(W, f32);
+        taps: Taps(W),
+        recs: [channels]Recursion(W),
+        lasts: [channels]V,
+
+        /// `acc` provides the source loads; the lasts are read before the forward pass in
+        /// case the intermediate aliases the source.
+        fn init(acc: anytype, len: usize, c: Coefficients) @This() {
+            var self: @This() = .{ .taps = .init(c), .recs = undefined, .lasts = undefined };
+            inline for (0..channels) |j| {
+                self.recs[j] = .init(acc.loadSrc(j));
+                self.lasts[j] = acc.loadSrc(len - channels + j);
+            }
+            return self;
+        }
+
+        inline fn step(self: *@This(), comptime j: usize, x: V) V {
+            return self.recs[j].step(self.taps, x);
+        }
+
+        fn turnAround(self: *@This(), c: Coefficients, pad: []f32) void {
+            inline for (0..channels) |j| self.recs[j].turnAround(self.taps, self.lasts[j], pad[j * c.pad * W ..][0 .. c.pad * W]);
+        }
+    };
+}
+
+/// One line of `len` elements through the forward and backward passes. `acc` provides the
 /// source loads, the intermediate (forward) stores and loads, and the final stores.
-fn filterLine(comptime W: usize, acc: anytype, len: usize, c: Coefficients, pad: []f32) void {
-    const first = acc.loadSrc(0);
-    // Read before the forward pass in case the intermediate aliases the source.
-    const last = acc.loadSrc(len - 1);
-    var rec: Recursion(W) = .init(c, first);
-    for (0..len) |i| acc.storeMid(i, rec.step(acc.loadSrc(i)));
-    rec.turnAround(last, pad);
-    var i = len;
+fn filterLine(comptime W: usize, comptime channels: usize, acc: anytype, len: usize, c: Coefficients, pad: []f32) void {
+    var chains: Chains(W, channels) = .init(acc, len, c);
+    var i: usize = 0;
+    while (i < len) : (i += channels) {
+        inline for (0..channels) |j| acc.storeMid(i + j, chains.step(j, acc.loadSrc(i + j)));
+    }
+    chains.turnAround(c, pad);
+    i = len;
     while (i > 0) {
-        i -= 1;
-        acc.storeDst(i, rec.step(acc.loadMid(i)));
+        i -= channels;
+        inline for (0..channels) |jj| {
+            const j = channels - 1 - jj;
+            acc.storeDst(i + j, chains.step(j, acc.loadMid(i + j)));
+        }
     }
 }
 
-/// `lanes` consecutive rows from `r0` through both passes. Columns go `lanes` at a time: a
+/// `lanes` consecutive rows from `r0` through both passes. Elements go `lanes` at a time: a
 /// square block is loaded as row vectors, transposed in registers so each vector holds one
-/// column across the rows, stepped, and transposed back for row stores. The last partial
-/// block uses per-lane loads.
-fn filterRowBlock(comptime T: type, src: Image(T), temp: Image(f32), r0: usize, c: Coefficients, pad: []f32) void {
+/// element column across the rows, stepped, and transposed back for row stores. Blocks are
+/// grouped so every block's channel pattern is fixed at comptime; the last partial group
+/// uses per-lane loads.
+fn filterRowBlock(comptime T: type, comptime channels: usize, src: Image(T), temp: Image(f32), r0: usize, c: Coefficients, pad: []f32) void {
     const W = lanes;
     const V = @Vector(W, f32);
+    const blocks = comptime channels / std.math.gcd(channels, W);
+    const group = blocks * W;
     const cols = src.cols;
-    const full = cols / W * W;
+    const full = cols / group * group;
     const tail = RowLanes(T, W){ .src = src, .temp = temp, .r0 = r0 };
-
-    const first = tail.loadSrc(0);
-    const last = tail.loadSrc(cols - 1);
-    var rec: Recursion(W) = .init(c, first);
+    var chains: Chains(W, channels) = .init(tail, cols, c);
 
     var n0: usize = 0;
-    while (n0 < full) : (n0 += W) {
-        var block: [W]V = undefined;
-        inline for (0..W) |i| block[i] = loadRowVec(T, W, src, r0 + i, n0);
-        var by_col = transpose(W, block);
-        inline for (0..W) |j| by_col[j] = rec.step(by_col[j]);
-        const by_row = transpose(W, by_col);
-        inline for (0..W) |i| temp.data[(r0 + i) * temp.stride + n0 ..][0..W].* = by_row[i];
+    while (n0 < full) : (n0 += group) {
+        inline for (0..blocks) |k| {
+            const e0 = n0 + k * W;
+            var block: [W]V = undefined;
+            inline for (0..W) |i| block[i] = loadRowVec(T, W, src, r0 + i, e0);
+            var by_col = transpose(W, block);
+            inline for (0..W) |j| by_col[j] = chains.step((k * W + j) % channels, by_col[j]);
+            const by_row = transpose(W, by_col);
+            inline for (0..W) |i| temp.data[(r0 + i) * temp.stride + e0 ..][0..W].* = by_row[i];
+        }
     }
-    for (full..cols) |n| tail.storeMid(n, rec.step(tail.loadSrc(n)));
+    var e = full;
+    while (e < cols) : (e += channels) {
+        inline for (0..channels) |j| tail.storeMid(e + j, chains.step(j, tail.loadSrc(e + j)));
+    }
 
-    rec.turnAround(last, pad);
+    chains.turnAround(c, pad);
 
-    var n = cols;
-    while (n > full) {
-        n -= 1;
-        tail.storeDst(n, rec.step(tail.loadMid(n)));
+    e = cols;
+    while (e > full) {
+        e -= channels;
+        inline for (0..channels) |jj| {
+            const j = channels - 1 - jj;
+            tail.storeDst(e + j, chains.step(j, tail.loadMid(e + j)));
+        }
     }
     n0 = full;
     while (n0 > 0) {
-        n0 -= W;
-        var block: [W]V = undefined;
-        inline for (0..W) |i| block[i] = temp.data[(r0 + i) * temp.stride + n0 ..][0..W].*;
-        var by_col = transpose(W, block);
-        inline for (0..W) |jj| {
-            const j = W - 1 - jj;
-            by_col[j] = rec.step(by_col[j]);
+        n0 -= group;
+        inline for (0..blocks) |kk| {
+            const k = blocks - 1 - kk;
+            const e0 = n0 + k * W;
+            var block: [W]V = undefined;
+            inline for (0..W) |i| block[i] = temp.data[(r0 + i) * temp.stride + e0 ..][0..W].*;
+            var by_col = transpose(W, block);
+            inline for (0..W) |jj| {
+                const j = W - 1 - jj;
+                by_col[j] = chains.step((k * W + j) % channels, by_col[j]);
+            }
+            const by_row = transpose(W, by_col);
+            inline for (0..W) |i| temp.data[(r0 + i) * temp.stride + e0 ..][0..W].* = by_row[i];
         }
-        const by_row = transpose(W, by_col);
-        inline for (0..W) |i| temp.data[(r0 + i) * temp.stride + n0 ..][0..W].* = by_row[i];
     }
 }
 
@@ -448,26 +488,33 @@ test "auto method picks the filter by sigma" {
 test "iir gaussian struct pixels match per-plane u8" {
     const allocator = std.testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();
-    const Rgb = @import("../color.zig").Rgb(u8);
+    const color = @import("../color.zig");
     var prng = std.Random.DefaultPrng.init(9);
     const random = prng.random();
 
-    var rgb: Image(Rgb) = try .init(allocator, 37, 53);
-    defer rgb.deinit(allocator);
+    // 53 columns leave a partial block group for both channel counts; 37 rows leave rows
+    // below one block of lanes.
     var green: Image(u8) = try .init(allocator, 37, 53);
     defer green.deinit(allocator);
-    for (rgb.data, green.data) |*px, *g| {
-        px.* = .{ .r = random.int(u8), .g = random.int(u8), .b = random.int(u8) };
-        g.* = px.g;
-    }
-    var rgb_out: Image(Rgb) = try .initLike(allocator, rgb);
-    defer rgb_out.deinit(allocator);
     var green_out: Image(u8) = try .initLike(allocator, green);
     defer green_out.deinit(allocator);
 
-    try blur(Rgb, io, rgb, rgb_out, allocator, 3);
-    try blur(u8, io, green, green_out, allocator, 3);
-    for (rgb_out.data, green_out.data) |px, g| try std.testing.expectEqual(g, px.g);
+    inline for ([_]type{ color.Rgb(u8), color.Rgba(u8) }) |T| {
+        const n = comptime Image(T).channels();
+        var img: Image(T) = try .init(allocator, 37, 53);
+        defer img.deinit(allocator);
+        for (std.mem.sliceAsBytes(img.data)) |*b| b.* = random.int(u8);
+        var out: Image(T) = try .initLike(allocator, img);
+        defer out.deinit(allocator);
+        try blur(T, io, img, out, allocator, 3);
+
+        // Every channel through the u8 path must match bit for bit.
+        for (0..n) |ch| {
+            for (green.data, 0..) |*g, i| g.* = std.mem.sliceAsBytes(img.data)[i * n + ch];
+            try blur(u8, io, green, green_out, allocator, 3);
+            for (green_out.data, 0..) |g, i| try std.testing.expectEqual(g, std.mem.sliceAsBytes(out.data)[i * n + ch]);
+        }
+    }
 
     // f32 planes take the same path (in place, no temp) without the rounding store.
     var f: Image(f32) = try .init(allocator, 37, 53);
