@@ -142,3 +142,21 @@ pub const findGlobalOptimum = optimization.findGlobalOptimum;
 const stats = @import("stats.zig");
 pub const RunningStats = stats.RunningStats;
 pub const RunningStatsConfig = stats.RunningStatsConfig;
+
+test {
+    _ = @import("color.zig");
+    _ = @import("image.zig");
+    _ = @import("geometry.zig");
+    _ = @import("matrix.zig");
+    _ = @import("perlin.zig");
+    _ = @import("canvas.zig");
+    _ = @import("codecs.zig");
+    _ = @import("fdm.zig");
+    _ = @import("pca.zig");
+    _ = @import("terminal.zig");
+    _ = @import("font.zig");
+    _ = @import("features.zig");
+    _ = @import("optimization.zig");
+    _ = @import("qrcode.zig");
+    _ = @import("meta.zig");
+}

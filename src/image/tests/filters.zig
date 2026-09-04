@@ -9,6 +9,7 @@ const color = @import("../../color.zig");
 const Rectangle = @import("../../geometry.zig").Rectangle;
 const Image = @import("../../image.zig").Image;
 const BorderMode = @import("../../image.zig").BorderMode;
+const parallel = @import("../../parallel.zig");
 
 const Rgb = color.Rgb(u8);
 const Rgba = color.Rgba(u8);
@@ -1434,98 +1435,104 @@ test "filters are identical on a thread pool" {
 
     var prng = std.Random.DefaultPrng.init(0x5eed);
     const random = prng.random();
-    // 520x640 takes the fused separable path (temp plane > 1 MiB); 400x600 the two-pass one.
-    for ([_][2]u32{ .{ 520, 640 }, .{ 400, 600 } }) |shape| {
-        const rows = shape[0];
-        const cols = shape[1];
 
+    // Shapes are the smallest that still split into >= 2 bands for each path (src/parallel.zig):
+    // `small` clears the 32 K pixel floor; `fused` pushes the separable temp plane past 1 MiB with
+    // rows for two bands of the widest kernel (sigma 9 -> 55 taps -> 220 rows each); `wide_rank`
+    // has two bands of the 257-wide window that exceeds the two-level histogram limit.
+    const small = [2]u32{ 200, 400 };
+    const fused = [2]u32{ 520, 640 };
+    const wide_rank = [2]u32{ 514, 260 };
+    const wide_radius = 128;
+    try std.testing.expect(parallel.bandCount(small[0], small[1]) >= 2);
+    try std.testing.expect(parallel.bandCountFor(fused[0], fused[1], 4 * 55) >= 2);
+    try std.testing.expect(parallel.bandCountFor(wide_rank[0], wide_rank[1], 2 * wide_radius + 1) >= 2);
+
+    inline for ([_]type{ u8, f32, Rgb }) |T| {
         const Check = struct {
-            fn run(comptime filter: anytype, src: anytype, out_serial: anytype, out_pool: anytype, io_serial: std.Io, io_pool: std.Io) !void {
-                try filter(src, io_serial, out_serial);
-                try filter(src, io_pool, out_pool);
-                try std.testing.expectEqualSlices(std.meta.Child(@TypeOf(out_serial.data)), out_serial.data, out_pool.data);
+            fn run(comptime filter: anytype, shape: [2]u32, comptime Out: type, rng: std.Random, io_serial: std.Io, io_pool: std.Io) !void {
+                var src: Image(T) = try .init(allocator, shape[0], shape[1]);
+                defer src.deinit(allocator);
+                for (src.data) |*px| px.* = switch (T) {
+                    u8 => rng.int(u8),
+                    f32 => 255 * rng.float(f32),
+                    else => .{ .r = rng.int(u8), .g = rng.int(u8), .b = rng.int(u8) },
+                };
+                var a: Image(Out) = try .init(allocator, shape[0], shape[1]);
+                defer a.deinit(allocator);
+                var b: Image(Out) = try .init(allocator, shape[0], shape[1]);
+                defer b.deinit(allocator);
+                try filter(src, io_serial, a);
+                try filter(src, io_pool, b);
+                try std.testing.expectEqualSlices(Out, a.data, b.data);
             }
         };
 
-        inline for ([_]type{ u8, f32, Rgb }) |T| {
-            var src: Image(T) = try .init(allocator, rows, cols);
-            defer src.deinit(allocator);
-            for (src.data) |*px| px.* = switch (T) {
-                u8 => random.int(u8),
-                f32 => 255 * random.float(f32),
-                else => .{ .r = random.int(u8), .g = random.int(u8), .b = random.int(u8) },
-            };
-            var a: Image(T) = try .initLike(allocator, src);
-            defer a.deinit(allocator);
-            var b: Image(T) = try .initLike(allocator, src);
-            defer b.deinit(allocator);
-            var gray_a: Image(u8) = try .init(allocator, rows, cols);
-            defer gray_a.deinit(allocator);
-            var gray_b: Image(u8) = try .init(allocator, rows, cols);
-            defer gray_b.deinit(allocator);
-
-            const F = struct {
-                fn box(s: Image(T), run_io: std.Io, o: Image(T)) !void {
-                    try s.boxBlur(run_io, allocator, o, 3);
-                }
-                fn sharp(s: Image(T), run_io: std.Io, o: Image(T)) !void {
-                    try s.sharpen(run_io, allocator, o, 2);
-                }
-                fn gauss(s: Image(T), run_io: std.Io, o: Image(T)) !void {
-                    try s.gaussianBlur(run_io, allocator, o, 2.5, .default);
-                }
-                fn gaussWide(s: Image(T), run_io: std.Io, o: Image(T)) !void {
-                    try s.gaussianBlur(run_io, allocator, o, 9, .default);
-                }
-                fn gaussIir(s: Image(T), run_io: std.Io, o: Image(T)) !void {
-                    try s.gaussianBlur(run_io, allocator, o, 9, .{ .method = .iir });
-                }
-                fn conv(s: Image(T), run_io: std.Io, o: Image(T)) !void {
-                    const k = [7][7]f32{
-                        .{ 1, 2, 3, 4, 3, 2, 1 },
-                        .{ 2, 3, 4, 5, 4, 3, 2 },
-                        .{ 3, 4, 5, 6, 5, 4, 3 },
-                        .{ 4, 5, 6, 7, 6, 5, 4 },
-                        .{ 3, 4, 5, 6, 5, 4, 3 },
-                        .{ 2, 3, 4, 5, 4, 3, 2 },
-                        .{ 1, 2, 3, 4, 3, 2, 1 },
-                    };
-                    var kn = k;
-                    for (&kn) |*row| for (row) |*v| {
-                        v.* /= 175;
-                    };
-                    try s.convolve(run_io, allocator, o, kn, .mirror);
-                }
-                fn sep(s: Image(T), run_io: std.Io, o: Image(T)) !void {
-                    try s.convolveSeparable(run_io, allocator, o, &.{ 0.1, 0.2, 0.4, 0.2, 0.1 }, &.{ 0.25, 0.5, 0.25 }, .replicate);
-                }
-                fn motionH(s: Image(T), run_io: std.Io, o: Image(T)) !void {
-                    try s.motionBlur(run_io, allocator, o, .{ .linear = .{ .angle = 0, .distance = 11 } });
-                }
-                fn motionV(s: Image(T), run_io: std.Io, o: Image(T)) !void {
-                    try s.motionBlur(run_io, allocator, o, .{ .linear = .{ .angle = std.math.pi / 2.0, .distance = 11 } });
-                }
-                fn median(s: Image(T), run_io: std.Io, o: Image(T)) !void {
-                    try s.medianBlur(run_io, allocator, o, 3);
-                }
-                fn percentileWide(s: Image(T), run_io: std.Io, o: Image(T)) !void {
-                    // Radius 130 (window 261) exceeds the two-level limit and takes the flat path.
-                    try s.percentileBlur(run_io, allocator, o, 130, 0.2, .zero);
-                }
-                fn sobel(s: Image(T), run_io: std.Io, o: Image(u8)) !void {
-                    try s.sobel(run_io, allocator, o);
-                }
-            };
-            inline for (.{ F.box, F.sharp, F.gauss, F.gaussWide, F.gaussIir, F.conv, F.sep, F.motionH, F.motionV }) |filter| {
-                try Check.run(filter, src, a, b, serial_io, pool_io);
+        const F = struct {
+            fn box(s: Image(T), run_io: std.Io, o: Image(T)) !void {
+                try s.boxBlur(run_io, allocator, o, 3);
             }
-            // Order-statistic filters take u8 planes only.
-            if (T != f32) {
-                try Check.run(F.median, src, a, b, serial_io, pool_io);
-                try Check.run(F.percentileWide, src, a, b, serial_io, pool_io);
+            fn sharp(s: Image(T), run_io: std.Io, o: Image(T)) !void {
+                try s.sharpen(run_io, allocator, o, 2);
             }
-            try Check.run(F.sobel, src, gray_a, gray_b, serial_io, pool_io);
+            fn gauss(s: Image(T), run_io: std.Io, o: Image(T)) !void {
+                try s.gaussianBlur(run_io, allocator, o, 2.5, .default);
+            }
+            fn gaussWide(s: Image(T), run_io: std.Io, o: Image(T)) !void {
+                try s.gaussianBlur(run_io, allocator, o, 9, .default);
+            }
+            fn gaussIir(s: Image(T), run_io: std.Io, o: Image(T)) !void {
+                try s.gaussianBlur(run_io, allocator, o, 9, .{ .method = .iir });
+            }
+            fn conv(s: Image(T), run_io: std.Io, o: Image(T)) !void {
+                const k = [7][7]f32{
+                    .{ 1, 2, 3, 4, 3, 2, 1 },
+                    .{ 2, 3, 4, 5, 4, 3, 2 },
+                    .{ 3, 4, 5, 6, 5, 4, 3 },
+                    .{ 4, 5, 6, 7, 6, 5, 4 },
+                    .{ 3, 4, 5, 6, 5, 4, 3 },
+                    .{ 2, 3, 4, 5, 4, 3, 2 },
+                    .{ 1, 2, 3, 4, 3, 2, 1 },
+                };
+                var kn = k;
+                for (&kn) |*row| for (row) |*v| {
+                    v.* /= 175;
+                };
+                try s.convolve(run_io, allocator, o, kn, .mirror);
+            }
+            fn sep(s: Image(T), run_io: std.Io, o: Image(T)) !void {
+                try s.convolveSeparable(run_io, allocator, o, &.{ 0.1, 0.2, 0.4, 0.2, 0.1 }, &.{ 0.25, 0.5, 0.25 }, .replicate);
+            }
+            fn motionH(s: Image(T), run_io: std.Io, o: Image(T)) !void {
+                try s.motionBlur(run_io, allocator, o, .{ .linear = .{ .angle = 0, .distance = 11 } });
+            }
+            fn motionV(s: Image(T), run_io: std.Io, o: Image(T)) !void {
+                try s.motionBlur(run_io, allocator, o, .{ .linear = .{ .angle = std.math.pi / 2.0, .distance = 11 } });
+            }
+            fn median(s: Image(T), run_io: std.Io, o: Image(T)) !void {
+                try s.medianBlur(run_io, allocator, o, 3);
+            }
+            fn percentileWide(s: Image(T), run_io: std.Io, o: Image(T)) !void {
+                try s.percentileBlur(run_io, allocator, o, wide_radius, 0.2, .zero);
+            }
+            fn sobel(s: Image(T), run_io: std.Io, o: Image(u8)) !void {
+                try s.sobel(run_io, allocator, o);
+            }
+        };
+        // Separable filters take the two-pass path on `small` and the fused ring-buffer path on `fused`.
+        inline for (.{ F.gauss, F.gaussWide, F.sep }) |filter| {
+            try Check.run(filter, small, T, random, serial_io, pool_io);
+            try Check.run(filter, fused, T, random, serial_io, pool_io);
         }
+        inline for (.{ F.box, F.sharp, F.gaussIir, F.conv, F.motionH, F.motionV }) |filter| {
+            try Check.run(filter, small, T, random, serial_io, pool_io);
+        }
+        // Order-statistic filters take u8 planes only.
+        if (T != f32) {
+            try Check.run(F.median, small, T, random, serial_io, pool_io);
+            try Check.run(F.percentileWide, wide_rank, T, random, serial_io, pool_io);
+        }
+        try Check.run(F.sobel, small, u8, random, serial_io, pool_io);
     }
 }
 
