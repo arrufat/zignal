@@ -67,11 +67,15 @@ fn blurPlane(comptime T: type, comptime channels: usize, io: Io, src: Image(T), 
     const cols: usize = src.cols;
     if (rows == 0 or cols == 0) return;
 
-    var temp: Image(f32) = if (T == f32) dst else try .init(allocator, src.rows, src.cols);
-    defer if (T != f32) temp.deinit(allocator);
-
-    // Column tiles of `lanes` columns are the unit of vertical work.
+    // Column tiles of `lanes` columns are the unit of vertical work. The temp plane is padded
+    // to whole tiles so a ragged last tile still runs as one vector line with its `dst`
+    // stores masked; a scalar column costs a whole line of latency.
     const tiles = (cols + lanes - 1) / lanes;
+    var temp: Image(f32) = if (T == f32) dst else try .init(allocator, src.rows, @intCast(tiles * lanes));
+    defer if (T != f32) temp.deinit(allocator);
+    if (T != f32 and temp.cols != cols) {
+        for (0..rows) |r| @memset(temp.data[r * temp.stride + cols ..][0 .. temp.cols - cols], 0);
+    }
     const row_bands = parallel.bandCount(rows, cols);
     const col_bands = parallel.bandCount(tiles, rows * lanes);
     const ctx: Pass(T, channels) = .{
@@ -99,6 +103,8 @@ fn Pass(comptime T: type, comptime channels: usize) type {
             return ctx.pads[band * ctx.coeffs.pad * lanes * channels ..][0 .. ctx.coeffs.pad * width * n];
         }
 
+        /// Scalar rows past the last block are cheap (a row is one contiguous chain), so
+        /// they stay scalar.
         fn rowBand(ctx: *const @This(), band: usize, r0: usize, r1: usize) void {
             var r = r0;
             while (r + lanes <= r1) : (r += lanes) {
@@ -109,15 +115,19 @@ fn Pass(comptime T: type, comptime channels: usize) type {
             }
         }
 
-        /// Columns are channel-agnostic: a row of the element view is just `cols * channels` lanes.
+        /// Columns are channel-agnostic: a row of the element view is just `cols * channels`
+        /// lanes. The ragged last tile runs over the padded temp with its `dst` stores masked;
+        /// only the in-place f32 pass (`dst` is the temp, unpadded) goes column by column.
         fn columnBand(ctx: *const @This(), band: usize, t0: usize, t1: usize) void {
             const cols = ctx.src.cols;
             for (t0..t1) |tile| {
                 const c0 = tile * lanes;
                 if (c0 + lanes <= cols) {
-                    filterLine(lanes, 1, ColumnLanes(T, lanes){ .temp = ctx.temp, .dst = ctx.dst, .c0 = c0 }, ctx.src.rows, ctx.coeffs, ctx.bandPad(band, lanes, 1));
+                    filterLine(lanes, 1, ColumnLanes(T, lanes, false){ .temp = ctx.temp, .dst = ctx.dst, .c0 = c0 }, ctx.src.rows, ctx.coeffs, ctx.bandPad(band, lanes, 1));
+                } else if (T != f32) {
+                    filterLine(lanes, 1, ColumnLanes(T, lanes, true){ .temp = ctx.temp, .dst = ctx.dst, .c0 = c0, .valid = cols - c0 }, ctx.src.rows, ctx.coeffs, ctx.bandPad(band, lanes, 1));
                 } else {
-                    for (c0..cols) |c| filterLine(1, 1, ColumnLanes(T, 1){ .temp = ctx.temp, .dst = ctx.dst, .c0 = c }, ctx.src.rows, ctx.coeffs, ctx.bandPad(band, 1, 1));
+                    for (c0..cols) |c| filterLine(1, 1, ColumnLanes(T, 1, false){ .temp = ctx.temp, .dst = ctx.dst, .c0 = c }, ctx.src.rows, ctx.coeffs, ctx.bandPad(band, 1, 1));
                 }
             }
         }
@@ -371,12 +381,14 @@ fn RowLanes(comptime T: type, comptime W: usize) type {
 
 /// `W` adjacent columns from `c0`, indexed by row; the forward pass rewrites `temp` in place
 /// and the backward pass stores into `dst`.
-fn ColumnLanes(comptime T: type, comptime W: usize) type {
+/// `masked` lines store only `valid` lanes to `dst`; the rest read and write the temp's padding.
+fn ColumnLanes(comptime T: type, comptime W: usize, comptime masked: bool) type {
     return struct {
         const V = @Vector(W, f32);
         temp: Image(f32),
         dst: Image(T),
         c0: usize,
+        valid: usize = W,
 
         inline fn loadSrc(a: @This(), row: usize) V {
             return a.temp.data[row * a.temp.stride + a.c0 ..][0..W].*;
@@ -391,8 +403,13 @@ fn ColumnLanes(comptime T: type, comptime W: usize) type {
         }
 
         inline fn storeDst(a: @This(), row: usize, v: V) void {
-            const out = a.dst.data[row * a.dst.stride + a.c0 ..][0..W];
-            out.* = if (T == f32) v else meta.roundToBytes(v);
+            const out = a.dst.data[row * a.dst.stride + a.c0 ..];
+            if (masked) {
+                const lanes_out: [W]T = if (T == f32) v else meta.roundToBytes(v);
+                @memcpy(out[0..a.valid], lanes_out[0..a.valid]);
+            } else {
+                out[0..W].* = if (T == f32) v else meta.roundToBytes(v);
+            }
         }
     };
 }

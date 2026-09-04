@@ -68,7 +68,12 @@ pub fn forRowBandsTry(io: Io, rows: usize, bands: usize, ctx: anytype, comptime 
     }
     group.await(io) catch {};
     const code = first.load(.monotonic);
-    if (code != 0) return @errorCast(@errorFromInt(code));
+    if (code != 0) {
+        const E = ErrorSetOf(func);
+        const empty = comptime if (@typeInfo(E).error_set.error_names) |names| names.len == 0 else false;
+        if (empty) unreachable;
+        return @errorCast(@errorFromInt(code));
+    }
 }
 
 fn ErrorSetOf(comptime func: anytype) type {

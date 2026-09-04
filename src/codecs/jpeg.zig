@@ -1436,6 +1436,8 @@ pub const JpegState = struct {
     // Scan data
     scan_components: []ScanComponent = undefined,
     restart_interval: u16 = 0,
+    /// Baseline scans with restart markers: offset of each segment's data within the scan.
+    restart_starts: []usize = &.{},
 
     // Bit reader for entropy-coded data
     bit_reader: BitReader = undefined,
@@ -1522,6 +1524,7 @@ pub const JpegState = struct {
 
     pub fn deinit(self: *JpegState) void {
         self.allocator.free(self.scan_components);
+        self.allocator.free(self.restart_starts);
         if (self.block_storage) |storage| {
             self.allocator.free(storage);
         }
@@ -2265,15 +2268,18 @@ fn decodeBlockBits(br: *BitReader, dc_table: *const HuffmanTable, ac_table: *con
 
 // Parse JPEG file and decode image
 // Helper function to find the end of entropy-coded scan data
-fn findScanEnd(data: []const u8, start_pos: usize) usize {
+/// End of the entropy-coded scan starting at `start_pos`. Only 0xFF can start a marker;
+/// stuffed zeros and RSTn stay inside the scan, and `starts`, when given, receives the
+/// offset (from `start_pos`) of the data after each RSTn.
+fn findScanEnd(data: []const u8, start_pos: usize, allocator: Allocator, starts: ?*std.ArrayList(usize)) !usize {
     if (data.len == 0) return 0;
     var pos = start_pos;
-    // Only 0xFF can start a marker; stuffed zeros and RSTn stay inside the scan.
     while (pos < data.len - 1) {
         const ff = std.mem.indexOfScalarPos(u8, data, pos, 0xFF) orelse break;
         if (ff >= data.len - 1) return ff;
         const next = data[ff + 1];
         if (next == 0x00 or isRstn(next)) {
+            if (starts) |list| if (isRstn(next)) try list.append(allocator, ff + 2 - start_pos);
             pos = ff + 2;
             continue;
         }
@@ -2300,7 +2306,15 @@ fn processScanMarker(state: *JpegState, data: []const u8, pos: usize) !usize {
     const scan_info = try state.parseSOS(data[payload_start..marker_end]);
     const scan_start = marker_end;
 
-    const scan_end = findScanEnd(data, scan_start);
+    const banded = state.header.frame_type == .baseline and state.restart_interval != 0;
+    var starts: std.ArrayList(usize) = .empty;
+    defer starts.deinit(state.allocator);
+    if (banded) try starts.append(state.allocator, 0);
+    const scan_end = try findScanEnd(data, scan_start, state.allocator, if (banded) &starts else null);
+    if (banded) {
+        state.allocator.free(state.restart_starts);
+        state.restart_starts = try starts.toOwnedSlice(state.allocator);
+    }
     state.bit_reader = BitReader.init(data[scan_start..scan_end]);
 
     // Baseline: the single scan is decoded by performBlockScan after the marker loop
@@ -2738,21 +2752,6 @@ fn performBlockScan(comptime T: type, state: *JpegState, band: *RenderBand, img:
 /// Byte offsets into the entropy data at which restart segments begin: `starts[k]` is the
 /// first byte after the k-th RSTn marker (`starts[0] = 0`), so segment k holds MCUs
 /// `[k * interval, (k + 1) * interval)`.
-fn restartSegments(allocator: Allocator, data: []const u8) ![]usize {
-    var starts: std.ArrayList(usize) = .empty;
-    errdefer starts.deinit(allocator);
-    try starts.append(allocator, 0);
-    var pos: usize = 0;
-    while (pos + 1 < data.len) {
-        const ff = std.mem.indexOfScalarPos(u8, data, pos, 0xFF) orelse break;
-        if (ff + 1 >= data.len) break;
-        const m = data[ff + 1];
-        if (isRstn(m)) try starts.append(allocator, ff + 2);
-        pos = ff + 1;
-    }
-    return starts.toOwnedSlice(allocator);
-}
-
 /// Baseline scan with restart intervals on `io`: bands own balanced runs of MCU rows, each
 /// starting its entropy decoder at the restart segment holding its first MCU (discarding
 /// the segment's earlier MCUs, under one MCU row) and rendering through its own scratch.
@@ -3072,25 +3071,56 @@ fn renderBlockRows(comptime T: type, state: *const JpegState, band: *RenderBand,
     }
 }
 
-/// Baseline frames stream their scan; progressive frames render the full store band by band.
+/// Baseline frames stream their scan; progressive frames render the full store in bands.
 fn decodeInto(comptime T: type, io: Io, state: *JpegState, img: *Image(T)) !void {
-    if (state.header.frame_type == .baseline and state.restart_interval != 0) {
+    if (state.header.frame_type != .baseline) return renderProgressive(T, io, state, img);
+    const starts = state.restart_starts;
+    if (starts.len > 1) {
         const layout: ScanLayout = .init(state);
-        const starts = try restartSegments(state.allocator, state.bit_reader.data);
-        defer state.allocator.free(starts);
         const bands = parallel.bandCount(starts.len, state.restart_interval * 64 * layout.x_step * layout.y_step);
         if (bands > 1) return performBlockScanBanded(T, io, state, img, starts, bands);
     }
     var band: RenderBand = try .init(state.allocator, state);
     defer band.deinit();
-    if (state.header.frame_type == .baseline) return performBlockScan(T, state, &band, img);
+    return performBlockScan(T, state, &band, img);
+}
+
+/// The whole-image block store of a progressive frame rendered in bands of MCU rows on
+/// `io`, each through its own scratch.
+fn renderProgressive(comptime T: type, io: Io, state: *JpegState, img: *Image(T)) !void {
     const full = state.block_storage orelse return error.BlockStorageNotAllocated;
     _, const max_v = state.maxSamplingFactors();
-    const bw: usize = state.block_width_actual;
-    var y: usize = 0;
-    while (y < state.block_height) : (y += max_v) {
-        try renderBlockRows(T, state, &band, full[y * bw ..], y, @min(max_v, state.block_height - y), img);
+    const block_rows: usize = state.block_height;
+    const mcu_rows = (block_rows + max_v - 1) / max_v;
+    const bands = parallel.bandCount(mcu_rows, @as(usize, state.header.width) * 8 * max_v);
+
+    const Ctx = struct {
+        state: *const JpegState,
+        img: *Image(T),
+        full: @TypeOf(full),
+        max_v: usize,
+        renders: []RenderBand,
+
+        fn run(ctx: *const @This(), k: usize, m0: usize, m1: usize) !void {
+            const bw: usize = ctx.state.block_width_actual;
+            const rows: usize = ctx.state.block_height;
+            var y = m0 * ctx.max_v;
+            while (y < @min(rows, m1 * ctx.max_v)) : (y += ctx.max_v) {
+                try renderBlockRows(T, ctx.state, &ctx.renders[k], ctx.full[y * bw ..], y, @min(ctx.max_v, rows - y), ctx.img);
+            }
+        }
+    };
+
+    const renders = try state.allocator.alloc(RenderBand, bands);
+    defer state.allocator.free(renders);
+    var made: usize = 0;
+    defer for (renders[0..made]) |*r| r.deinit();
+    for (renders) |*r| {
+        r.* = try .init(state.allocator, state);
+        made += 1;
     }
+    const ctx: Ctx = .{ .state = state, .img = img, .full = full, .max_v = max_v, .renders = renders };
+    try parallel.forRowBandsTry(io, mcu_rows, bands, &ctx, Ctx.run);
 }
 
 pub fn toNativeImage(io: Io, allocator: Allocator, state: *JpegState) !union(enum) {
