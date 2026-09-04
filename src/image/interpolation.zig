@@ -129,9 +129,9 @@ pub fn resize(comptime T: type, io: Io, self: Image(T), out: Image(T), allocator
 }
 
 /// One plane of `P` (`channels` elements per pixel when interleaved, strides in elements):
-/// nearest samples directly in output-row bands; every other kernel runs separably, a
-/// horizontal pass into an accumulator plane over the source rows and a vertical pass over
-/// the output rows.
+/// nearest samples directly in output-row bands; every other kernel runs separably in
+/// output-row bands, each band resampling the source rows its output taps horizontally
+/// into a small ring and blending them vertically from there.
 fn resizePlane(comptime P: type, comptime channels: usize, io: Io, src: []const P, src_stride: usize, dst: []P, dst_stride: usize, src_rows: u32, src_cols: u32, dst_rows: u32, dst_cols: u32, allocator: Allocator, method: Interpolation) !void {
     switch (method) {
         .nearest => {
@@ -143,12 +143,16 @@ fn resizePlane(comptime P: type, comptime channels: usize, io: Io, src: []const 
             defer x_taps.deinit(allocator);
             const y_taps: channel_ops.AxisTaps(P) = try .init(allocator, src_rows, dst_rows, method);
             defer y_taps.deinit(allocator);
-            const mid = try allocator.alloc(channel_ops.Accum(P), @as(usize, src_rows) * dst_cols * channels);
-            defer allocator.free(mid);
+            // Consecutive output rows tap windows that slide by the row ratio; twice the taps
+            // keeps every window that overlaps the previous one resident.
+            const ring_rows = 2 * x_taps.taps;
+            const row_len = @as(usize, dst_cols) * channels;
+            const bands = parallel.bandCount(dst_rows, dst_cols);
+            const rings = try allocator.alloc(channel_ops.Accum(P), bands * ring_rows * row_len);
+            defer allocator.free(rings);
 
-            const ctx: SeparablePlane(P, channels) = .{ .src = src, .src_stride = src_stride, .mid = mid, .dst = dst, .dst_stride = dst_stride, .src_cols = src_cols, .dst_cols = dst_cols, .x_taps = x_taps, .y_taps = y_taps };
-            parallel.forRowBands(io, src_rows, parallel.bandCount(src_rows, dst_cols), &ctx, SeparablePlane(P, channels).rowsBand);
-            parallel.forRowBands(io, dst_rows, parallel.bandCount(dst_rows, dst_cols), &ctx, SeparablePlane(P, channels).columnsBand);
+            const ctx: SeparablePlane(P, channels) = .{ .src = src, .src_stride = src_stride, .dst = dst, .dst_stride = dst_stride, .src_cols = src_cols, .dst_cols = dst_cols, .x_taps = x_taps, .y_taps = y_taps, .rings = rings, .ring_rows = ring_rows };
+            parallel.forRowBands(io, dst_rows, bands, &ctx, SeparablePlane(P, channels).band);
         },
     }
 }
@@ -172,22 +176,52 @@ fn DirectPlane(comptime P: type, comptime channels: usize) type {
 
 fn SeparablePlane(comptime P: type, comptime channels: usize) type {
     return struct {
+        const A = channel_ops.Accum(P);
+
         src: []const P,
         src_stride: usize,
-        mid: []channel_ops.Accum(P),
         dst: []P,
         dst_stride: usize,
         src_cols: u32,
         dst_cols: u32,
         x_taps: channel_ops.AxisTaps(P),
         y_taps: channel_ops.AxisTaps(P),
+        /// `ring_rows` horizontally resampled source rows per band, slot `row % ring_rows`.
+        rings: []A,
+        ring_rows: usize,
 
-        fn rowsBand(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
-            channel_ops.resizeRows(P, channels, ctx.src, ctx.src_stride, ctx.src_cols, ctx.x_taps, ctx.mid, ctx.dst_cols, r0, r1);
-        }
-
-        fn columnsBand(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
-            channel_ops.resizeColumns(P, ctx.mid, @as(usize, ctx.dst_cols) * channels, ctx.y_taps, ctx.dst, ctx.dst_stride, r0, r1);
+        /// Output rows `[r0, r1)`. The ring holds the contiguous source rows `[lo, hi)`; a
+        /// window sliding forward extends it, anything else (a gap on a steep downscale, the
+        /// mirrored bottom edge folding back) restarts it, so untapped source rows are never
+        /// resampled and each band recomputes at most one window of halo.
+        fn band(ctx: *const @This(), k: usize, r0: usize, r1: usize) void {
+            const taps = ctx.x_taps.taps;
+            const row_len = @as(usize, ctx.dst_cols) * channels;
+            const ring = ctx.rings[k * ctx.ring_rows * row_len ..][0 .. ctx.ring_rows * row_len];
+            var lo: usize = 0;
+            var hi: usize = 0;
+            for (r0..r1) |r| {
+                const rows = ctx.y_taps.indices[r * taps ..][0..taps];
+                var need_lo: usize = rows[0];
+                var need_hi: usize = rows[0] + 1;
+                for (rows) |sr| {
+                    need_lo = @min(need_lo, sr);
+                    need_hi = @max(need_hi, sr + 1);
+                }
+                if (need_lo < lo or need_hi > hi) {
+                    var from = need_lo;
+                    if (need_lo >= lo and need_lo <= hi) from = hi else lo = need_lo;
+                    for (from..need_hi) |sr| {
+                        const src_row = ctx.src[sr * ctx.src_stride ..][0 .. @as(usize, ctx.src_cols) * channels];
+                        channel_ops.resizeRow(P, channels, src_row, ctx.x_taps, ring[(sr % ctx.ring_rows) * row_len ..][0..row_len], ctx.dst_cols);
+                    }
+                    hi = need_hi;
+                    lo = @max(lo, hi -| ctx.ring_rows);
+                }
+                var srcs: [channel_ops.max_taps][*]const A = undefined;
+                for (rows, 0..) |sr, t| srcs[t] = ring[(sr % ctx.ring_rows) * row_len ..].ptr;
+                channel_ops.blendRows(P, srcs[0..taps], ctx.y_taps.weightsAt(r), ctx.dst[r * ctx.dst_stride ..][0..row_len]);
+            }
         }
     };
 }
