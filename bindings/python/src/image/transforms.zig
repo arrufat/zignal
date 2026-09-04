@@ -449,7 +449,7 @@ pub fn image_flip_left_right(self_obj: ?*c.PyObject, args: ?*c.PyObject) callcon
                 python.mapZigError(err, "flip image");
                 return null;
             };
-            out.flipLeftRight();
+            out.flipLeftRight(python.io);
             return @ptrCast(moveImageToPython(out) orelse return null);
         }
     }.apply);
@@ -475,7 +475,7 @@ pub fn image_flip_top_bottom(self_obj: ?*c.PyObject, args: ?*c.PyObject) callcon
                 python.mapZigError(err, "flip image");
                 return null;
             };
-            out.flipTopBottom();
+            out.flipTopBottom(python.io);
             return @ptrCast(moveImageToPython(out) orelse return null);
         }
     }.apply);
@@ -717,22 +717,22 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
                 return null;
             };
             switch (src_pimg.data) {
-                .gray => |img| dst.insert(img, rect, @floatCast(angle), method, blend_mode),
+                .gray => |img| dst.insert(python.io, img, rect, @floatCast(angle), method, blend_mode),
                 .rgb => |img| {
-                    var src_converted = img.convert(allocator, u8) catch |err| {
+                    var src_converted = img.convert(python.io, allocator, u8) catch |err| {
                         python.mapZigError(err, "convert image");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
-                    dst.insert(src_converted, rect, @floatCast(angle), method, blend_mode);
+                    dst.insert(python.io, src_converted, rect, @floatCast(angle), method, blend_mode);
                 },
                 .rgba => |img| {
-                    var src_converted = img.convert(allocator, u8) catch |err| {
+                    var src_converted = img.convert(python.io, allocator, u8) catch |err| {
                         python.mapZigError(err, "convert image");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
-                    dst.insert(src_converted, rect, @floatCast(angle), method, blend_mode);
+                    dst.insert(python.io, src_converted, rect, @floatCast(angle), method, blend_mode);
                 },
             }
         },
@@ -743,21 +743,21 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
             };
             switch (src_pimg.data) {
                 .gray => |img| {
-                    var src_converted = img.convert(allocator, Rgb) catch |err| {
+                    var src_converted = img.convert(python.io, allocator, Rgb) catch |err| {
                         python.mapZigError(err, "convert image");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
-                    dst.insert(src_converted, rect, @floatCast(angle), method, blend_mode);
+                    dst.insert(python.io, src_converted, rect, @floatCast(angle), method, blend_mode);
                 },
-                .rgb => |img| dst.insert(img, rect, @floatCast(angle), method, blend_mode),
+                .rgb => |img| dst.insert(python.io, img, rect, @floatCast(angle), method, blend_mode),
                 .rgba => |img| {
-                    var src_converted = img.convert(allocator, Rgb) catch |err| {
+                    var src_converted = img.convert(python.io, allocator, Rgb) catch |err| {
                         python.mapZigError(err, "convert image");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
-                    dst.insert(src_converted, rect, @floatCast(angle), method, blend_mode);
+                    dst.insert(python.io, src_converted, rect, @floatCast(angle), method, blend_mode);
                 },
             }
         },
@@ -768,22 +768,22 @@ pub fn image_insert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
             };
             switch (src_pimg.data) {
                 .gray => |img| {
-                    var src_converted = img.convert(allocator, Rgba) catch |err| {
+                    var src_converted = img.convert(python.io, allocator, Rgba) catch |err| {
                         python.mapZigError(err, "convert image");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
-                    dst.insert(src_converted, rect, @floatCast(angle), method, blend_mode);
+                    dst.insert(python.io, src_converted, rect, @floatCast(angle), method, blend_mode);
                 },
                 .rgb => |img| {
-                    var src_converted = img.convert(allocator, Rgba) catch |err| {
+                    var src_converted = img.convert(python.io, allocator, Rgba) catch |err| {
                         python.mapZigError(err, "convert image");
                         return null;
                     };
                     defer src_converted.deinit(allocator);
-                    dst.insert(src_converted, rect, @floatCast(angle), method, blend_mode);
+                    dst.insert(python.io, src_converted, rect, @floatCast(angle), method, blend_mode);
                 },
-                .rgba => |img| dst.insert(img, rect, @floatCast(angle), method, blend_mode),
+                .rgba => |img| dst.insert(python.io, img, rect, @floatCast(angle), method, blend_mode),
             }
         },
     }

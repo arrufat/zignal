@@ -38,10 +38,10 @@ fn createMatchVisualizationWithParams(
     ratio_threshold: f32,
 ) !Image(Rgba) {
     // Convert directly to grayscale for feature detection
-    var gray1 = try img1_rgba.convert(allocator, u8);
+    var gray1 = try img1_rgba.convert(std.Io.failing, allocator, u8);
     defer gray1.deinit(allocator);
 
-    var gray2 = try img2_rgba.convert(allocator, u8);
+    var gray2 = try img2_rgba.convert(std.Io.failing, allocator, u8);
     defer gray2.deinit(allocator);
 
     // Create ORB detector with custom parameters
@@ -275,13 +275,13 @@ pub export fn getMatchStats(
     const img2: Image(Rgba) = .initFromSlice(rows2, cols2, image2_ptr[0..img2_size]);
 
     // Convert to grayscale
-    var gray1 = img1.convert(allocator, u8) catch {
+    var gray1 = img1.convert(std.Io.failing, allocator, u8) catch {
         for (0..6) |i| stats_ptr[i] = 0;
         return;
     };
     defer gray1.deinit(allocator);
 
-    var gray2 = img2.convert(allocator, u8) catch {
+    var gray2 = img2.convert(std.Io.failing, allocator, u8) catch {
         for (0..6) |i| stats_ptr[i] = 0;
         return;
     };

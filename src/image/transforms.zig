@@ -31,22 +31,35 @@ pub fn Transform(comptime T: type) type {
         // ============================================================================
 
         /// Flips an image from left to right (mirror effect).
-        pub fn flipLeftRight(self: Self) void {
-            for (0..self.rows) |r| {
-                const start = r * self.stride;
-                std.mem.reverse(T, self.data[start .. start + self.cols]);
-            }
+        pub fn flipLeftRight(self: Self, io: Io) void {
+            const Ctx = struct {
+                img: Self,
+
+                fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
+                    for (r0..r1) |r| std.mem.reverse(T, ctx.img.data[r * ctx.img.stride ..][0..ctx.img.cols]);
+                }
+            };
+            const ctx: Ctx = .{ .img = self };
+            parallel.forRowBands(io, self.rows, parallel.bandCount(self.rows, self.cols), &ctx, Ctx.band);
         }
 
-        /// Flips an image from top to bottom (upside down effect).
-        pub fn flipTopBottom(self: Self) void {
-            for (0..self.rows / 2) |r| {
-                const top_row = self.data[r * self.stride ..][0..self.cols];
-                const bot_row = self.data[(self.rows - r - 1) * self.stride ..][0..self.cols];
-                for (top_row, bot_row) |*t, *b| {
-                    std.mem.swap(T, t, b);
+        /// Flips an image from top to bottom (upside down effect); bands cover row pairs.
+        pub fn flipTopBottom(self: Self, io: Io) void {
+            const Ctx = struct {
+                img: Self,
+
+                fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
+                    const img = ctx.img;
+                    for (r0..r1) |r| {
+                        const top_row = img.data[r * img.stride ..][0..img.cols];
+                        const bot_row = img.data[(img.rows - r - 1) * img.stride ..][0..img.cols];
+                        for (top_row, bot_row) |*t, *b| std.mem.swap(T, t, b);
+                    }
                 }
-            }
+            };
+            const ctx: Ctx = .{ .img = self };
+            const pairs = self.rows / 2;
+            parallel.forRowBands(io, pairs, parallel.bandCount(pairs, 2 * self.cols), &ctx, Ctx.band);
         }
 
         /// Resizes an image to fit within the output dimensions while preserving aspect ratio.
@@ -330,10 +343,11 @@ pub fn Transform(comptime T: type) type {
         /// - When the source is not RGBA, pixels are copied directly.
         /// - Pixels outside the source bounds are not modified in self.
         /// - This method mutates self in-place.
-        pub fn insert(self: *Self, source: anytype, rect: Rectangle(f32), angle: f32, method: Interpolation, blend_mode: Blending) void {
+        pub fn insert(self: *Self, io: Io, source: anytype, rect: Rectangle(f32), angle: f32, method: Interpolation, blend_mode: Blending) void {
             if (source.rows == 0 or source.cols == 0) return;
 
             const SourcePixelType = std.meta.Child(@TypeOf(source.data));
+            const Source = @TypeOf(source);
 
             const frows: f32 = @floatFromInt(source.rows);
             const fcols: f32 = @floatFromInt(source.cols);
@@ -346,17 +360,29 @@ pub fn Transform(comptime T: type) type {
                 @abs(rect_width - fcols) < epsilon and
                 @abs(rect_height - frows) < epsilon)
             {
-                const dst_top: i32 = @round(rect.t);
-                const dst_left: i32 = @round(rect.l);
-                for (0..source.rows) |r| {
-                    const y: i32 = dst_top + @as(i32, @intCast(r));
-                    for (0..source.cols) |c| {
-                        const x: i32 = dst_left + @as(i32, @intCast(c));
-                        if (self.atOrNull(y, x)) |dest| {
-                            assignPixel(dest, source.at(r, c).*, blend_mode);
+                // Source rows are the band unit: each lands on one destination row.
+                const Copy = struct {
+                    dst: Self,
+                    source: Source,
+                    dst_top: i32,
+                    dst_left: i32,
+                    blend_mode: Blending,
+
+                    fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
+                        const p = ctx.*;
+                        for (r0..r1) |r| {
+                            const y: i32 = p.dst_top + @as(i32, @intCast(r));
+                            for (0..p.source.cols) |c| {
+                                const x: i32 = p.dst_left + @as(i32, @intCast(c));
+                                if (p.dst.atOrNull(y, x)) |dest| {
+                                    assignPixel(dest, p.source.at(r, c).*, p.blend_mode);
+                                }
+                            }
                         }
                     }
-                }
+                };
+                const ctx: Copy = .{ .dst = self.*, .source = source, .dst_top = @round(rect.t), .dst_left = @round(rect.l), .blend_mode = blend_mode };
+                parallel.forRowBands(io, source.rows, parallel.bandCount(source.rows, source.cols), &ctx, Copy.band);
                 return;
             }
 
@@ -391,35 +417,85 @@ pub fn Transform(comptime T: type) type {
             const min_c: u32 = @floor(@max(0, left));
             const max_c: u32 = @min(self.cols, @as(u32, @ceil(@min(right, cols_f))) + 1);
 
-            // Only iterate over potentially affected pixels
-            for (min_r..max_r) |r| {
-                const dest_y: f32 = @floatFromInt(r);
-                const dy = dest_y - cy;
+            // Only the rows of the bounding box, in bands. The band is instantiated per
+            // interpolation method: with the tag known at comptime the per-pixel dispatch
+            // folds away, as it did when the loop was inlined into callers passing a literal.
+            const Blit = struct {
+                const Outer = @This();
 
-                for (min_c..max_c) |c| {
-                    const dest_x: f32 = @floatFromInt(c);
-                    const dx = dest_x - cx;
+                dst: Self,
+                source: Source,
+                min_r: usize,
+                min_c: usize,
+                max_c: usize,
+                cx: f32,
+                cy: f32,
+                cos: f32,
+                sin: f32,
+                half_width: f32,
+                half_height: f32,
+                inv_width: f32,
+                inv_height: f32,
+                method: Interpolation,
+                blend_mode: Blending,
 
-                    // Inverse rotate to rectangle space
-                    const rect_x = cos * dx + sin * dy;
-                    const rect_y = -sin * dx + cos * dy;
+                fn Band(comptime tag: std.meta.Tag(Interpolation)) type {
+                    return struct {
+                        fn run(ctx: *const Outer, _: usize, r0: usize, r1: usize) void {
+                            // Locals: the pixel stores could alias `ctx`, which would reload every field per pixel.
+                            const p = ctx.*;
+                            const kind: Interpolation = if (tag == .mitchell) .{ .mitchell = p.method.mitchell } else @unionInit(Interpolation, @tagName(tag), {});
+                            const src = p.source;
+                            const src_rows: f32 = @floatFromInt(src.rows);
+                            const src_cols: f32 = @floatFromInt(src.cols);
+                            for (p.min_r + r0..p.min_r + r1) |r| {
+                                const dy = @as(f32, @floatFromInt(r)) - p.cy;
+                                for (p.min_c..p.max_c) |c| {
+                                    const dx = @as(f32, @floatFromInt(c)) - p.cx;
 
-                    // A pixel is inside when its centre lies in the half-open rect area.
-                    if (rect_x < -half_width or rect_x >= half_width or rect_y < -half_height or rect_y >= half_height) continue;
+                                    // Inverse rotate to rectangle space
+                                    const rect_x = p.cos * dx + p.sin * dy;
+                                    const rect_y = -p.sin * dx + p.cos * dy;
 
-                    // Normalized [0,1) position within the rect, then source pixel-centre coordinates
-                    const norm_x = (rect_x + half_width) * inv_width;
-                    const norm_y = (rect_y + half_height) * inv_height;
-                    const src_x = if (source.cols == 1) 0 else norm_x * fcols - 0.5;
-                    const src_y = if (source.rows == 1) 0 else norm_y * frows - 0.5;
+                                    // A pixel is inside when its centre lies in the half-open rect area.
+                                    if (rect_x < -p.half_width or rect_x >= p.half_width or rect_y < -p.half_height or rect_y >= p.half_height) continue;
 
-                    // Sample from source
-                    if (interpolate(SourcePixelType, source, src_x, src_y, method, .mirror)) |src_val| {
-                        // Type-specific handling with compile-time optimization
-                        const dest_pixel = self.at(r, c);
-                        assignPixel(dest_pixel, src_val, blend_mode);
-                    }
+                                    // Normalized [0,1) position within the rect, then source pixel-centre coordinates
+                                    const norm_x = (rect_x + p.half_width) * p.inv_width;
+                                    const norm_y = (rect_y + p.half_height) * p.inv_height;
+                                    const src_x = if (src.cols == 1) 0 else norm_x * src_cols - 0.5;
+                                    const src_y = if (src.rows == 1) 0 else norm_y * src_rows - 0.5;
+
+                                    if (@call(.always_inline, interpolate, .{ SourcePixelType, src, src_x, src_y, kind, .mirror })) |src_val| {
+                                        assignPixel(p.dst.at(r, c), src_val, p.blend_mode);
+                                    }
+                                }
+                            }
+                        }
+                    };
                 }
+            };
+            const ctx: Blit = .{
+                .dst = self.*,
+                .source = source,
+                .min_r = min_r,
+                .min_c = min_c,
+                .max_c = max_c,
+                .cx = cx,
+                .cy = cy,
+                .cos = cos,
+                .sin = sin,
+                .half_width = half_width,
+                .half_height = half_height,
+                .inv_width = inv_width,
+                .inv_height = inv_height,
+                .method = method,
+                .blend_mode = blend_mode,
+            };
+            const rows = max_r - min_r;
+            const bands = parallel.bandCount(rows, max_c - min_c);
+            switch (method) {
+                inline else => |_, tag| parallel.forRowBands(io, rows, bands, &ctx, Blit.Band(tag).run),
             }
         }
 

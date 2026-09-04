@@ -17,6 +17,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
+const parallel = @import("parallel.zig");
 const assert = std.debug.assert;
 
 const Rgb = @import("color.zig").Rgb(u8);
@@ -405,17 +406,26 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Converts the image to a different pixel type, writing into a pre-allocated output image.
-        /// The output image `out` must have the same dimensions as `self`.
-        pub fn convertInto(self: Self, comptime TargetType: type, out: Image(TargetType)) void {
+        /// The output image `out` must have the same dimensions as `self`. Rows run in bands on `io`.
+        pub fn convertInto(self: Self, io: Io, comptime TargetType: type, out: Image(TargetType)) void {
             assert(self.hasSameShape(out));
             if (comptime T == TargetType) {
                 self.copy(out);
             } else {
-                for (0..self.rows) |r| {
-                    for (0..self.cols) |c| {
-                        out.at(r, c).* = convertColor(TargetType, self.at(r, c).*);
+                const Ctx = struct {
+                    src: Self,
+                    out: Image(TargetType),
+
+                    fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
+                        for (r0..r1) |r| {
+                            const src_row = ctx.src.data[r * ctx.src.stride ..][0..ctx.src.cols];
+                            const out_row = ctx.out.data[r * ctx.out.stride ..][0..ctx.out.cols];
+                            for (out_row, src_row) |*o, px| o.* = convertColor(TargetType, px);
+                        }
                     }
-                }
+                };
+                const ctx: Ctx = .{ .src = self, .out = out };
+                parallel.forRowBands(io, self.rows, parallel.bandCount(self.rows, self.cols), &ctx, Ctx.band);
             }
         }
 
@@ -425,12 +435,12 @@ pub fn Image(comptime T: type) type {
         /// Example usage:
         /// ```zig
         /// var rgba_image: Image(Rgba) = ...;
-        /// var gray_image = try rgba_image.convert(allocator, u8);
+        /// var gray_image = try rgba_image.convert(io, allocator, u8);
         /// defer gray_image.deinit(allocator);
         /// ```
-        pub fn convert(self: Self, allocator: Allocator, comptime TargetType: type) !Image(TargetType) {
+        pub fn convert(self: Self, io: Io, allocator: Allocator, comptime TargetType: type) !Image(TargetType) {
             const result = try Image(TargetType).init(allocator, self.rows, self.cols);
-            self.convertInto(TargetType, result);
+            self.convertInto(io, TargetType, result);
             return result;
         }
 
@@ -490,14 +500,14 @@ pub fn Image(comptime T: type) type {
             }
         }
 
-        /// Flips an image from left to right (mirror effect).
-        pub fn flipLeftRight(self: Self) void {
-            return Transform(T).flipLeftRight(self);
+        /// Flips an image from left to right (mirror effect), in row bands on `io`.
+        pub fn flipLeftRight(self: Self, io: Io) void {
+            return Transform(T).flipLeftRight(self, io);
         }
 
-        /// Flips an image from top to bottom (upside down effect).
-        pub fn flipTopBottom(self: Self) void {
-            return Transform(T).flipTopBottom(self);
+        /// Flips an image from top to bottom (upside down effect), in row bands on `io`.
+        pub fn flipTopBottom(self: Self, io: Io) void {
+            return Transform(T).flipTopBottom(self, io);
         }
 
         /// Inverts the colors of an image in-place.
@@ -617,9 +627,9 @@ pub fn Image(comptime T: type) type {
         /// - For Image(Rgba) sources, alpha blending is applied using the specified blend mode.
         /// - When the source is not RGBA, pixels are copied directly.
         /// - Pixels outside the source bounds are not modified in self.
-        /// - This method mutates self in-place.
-        pub fn insert(self: *Self, source: anytype, rect: Rectangle(f32), angle: f32, method: Interpolation, blend_mode: Blending) void {
-            return Transform(T).insert(self, source, rect, angle, method, blend_mode);
+        /// - This method mutates self in-place, in row bands on `io`.
+        pub fn insert(self: *Self, io: Io, source: anytype, rect: Rectangle(f32), angle: f32, method: Interpolation, blend_mode: Blending) void {
+            return Transform(T).insert(self, io, source, rect, angle, method, blend_mode);
         }
 
         /// Warps the image through a Similarity, Affine, or Projective `transform`, sampling each

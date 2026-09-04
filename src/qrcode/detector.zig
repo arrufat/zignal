@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const Io = std.Io;
+const parallel = @import("../parallel.zig");
 const Allocator = std.mem.Allocator;
 
 const ProjectiveTransform = @import("../geometry.zig").ProjectiveTransform;
@@ -50,7 +51,7 @@ const alignment_run_limit = 1.6;
 /// Caller owns result.data.
 pub fn decode(allocator: Allocator, image: anytype) !?DecodeResult {
     if (@TypeOf(image) == Image(u8)) return decodeGray(allocator, image);
-    var gray = try image.convert(allocator, u8);
+    var gray = try image.convert(parallel.inline_io, allocator, u8);
     defer gray.deinit(allocator);
     return decodeGray(allocator, gray);
 }
@@ -754,7 +755,7 @@ test "decode accepts color images" {
     const allocator = std.testing.allocator;
     var clean = try encoder.encode(allocator, "COLOR INPUT", .{ .module_size = 4 });
     defer clean.deinit(allocator);
-    var rgba = try clean.convert(allocator, Rgba);
+    var rgba = try clean.convert(parallel.inline_io, allocator, Rgba);
     defer rgba.deinit(allocator);
     var result = (try decode(allocator, rgba)) orelse return error.TestUnexpectedResult;
     defer result.deinit(allocator);

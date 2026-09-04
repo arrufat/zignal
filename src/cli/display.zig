@@ -134,6 +134,7 @@ pub fn emit(
 
 pub fn createHorizontalComposite(
     comptime T: type,
+    io: Io,
     allocator: Allocator,
     images: []const zignal.Image(T),
     user_width: ?u32,
@@ -170,7 +171,7 @@ pub fn createHorizontalComposite(
 
     for (images, 0..) |img, i| {
         const offset_x = @as(f32, @floatFromInt(i)) * wf;
-        canvas.insert(img, .{ .l = offset_x, .t = 0, .r = offset_x + wf, .b = hf }, 0, .bilinear, .none);
+        canvas.insert(io, img, .{ .l = offset_x, .t = 0, .r = offset_x + wf, .b = hf }, 0, .bilinear, .none);
     }
 
     return canvas;

@@ -196,7 +196,7 @@ fn finishEncode(format: ImageFormat, bytes: []u8, encode_ms: f32) i32 {
 fn encodeSource(comptime codec: type, as_gray: u32, options: codec.EncodeOptions) ![]u8 {
     const source = g_source orelse return error.NoImage;
     if (as_gray != 0) {
-        if (g_gray == null) g_gray = try source.convert(allocator, u8);
+        if (g_gray == null) g_gray = try source.convert(std.Io.failing, allocator, u8);
         return codec.encode(u8, allocator, g_gray.?, options);
     }
     return codec.encode(Rgba, allocator, source, options);

@@ -17,6 +17,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
+const parallel = @import("../parallel.zig");
 
 const convertColor = @import("../color.zig").convertColor;
 const Image = @import("../image.zig").Image;
@@ -806,17 +807,17 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8, l
         .grayscale => |*img| {
             if (T == u8) return img.*;
             defer img.deinit(allocator);
-            return img.convert(allocator, T);
+            return img.convert(parallel.inline_io, allocator, T);
         },
         .rgb => |*img| {
             if (T == Rgb) return img.*;
             defer img.deinit(allocator);
-            return img.convert(allocator, T);
+            return img.convert(parallel.inline_io, allocator, T);
         },
         .rgba => |*img| {
             if (T == Rgba) return img.*;
             defer img.deinit(allocator);
-            return img.convert(allocator, T);
+            return img.convert(parallel.inline_io, allocator, T);
         },
     }
 }

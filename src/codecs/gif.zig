@@ -13,6 +13,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
+const parallel = @import("../parallel.zig");
 const expect = std.testing.expect;
 const expectError = std.testing.expectError;
 const expectEqual = std.testing.expectEqual;
@@ -559,7 +560,7 @@ fn composeFirstFrame(comptime T: type, allocator: Allocator, state: GifState) !I
 
     if (T == Rgba) return canvas;
     defer canvas.deinit(allocator);
-    return canvas.convert(allocator, T);
+    return canvas.convert(parallel.inline_io, allocator, T);
 }
 
 /// First-frame composition pre-converted to `Rgb`/`Rgba`. The Rgba variant is
@@ -652,7 +653,7 @@ fn composeAnimated(comptime T: type, allocator: Allocator, state: GifState) !Ani
             frames_out[i] = rgba_frame;
         } else {
             defer rgba_frame.deinit(allocator);
-            frames_out[i] = try rgba_frame.convert(allocator, T);
+            frames_out[i] = try rgba_frame.convert(parallel.inline_io, allocator, T);
         }
         frames_init = i + 1;
 
@@ -919,7 +920,7 @@ fn mapImageToPalette(
     const lut = quantize.ColorLookupTable.init(lookup_palette);
 
     if (use_dither) {
-        var work = try image.convert(allocator, Rgb);
+        var work = try image.convert(parallel.inline_io, allocator, Rgb);
         defer work.deinit(allocator);
         dither.applyFloydSteinberg(work, lookup_palette, lut);
         var i: usize = 0;

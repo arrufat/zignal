@@ -18,7 +18,7 @@ pub fn main(init: std.process.Init) !void {
     defer image.deinit(init.gpa);
 
     std.debug.print("Detecting edges...\n", .{});
-    var gray = try image.convert(init.gpa, u8);
+    var gray = try image.convert(init.io, init.gpa, u8);
     defer gray.deinit(init.gpa);
     var edges = try Image(u8).init(init.gpa, image.rows, image.cols);
     defer edges.deinit(init.gpa);
