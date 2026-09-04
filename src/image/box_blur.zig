@@ -95,9 +95,7 @@ inline fn finishU8(comptime len: usize, comptime mode: Mode, src_row: []const u8
             break :blk orig_f + orig_f - blurred;
         },
     };
-    const zero: @Vector(len, f32) = @splat(0);
-    const max: @Vector(len, f32) = @splat(255);
-    return @round(@max(zero, @min(max, value)));
+    return meta.roundToBytes(value);
 }
 
 /// Accumulator type: exact u32 sums for u8 planes, f64 for f32.
@@ -121,7 +119,7 @@ fn plane(comptime P: type, comptime mode: Mode, io: Io, src: Image(P), dst: Imag
     // Integer sums are exact, so bands seeded mid-image match one sweep; f32 planes (f64 sums) stay one band.
     // Each band re-seeds `2·radius + 1` rows, hence four windows tall.
     const bands = if (@typeInfo(SumT(P)) == .int) parallel.bandCountFor(rows, cols, 4 * (2 * radius + 1)) else 1;
-    const ctx: BandContext(P, SumT(P), InvT(P), planeRows(P, mode)) = .{
+    const ctx: BandContext(P, mode, false) = .{
         .src = src,
         .dst = dst,
         .radius = radius,
@@ -135,32 +133,29 @@ fn plane(comptime P: type, comptime mode: Mode, io: Io, src: Image(P), dst: Imag
 }
 
 /// Read-only state shared by the row bands; `width` is the element count of one row of
-/// column sums (`cols`, or `cols * channels` for the interleaved path).
-fn BandContext(comptime P: type, comptime Sum: type, comptime Inv: type, comptime rowsFn: anytype) type {
+/// column sums (`cols`, or `cols * channels` when `interleaved`).
+fn BandContext(comptime P: type, comptime mode: Mode, comptime interleaved: bool) type {
     return struct {
         src: Image(P),
         dst: Image(P),
         radius: usize,
         width: usize,
-        col_sums: []Sum,
-        inv_widths: []const Inv,
+        col_sums: []if (interleaved) u32 else SumT(P),
+        inv_widths: []const if (interleaved) f32 else InvT(P),
 
         fn rowBand(ctx: *const @This(), band: usize, r0: usize, r1: usize) void {
-            rowsFn(ctx.src, ctx.dst, ctx.col_sums[band * ctx.width ..][0..ctx.width], ctx.inv_widths, ctx.radius, r0, r1);
+            const sums = ctx.col_sums[band * ctx.width ..][0..ctx.width];
+            if (interleaved) {
+                interleavedRows(P, mode, ctx.src, ctx.dst, sums, ctx.inv_widths, ctx.radius, r0, r1);
+            } else {
+                planeRows(P, mode, ctx.src, ctx.dst, sums, ctx.inv_widths, ctx.radius, r0, r1);
+            }
         }
     };
 }
 
 /// Rows `[r_start, r_end)` of one plane; `col_sums` is seeded for `r_start` here.
-fn planeRows(comptime P: type, comptime mode: Mode) fn (Image(P), Image(P), []SumT(P), []const InvT(P), usize, usize, usize) void {
-    return struct {
-        fn run(src: Image(P), dst: Image(P), col_sums: []SumT(P), inv_widths: []const InvT(P), radius: usize, r_start: usize, r_end: usize) void {
-            planeRowsImpl(P, mode, src, dst, col_sums, inv_widths, radius, r_start, r_end);
-        }
-    }.run;
-}
-
-fn planeRowsImpl(comptime P: type, comptime mode: Mode, src: Image(P), dst: Image(P), col_sums: []SumT(P), inv_widths: []const InvT(P), radius: usize, r_start: usize, r_end: usize) void {
+fn planeRows(comptime P: type, comptime mode: Mode, src: Image(P), dst: Image(P), col_sums: []SumT(P), inv_widths: []const InvT(P), radius: usize, r_start: usize, r_end: usize) void {
     const rows: usize = src.rows;
     const cols: usize = src.cols;
 
@@ -256,7 +251,7 @@ inline fn emitAndSlide(
 fn interleavedU8(comptime T: type, comptime mode: Mode, io: Io, image: Image(T), out: Image(T), allocator: Allocator, radius: usize) !void {
     const width_e = @as(usize, image.cols) * comptime Image(T).channels();
     const bands = parallel.bandCountFor(image.rows, image.cols, 4 * (2 * radius + 1));
-    const ctx: BandContext(T, u32, f32, interleavedRows(T, mode)) = .{
+    const ctx: BandContext(T, mode, true) = .{
         .src = image,
         .dst = out,
         .radius = radius,
@@ -270,15 +265,7 @@ fn interleavedU8(comptime T: type, comptime mode: Mode, io: Io, image: Image(T),
 }
 
 /// Rows `[r_start, r_end)` of the interleaved path; `col_sums` is seeded for `r_start` here.
-fn interleavedRows(comptime T: type, comptime mode: Mode) fn (Image(T), Image(T), []u32, []const f32, usize, usize, usize) void {
-    return struct {
-        fn run(image: Image(T), out: Image(T), col_sums: []u32, inv_widths: []const f32, radius: usize, r_start: usize, r_end: usize) void {
-            interleavedRowsImpl(T, mode, image, out, col_sums, inv_widths, radius, r_start, r_end);
-        }
-    }.run;
-}
-
-fn interleavedRowsImpl(comptime T: type, comptime mode: Mode, image: Image(T), out: Image(T), col_sums: []u32, inv_widths: []const f32, radius: usize, r_start: usize, r_end: usize) void {
+fn interleavedRows(comptime T: type, comptime mode: Mode, image: Image(T), out: Image(T), col_sums: []u32, inv_widths: []const f32, radius: usize, r_start: usize, r_end: usize) void {
     const n = comptime Image(T).channels();
     const rows: usize = image.rows;
     const cols: usize = image.cols;
@@ -294,16 +281,8 @@ fn interleavedRowsImpl(comptime T: type, comptime mode: Mode, image: Image(T), o
     // width so both paths run one-multiply rounding over the exact same pixel range.
     const px_block = std.simd.suggestVectorLength(i32) orelse 1;
     const B = px_block * n;
-    const repeat_mask = comptime blk: {
-        var m: [B]i32 = undefined;
-        for (&m, 0..) |*e, j| e.* = @intCast(j % n);
-        break :blk m;
-    };
-    const tail_mask = comptime blk: {
-        var m: [n]i32 = undefined;
-        for (&m, 0..) |*e, t| e.* = @intCast(B - n + t);
-        break :blk m;
-    };
+    const repeat_mask = meta.StrideMasks(B, n).repeat;
+    const tail_mask = meta.StrideMasks(B, n).tail;
 
     for (r_start..r_end) |r| {
         if (r > r_start) {

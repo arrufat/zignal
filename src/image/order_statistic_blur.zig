@@ -85,8 +85,8 @@ inline fn scanFine(rank: usize, cum_below: u32, bucket: usize, fine_win: Vec16) 
 /// selected bucket is maintained incrementally alongside the coarse window and only
 /// rebuilt (O(window)) when the selected bucket changes between adjacent pixels.
 fn applyScalarOpTwoLevel(
-    io: Io,
     image: Image(u8),
+    io: Io,
     allocator: Allocator,
     radius: usize,
     out: Image(u8),
@@ -206,8 +206,8 @@ const TwoLevelBands = struct {
 };
 
 fn applyScalarOp(
-    io: Io,
     image: Image(u8),
+    io: Io,
     allocator: Allocator,
     radius: usize,
     out: Image(u8),
@@ -220,14 +220,14 @@ fn applyScalarOp(
     // window^2, so the rank is constant for the whole plane.
     const window = radius * 2 + 1;
     if (@hasDecl(@TypeOf(reducer_in), "rankFor") and window <= TwoLevelColumn.max_window) {
-        return applyScalarOpTwoLevel(io, image, allocator, radius, out, border, reducer_in.rankFor(window * window));
+        return applyScalarOpTwoLevel(image, io, allocator, radius, out, border, reducer_in.rankFor(window * window));
     }
-    return applyScalarOpFlat(io, image, allocator, radius, out, border, reducer_in);
+    return applyScalarOpFlat(image, io, allocator, radius, out, border, reducer_in);
 }
 
 fn applyScalarOpFlat(
-    io: Io,
     image: Image(u8),
+    io: Io,
     allocator: Allocator,
     radius: usize,
     out: Image(u8),
@@ -249,13 +249,9 @@ fn applyScalarOpFlat(
         .border = border,
         .reducer = reducer_in,
         .column_hists = try allocator.alloc(Histogram(u8), bands * image.cols),
-        .errors = try allocator.alloc(?Error, bands),
     };
     defer allocator.free(ctx.column_hists);
-    defer allocator.free(ctx.errors);
-    @memset(ctx.errors, null);
-    parallel.forRowBands(io, image.rows, bands, &ctx, Bands.band);
-    for (ctx.errors) |err| if (err) |e| return e;
+    try parallel.forRowBandsTry(io, image.rows, bands, &ctx, Bands.band);
 }
 
 fn FlatBands(comptime Reducer: type) type {
@@ -267,14 +263,8 @@ fn FlatBands(comptime Reducer: type) type {
         reducer: Reducer,
         /// `cols` column histograms per band.
         column_hists: []Histogram(u8),
-        /// First reducer error per band, reported after the group.
-        errors: []?Error,
 
-        fn band(ctx: *const @This(), b: usize, r0: usize, r1: usize) void {
-            ctx.errors[b] = if (ctx.bandRows(b, r0, r1)) null else |err| err;
-        }
-
-        fn bandRows(ctx: *const @This(), b: usize, r0: usize, r1: usize) Error!void {
+        fn band(ctx: *const @This(), b: usize, r0: usize, r1: usize) Error!void {
             const image = ctx.image;
             const out = ctx.out;
             const border = ctx.border;
@@ -555,7 +545,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             switch (@typeInfo(T)) {
                 .int => {
                     if (T != u8) return Error.UnsupportedPixelType;
-                    try applyScalarOp(io, image, allocator, radius, target, border, reducer);
+                    try applyScalarOp(image, io, allocator, radius, target, border, reducer);
                 },
                 .@"struct" => {
                     if (!comptime meta.allFieldsAreU8(T)) return Error.UnsupportedPixelType;
@@ -590,7 +580,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
             inline for (src_planes, dst_planes) |src_data, dst_data| {
                 const src_plane = Image(u8).initFromSlice(image.rows, image.cols, src_data);
                 const dst_plane = Image(u8).initFromSlice(image.rows, image.cols, dst_data);
-                try applyScalarOp(io, src_plane, allocator, radius, dst_plane, border, reducer);
+                try applyScalarOp(src_plane, io, allocator, radius, dst_plane, border, reducer);
             }
 
             channel_ops.mergeChannels(T, io, dst_planes, target);
@@ -624,8 +614,8 @@ test "two-level rank filter matches flat histogram path" {
                 for (percentiles) |p| {
                     const window = radius * 2 + 1;
                     const flat_reducer = PercentileReducer{ .percentile = p };
-                    try applyScalarOpFlat(std.Io.Threaded.global_single_threaded.io(), img, allocator, radius, flat, mode, flat_reducer);
-                    try applyScalarOpTwoLevel(std.Io.Threaded.global_single_threaded.io(), img, allocator, radius, two, mode, flat_reducer.rankFor(window * window));
+                    try applyScalarOpFlat(img, std.Io.Threaded.global_single_threaded.io(), allocator, radius, flat, mode, flat_reducer);
+                    try applyScalarOpTwoLevel(img, std.Io.Threaded.global_single_threaded.io(), allocator, radius, two, mode, flat_reducer.rankFor(window * window));
                     try testing.expectEqualSlices(u8, flat.data, two.data);
                 }
             }
@@ -658,8 +648,8 @@ test "two-level rank filter matches flat histogram path" {
                 for ([_]f64{ 0.0, 0.5, 1.0 }) |p| {
                     const window = radius * 2 + 1;
                     const flat_reducer = PercentileReducer{ .percentile = p };
-                    try applyScalarOpFlat(std.Io.Threaded.global_single_threaded.io(), img, allocator, radius, flat, mode, flat_reducer);
-                    try applyScalarOpTwoLevel(std.Io.Threaded.global_single_threaded.io(), img, allocator, radius, two, mode, flat_reducer.rankFor(window * window));
+                    try applyScalarOpFlat(img, std.Io.Threaded.global_single_threaded.io(), allocator, radius, flat, mode, flat_reducer);
+                    try applyScalarOpTwoLevel(img, std.Io.Threaded.global_single_threaded.io(), allocator, radius, two, mode, flat_reducer.rankFor(window * window));
                     try testing.expectEqualSlices(u8, flat.data, two.data);
                 }
             }

@@ -48,18 +48,18 @@ inline fn divClampU8Vec(
 /// to 30*9 = 270/256, brightening by +5.5% and clipping highlights.
 /// For all-equal taps the strict `>` puts the residual on tap 0 — `isUniformBody`
 /// relies on that shape to detect uniform kernels after quantization.
-fn quantizeKernel(taps: []i32, weights: []const f32) void {
+pub fn quantizeKernel(taps: []i32, weights: []const f32, comptime scale: comptime_int) void {
     if (taps.len == 0) return;
     var weight_sum: f64 = 0;
     var sum: i64 = 0;
     var largest: usize = 0;
     for (taps, weights, 0..) |*t, w, i| {
-        t.* = @round(w * fixed_point_scale);
+        t.* = @round(w * scale);
         weight_sum += w;
         sum += t.*;
         if (@abs(t.*) > @abs(taps[largest])) largest = i;
     }
-    const target: i64 = @round(fixed_point_scale * weight_sum);
+    const target: i64 = @round(scale * weight_sum);
     taps[largest] += @intCast(target - sum);
 }
 
@@ -102,7 +102,7 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
             }
             if (T == f32) return weights;
             var result: [size]i32 = undefined;
-            quantizeKernel(&result, &weights);
+            quantizeKernel(&result, &weights, fixed_point_scale);
             return result;
         }
 
@@ -423,7 +423,7 @@ pub fn convolvePlanes(
 
 fn scaleKernelToInt(allocator: Allocator, kernel: []const f32) ![]i32 {
     const result = try allocator.alloc(i32, kernel.len);
-    quantizeKernel(result, kernel);
+    quantizeKernel(result, kernel, fixed_point_scale);
     return result;
 }
 
@@ -525,6 +525,9 @@ fn convolveSeparableAutoImpl(
 /// `image`'s bytes as a `cols * channels` wide u8 image: every channel of a pixel is a
 /// column, so the separable passes run over interleaved struct pixels without a split.
 pub fn elementView(comptime T: type, image: Image(T)) Image(u8) {
+    comptime if (@typeInfo(T) != .@"struct" or !meta.allFieldsAreU8(T)) {
+        @compileError("elementView needs a struct of u8 fields, got " ++ @typeName(T));
+    };
     const n = comptime Image(T).channels();
     return .{
         .rows = image.rows,
@@ -800,6 +803,8 @@ fn SeparablePass(comptime SrcT: type, comptime DstT: type, comptime AccumIntT: t
             kernel: []const KernelT,
             table: BorderIndexTable,
             bases: []usize = &.{},
+            /// Vertical interior rows through the O(1) column sums instead of the tap loop.
+            box: bool = false,
 
             fn horizontalBand(ctx: *const BandContext, _: usize, r0: usize, r1: usize) void {
                 const folded = isSymmetric(ctx.kernel);
@@ -811,27 +816,22 @@ fn SeparablePass(comptime SrcT: type, comptime DstT: type, comptime AccumIntT: t
             }
 
             fn verticalBand(ctx: *const BandContext, band: usize, r0: usize, r1: usize) void {
-                const folded = isSymmetric(ctx.kernel);
-                const dense = isDense(ctx.kernel);
                 ctx.verticalBorderRows(band, r0, @min(r1, ctx.table.low_end));
                 const inner0 = @max(r0, ctx.table.low_end);
                 const inner1 = @min(r1, ctx.table.high_start);
                 if (inner0 < inner1) {
-                    if (dense) verticalTiles(true, ctx.src, ctx.dst, ctx.kernel, folded, inner0, inner1) else verticalTiles(false, ctx.src, ctx.dst, ctx.kernel, folded, inner0, inner1);
+                    if (ctx.box) {
+                        verticalBoxRows(ctx.src, ctx.dst, ctx.kernel, inner0, inner1);
+                    } else {
+                        const folded = isSymmetric(ctx.kernel);
+                        if (isDense(ctx.kernel)) verticalTiles(true, ctx.src, ctx.dst, ctx.kernel, folded, inner0, inner1) else verticalTiles(false, ctx.src, ctx.dst, ctx.kernel, folded, inner0, inner1);
+                    }
                 }
                 ctx.verticalBorderRows(band, @max(r0, ctx.table.high_start), r1);
             }
 
             fn horizontalBoxBand(ctx: *const BandContext, _: usize, r0: usize, r1: usize) void {
                 horizontalBoxRows(ctx.src, ctx.dst, ctx.kernel, ctx.table, r0, r1);
-            }
-
-            fn verticalBoxBand(ctx: *const BandContext, band: usize, r0: usize, r1: usize) void {
-                ctx.verticalBorderRows(band, r0, @min(r1, ctx.table.low_end));
-                const inner0 = @max(r0, ctx.table.low_end);
-                const inner1 = @min(r1, ctx.table.high_start);
-                if (inner0 < inner1) verticalBoxRows(ctx.src, ctx.dst, ctx.kernel, inner0, inner1);
-                ctx.verticalBorderRows(band, @max(r0, ctx.table.high_start), r1);
             }
 
             /// Top/bottom border rows `[r0, r1)` from the row-resolved table; shared by the
@@ -907,19 +907,19 @@ fn SeparablePass(comptime SrcT: type, comptime DstT: type, comptime AccumIntT: t
         /// Column-tiled 1D pass along rows (src -> dst); tiling keeps the working set cache-resident
         /// and, unlike per-row bases, lets LLVM hoist the tap offsets (row-major measured 0.9x on f32).
         fn vertical(io: Io, src: Image(SrcT), dst: Image(DstT), allocator: Allocator, kernel: []const KernelT, border_mode: BorderMode) !void {
-            try verticalPass(io, src, dst, allocator, kernel, border_mode, BandContext.verticalBand);
+            try verticalPass(io, src, dst, allocator, kernel, border_mode, false);
         }
 
         /// Bands cover every row; each band emits its border rows from the row table and its
-        /// interior rows through `band_fn`'s fast path, so no rows wait on the caller thread.
-        fn verticalPass(io: Io, src: Image(SrcT), dst: Image(DstT), allocator: Allocator, kernel: []const KernelT, border_mode: BorderMode, comptime band_fn: anytype) !void {
+        /// interior rows through the tiled (or `box`) fast path, so no rows wait on the caller thread.
+        fn verticalPass(io: Io, src: Image(SrcT), dst: Image(DstT), allocator: Allocator, kernel: []const KernelT, border_mode: BorderMode, box: bool) !void {
             const table: BorderIndexTable = try .init(allocator, src.rows, kernel.len, border_mode);
             defer table.deinit(allocator);
             const bands = parallel.bandCount(src.rows, src.cols);
             const bases = try allocator.alloc(usize, bands * kernel.len);
             defer allocator.free(bases);
-            const ctx: BandContext = .{ .src = src, .dst = dst, .kernel = kernel, .table = table, .bases = bases };
-            parallel.forRowBands(io, src.rows, bands, &ctx, band_fn);
+            const ctx: BandContext = .{ .src = src, .dst = dst, .kernel = kernel, .table = table, .bases = bases, .box = box };
+            parallel.forRowBands(io, src.rows, bands, &ctx, BandContext.verticalBand);
         }
 
         /// Column-tiled interior rows `[r_start, r_end)`; tiling keeps the working set
@@ -1013,45 +1013,33 @@ fn SeparablePass(comptime SrcT: type, comptime DstT: type, comptime AccumIntT: t
                     var sum: Lane = @splat(0);
                     for (0..len) |i| {
                         const px: @Vector(channels, SrcT) = src.data[src_offset + e - tap + i * channels ..][0..channels].*;
-                        sum += if (AccumT == f32) px else @intCast(px);
+                        sum += px;
                     }
 
                     if (AccumT == i32 and SrcT == u8) {
                         // The running sum as a stride-`channels` prefix sum of window deltas; exact integers, so identical to the scalar loop.
                         const k_vec: @Vector(B, AccumT) = @splat(k);
                         const r_vec: @Vector(B, AccumT) = @splat(residual);
-                        const repeat_mask = comptime blk: {
-                            var m: [B]i32 = undefined;
-                            for (&m, 0..) |*m_e, j| m_e.* = @intCast(j % channels);
-                            break :blk m;
-                        };
-                        const tail_mask = comptime blk: {
-                            var m: [channels]i32 = undefined;
-                            for (&m, 0..) |*m_e, t| m_e.* = @intCast(B - channels + t);
-                            break :blk m;
-                        };
+                        const masks = meta.StrideMasks(B, channels);
                         // The last slide delta reads one pixel past the block, hence `+ channels`.
                         while (e + B + channels <= e_end) : (e += B) {
-                            const firsts: @Vector(B, AccumT) = @intCast(@as(@Vector(B, SrcT), src.data[src_offset + e - tap ..][0..B].*));
-                            const highs: @Vector(B, AccumT) = @intCast(@as(@Vector(B, SrcT), src.data[src_offset + e - tap + window ..][0..B].*));
+                            const firsts: @Vector(B, AccumT) = @as(@Vector(B, SrcT), src.data[src_offset + e - tap ..][0..B].*);
+                            const highs: @Vector(B, AccumT) = @as(@Vector(B, SrcT), src.data[src_offset + e - tap + window ..][0..B].*);
                             const deltas = std.simd.prefixScan(.Add, channels, highs - firsts);
-                            const w_vec = @shuffle(AccumT, sum, undefined, repeat_mask) +
+                            const w_vec = @shuffle(AccumT, sum, undefined, masks.repeat) +
                                 std.simd.shiftElementsRight(deltas, channels, 0);
                             storeVec(k_vec * w_vec + r_vec * firsts, dst_row[e..].ptr);
-                            sum += @shuffle(AccumT, deltas, undefined, tail_mask);
+                            sum += @shuffle(AccumT, deltas, undefined, masks.tail);
                         }
                     }
 
                     while (e < e_end) : (e += channels) {
-                        const first: Lane = blk: {
-                            const px: @Vector(channels, SrcT) = src.data[src_offset + e - tap ..][0..channels].*;
-                            break :blk if (AccumT == f32) px else @intCast(px);
-                        };
+                        const first: Lane = @as(@Vector(channels, SrcT), src.data[src_offset + e - tap ..][0..channels].*);
                         const out: Lane = @as(Lane, @splat(k)) * sum + @as(Lane, @splat(residual)) * first;
                         inline for (0..channels) |ch| dst_row[e + ch] = store(out[ch]);
                         if (e + channels < e_end) {
                             const next: @Vector(channels, SrcT) = src.data[src_offset + e - tap + window ..][0..channels].*;
-                            sum += @as(Lane, if (AccumT == f32) next else @intCast(next)) - first;
+                            sum += @as(Lane, next) - first;
                         }
                     }
                 }
@@ -1063,7 +1051,7 @@ fn SeparablePass(comptime SrcT: type, comptime DstT: type, comptime AccumIntT: t
         /// O(1)-per-pixel vertical pass for uniform-body kernels: SIMD column sums slide
         /// down the rows. Same exactness contract as `horizontalBox`.
         fn verticalBox(io: Io, src: Image(SrcT), dst: Image(DstT), allocator: Allocator, kernel: []const KernelT, border_mode: BorderMode) !void {
-            try verticalPass(io, src, dst, allocator, kernel, border_mode, BandContext.verticalBoxBand);
+            try verticalPass(io, src, dst, allocator, kernel, border_mode, true);
         }
 
         /// Interior rows `[r_start, r_end)` of the vertical box pass; the column sums are

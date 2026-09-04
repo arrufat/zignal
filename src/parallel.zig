@@ -49,3 +49,28 @@ pub fn forRowBands(io: Io, rows: usize, bands: usize, ctx: anytype, comptime fun
     }
     group.await(io) catch {};
 }
+
+/// `forRowBands` for fallible band functions: the first error any band returns is the result.
+pub fn forRowBandsTry(io: Io, rows: usize, bands: usize, ctx: anytype, comptime func: anytype) ErrorSetOf(func)!void {
+    if (bands <= 1 or rows == 0) return func(ctx, 0, 0, rows);
+    const Code = @Int(.unsigned, @bitSizeOf(anyerror));
+    const Wrap = struct {
+        fn run(first: *std.atomic.Value(Code), c: @TypeOf(ctx), band: usize, r0: usize, r1: usize) void {
+            func(c, band, r0, r1) catch |err| {
+                _ = first.cmpxchgStrong(0, @intFromError(err), .monotonic, .monotonic);
+            };
+        }
+    };
+    var first: std.atomic.Value(Code) = .init(0);
+    var group: Io.Group = .init;
+    for (0..bands) |band| {
+        group.async(io, Wrap.run, .{ &first, ctx, band, rows * band / bands, rows * (band + 1) / bands });
+    }
+    group.await(io) catch {};
+    const code = first.load(.monotonic);
+    if (code != 0) return @errorCast(@errorFromInt(code));
+}
+
+fn ErrorSetOf(comptime func: anytype) type {
+    return @typeInfo(@typeInfo(@TypeOf(func)).@"fn".return_type.?).error_union.error_set;
+}

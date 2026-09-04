@@ -585,11 +585,11 @@ pub fn Matrix(comptime T: type) type {
         /// C += alpha * A * B for row-major A (m×k) and B (k×n).
         /// Blocked over k and n so the B block stays in L2 while every row of A streams past it,
         /// with a `micro_rows` × `2·vec_len` register tile so each B load feeds `2·micro_rows` FMAs.
-        fn blockedGemm(comptime VecType: type, io: Io, c: *Matrix(T), a: Matrix(T), b: Matrix(T), alpha: T) void {
+        fn blockedGemm(comptime VecType: type, io: Io, c: Matrix(T), a: Matrix(T), b: Matrix(T), alpha: T) void {
             // Bands are groups of `micro_rows` rows of C; the same k order per element makes the split invisible.
             const groups = (@as(usize, a.rows) + micro_rows - 1) / micro_rows;
-            const ctx: GemmBands(VecType) = .{ .c = c.*, .a = a, .b = b, .alpha = alpha };
-            parallel.forRowBands(io, groups, parallel.bandCount(a.rows, b.cols), &ctx, GemmBands(VecType).band);
+            const ctx: GemmBands(VecType) = .{ .c = c, .a = a, .b = b, .alpha = alpha };
+            parallel.forRowBands(io, groups, parallel.bandCount(groups, micro_rows * b.cols), &ctx, GemmBands(VecType).band);
         }
 
         fn GemmBands(comptime VecType: type) type {
@@ -612,7 +612,6 @@ pub fn Matrix(comptime T: type) type {
                     const n: usize = ctx.b.cols;
                     const i_start = g0 * micro_rows;
                     const i_end = @min(g1 * micro_rows, m);
-                    var c = ctx.c;
 
                     var j0: usize = 0;
                     while (j0 < n) : (j0 += block_n) {
@@ -623,7 +622,7 @@ pub fn Matrix(comptime T: type) type {
                             var i: usize = i_start;
                             while (i < i_end) : (i += micro_rows) {
                                 switch (@min(micro_rows, i_end - i)) {
-                                    inline 1...micro_rows => |rows| microTile(VecType, rows, &c, ctx.a, ctx.b, ctx.alpha, i, k0, k1, j0, j1),
+                                    inline 1...micro_rows => |rows| microTile(VecType, rows, ctx.c, ctx.a, ctx.b, ctx.alpha, i, k0, k1, j0, j1),
                                     else => unreachable,
                                 }
                             }
@@ -639,7 +638,7 @@ pub fn Matrix(comptime T: type) type {
         fn microTile(
             comptime VecType: type,
             comptime rows: usize,
-            c: *Matrix(T),
+            c: Matrix(T),
             a: Matrix(T),
             b: Matrix(T),
             alpha: T,
@@ -753,7 +752,7 @@ pub fn Matrix(comptime T: type) type {
                     defer if (a_t) |*t| t.deinit();
                     var b_t: ?Matrix(T) = if (trans_b) try other.transpose() else null;
                     defer if (b_t) |*t| t.deinit();
-                    blockedGemm(@Vector(vec_len, T), io, &result, a_t orelse self, b_t orelse other, alpha);
+                    blockedGemm(@Vector(vec_len, T), io, result, a_t orelse self, b_t orelse other, alpha);
                 } else {
                     for (0..a_rows) |i| {
                         for (0..b_cols) |j| {

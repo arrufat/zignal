@@ -1102,7 +1102,7 @@ pub fn Image(comptime T: type) type {
                 return error.DimensionMismatch;
             }
             switch (motion) {
-                .linear => |params| try MotionBlurOps(T).linear(io, self, out, allocator, params.angle, params.distance),
+                .linear => |params| try MotionBlurOps(T).linear(self, io, out, allocator, params.angle, params.distance),
                 .radial_zoom => |params| try MotionBlurOps(T).radial(self, out, allocator, params.center_x, params.center_y, params.strength, .zoom),
                 .radial_spin => |params| try MotionBlurOps(T).radial(self, out, allocator, params.center_x, params.center_y, params.strength, .spin),
             }

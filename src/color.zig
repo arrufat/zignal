@@ -982,29 +982,37 @@ pub fn Ycbcr(comptime T: type) type {
 }
 
 /// Converts RGB to Ycbcr using ITU-R BT.601 coefficients.
+/// BT.601 RGB<->YCbCr coefficients with 16 fractional bits; the JPEG vector paths use the same
+/// constants so they match `convertColor` exactly.
+pub const bt601 = struct {
+    pub const y_r = 19595;
+    pub const y_g = 38470;
+    pub const y_b = 7471;
+    pub const cb_r = -11059;
+    pub const cb_g = -21710;
+    pub const cb_b = 32768;
+    pub const cr_r = 32768;
+    pub const cr_g = -27439;
+    pub const cr_b = -5329;
+    pub const r_cr = 91881;
+    pub const g_cb = 22554;
+    pub const g_cr = 46802;
+    pub const b_cb = 116130;
+};
+
 /// All components in [0, 255] range for u8, with Cb/Cr having 128 as neutral.
 /// Uses 16-bit fixed-point arithmetic for precision when T is u8.
 fn rgbToYcbcr(comptime T: type, rgb: Rgb(T)) Ycbcr(T) {
     if (T == u8) {
         // Integer (fixed-point) BT.601: 16-bit fractional precision, rounding at +32768.
-        const r: i32 = rgb.r;
-        const g: i32 = rgb.g;
-        const b: i32 = rgb.b;
-
-        const y_r: i64 = 19595;
-        const y_g: i64 = 38470;
-        const y_b: i64 = 7471;
-        const cb_r: i64 = -11059;
-        const cb_g: i64 = -21710;
-        const cb_b: i64 = 32768;
-        const cr_r: i64 = 32768;
-        const cr_g: i64 = -27439;
-        const cr_b: i64 = -5329;
-
+        const r: i64 = rgb.r;
+        const g: i64 = rgb.g;
+        const b: i64 = rgb.b;
+        const k = bt601;
         return .{
-            .y = @intCast(clamp((y_r * r + y_g * g + y_b * b + 32768) >> 16, 0, 255)),
-            .cb = @intCast(clamp(((cb_r * r + cb_g * g + cb_b * b + 32768) >> 16) + 128, 0, 255)),
-            .cr = @intCast(clamp(((cr_r * r + cr_g * g + cr_b * b + 32768) >> 16) + 128, 0, 255)),
+            .y = @intCast(clamp((k.y_r * r + k.y_g * g + k.y_b * b + 32768) >> 16, 0, 255)),
+            .cb = @intCast(clamp(((k.cb_r * r + k.cb_g * g + k.cb_b * b + 32768) >> 16) + 128, 0, 255)),
+            .cr = @intCast(clamp(((k.cr_r * r + k.cr_g * g + k.cr_b * b + 32768) >> 16) + 128, 0, 255)),
         };
     } else {
         const y = clamp(0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b, 0, 1);
@@ -1060,9 +1068,10 @@ fn ycbcrToRgb(comptime T: type, ycbcr: Ycbcr(T)) Rgb(T) {
         const cb: i64 = @as(i64, ycbcr.cb) - 128;
         const cr: i64 = @as(i64, ycbcr.cr) - 128;
 
-        const r: u8 = @intCast(clamp((65536 * y + 91881 * cr + 32768) >> 16, 0, 255));
-        const g: u8 = @intCast(clamp((65536 * y - 22554 * cb - 46802 * cr + 32768) >> 16, 0, 255));
-        const b: u8 = @intCast(clamp((65536 * y + 116130 * cb + 32768) >> 16, 0, 255));
+        const k = bt601;
+        const r: u8 = @intCast(clamp((65536 * y + k.r_cr * cr + 32768) >> 16, 0, 255));
+        const g: u8 = @intCast(clamp((65536 * y - k.g_cb * cb - k.g_cr * cr + 32768) >> 16, 0, 255));
+        const b: u8 = @intCast(clamp((65536 * y + k.b_cb * cb + 32768) >> 16, 0, 255));
 
         return .{ .r = r, .g = g, .b = b };
     } else {

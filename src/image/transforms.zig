@@ -221,7 +221,7 @@ pub fn Transform(comptime T: type) type {
                 .src_cx = center.x(),
                 .src_cy = center.y(),
             };
-            parallel.forRowBands(io, out.rows, parallel.bandCount(out.rows, out.cols), &ctx, Resample.rotateBand);
+            parallel.forRowBands(io, out.rows, parallel.bandCount(out.rows, out.cols), &ctx, Resample.band);
         }
 
         /// Inverse-mapped resampling shared by the general rotate and extract paths: output
@@ -242,28 +242,15 @@ pub fn Transform(comptime T: type) type {
             origin_x: f32 = 0,
             origin_y: f32 = 0,
 
-            fn rotateBand(ctx: *const Resample, _: usize, r0: usize, r1: usize) void {
+            /// Output pixel centres map through scale and origin (identity for rotate), then
+            /// rotate by +angle (CCW) about `dst_c` onto `src_c`.
+            fn band(ctx: *const Resample, _: usize, r0: usize, r1: usize) void {
                 for (r0..r1) |r| {
-                    const dy = @as(f32, @floatFromInt(r)) - ctx.dst_cy;
+                    const dy = ctx.origin_y + (@as(f32, @floatFromInt(r)) + 0.5) * ctx.scale_y - 0.5 - ctx.dst_cy;
                     for (0..ctx.out.cols) |c| {
-                        const dx = @as(f32, @floatFromInt(c)) - ctx.dst_cx;
+                        const dx = ctx.origin_x + (@as(f32, @floatFromInt(c)) + 0.5) * ctx.scale_x - 0.5 - ctx.dst_cx;
                         const src_x = ctx.cos * dx - ctx.sin * dy + ctx.src_cx;
                         const src_y = ctx.sin * dx + ctx.cos * dy + ctx.src_cy;
-                        ctx.out.at(r, c).* = ctx.sampler.sample(src_x, src_y);
-                    }
-                }
-            }
-
-            fn extractBand(ctx: *const Resample, _: usize, r0: usize, r1: usize) void {
-                for (r0..r1) |r| {
-                    const y_rect = ctx.origin_y + (@as(f32, @floatFromInt(r)) + 0.5) * ctx.scale_y - 0.5;
-                    const dy = y_rect - ctx.src_cy;
-                    for (0..ctx.out.cols) |c| {
-                        const x_rect = ctx.origin_x + (@as(f32, @floatFromInt(c)) + 0.5) * ctx.scale_x - 0.5;
-                        // Rotate around rectangle center by +angle (CCW)
-                        const dx = x_rect - ctx.src_cx;
-                        const src_x = ctx.src_cx + ctx.cos * dx - ctx.sin * dy;
-                        const src_y = ctx.src_cy + ctx.sin * dx + ctx.cos * dy;
                         ctx.out.at(r, c).* = ctx.sampler.sample(src_x, src_y);
                     }
                 }
@@ -330,7 +317,7 @@ pub fn Transform(comptime T: type) type {
                 .origin_x = rect.l,
                 .origin_y = rect.t,
             };
-            parallel.forRowBands(io, out.rows, parallel.bandCount(out.rows, out.cols), &ctx, Resample.extractBand);
+            parallel.forRowBands(io, out.rows, parallel.bandCount(out.rows, out.cols), &ctx, Resample.band);
         }
 
         /// Inserts `source` into `self` at the destination rectangle, with optional rotation

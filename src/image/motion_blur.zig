@@ -97,7 +97,7 @@ pub fn MotionBlurOps(comptime T: type) type {
 
         /// Applies linear motion blur by averaging pixels along a line at the given `angle`
         /// (radians, 0 = horizontal) and `distance` (pixels).
-        pub fn linear(io: Io, image: Image(T), out: Image(T), allocator: Allocator, angle: f32, distance: usize) !void {
+        pub fn linear(image: Image(T), io: Io, out: Image(T), allocator: Allocator, angle: f32, distance: usize) !void {
             if (distance == 0) {
                 image.copy(out);
                 return;

@@ -10,6 +10,7 @@ const Allocator = std.mem.Allocator;
 
 const Image = @import("../image.zig").Image;
 const convolution = @import("convolution.zig");
+const meta = @import("../meta.zig");
 const parallel = @import("../parallel.zig");
 
 /// Below this the fit is visibly off the exact kernel (mean error ~2 units at sigma 0.5).
@@ -290,8 +291,7 @@ fn filterRowBlock(comptime T: type, comptime channels: usize, src: Image(T), tem
 }
 
 inline fn loadRowVec(comptime T: type, comptime W: usize, img: Image(T), row: usize, col: usize) @Vector(W, f32) {
-    const v: @Vector(W, T) = img.data[row * img.stride + col ..][0..W].*;
-    return if (T == f32) v else @floatFromInt(v);
+    return @as(@Vector(W, T), img.data[row * img.stride + col ..][0..W].*);
 }
 
 /// In-register transpose of a `W`×`W` block (`W` a power of two): `log2(W)` rounds of
@@ -392,14 +392,7 @@ fn ColumnLanes(comptime T: type, comptime W: usize) type {
 
         inline fn storeDst(a: @This(), row: usize, v: V) void {
             const out = a.dst.data[row * a.dst.stride + a.c0 ..][0..W];
-            if (T == f32) {
-                out.* = v;
-            } else {
-                const zero: V = @splat(0);
-                const max: V = @splat(255);
-                const rounded: @Vector(W, u8) = @round(@max(zero, @min(max, v)));
-                out.* = rounded;
-            }
+            out.* = if (T == f32) v else meta.roundToBytes(v);
         }
     };
 }
@@ -424,7 +417,6 @@ test "register transpose" {
 test "iir gaussian approximates the exact kernel" {
     const allocator = std.testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();
-    const meta = @import("../meta.zig");
     var prng = std.Random.DefaultPrng.init(3);
     const random = prng.random();
 
