@@ -3,81 +3,81 @@
 ## [Unreleased]
 
 ### Breaking Changes
-- **`io: Io` parameter**: image filters, resampling transforms, order-statistic filters, `convert`/flips/`insert`, codec `encode`/`loadFromBytes`, `Matrix` products, `Pca`, `ImagePyramid.build` and `Orb.detect` take an `io: Io` after `self` and run in row bands on it; a `process.Init` pool runs them in parallel, `Io.Threaded.global_single_threaded.io()` or `std.Io.failing` runs them serially, output is byte-identical either way. (#437-#448, #464-#468)
-- **Argument order**: out-param image methods follow `(self, io, allocator, out, ...)`, `diff` takes `(self, other, out, opts)`, ORB helpers take the allocator first. (#354, #359, #434)
-- **`DrawOptions`**: canvas primitives take `opts: DrawOptions { mode, blending }` instead of a `DrawMode`; the `.soft`/`.fast` presets reproduce the old output, every primitive can use any of the 12 blend modes, and `setPixel`/`setPoint` gain a `blending` parameter. (#400)
-- **`Canvas.drawText(font: Font, size: ?f32)`**: takes the `Font` union and a pixel size instead of a `BitmapFont` and a scale (`null` uses `font.defaultSize()`), and returns `!void`. (#403)
-- **`Matrix` chains**: `Matrix(T)` ops return `MatrixError!Matrix(T)`; the deferred-error `.eval()` design moved to `Chain(T)` (`m.chain()`, `toOwned()`), which frees each intermediate. (#346)
-- **`Matrix` renames**: `inverse` to `inv`, `determinant` to `det`, `pseudoInverse` to `pinv`, `cholesky` to `chol`, `times` to `hadamard` (`timesBy` to `hadamardBy`), `ProjectiveTransform.inverse` to `inv`; the SVD `with_u` flag became `mode = .no_u`. (#360)
+- **`io: Io` parameter**: image filters, resampling transforms, order-statistic filters, `convert`/flips/`insert`, codec `encode`/`loadFromBytes`, `Matrix` products, `Pca`, `ImagePyramid.build` and `Orb.detect` take an `io: Io` after `self` and run in row bands on it; a `process.Init` pool runs them in parallel, `Io.Threaded.global_single_threaded.io()` or `std.Io.failing` runs them serially, output is byte-identical either way. ([#437](https://github.com/arrufat/zignal/pull/437)-[#448](https://github.com/arrufat/zignal/pull/448), [#464](https://github.com/arrufat/zignal/pull/464)-[#468](https://github.com/arrufat/zignal/pull/468))
+- **Argument order**: out-param image methods follow `(self, io, allocator, out, ...)`, `diff` takes `(self, other, out, opts)`, ORB helpers take the allocator first. ([#354](https://github.com/arrufat/zignal/pull/354), [#359](https://github.com/arrufat/zignal/pull/359), [#434](https://github.com/arrufat/zignal/pull/434))
+- **`DrawOptions`**: canvas primitives take `opts: DrawOptions { mode, blending }` instead of a `DrawMode`; the `.soft`/`.fast` presets reproduce the old output, every primitive can use any of the 12 blend modes, and `setPixel`/`setPoint` gain a `blending` parameter. ([#400](https://github.com/arrufat/zignal/pull/400))
+- **`Canvas.drawText(font: Font, size: ?f32)`**: takes the `Font` union and a pixel size instead of a `BitmapFont` and a scale (`null` uses `font.defaultSize()`), and returns `!void`. ([#403](https://github.com/arrufat/zignal/pull/403))
+- **`Matrix` chains**: `Matrix(T)` ops return `MatrixError!Matrix(T)`; the deferred-error `.eval()` design moved to `Chain(T)` (`m.chain()`, `toOwned()`), which frees each intermediate. ([#346](https://github.com/arrufat/zignal/pull/346))
+- **`Matrix` renames**: `inverse` to `inv`, `determinant` to `det`, `pseudoInverse` to `pinv`, `cholesky` to `chol`, `times` to `hadamard` (`timesBy` to `hadamardBy`), `ProjectiveTransform.inverse` to `inv`; the SVD `with_u` flag became `mode = .no_u`. ([#360](https://github.com/arrufat/zignal/pull/360))
 - **`RunningStats(T, config)`**: `.all`/`.variance`/`.summary` selects the tracked quantities; `.all` is the previous behavior.
-- **`terminal` namespace**: `sixel`, `kitty` and `iterm2` moved to `terminal.*` and `src/terminal/`. (#381)
-- **`Interpolation.nearest_neighbor` renamed to `.nearest`** in Zig, Python and the CLI. (#358)
-- **Python draws antialiased by default**: canvas methods default to `DrawMode.SOFT` and an omitted `blending` follows the mode's preset; pass `mode=DrawMode.FAST, blending=Blending.NORMAL` for the old output. (#424)
-- **Python `Font` replaces `BitmapFont`**: `Font.load` detects the format and `Canvas.draw_text` takes a pixel `size`. (#403)
-- **JPEG encodes write a restart marker per MCU row by default** (`EncodeOptions.restart_interval`, about 0.1 % larger files) so they decode in parallel; `.none` restores the old bytes. (#466)
+- **`terminal` namespace**: `sixel`, `kitty` and `iterm2` moved to `terminal.*` and `src/terminal/`. ([#381](https://github.com/arrufat/zignal/pull/381))
+- **`Interpolation.nearest_neighbor` renamed to `.nearest`** in Zig, Python and the CLI. ([#358](https://github.com/arrufat/zignal/pull/358))
+- **Python draws antialiased by default**: canvas methods default to `DrawMode.SOFT` and an omitted `blending` follows the mode's preset; pass `mode=DrawMode.FAST, blending=Blending.NORMAL` for the old output. ([#424](https://github.com/arrufat/zignal/pull/424))
+- **Python `Font` replaces `BitmapFont`**: `Font.load` detects the format and `Canvas.draw_text` takes a pixel `size`. ([#403](https://github.com/arrufat/zignal/pull/403))
+- **JPEG encodes write a restart marker per MCU row by default** (`EncodeOptions.restart_interval`, about 0.1 % larger files) so they decode in parallel; `.none` restores the old bytes. ([#466](https://github.com/arrufat/zignal/pull/466))
 - **Minimum Zig version is 0.17.0-dev.1970.**
 
 ### Features
-- **Vector fonts**: `VectorFont` parses TrueType (`.ttf`), CFF OpenType (`.otf`, including CID-keyed fonts, `seac` accents and CFF2 default instances) and collections (`.ttc`/`.otc`, `loadFace`) in place from a borrowed buffer with GPOS/`kern` kerning; every read is bounds-checked and the parser builds for `wasm32-freestanding`. The `Font` union (`bitmap`/`vector`) lets every text API accept either kind. (#403-#405)
-- **Text layout**: `Canvas.drawTextBox` wraps and aligns text in a rectangle under a `TextLayout` (`halign`, `valign`, `wrap`, `line_spacing`, `letter_spacing`), `Font.measureText` measures the block, and `drawTextOutline`/`drawTextBoxOutline` stroke glyph outlines with round joins. (#406, #407)
-- **Glyph cache**: opt-in `Font.enableCache` memoizes lookups, outlines and quarter-pixel coverage masks; an 18 px paragraph draws 7.5x faster with TrueType and 17x with CFF. Python enables it automatically. (#409)
-- **Glyph rasterization**: `Canvas.fillGlyph` fills outlines with the nonzero rule; `Canvas(u8).rasterizeGlyph`/`rasterizePolygons` accumulate antialiased coverage into an 8-bit mask. (#403)
-- **QR codes**: `qrcode.encode`/`decode` with Reed-Solomon correction and a perspective-robust detector that returns the symbol corners; exposed through the `qr` CLI command, Python and a web example. (#374, #375)
-- **Global optimization**: `GlobalOptimizer`/`findGlobalOptimum` (MaxLIPO + trust region) for bound-constrained mixed integer/continuous objectives, with parallel evaluation through `Io`. (#368)
-- **Flood fill**: `Image.floodFill` with 4/8-connectivity, seed- or neighbor-relative thresholds and Euclidean or Oklab distance; also in Python. (#369)
-- **Linear solvers and eigendecomposition**: `Matrix.solve`/`LuResult.solve` (pivoted LU, multiple right-hand sides), `SMatrix.solve`, symmetric `Matrix.eigh` with signed eigenvalues, and a `Matrix.diagonal` constructor. (#367, #376, #377)
-- **Matrix sums and in-place ops**: `sumRows`/`sumCols` on `Matrix`, `SMatrix` and `Chain`, in-place `*By` element-wise variants, and Python `+=`/`-=`/`*=`/`/=`. (#361)
-- **Recursive Gaussian blur**: `gaussianBlur` takes a `GaussianBlurOptions`; `.iir` runs the Young-van Vliet recursive filter at a cost independent of sigma (sigma 8 at 480x640: 3.0 to 0.74 ms) within a few 8-bit units of the FIR kernel, and `.auto` switches to it above sigma 4. (#438, #444)
+- **Vector fonts**: `VectorFont` parses TrueType (`.ttf`), CFF OpenType (`.otf`, including CID-keyed fonts, `seac` accents and CFF2 default instances) and collections (`.ttc`/`.otc`, `loadFace`) in place from a borrowed buffer with GPOS/`kern` kerning; every read is bounds-checked and the parser builds for `wasm32-freestanding`. The `Font` union (`bitmap`/`vector`) lets every text API accept either kind. ([#403](https://github.com/arrufat/zignal/pull/403)-[#405](https://github.com/arrufat/zignal/pull/405))
+- **Text layout**: `Canvas.drawTextBox` wraps and aligns text in a rectangle under a `TextLayout` (`halign`, `valign`, `wrap`, `line_spacing`, `letter_spacing`), `Font.measureText` measures the block, and `drawTextOutline`/`drawTextBoxOutline` stroke glyph outlines with round joins. ([#406](https://github.com/arrufat/zignal/pull/406), [#407](https://github.com/arrufat/zignal/pull/407))
+- **Glyph cache**: opt-in `Font.enableCache` memoizes lookups, outlines and quarter-pixel coverage masks; an 18 px paragraph draws 7.5x faster with TrueType and 17x with CFF. Python enables it automatically. ([#409](https://github.com/arrufat/zignal/pull/409))
+- **Glyph rasterization**: `Canvas.fillGlyph` fills outlines with the nonzero rule; `Canvas(u8).rasterizeGlyph`/`rasterizePolygons` accumulate antialiased coverage into an 8-bit mask. ([#403](https://github.com/arrufat/zignal/pull/403))
+- **QR codes**: `qrcode.encode`/`decode` with Reed-Solomon correction and a perspective-robust detector that returns the symbol corners; exposed through the `qr` CLI command, Python and a web example. ([#374](https://github.com/arrufat/zignal/pull/374), [#375](https://github.com/arrufat/zignal/pull/375))
+- **Global optimization**: `GlobalOptimizer`/`findGlobalOptimum` (MaxLIPO + trust region) for bound-constrained mixed integer/continuous objectives, with parallel evaluation through `Io`. ([#368](https://github.com/arrufat/zignal/pull/368))
+- **Flood fill**: `Image.floodFill` with 4/8-connectivity, seed- or neighbor-relative thresholds and Euclidean or Oklab distance; also in Python. ([#369](https://github.com/arrufat/zignal/pull/369))
+- **Linear solvers and eigendecomposition**: `Matrix.solve`/`LuResult.solve` (pivoted LU, multiple right-hand sides), `SMatrix.solve`, symmetric `Matrix.eigh` with signed eigenvalues, and a `Matrix.diagonal` constructor. ([#367](https://github.com/arrufat/zignal/pull/367), [#376](https://github.com/arrufat/zignal/pull/376), [#377](https://github.com/arrufat/zignal/pull/377))
+- **Matrix sums and in-place ops**: `sumRows`/`sumCols` on `Matrix`, `SMatrix` and `Chain`, in-place `*By` element-wise variants, and Python `+=`/`-=`/`*=`/`/=`. ([#361](https://github.com/arrufat/zignal/pull/361))
+- **Recursive Gaussian blur**: `gaussianBlur` takes a `GaussianBlurOptions`; `.iir` runs the Young-van Vliet recursive filter at a cost independent of sigma (sigma 8 at 480x640: 3.0 to 0.74 ms) within a few 8-bit units of the FIR kernel, and `.auto` switches to it above sigma 4. ([#438](https://github.com/arrufat/zignal/pull/438), [#444](https://github.com/arrufat/zignal/pull/444))
 - **Nonzero polygon fills**: `Canvas.fillPolygons` fills several contours as one shape under a `FillRule` (`.even_odd`/`.nonzero`).
 - **Round joins**: `drawPolygon`, the Bezier curves and `drawSplinePolygon` stroke widths above 1 as one joined path with round joins and caps.
-- **BMP codec**: native reader (CORE/INFO/V4/V5 headers, 1 to 32 bpp, bitfields, RLE4/RLE8, both row orders) and writer, wired into `Image.load`/`save`, the CLI and Python. (#348)
-- **GIF codec**: native reader (87a/89a, all disposal methods, interlacing, NETSCAPE loops) and writer (median-cut palettes, optional Floyd-Steinberg dithering, animation); `gif.loadAnimated` returns an `AnimatedImage(T)` of composed frames. (#349)
+- **BMP codec**: native reader (CORE/INFO/V4/V5 headers, 1 to 32 bpp, bitfields, RLE4/RLE8, both row orders) and writer, wired into `Image.load`/`save`, the CLI and Python. ([#348](https://github.com/arrufat/zignal/pull/348))
+- **GIF codec**: native reader (87a/89a, all disposal methods, interlacing, NETSCAPE loops) and writer (median-cut palettes, optional Floyd-Steinberg dithering, animation); `gif.loadAnimated` returns an `AnimatedImage(T)` of composed frames. ([#349](https://github.com/arrufat/zignal/pull/349))
 - **Quantization and dithering modules**: `image/quantize.zig` (`medianCut`, `ColorLookupTable`, fixed palettes) and `image/dither.zig` (`floyd_steinberg`, `atkinson`, `ordered`), shared by sixel, braille and GIF.
-- **Terminal output**: iTerm2 inline images (`terminal.iterm2`, `--protocol iterm2`, in the `.auto` chain after kitty) and color braille rendering with coalesced SGR escapes. (#365, #380)
-- **Inferno colormap** in `Image.applyColormap` and Python `Colormap.inferno()`. (#378)
-- **CLI**: a `pipeline` command runs a `.zon` recipe of sequential operations, options accept short aliases (`-o`, `-d`), and batch failures set the exit code. (#379)
-- **Python releases the GIL** around every image filter binding. (#446)
-- **Examples**: image codec playground, QR encoder/decoder with camera scanning, gray-world white balance, live preview for the global optimizer. (#384)
+- **Terminal output**: iTerm2 inline images (`terminal.iterm2`, `--protocol iterm2`, in the `.auto` chain after kitty) and color braille rendering with coalesced SGR escapes. ([#365](https://github.com/arrufat/zignal/pull/365), [#380](https://github.com/arrufat/zignal/pull/380))
+- **Inferno colormap** in `Image.applyColormap` and Python `Colormap.inferno()`. ([#378](https://github.com/arrufat/zignal/pull/378))
+- **CLI**: a `pipeline` command runs a `.zon` recipe of sequential operations, options accept short aliases (`-o`, `-d`), and batch failures set the exit code. ([#379](https://github.com/arrufat/zignal/pull/379))
+- **Python releases the GIL** around every image filter binding. ([#446](https://github.com/arrufat/zignal/pull/446))
+- **Examples**: image codec playground, QR encoder/decoder with camera scanning, gray-world white balance, live preview for the global optimizer. ([#384](https://github.com/arrufat/zignal/pull/384))
 
 ### Performance
-- **JPEG decoding**: baseline frames stream one MCU row at a time through a vectorized render path, a check-free 10-bit Huffman lookup and a 16-bit two-block IDCT, and restart-interval segments decode in parallel: 4K 4:2:0 731 to 22 ms on one core, 4.9 ms on 8 cores, at or below libjpeg-turbo. (#451-#456, #465)
-- **JPEG encoding**: rebuilt around MCU rows and vectors (exact integer DCT, reciprocal quantization, bitmask-driven coding, no wasted ZRL codes) and banded across restart intervals: 4K quality 90 92 to 20 ms serial, 5 ms on 8 cores; files are within a few bytes of libjpeg-turbo. (#457, #468)
-- **PNG**: rows are filtered and deflated in parallel 256 KiB chunks (4K RGB 344 to 77 ms on 8 cores, 0.3 % larger files); defiltering uses a branchless Paeth predictor and SIMD rows. (#383, #469)
-- **Filters on the pool**: convolution, Gaussian, box, sharpen, Sobel, Canny, motion and the order-statistic blurs run in row bands, 2.6-4.9x on 8 cores, byte-identical to serial. (#437, #440, #441)
-- **Convolution kernels**: i32 accumulators, renormalized quantized kernels, a fused separable ring path from 1 MiB, comptime-dense taps, symmetric tap folding and once-per-call border columns; median blur memoizes the two-level fine row (radius 63: 10.1 to 3.0 ms). (#391-#395, #429)
-- **Interleaved struct pixels**: separable convolution, the recursive Gaussian and resize run over `Rgb`/`Rgba` bytes directly instead of split planes, bit-identical and up to 2x faster. (#460, #461, #463)
-- **Resize**: u8 and f32 resizers are separable two-pass filters with per-axis tap tables resampling through a per-band ring, views take the same path, and the work bands on the pool: 4K to 1080p bicubic 216 to 37 ms serial, Lanczos 687 to 50 ms, 4-5x more on 8 cores. (#449, #463, #472, #473)
-- **Rotate, warp and extract** sample through a per-call `Sampler` with tabulated kernel weights and interior fast paths: 1080p bilinear rotate 88 to 39 ms serial, 4.8-6.7x more on the pool. (#447, #450)
-- **`Matrix.gemm`** is a register-tiled blocked kernel that bands its rows on the pool and gathers transposed panels without a copy: 2048^2 f32 26 s to 0.22 s serial, 68 ms on 8 cores. (#448, #472)
-- **Canvas**: a signed-area coverage rasterizer with an integer blend path renders text 2-2.5x and thick curves 2-5x faster; thick diagonal lines and ring/arc outlines visit only the band around the stroke (8-13x on long diagonals); rectangle outlines rasterize as an exact axis-aligned ring; polygon fills share one edge sweep; text blocks lay out once. (#408, #410, #412, #414, #416)
-- **CFF glyphs** are interpreted once per draw and GPOS pair lookups are indexed at load. (#420)
-- **Also**: vectorized color blending, FAST corner detection without `sqrt`, integral-image adaptive thresholding, direct blits for unscaled bitmap glyphs. (#354, #356)
+- **JPEG decoding**: baseline frames stream one MCU row at a time through a vectorized render path, a check-free 10-bit Huffman lookup and a 16-bit two-block IDCT, and restart-interval segments decode in parallel: 4K 4:2:0 731 to 22 ms on one core, 4.9 ms on 8 cores, at or below libjpeg-turbo. ([#451](https://github.com/arrufat/zignal/pull/451)-[#456](https://github.com/arrufat/zignal/pull/456), [#465](https://github.com/arrufat/zignal/pull/465))
+- **JPEG encoding**: rebuilt around MCU rows and vectors (exact integer DCT, reciprocal quantization, bitmask-driven coding, no wasted ZRL codes) and banded across restart intervals: 4K quality 90 92 to 20 ms serial, 5 ms on 8 cores; files are within a few bytes of libjpeg-turbo. ([#457](https://github.com/arrufat/zignal/pull/457), [#468](https://github.com/arrufat/zignal/pull/468))
+- **PNG**: rows are filtered and deflated in parallel 256 KiB chunks (4K RGB 344 to 77 ms on 8 cores, 0.3 % larger files); defiltering uses a branchless Paeth predictor and SIMD rows. ([#383](https://github.com/arrufat/zignal/pull/383), [#469](https://github.com/arrufat/zignal/pull/469))
+- **Filters on the pool**: convolution, Gaussian, box, sharpen, Sobel, Canny, motion and the order-statistic blurs run in row bands, 2.6-4.9x on 8 cores, byte-identical to serial. ([#437](https://github.com/arrufat/zignal/pull/437), [#440](https://github.com/arrufat/zignal/pull/440), [#441](https://github.com/arrufat/zignal/pull/441))
+- **Convolution kernels**: i32 accumulators, renormalized quantized kernels, a fused separable ring path from 1 MiB, comptime-dense taps, symmetric tap folding and once-per-call border columns; median blur memoizes the two-level fine row (radius 63: 10.1 to 3.0 ms). ([#391](https://github.com/arrufat/zignal/pull/391)-[#395](https://github.com/arrufat/zignal/pull/395), [#429](https://github.com/arrufat/zignal/pull/429))
+- **Interleaved struct pixels**: separable convolution, the recursive Gaussian and resize run over `Rgb`/`Rgba` bytes directly instead of split planes, bit-identical and up to 2x faster. ([#460](https://github.com/arrufat/zignal/pull/460), [#461](https://github.com/arrufat/zignal/pull/461), [#463](https://github.com/arrufat/zignal/pull/463))
+- **Resize**: u8 and f32 resizers are separable two-pass filters with per-axis tap tables resampling through a per-band ring, views take the same path, and the work bands on the pool: 4K to 1080p bicubic 216 to 37 ms serial, Lanczos 687 to 50 ms, 4-5x more on 8 cores. ([#449](https://github.com/arrufat/zignal/pull/449), [#463](https://github.com/arrufat/zignal/pull/463), [#472](https://github.com/arrufat/zignal/pull/472), [#473](https://github.com/arrufat/zignal/pull/473))
+- **Rotate, warp and extract** sample through a per-call `Sampler` with tabulated kernel weights and interior fast paths: 1080p bilinear rotate 88 to 39 ms serial, 4.8-6.7x more on the pool. ([#447](https://github.com/arrufat/zignal/pull/447), [#450](https://github.com/arrufat/zignal/pull/450))
+- **`Matrix.gemm`** is a register-tiled blocked kernel that bands its rows on the pool and gathers transposed panels without a copy: 2048^2 f32 26 s to 0.22 s serial, 68 ms on 8 cores. ([#448](https://github.com/arrufat/zignal/pull/448), [#472](https://github.com/arrufat/zignal/pull/472))
+- **Canvas**: a signed-area coverage rasterizer with an integer blend path renders text 2-2.5x and thick curves 2-5x faster; thick diagonal lines and ring/arc outlines visit only the band around the stroke (8-13x on long diagonals); rectangle outlines rasterize as an exact axis-aligned ring; polygon fills share one edge sweep; text blocks lay out once. ([#408](https://github.com/arrufat/zignal/pull/408), [#410](https://github.com/arrufat/zignal/pull/410), [#412](https://github.com/arrufat/zignal/pull/412), [#414](https://github.com/arrufat/zignal/pull/414), [#416](https://github.com/arrufat/zignal/pull/416))
+- **CFF glyphs** are interpreted once per draw and GPOS pair lookups are indexed at load. ([#420](https://github.com/arrufat/zignal/pull/420))
+- **Also**: vectorized color blending, FAST corner detection without `sqrt`, integral-image adaptive thresholding, direct blits for unscaled bitmap glyphs. ([#354](https://github.com/arrufat/zignal/pull/354), [#356](https://github.com/arrufat/zignal/pull/356))
 
 ### Improvements
-- **Direction-independent polygon antialiasing**: `.soft` fills compute exact coverage in every direction instead of ramping only the span ends. (#401)
-- **2-D kernels larger than 7x7** compile (rows loop at runtime above 7), tested up to 31x31. (#443)
-- **JPEG robustness**: progressive decoding renders what it has at the scan limit or on truncated data, rejects duplicate SOF markers, validates SOS/SOF fields, honours JFIF/Adobe color models for RGB-coded files, and recognises SOF5-15. (#382, #431)
-- **PNG truncation**: files cut mid-chunk, mid-stream or before IEND decode with zero-padded rows and a `truncated` flag. (#383)
-- **Input hardening**: canvas, codecs, fonts and the CLI reject or clip NaN, off-image and oversized inputs instead of panicking; `font.max_file_size` is 256 MB. (#408, #432)
-- **Terminal detection**: single round-trip sixel probing, `aspectScale` upscales within `max_dim`, `EndOfStream` counts as a timeout. (#351, #397)
+- **Direction-independent polygon antialiasing**: `.soft` fills compute exact coverage in every direction instead of ramping only the span ends. ([#401](https://github.com/arrufat/zignal/pull/401))
+- **2-D kernels larger than 7x7** compile (rows loop at runtime above 7), tested up to 31x31. ([#443](https://github.com/arrufat/zignal/pull/443))
+- **JPEG robustness**: progressive decoding renders what it has at the scan limit or on truncated data, rejects duplicate SOF markers, validates SOS/SOF fields, honours JFIF/Adobe color models for RGB-coded files, and recognises SOF5-15. ([#382](https://github.com/arrufat/zignal/pull/382), [#431](https://github.com/arrufat/zignal/pull/431))
+- **PNG truncation**: files cut mid-chunk, mid-stream or before IEND decode with zero-padded rows and a `truncated` flag. ([#383](https://github.com/arrufat/zignal/pull/383))
+- **Input hardening**: canvas, codecs, fonts and the CLI reject or clip NaN, off-image and oversized inputs instead of panicking; `font.max_file_size` is 256 MB. ([#408](https://github.com/arrufat/zignal/pull/408), [#432](https://github.com/arrufat/zignal/pull/432))
+- **Terminal detection**: single round-trip sixel probing, `aspectScale` upscales within `max_dim`, `EndOfStream` counts as a timeout. ([#351](https://github.com/arrufat/zignal/pull/351), [#397](https://github.com/arrufat/zignal/pull/397))
 - **Single-threaded builds**: the sixel palette cache skips its spinlock under `single_threaded`.
 
 ### Fixes
-- **Antialiased fills** no longer inherit coverage from a previous fill's untouched accumulator blocks. (#428)
-- **`extract`/`insert`** use the half-open rectangle like `crop`; a rotated extract was stretched by cols/(cols-1). (#435)
-- **JPEG restart intervals** were unusable because the bit reader ran past RSTn markers. (#431)
-- **Numerics**: `RunningStats` skewness/kurtosis scaling, Perlin amplitude normalization, relative pivot tolerances in `lu`/`inv`/`solve`/`det`, `eigh` returns `NotConverged` instead of partial results. (#430)
-- **Vector `@intCast` to `u8`** compiled to a saturating pack in release builds; `meta.narrowToBytes` replaces it and CI runs ReleaseSafe. (#459)
-- **GIF LZW** code size grows in lockstep in encoder and decoder. (#350)
-- **PNG grayscale with alpha** converts to RGBA. (#352)
+- **Antialiased fills** no longer inherit coverage from a previous fill's untouched accumulator blocks. ([#428](https://github.com/arrufat/zignal/pull/428))
+- **`extract`/`insert`** use the half-open rectangle like `crop`; a rotated extract was stretched by cols/(cols-1). ([#435](https://github.com/arrufat/zignal/pull/435))
+- **JPEG restart intervals** were unusable because the bit reader ran past RSTn markers. ([#431](https://github.com/arrufat/zignal/pull/431))
+- **Numerics**: `RunningStats` skewness/kurtosis scaling, Perlin amplitude normalization, relative pivot tolerances in `lu`/`inv`/`solve`/`det`, `eigh` returns `NotConverged` instead of partial results. ([#430](https://github.com/arrufat/zignal/pull/430))
+- **Vector `@intCast` to `u8`** compiled to a saturating pack in release builds; `meta.narrowToBytes` replaces it and CI runs ReleaseSafe. ([#459](https://github.com/arrufat/zignal/pull/459))
+- **GIF LZW** code size grows in lockstep in encoder and decoder. ([#350](https://github.com/arrufat/zignal/pull/350))
+- **PNG grayscale with alpha** converts to RGBA. ([#352](https://github.com/arrufat/zignal/pull/352))
 - **`Image.rotateBounds`** returns a named `RotateBounds` struct; the anonymous return type did not compile.
-- **`isAliased`** detects partial buffer overlap between views. (#356)
-- **Wide IIR lanes** no longer exceed the comptime branch quota on AVX-512. (#470)
+- **`isAliased`** detects partial buffer overlap between views. ([#356](https://github.com/arrufat/zignal/pull/356))
+- **Wide IIR lanes** no longer exceed the comptime branch quota on AVX-512. ([#470](https://github.com/arrufat/zignal/pull/470))
 
 ### Tooling
-- **Tests run as one binary** rooted at `src/root.zig`; the uncached suite drops from 3 min to 31 s. (#458)
-- **Codecs live in `src/codecs/`**, `parallel.zig` moved to `src/`. (#352, #448)
-- **CI** publishes to TestPyPI only on releases and manual runs. (#413)
+- **Tests run as one binary** rooted at `src/root.zig`; the uncached suite drops from 3 min to 31 s. ([#458](https://github.com/arrufat/zignal/pull/458))
+- **Codecs live in `src/codecs/`**, `parallel.zig` moved to `src/`. ([#352](https://github.com/arrufat/zignal/pull/352), [#448](https://github.com/arrufat/zignal/pull/448))
+- **CI** publishes to TestPyPI only on releases and manual runs. ([#413](https://github.com/arrufat/zignal/pull/413))
 
 ## [0.10.0] - 2026-04-15
 
@@ -87,65 +87,65 @@
   - Leveraged new result type coercion for rounding built-ins to simplify type casting.
   - Updated `std.Io` and `std.Build` API usage to match latest standard library changes.
   - Transitioned to unmanaged containers requiring explicit allocators.
-- **Dimension Standardization**: Standardized image and matrix dimensions/indices to `u32` across the library. (#292, #295, #321)
+- **Dimension Standardization**: Standardized image and matrix dimensions/indices to `u32` across the library. ([#292](https://github.com/arrufat/zignal/pull/292), [#295](https://github.com/arrufat/zignal/pull/295), [#321](https://github.com/arrufat/zignal/pull/321))
 
 ### Features
-- **CLI Subcommands**: Added a robust CLI with `blur`, `edges`, `metrics`, `stats`, `resize`, `tile`, `fdm`, `info`, and `version` commands using declarative argument parsing. (#291, #294, #308, #312, #314, #317)
-- **Hough Transform**: Implemented Hough transform for line detection with optimized integer arithmetic and 1D lookup tables. (#326)
+- **CLI Subcommands**: Added a robust CLI with `blur`, `edges`, `metrics`, `stats`, `resize`, `tile`, `fdm`, `info`, and `version` commands using declarative argument parsing. ([#291](https://github.com/arrufat/zignal/pull/291), [#294](https://github.com/arrufat/zignal/pull/294), [#308](https://github.com/arrufat/zignal/pull/308), [#312](https://github.com/arrufat/zignal/pull/312), [#314](https://github.com/arrufat/zignal/pull/314), [#317](https://github.com/arrufat/zignal/pull/317))
+- **Hough Transform**: Implemented Hough transform for line detection with optimized integer arithmetic and 1D lookup tables. ([#326](https://github.com/arrufat/zignal/pull/326))
 - **Edge Vectorization**: Added `Tracer` for converting edge maps into vectorized paths.
-- **Advanced Interpolation**: Added Mitchell and Lanczos3 resizing methods with LUT optimizations. (#299, #300)
-- **Cholesky Decomposition**: Added high-performance Cholesky decomposition for symmetric positive-definite matrices. (#322)
-- **Colormap Support**: Added built-in colormaps (Heat, Jet, etc.) for data visualization. (#336)
-- **PCF Font Writing**: Added support for writing fonts in PCF format. (#337)
-- **Sixel RLE**: Implemented run-length encoding in the Sixel encoder for smaller output sizes. (#302)
-- **Image Difference**: Added utility to compute visual and statistical differences between images. (#309)
-- **Generic Blending**: Expanded blending modes to support generic float pixel types. (#335)
+- **Advanced Interpolation**: Added Mitchell and Lanczos3 resizing methods with LUT optimizations. ([#299](https://github.com/arrufat/zignal/pull/299), [#300](https://github.com/arrufat/zignal/pull/300))
+- **Cholesky Decomposition**: Added high-performance Cholesky decomposition for symmetric positive-definite matrices. ([#322](https://github.com/arrufat/zignal/pull/322))
+- **Colormap Support**: Added built-in colormaps (Heat, Jet, etc.) for data visualization. ([#336](https://github.com/arrufat/zignal/pull/336))
+- **PCF Font Writing**: Added support for writing fonts in PCF format. ([#337](https://github.com/arrufat/zignal/pull/337))
+- **Sixel RLE**: Implemented run-length encoding in the Sixel encoder for smaller output sizes. ([#302](https://github.com/arrufat/zignal/pull/302))
+- **Image Difference**: Added utility to compute visual and statistical differences between images. ([#309](https://github.com/arrufat/zignal/pull/309))
+- **Generic Blending**: Expanded blending modes to support generic float pixel types. ([#335](https://github.com/arrufat/zignal/pull/335))
 
 ### Breaking Changes
-- **Interpolation API**: Sampling methods now require an explicit `BorderMode`. (#329)
-- **Rectangle API**: Updated `Rectangle` methods to take `Point` types instead of individual coordinates. (#333)
+- **Interpolation API**: Sampling methods now require an explicit `BorderMode`. ([#329](https://github.com/arrufat/zignal/pull/329))
+- **Rectangle API**: Updated `Rectangle` methods to take `Point` types instead of individual coordinates. ([#333](https://github.com/arrufat/zignal/pull/333))
 - **Random Matrices**: Matrix generation now requires an explicit `seed` for reproducibility.
 
 ### Performance
-- **SIMD Optimizations**: Vectorized IDCT, color conversion, and convolution inner loops. (#307, #341)
-- **Fast CRC**: Implemented slice-by-8 CRC calculation for PNG encoding/decoding. (#304)
+- **SIMD Optimizations**: Vectorized IDCT, color conversion, and convolution inner loops. ([#307](https://github.com/arrufat/zignal/pull/307), [#341](https://github.com/arrufat/zignal/pull/341))
+- **Fast CRC**: Implemented slice-by-8 CRC calculation for PNG encoding/decoding. ([#304](https://github.com/arrufat/zignal/pull/304))
 - **Memory Optimization**: Removed redundant allocator field from `HuffmanTable`, reducing memory footprint per table instance.
 
 ### Improvements
 - **Rounding Accuracy**: Improved numerical precision by replacing manual truncation-based rounding with the `@round` built-in.
-- **Infallible Operations**: Made `resize` and `letterbox` infallible by handling edge cases internally. (#334)
-- **Border Handling**: Improved rotation and interpolation to consistently respect border modes. (#329, #331)
+- **Infallible Operations**: Made `resize` and `letterbox` infallible by handling edge cases internally. ([#334](https://github.com/arrufat/zignal/pull/334))
+- **Border Handling**: Improved rotation and interpolation to consistently respect border modes. ([#329](https://github.com/arrufat/zignal/pull/329), [#331](https://github.com/arrufat/zignal/pull/331))
 
 ### Fixes
-- **PNG Alpha**: Correctly extract alpha channel for grayscale images. (#330)
+- **PNG Alpha**: Correctly extract alpha channel for grayscale images. ([#330](https://github.com/arrufat/zignal/pull/330))
 - **JPEG Robustness**: Improved restart marker handling and MCG decoding stability.
 - **Negative Rounding**: Fixed incorrect rounding logic for negative values in fixed-point constants.
 
 ## [0.9.0] - 2025-12-15
 
 ### Features
-- **Convex Hull Bounds**: `ConvexHull.getRectangle()` (and Python's `get_rectangle()`) returns the tightest axis-aligned rectangle for the cached hull, simplifying ROI extraction from arbitrary point clouds. (#232)
-- **Resource Limits in Image Loading**: Enforce resource limits during image loading to prevent excessive memory usage. (#234)
-- **Scalar Type Conversion for Transforms**: Added scalar type conversion methods to geometry transforms. (#239)
-- **Matrix Element Type Conversion**: Added method to convert matrix element types. (#238)
-- **Python Sequence Conversion**: Added sequence conversion and improved memory error handling in Python bindings. (#244)
+- **Convex Hull Bounds**: `ConvexHull.getRectangle()` (and Python's `get_rectangle()`) returns the tightest axis-aligned rectangle for the cached hull, simplifying ROI extraction from arbitrary point clouds. ([#232](https://github.com/arrufat/zignal/pull/232))
+- **Resource Limits in Image Loading**: Enforce resource limits during image loading to prevent excessive memory usage. ([#234](https://github.com/arrufat/zignal/pull/234))
+- **Scalar Type Conversion for Transforms**: Added scalar type conversion methods to geometry transforms. ([#239](https://github.com/arrufat/zignal/pull/239))
+- **Matrix Element Type Conversion**: Added method to convert matrix element types. ([#238](https://github.com/arrufat/zignal/pull/238))
+- **Python Sequence Conversion**: Added sequence conversion and improved memory error handling in Python bindings. ([#244](https://github.com/arrufat/zignal/pull/244))
 
 ### Breaking Changes
-- **Python Grayscale Dtype Rename**: Renamed `Grayscale` dtype to `Gray` in Python bindings. (#246)
-- **Color Scalar Handling**: Generalized scalar color handling to all floats, potentially changing behavior for non-f32 scalars. (#245)
-- **Python Color Validation**: Added validation for color component range (0-255), now raising errors for invalid values. (#243)
-- **Geometry Transform Allocators**: Removed allocator field from transform structs. (#240)
+- **Python Grayscale Dtype Rename**: Renamed `Grayscale` dtype to `Gray` in Python bindings. ([#246](https://github.com/arrufat/zignal/pull/246))
+- **Color Scalar Handling**: Generalized scalar color handling to all floats, potentially changing behavior for non-f32 scalars. ([#245](https://github.com/arrufat/zignal/pull/245))
+- **Python Color Validation**: Added validation for color component range (0-255), now raising errors for invalid values. ([#243](https://github.com/arrufat/zignal/pull/243))
+- **Geometry Transform Allocators**: Removed allocator field from transform structs. ([#240](https://github.com/arrufat/zignal/pull/240))
 
 ### Fixes
 - **Integral Images**: Prevent initialization of empty images in integral image operations.
-- **Python Wheels**: Use explicit Zig targets instead of native for better cross-platform compatibility. (#241)
+- **Python Wheels**: Use explicit Zig targets instead of native for better cross-platform compatibility. ([#241](https://github.com/arrufat/zignal/pull/241))
 - **PNG IEND Chunk**: Enforce requirement for mandatory IEND chunk in PNG decoding.
-- **PNG Critical Chunk Ordering**: Validate critical chunk ordering in PNG files. (#233)
+- **PNG Critical Chunk Ordering**: Validate critical chunk ordering in PNG files. ([#233](https://github.com/arrufat/zignal/pull/233))
 
 ### Tooling & Docs
 - Updated Image I/O description in README.
-- Updated CI to use Zig master version. (#236)
-- Updated macOS runners in CI matrix. (#231)
+- Updated CI to use Zig master version. ([#236](https://github.com/arrufat/zignal/pull/236))
+- Updated macOS runners in CI matrix. ([#231](https://github.com/arrufat/zignal/pull/231))
 - Bumped minimum required Zig version.
 
 ## [0.8.0] - 2025-11-08
