@@ -17,9 +17,11 @@ pub fn build(b: *Build) void {
         .target = target,
     });
     const version = resolveVersion(b);
-    const version_options = b.addOptions();
-    version_options.addOption([]const u8, "version", b.fmt("{f}", .{version}));
-    zignal.addOptions("build_options", version_options);
+    const build_options = b.addOptions();
+    build_options.addOption([]const u8, "version", b.fmt("{f}", .{version}));
+    build_options.addOption(bool, "print_md5sums", print_md5sums);
+    build_options.addOption(bool, "debug_test_images", debug_test_images);
+    zignal.addOptions("build_options", build_options);
 
     const lib = b.addLibrary(.{
         .name = "zignal",
@@ -64,42 +66,19 @@ pub fn build(b: *Build) void {
     const check = b.step("check", "Check if zignal compiles");
     check.dependOn(&lib.step);
 
+    // One binary: tests come from every file reachable from the root, so per-module binaries
+    // would each re-run the whole image/codecs/terminal closure.
     const test_step = b.step("test", "Run library tests");
-    const test_options = b.addOptions();
-    test_options.addOption(bool, "print_md5sums", print_md5sums);
-    test_options.addOption(bool, "debug_test_images", debug_test_images);
-
-    const modules = [_][]const u8{
-        "color",
-        "image",
-        "geometry",
-        "matrix",
-        "perlin",
-        "canvas",
-        "codecs",
-        "fdm",
-        "pca",
-        "terminal",
-        "font",
-        "features",
-        "optimization",
-        "qrcode",
-        "meta",
-    };
-
-    for (modules) |name| {
-        const module_test = b.addTest(.{
-            .name = name,
-            .root_module = b.createModule(.{
-                .root_source_file = b.path(b.fmt("src/{s}.zig", .{name})),
-                .target = target,
-                .optimize = optimize,
-            }),
-        });
-        module_test.root_module.addOptions("build_options", test_options);
-        const module_test_run = b.addRunArtifact(module_test);
-        test_step.dependOn(&module_test_run.step);
-    }
+    const lib_test = b.addTest(.{
+        .name = "zignal",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    lib_test.root_module.addOptions("build_options", build_options);
+    test_step.dependOn(&b.addRunArtifact(lib_test).step);
 
     const fmt_step = b.step("fmt", "Check code formatting");
     const fmt = b.addFmt(.{

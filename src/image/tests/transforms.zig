@@ -9,6 +9,7 @@ const color = @import("../../color.zig");
 const Rectangle = @import("../../geometry.zig").Rectangle;
 const Image = @import("../../image.zig").Image;
 const Interpolation = @import("../../root.zig").Interpolation;
+const parallel = @import("../../parallel.zig");
 
 const Rgb = color.Rgb(u8);
 const Rgba = color.Rgba(u8);
@@ -520,8 +521,13 @@ test "transforms are identical on a thread pool" {
     var prng = std.Random.DefaultPrng.init(0x7ea);
     const random = prng.random();
 
+    // Every output is at least 64 K pixels, the floor for two bands (src/parallel.zig); the smallest
+    // is the 200x330 downscale, and the resize row pass bands on (src rows, dst cols).
+    try std.testing.expect(parallel.bandCount(200, 330) >= 2);
+    try std.testing.expect(parallel.bandCount(300, 330) >= 2);
+
     inline for ([_]type{ u8, f32, Rgb }) |T| {
-        var src: Image(T) = try .init(allocator, 720, 960);
+        var src: Image(T) = try .init(allocator, 300, 400);
         defer src.deinit(allocator);
         for (src.data) |*px| px.* = switch (T) {
             u8 => random.int(u8),
@@ -538,7 +544,7 @@ test "transforms are identical on a thread pool" {
         // Resize up and down with every method (Rgb takes the u8 plane path, the rest the generic one).
         const methods = [_]Interpolation{ .nearest, .bilinear, .bicubic, .catmull_rom, .{ .mitchell = .default }, .lanczos };
         for (methods) |method| {
-            for ([_][2]u32{ .{ 1000, 1400 }, .{ 300, 400 } }) |shape| {
+            for ([_][2]u32{ .{ 400, 560 }, .{ 200, 330 } }) |shape| {
                 var a: Image(T) = try .init(allocator, shape[0], shape[1]);
                 defer a.deinit(allocator);
                 var b: Image(T) = try .init(allocator, shape[0], shape[1]);
@@ -549,9 +555,9 @@ test "transforms are identical on a thread pool" {
             }
         }
 
-        var rot_a: Image(T) = try .init(allocator, 900, 1100);
+        var rot_a: Image(T) = try .init(allocator, 300, 400);
         defer rot_a.deinit(allocator);
-        var rot_b: Image(T) = try .init(allocator, 900, 1100);
+        var rot_b: Image(T) = try .init(allocator, 300, 400);
         defer rot_b.deinit(allocator);
         src.rotateInto(io, rot_a, 0.5, .bilinear, .mirror);
         src.rotateInto(pool_io, rot_b, 0.5, .bilinear, .mirror);
@@ -560,19 +566,19 @@ test "transforms are identical on a thread pool" {
         const from = [_]Point(2, f32){ .init(.{ 0, 0 }), .init(.{ 100, 0 }), .init(.{ 0, 100 }) };
         const to = [_]Point(2, f32){ .init(.{ 10, 20 }), .init(.{ 90, 35 }), .init(.{ -5, 110 }) };
         const transform = try SimilarityTransform(f32).init(&from, &to);
-        var warp_a: Image(T) = try .init(allocator, 700, 900);
+        var warp_a: Image(T) = try .init(allocator, 300, 400);
         defer warp_a.deinit(allocator);
-        var warp_b: Image(T) = try .init(allocator, 700, 900);
+        var warp_b: Image(T) = try .init(allocator, 300, 400);
         defer warp_b.deinit(allocator);
         src.warp(io, warp_a, transform, .bicubic);
         src.warp(pool_io, warp_b, transform, .bicubic);
         try Check.same(warp_a, warp_b);
 
-        var ext_a: Image(T) = try .init(allocator, 400, 400);
+        var ext_a: Image(T) = try .init(allocator, 300, 300);
         defer ext_a.deinit(allocator);
-        var ext_b: Image(T) = try .init(allocator, 400, 400);
+        var ext_b: Image(T) = try .init(allocator, 300, 300);
         defer ext_b.deinit(allocator);
-        const rect: Rectangle(f32) = .init(200, 150, 650, 600);
+        const rect: Rectangle(f32) = .init(50, 40, 350, 300);
         src.extract(io, ext_a, rect, 0.3, .bilinear, .zero);
         src.extract(pool_io, ext_b, rect, 0.3, .bilinear, .zero);
         try Check.same(ext_a, ext_b);
