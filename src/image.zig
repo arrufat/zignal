@@ -274,16 +274,16 @@ pub fn Image(comptime T: type) type {
         /// Example usage:
         /// ```zig
         /// const bytes = try fetchNetworkImage();
-        /// var img: Image(Rgb) = try .loadFromBytes(allocator, bytes);
+        /// var img: Image(Rgb) = try .loadFromBytes(io, allocator, bytes);
         /// defer img.deinit(allocator);
         /// ```
-        pub fn loadFromBytes(allocator: Allocator, data: []const u8) !Self {
+        pub fn loadFromBytes(io: Io, allocator: Allocator, data: []const u8) !Self {
             const image_format = ImageFormat.detectFromBytes(data) orelse return error.UnsupportedImageFormat;
             return switch (image_format) {
-                .png => png.loadFromBytes(T, allocator, data, .{}),
-                .jpeg => jpeg.loadFromBytes(T, allocator, data, .{}),
-                .bmp => bmp.loadFromBytes(T, allocator, data, .{}),
-                .gif => gif.loadFromBytes(T, allocator, data, .{}),
+                .png => png.loadFromBytes(T, io, allocator, data, .{}),
+                .jpeg => jpeg.loadFromBytes(T, io, allocator, data, .{}),
+                .bmp => bmp.loadFromBytes(T, io, allocator, data, .{}),
+                .gif => gif.loadFromBytes(T, io, allocator, data, .{}),
             };
         }
 

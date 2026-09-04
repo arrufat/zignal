@@ -1158,7 +1158,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !union(enum) {
 /// with transparency), with full Adam7 interlacing.
 /// Truncated pixel data yields a partial image; use `decode` + `toNativeImage`
 /// to observe the `truncated` flag.
-pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u8, limits: DecodeLimits) !Image(T) {
+pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, png_data: []const u8, limits: DecodeLimits) !Image(T) {
     var png_state = try decode(allocator, png_data, limits);
     defer png_state.deinit(allocator);
 
@@ -1171,7 +1171,7 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u
                 return img.*;
             } else {
                 defer img.deinit(allocator);
-                return img.convert(parallel.inline_io, allocator, T);
+                return img.convert(io, allocator, T);
             }
         },
         .rgb => |*img| {
@@ -1180,7 +1180,7 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u
                 return img.*;
             } else {
                 defer img.deinit(allocator);
-                return img.convert(parallel.inline_io, allocator, T);
+                return img.convert(io, allocator, T);
             }
         },
         .rgba => |*img| {
@@ -1189,7 +1189,7 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u
                 return img.*;
             } else {
                 defer img.deinit(allocator);
-                return img.convert(parallel.inline_io, allocator, T);
+                return img.convert(io, allocator, T);
             }
         },
     }
@@ -1199,7 +1199,7 @@ pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u
     const read_limit = if (limits.max_png_bytes == 0) std.math.maxInt(usize) else limits.max_png_bytes;
     const png_data = try Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
     defer allocator.free(png_data);
-    return loadFromBytes(T, allocator, png_data, limits);
+    return loadFromBytes(T, io, allocator, png_data, limits);
 }
 
 // PNG Encoder functionality
@@ -2286,7 +2286,7 @@ test "PNG truncated mid-IDAT decodes partially" {
     const gpa = std.testing.allocator;
     const png_data = try makeTruncationTestPng(gpa);
     defer gpa.free(png_data);
-    var full: Image(Rgb) = try loadFromBytes(Rgb, gpa, png_data, .{});
+    var full: Image(Rgb) = try loadFromBytes(Rgb, parallel.inline_io, gpa, png_data, .{});
     defer full.deinit(gpa);
 
     const idat = findTestChunk(png_data, "IDAT").?;
@@ -2296,7 +2296,7 @@ test "PNG truncated mid-IDAT decodes partially" {
     defer state.deinit(gpa);
     try std.testing.expect(state.truncated);
 
-    var partial: Image(Rgb) = try loadFromBytes(Rgb, gpa, cut, .{});
+    var partial: Image(Rgb) = try loadFromBytes(Rgb, parallel.inline_io, gpa, cut, .{});
     defer partial.deinit(gpa);
     try expectPrefixOrZero(full, partial);
 }
@@ -2305,7 +2305,7 @@ test "PNG missing IEND with complete IDAT decodes fully" {
     const gpa = std.testing.allocator;
     const png_data = try makeTruncationTestPng(gpa);
     defer gpa.free(png_data);
-    var full: Image(Rgb) = try loadFromBytes(Rgb, gpa, png_data, .{});
+    var full: Image(Rgb) = try loadFromBytes(Rgb, parallel.inline_io, gpa, png_data, .{});
     defer full.deinit(gpa);
 
     const cut = png_data[0 .. png_data.len - 12]; // IEND is length + type + CRC
@@ -2314,7 +2314,7 @@ test "PNG missing IEND with complete IDAT decodes fully" {
     defer state.deinit(gpa);
     try std.testing.expect(state.truncated);
 
-    var partial: Image(Rgb) = try loadFromBytes(Rgb, gpa, cut, .{});
+    var partial: Image(Rgb) = try loadFromBytes(Rgb, parallel.inline_io, gpa, cut, .{});
     defer partial.deinit(gpa);
     try std.testing.expectEqualSlices(Rgb, full.data, partial.data);
 }
@@ -2323,12 +2323,12 @@ test "PNG truncated mid-chunk-header decodes fully" {
     const gpa = std.testing.allocator;
     const png_data = try makeTruncationTestPng(gpa);
     defer gpa.free(png_data);
-    var full: Image(Rgb) = try loadFromBytes(Rgb, gpa, png_data, .{});
+    var full: Image(Rgb) = try loadFromBytes(Rgb, parallel.inline_io, gpa, png_data, .{});
     defer full.deinit(gpa);
 
     const cut = png_data[0 .. png_data.len - 8]; // 4 bytes into the IEND header
 
-    var partial: Image(Rgb) = try loadFromBytes(Rgb, gpa, cut, .{});
+    var partial: Image(Rgb) = try loadFromBytes(Rgb, parallel.inline_io, gpa, cut, .{});
     defer partial.deinit(gpa);
     try std.testing.expectEqualSlices(Rgb, full.data, partial.data);
 }
@@ -2337,7 +2337,7 @@ test "PNG truncated ancillary chunk after IDAT decodes fully" {
     const gpa = std.testing.allocator;
     const png_data = try makeTruncationTestPng(gpa);
     defer gpa.free(png_data);
-    var full: Image(Rgb) = try loadFromBytes(Rgb, gpa, png_data, .{});
+    var full: Image(Rgb) = try loadFromBytes(Rgb, parallel.inline_io, gpa, png_data, .{});
     defer full.deinit(gpa);
 
     // Replace IEND with a tEXt chunk cut inside its payload.
@@ -2350,7 +2350,7 @@ test "PNG truncated ancillary chunk after IDAT decodes fully" {
     defer state.deinit(gpa);
     try std.testing.expect(state.truncated);
 
-    var partial: Image(Rgb) = try loadFromBytes(Rgb, gpa, data.items, .{});
+    var partial: Image(Rgb) = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
     defer partial.deinit(gpa);
     try std.testing.expectEqualSlices(Rgb, full.data, partial.data);
 }
@@ -3507,7 +3507,7 @@ test "PNG encode of a view packs only the visible pixels" {
 
     const bytes = try encode(Rgb, gpa, view, .default);
     defer gpa.free(bytes);
-    var decoded = try loadFromBytes(Rgb, gpa, bytes, .{});
+    var decoded = try loadFromBytes(Rgb, parallel.inline_io, gpa, bytes, .{});
     defer decoded.deinit(gpa);
     try std.testing.expectEqual(view.rows, decoded.rows);
     try std.testing.expectEqual(view.cols, decoded.cols);
