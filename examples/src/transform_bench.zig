@@ -168,6 +168,8 @@ pub fn main(init: std.process.Init) !void {
     try benchResize(Rgb, io, gpa, random, filter, 2160, 3840, 1080, 1920, .bicubic);
     try benchResize(Rgb, io, gpa, random, filter, 2160, 3840, 1080, 1920, .lanczos);
     try benchResize(f32, io, gpa, random, filter, 2160, 3840, 1080, 1920, .bilinear);
+    try benchResize(f32, io, gpa, random, filter, 2160, 3840, 1080, 1920, .bicubic);
+    try benchResize(f32, io, gpa, random, filter, 2160, 3840, 1080, 1920, .lanczos);
     try benchResize(u8, io, gpa, random, filter, 480, 640, 2160, 3840, .bilinear);
     try benchResize(u8, io, gpa, random, filter, 480, 640, 2160, 3840, .bicubic);
     try benchResize(u8, io, gpa, random, filter, 480, 640, 2160, 3840, .lanczos);

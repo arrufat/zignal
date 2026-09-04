@@ -208,10 +208,13 @@ fn PlaneBands(comptime T: type, comptime Plane: type) type {
 // Direct plane resize: output rows [r_start, r_end) of a dst_rows x dst_cols plane
 // ============================================================================
 
-/// Optimized nearest neighbor resize for u8 planes.
-pub fn resizePlaneNearestU8(
-    src: []const u8,
-    dst: []u8,
+/// Nearest neighbor resize of a contiguous plane; `channels` > 1 means interleaved pixels
+/// of `channels` elements each (dimensions count pixels).
+pub fn resizePlaneNearest(
+    comptime P: type,
+    comptime channels: usize,
+    src: []const P,
+    dst: []P,
     src_rows: u32,
     src_cols: u32,
     dst_rows: u32,
@@ -229,13 +232,13 @@ pub fn resizePlaneNearestU8(
         for (0..dst_cols) |c| {
             const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
             const src_x = @max(0, @min(src_cols - 1, @as(u32, @round(src_x_f))));
-            dst[r * dst_cols + c] = src[@as(usize, src_y) * src_cols + src_x];
+            dst[(r * dst_cols + c) * channels ..][0..channels].* = src[(@as(usize, src_y) * src_cols + src_x) * channels ..][0..channels].*;
         }
     }
 }
 
 // ============================================================================
-// Separable u8 plane resize (bicubic, Catmull-Rom, Mitchell, Lanczos)
+// Separable plane resize (bilinear, bicubic, Catmull-Rom, Mitchell, Lanczos)
 // ============================================================================
 
 const interpolation = @import("interpolation.zig");
@@ -247,20 +250,23 @@ pub const weight_shift = 10;
 pub const weight_scale: i32 = 1 << weight_shift;
 pub const max_taps = 6;
 
-/// Mirror-resolved source indices and fixed-point weights for every output position along
-/// one axis. Each position's weights sum to exactly `weight_scale`, so the passes need no
-/// per-pixel normalization; the kernel is evaluated `taps` times per output position instead
-/// of `taps²` per pixel.
+/// Mirror-resolved source indices and weights for every output position along one axis,
+/// as fixed point for u8 planes (each position sums to exactly `weight_scale`) and as unit
+/// gain floats for f32 planes, so the passes need no per-pixel normalization; the kernel is
+/// evaluated `taps` times per output position instead of `taps²` per pixel.
 pub const AxisTaps = struct {
     taps: usize,
     indices: []u32,
     weights: []i32,
+    floats: []f32,
 
     pub fn init(allocator: std.mem.Allocator, src_len: u32, dst_len: u32, method: Interpolation) !AxisTaps {
         const taps = interpolation.kernelTaps(method);
         const indices = try allocator.alloc(u32, @as(usize, dst_len) * taps);
         errdefer allocator.free(indices);
         const weights = try allocator.alloc(i32, @as(usize, dst_len) * taps);
+        errdefer allocator.free(weights);
+        const floats = try allocator.alloc(f32, @as(usize, dst_len) * taps);
         const ratio = @as(f32, @floatFromInt(src_len)) / @as(f32, @floatFromInt(dst_len));
 
         for (0..dst_len) |i| {
@@ -284,61 +290,84 @@ pub const AxisTaps = struct {
                 if (@abs(q.*) > @abs(w[largest])) largest = t;
             }
             w[largest] += weight_scale - quantized_sum;
+            for (floats[i * taps ..][0..taps], raw[0..taps]) |*f, r| f.* = r / sum;
         }
-        return .{ .taps = taps, .indices = indices, .weights = weights };
+        return .{ .taps = taps, .indices = indices, .weights = weights, .floats = floats };
     }
 
     pub fn deinit(self: AxisTaps, allocator: std.mem.Allocator) void {
         allocator.free(self.indices);
         allocator.free(self.weights);
+        allocator.free(self.floats);
+    }
+
+    /// Weights in the accumulator type of plane type `P`.
+    fn weightsFor(self: AxisTaps, comptime P: type, pos: usize) []const Accum(P) {
+        return (if (P == u8) self.weights else self.floats)[pos * self.taps ..][0..self.taps];
     }
 };
 
-/// Horizontal pass: source rows `[r_start, r_end)` of `src` (`src_cols` wide) resampled
-/// through `x_taps` into `mid` (`dst_cols` wide) as unnormalized i32 sums.
-pub fn resizeRowsU8(src: []const u8, src_cols: u32, x_taps: AxisTaps, mid: []i32, dst_cols: u32, r_start: usize, r_end: usize) void {
+/// Intermediate plane and accumulator type of the separable passes for plane type `P`.
+pub fn Accum(comptime P: type) type {
+    return switch (P) {
+        u8 => i32,
+        f32 => f32,
+        else => @compileError("separable resize supports u8 and f32 planes, not " ++ @typeName(P)),
+    };
+}
+
+/// Horizontal pass: source rows `[r_start, r_end)` of `src` (`src_cols` pixels wide)
+/// resampled through `x_taps` into `mid` (`dst_cols` pixels wide) as unnormalized sums.
+/// `channels` > 1 means interleaved pixels; the taps index pixels, every channel of each.
+pub fn resizeRows(comptime P: type, comptime channels: usize, src: []const P, src_cols: u32, x_taps: AxisTaps, mid: []Accum(P), dst_cols: u32, r_start: usize, r_end: usize) void {
+    const A = Accum(P);
     const taps = x_taps.taps;
     for (r_start..r_end) |r| {
-        const row = src[r * src_cols ..][0..src_cols];
-        const out = mid[r * dst_cols ..][0..dst_cols];
-        for (out, 0..) |*o, c| {
-            var acc: i32 = 0;
-            for (x_taps.indices[c * taps ..][0..taps], x_taps.weights[c * taps ..][0..taps]) |idx, w| {
-                acc += w * @as(i32, row[idx]);
+        const row = src[r * src_cols * channels ..][0 .. src_cols * channels];
+        const out = mid[r * dst_cols * channels ..][0 .. dst_cols * channels];
+        for (0..dst_cols) |c| {
+            var acc: [channels]A = @splat(0);
+            for (x_taps.indices[c * taps ..][0..taps], x_taps.weightsFor(P, c)) |idx, w| {
+                inline for (0..channels) |ch| acc[ch] += w * @as(A, row[idx * channels + ch]);
             }
-            o.* = acc;
+            out[c * channels ..][0..channels].* = acc;
         }
     }
 }
 
-/// Vertical pass: output rows `[r_start, r_end)` of `dst` from `mid` through `y_taps`,
-/// rounded and clamped to u8.
-pub fn resizeColumnsU8(mid: []const i32, dst_cols: u32, y_taps: AxisTaps, dst: []u8, r_start: usize, r_end: usize) void {
-    const vec_len = std.simd.suggestVectorLength(i32) orelse 1;
-    const V = @Vector(vec_len, i32);
+/// Vertical pass: output rows `[r_start, r_end)` of `dst` (`cols` elements wide) from `mid`
+/// through `y_taps`; u8 planes are rounded and clamped, f32 planes stored as is.
+pub fn resizeColumns(comptime P: type, mid: []const Accum(P), cols: usize, y_taps: AxisTaps, dst: []P, r_start: usize, r_end: usize) void {
+    const A = Accum(P);
+    const vec_len = std.simd.suggestVectorLength(A) orelse 1;
+    const V = @Vector(vec_len, A);
     const taps = y_taps.taps;
     const shift = 2 * weight_shift;
-    const half: i32 = 1 << (shift - 1);
+    const half: A = if (P == u8) 1 << (shift - 1) else 0;
 
     for (r_start..r_end) |r| {
         const rows = y_taps.indices[r * taps ..][0..taps];
-        const weights = y_taps.weights[r * taps ..][0..taps];
-        const out = dst[r * dst_cols ..][0..dst_cols];
+        const weights = y_taps.weightsFor(P, r);
+        const out = dst[r * cols ..][0..cols];
         var c: usize = 0;
-        while (c + vec_len <= dst_cols) : (c += vec_len) {
+        while (c + vec_len <= cols) : (c += vec_len) {
             var acc: V = @splat(half);
             for (rows, weights) |row, w| {
-                acc += @as(V, @splat(w)) * @as(V, mid[row * dst_cols + c ..][0..vec_len].*);
+                acc += @as(V, @splat(w)) * @as(V, mid[row * cols + c ..][0..vec_len].*);
             }
-            const scaled = acc >> @splat(shift);
-            const clamped = @max(@as(V, @splat(0)), @min(@as(V, @splat(255)), scaled));
-            const bytes: @Vector(vec_len, u8) = meta.narrowToBytes(clamped);
-            out[c..][0..vec_len].* = bytes;
+            if (P == u8) {
+                const scaled = acc >> @splat(shift);
+                const clamped = @max(@as(V, @splat(0)), @min(@as(V, @splat(255)), scaled));
+                const bytes: @Vector(vec_len, u8) = meta.narrowToBytes(clamped);
+                out[c..][0..vec_len].* = bytes;
+            } else {
+                out[c..][0..vec_len].* = acc;
+            }
         }
-        while (c < dst_cols) : (c += 1) {
-            var acc: i32 = half;
-            for (rows, weights) |row, w| acc += w * mid[row * dst_cols + c];
-            out[c] = meta.clamp(u8, acc >> shift);
+        while (c < cols) : (c += 1) {
+            var acc: A = half;
+            for (rows, weights) |row, w| acc += w * mid[row * cols + c];
+            out[c] = if (P == u8) meta.clamp(u8, acc >> shift) else acc;
         }
     }
 }
