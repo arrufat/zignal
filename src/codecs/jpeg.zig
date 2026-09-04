@@ -285,13 +285,33 @@ pub const Subsampling = enum {
     }
 };
 
+/// Restart interval (DRI) of the scan. Markers let a decoder resume at every segment, which
+/// `decodeInto` uses to decode segments in parallel; each costs a marker and a DC predictor
+/// reset (one row per interval is ~0.1 % of a 4K file and ~2 % more cycles to decode serially).
+pub const RestartInterval = union(enum) {
+    none,
+    /// Every `rows` MCU rows.
+    rows: u16,
+    /// Every `mcus` MCUs.
+    mcus: u16,
+
+    /// MCUs per interval for a scan `mcus_per_row` wide; 0 means no markers.
+    fn mcusFor(self: RestartInterval, mcus_per_row: usize) u16 {
+        return switch (self) {
+            .none => 0,
+            .mcus => |n| n,
+            .rows => |r| @intCast(@min(std.math.maxInt(u16), @as(usize, r) * mcus_per_row)),
+        };
+    }
+};
+
 pub const EncodeOptions = struct {
     quality: u8 = 90,
     subsampling: Subsampling = .yuv420,
     density_dpi: u16 = 72,
     comment: ?[]const u8 = null,
-    /// MCUs per restart interval (DRI); 0 writes no restart markers.
-    restart_interval: u16 = 0,
+    /// One MCU row per restart interval by default, so the file decodes in parallel.
+    restart_interval: RestartInterval = .{ .rows = 1 },
     pub const default: EncodeOptions = .{};
 };
 
@@ -1131,7 +1151,9 @@ fn encodeRgb(allocator: Allocator, image: Image(Rgb), options: EncodeOptions) ![
     try writeDQT(&out, allocator, &ql, &qc);
     try writeSOF0(&out, allocator, @intCast(image.cols), @intCast(image.rows), false, options.subsampling);
     try writeDHT(&out, allocator, false);
-    if (options.restart_interval != 0) try writeDRI(&out, allocator, options.restart_interval);
+    const mcu_width: usize = 8 * @as(usize, options.subsampling.lumaFactors() >> 4);
+    const restart_interval = options.restart_interval.mcusFor((image.cols + mcu_width - 1) / mcu_width);
+    if (restart_interval != 0) try writeDRI(&out, allocator, restart_interval);
     try writeSOS(&out, allocator, false);
 
     const h_max: usize = switch (options.subsampling) {
@@ -1157,7 +1179,7 @@ fn encodeRgb(allocator: Allocator, image: Image(Rgb), options: EncodeOptions) ![
         EncodeBand.transformPlane(band.y, band.y_stride, v_max, &tables.y_quant, band.y_coefs);
         EncodeBand.transformPlane(band.cb, band.c_stride, 1, &tables.c_quant, band.cb_coefs);
         EncodeBand.transformPlane(band.cr, band.c_stride, 1, &tables.c_quant, band.cr_coefs);
-        try encodeBandScan(&w, &band, &tables, true, options.restart_interval, &mcus_in_interval, &rst_index, &prev_dc);
+        try encodeBandScan(&w, &band, &tables, true, restart_interval, &mcus_in_interval, &rst_index, &prev_dc);
     }
     try w.reserve();
     w.flush();
@@ -1194,7 +1216,8 @@ fn encodeGrayscale(allocator: Allocator, bytes: []const u8, width: u32, height: 
 
     try writeSOF0(&out, allocator, @intCast(width), @intCast(height), true, .yuv444);
     try writeDHT(&out, allocator, true);
-    if (options.restart_interval != 0) try writeDRI(&out, allocator, options.restart_interval);
+    const restart_interval = options.restart_interval.mcusFor((width + 7) / 8);
+    if (restart_interval != 0) try writeDRI(&out, allocator, restart_interval);
     try writeSOS(&out, allocator, true);
 
     const tables = scanTables(&ql, &qc);
@@ -1211,7 +1234,7 @@ fn encodeGrayscale(allocator: Allocator, bytes: []const u8, width: u32, height: 
     for (0..(rows + 7) / 8) |mcu_y| {
         band.fillGray(bytes, cols, rows, mcu_y);
         EncodeBand.transformPlane(band.y, band.y_stride, 1, &tables.y_quant, band.y_coefs);
-        try encodeBandScan(&w, &band, &tables, false, options.restart_interval, &mcus_in_interval, &rst_index, &prev_dc);
+        try encodeBandScan(&w, &band, &tables, false, restart_interval, &mcus_in_interval, &rst_index, &prev_dc);
     }
     try w.reserve();
     w.flush();
@@ -3439,7 +3462,7 @@ test "banded restart-interval decode matches the single sweep" {
     // 1 and 3 MCUs, one row (25 MCUs at 4:2:0, 50 otherwise), and a run straddling rows.
     for ([_]Subsampling{ .yuv444, .yuv422, .yuv420 }) |subsampling| {
         for ([_]u16{ 1, 3, 25, 50, 77 }) |interval| {
-            const bytes = try encode(Rgb, gpa, img, .{ .subsampling = subsampling, .restart_interval = interval });
+            const bytes = try encode(Rgb, gpa, img, .{ .subsampling = subsampling, .restart_interval = .{ .mcus = interval } });
             defer gpa.free(bytes);
             var want = try loadFromBytes(Rgb, parallel.inline_io, gpa, bytes, .{});
             defer want.deinit(gpa);
@@ -3467,13 +3490,42 @@ test "banded restart-interval decode matches the single sweep" {
         }
     }
 
-    const bytes = try encode(u8, gpa, gray, .{ .restart_interval = 7 });
+    const bytes = try encode(u8, gpa, gray, .{ .restart_interval = .{ .mcus = 7 } });
     defer gpa.free(bytes);
     var want = try loadFromBytes(u8, parallel.inline_io, gpa, bytes, .{});
     defer want.deinit(gpa);
     var got = try loadFromBytes(u8, pool_io, gpa, bytes, .{});
     defer got.deinit(gpa);
     try std.testing.expectEqualSlices(u8, want.data, got.data);
+}
+
+test "default encode writes one MCU row per restart interval" {
+    const gpa = std.testing.allocator;
+    // 37 columns: 5 MCUs at 4:4:4, 3 at 4:2:2 and 4:2:0 (16-wide MCUs), 5 blocks in gray.
+    var img = try gradientImage(gpa, 21, 37);
+    defer img.deinit(gpa);
+    var gray = try img.convert(parallel.inline_io, gpa, u8);
+    defer gray.deinit(gpa);
+
+    for ([_]struct { s: Subsampling, mcus: u16 }{ .{ .s = .yuv444, .mcus = 5 }, .{ .s = .yuv422, .mcus = 3 }, .{ .s = .yuv420, .mcus = 3 } }) |case| {
+        const bytes = try encode(Rgb, gpa, img, .{ .subsampling = case.s });
+        defer gpa.free(bytes);
+        const dri = std.mem.indexOf(u8, bytes, &.{ 0xFF, 0xDD, 0x00, 0x04 }).?;
+        try std.testing.expectEqual(case.mcus, std.mem.readInt(u16, bytes[dri + 4 ..][0..2], .big));
+        // The markers change the bitstream, not the pixels.
+        const plain = try encode(Rgb, gpa, img, .{ .subsampling = case.s, .restart_interval = .none });
+        defer gpa.free(plain);
+        var want = try loadFromBytes(Rgb, parallel.inline_io, gpa, plain, .{});
+        defer want.deinit(gpa);
+        var got = try loadFromBytes(Rgb, parallel.inline_io, gpa, bytes, .{});
+        defer got.deinit(gpa);
+        try std.testing.expectEqualSlices(u8, want.asBytes(), got.asBytes());
+    }
+
+    const bytes = try encode(u8, gpa, gray, .{});
+    defer gpa.free(bytes);
+    const dri = std.mem.indexOf(u8, bytes, &.{ 0xFF, 0xDD, 0x00, 0x04 }).?;
+    try std.testing.expectEqual(5, std.mem.readInt(u16, bytes[dri + 4 ..][0..2], .big));
 }
 
 test "JPEG restart intervals decode identically to a single interval" {
@@ -3484,12 +3536,13 @@ test "JPEG restart intervals decode identically to a single interval" {
     defer gray.deinit(gpa);
 
     for ([_]Subsampling{ .yuv444, .yuv422, .yuv420 }) |subsampling| {
-        const plain = try encode(Rgb, gpa, img, .{ .subsampling = subsampling });
+        const plain = try encode(Rgb, gpa, img, .{ .subsampling = subsampling, .restart_interval = .none });
         defer gpa.free(plain);
+        try std.testing.expect(std.mem.indexOf(u8, plain, &.{ 0xFF, 0xDD }) == null);
         var want = try loadFromBytes(Rgb, parallel.inline_io, gpa, plain, .{});
         defer want.deinit(gpa);
         for ([_]u16{ 1, 3 }) |interval| {
-            const bytes = try encode(Rgb, gpa, img, .{ .subsampling = subsampling, .restart_interval = interval });
+            const bytes = try encode(Rgb, gpa, img, .{ .subsampling = subsampling, .restart_interval = .{ .mcus = interval } });
             defer gpa.free(bytes);
             try std.testing.expect(std.mem.indexOf(u8, bytes, &.{ 0xFF, 0xDD }) != null);
             var got = try loadFromBytes(Rgb, parallel.inline_io, gpa, bytes, .{});
@@ -3498,18 +3551,18 @@ test "JPEG restart intervals decode identically to a single interval" {
         }
     }
 
-    const plain = try encode(u8, gpa, gray, .{});
+    const plain = try encode(u8, gpa, gray, .{ .restart_interval = .none });
     defer gpa.free(plain);
     var want = try loadFromBytes(u8, parallel.inline_io, gpa, plain, .{});
     defer want.deinit(gpa);
-    const bytes = try encode(u8, gpa, gray, .{ .restart_interval = 2 });
+    const bytes = try encode(u8, gpa, gray, .{ .restart_interval = .{ .mcus = 2 } });
     defer gpa.free(bytes);
     var got = try loadFromBytes(u8, parallel.inline_io, gpa, bytes, .{});
     defer got.deinit(gpa);
     try std.testing.expectEqualSlices(u8, want.data, got.data);
 
     // Truncated inside the third interval: the first MCU row (two intervals) is intact.
-    const rgb = try encode(Rgb, gpa, img, .{ .subsampling = .yuv420, .restart_interval = 1 });
+    const rgb = try encode(Rgb, gpa, img, .{ .subsampling = .yuv420, .restart_interval = .{ .mcus = 1 } });
     defer gpa.free(rgb);
     var full = try loadFromBytes(Rgb, parallel.inline_io, gpa, rgb, .{});
     defer full.deinit(gpa);
