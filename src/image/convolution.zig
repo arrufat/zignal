@@ -524,7 +524,7 @@ fn convolveSeparableAutoImpl(
 
 /// `image`'s bytes as a `cols * channels` wide u8 image: every channel of a pixel is a
 /// column, so the separable passes run over interleaved struct pixels without a split.
-fn elementView(comptime T: type, image: Image(T)) Image(u8) {
+pub fn elementView(comptime T: type, image: Image(T)) Image(u8) {
     const n = comptime Image(T).channels();
     return .{
         .rows = image.rows,

@@ -233,6 +233,7 @@ pub fn main(init: std.process.Init) !void {
     try benchGaussian(u8, io, gpa, random, filter, 480, 640, 8, .{ .method = .iir });
     try benchGaussian(u8, io, gpa, random, filter, 2160, 3840, 3, .{ .method = .iir });
     try benchGaussian(Rgb, io, gpa, random, filter, 480, 640, 3, .{ .method = .iir });
+    try benchGaussian(Rgb, io, gpa, random, filter, 2160, 3840, 3, .{ .method = .iir });
 
     // 2D convolution (interior SIMD + border rows; 64x64 with 7x7 is border-dominated)
     try benchConvolve2D(u8, io, gpa, random, filter, 480, 640, sharpen_3x3, "3x3", .mirror);
