@@ -12,6 +12,7 @@ const Image = @import("../image.zig").Image;
 
 const Rgb = @import("../color.zig").Rgb(u8);
 const Ycbcr = @import("../color.zig").Ycbcr(u8);
+const meta = @import("../meta.zig");
 
 const max_file_size: usize = 100 * 1024 * 1024;
 
@@ -981,7 +982,6 @@ const EncodeBand = struct {
     /// `convertColor`, so the result matches the scalar conversion exactly.
     fn convertRow(src: []const Rgb, y: []u8, cb: []u8, cr: []u8) void {
         const V = @Vector(16, i32);
-        const B = @Vector(16, u8);
         var px: usize = 0;
         if (RenderBand.packed_rgb) {
             while (px + 16 <= src.len) : (px += 16) {
@@ -996,9 +996,9 @@ const EncodeBand = struct {
                 const yv = (@as(V, @splat(19595)) * r + @as(V, @splat(38470)) * g + @as(V, @splat(7471)) * b + half) >> @splat(16);
                 const cbv = ((@as(V, @splat(-11059)) * r + @as(V, @splat(-21710)) * g + @as(V, @splat(32768)) * b + half) >> @splat(16)) + bias;
                 const crv = ((@as(V, @splat(32768)) * r + @as(V, @splat(-27439)) * g + @as(V, @splat(-5329)) * b + half) >> @splat(16)) + bias;
-                y[px..][0..16].* = @as(B, @intCast(std.math.clamp(yv, lo, hi)));
-                cb[px..][0..16].* = @as(B, @intCast(std.math.clamp(cbv, lo, hi)));
-                cr[px..][0..16].* = @as(B, @intCast(std.math.clamp(crv, lo, hi)));
+                y[px..][0..16].* = meta.narrowToBytes(std.math.clamp(yv, lo, hi));
+                cb[px..][0..16].* = meta.narrowToBytes(std.math.clamp(cbv, lo, hi));
+                cr[px..][0..16].* = meta.narrowToBytes(std.math.clamp(crv, lo, hi));
             }
         }
         for (src[px..], y[px..src.len], cb[px..src.len], cr[px..src.len]) |p, *yo, *cbo, *cro| {
@@ -2532,7 +2532,7 @@ const Idct = struct {
         if (@reduce(.Or, ac) == 0) {
             // DC only: (dc + 4) >> 3 + 128 for every sample, exactly the two-pass result.
             const dc = std.math.clamp(((r[0] + @as(V16, @splat(4))) >> @splat(3)) + @as(V16, @splat(128)), @as(V16, @splat(0)), @as(V16, @splat(255)));
-            const bytes: [16]u8 = @as(@Vector(16, u8), @intCast(@shuffle(i16, dc, undefined, [16]i32{ 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8, 8, 8, 8, 8 })));
+            const bytes: [16]u8 = meta.narrowToBytes(@shuffle(i16, dc, undefined, [16]i32{ 0, 0, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8, 8, 8, 8, 8 }));
             for (0..8) |i| {
                 if (single) dst[i * stride ..][0..8].* = bytes[0..8].* else dst[i * stride ..][0..16].* = bytes;
             }
@@ -2543,7 +2543,7 @@ const Idct = struct {
         pass(&r, 65536 + (128 << 17), 17);
         transpose(&r);
         for (0..8) |i| {
-            const bytes: [16]u8 = @as(@Vector(16, u8), @intCast(std.math.clamp(r[i], @as(V16, @splat(0)), @as(V16, @splat(255)))));
+            const bytes: [16]u8 = meta.narrowToBytes(std.math.clamp(r[i], @as(V16, @splat(0)), @as(V16, @splat(255))));
             if (single) dst[i * stride ..][0..8].* = bytes[0..8].* else dst[i * stride ..][0..16].* = bytes;
         }
     }
@@ -2709,7 +2709,7 @@ const RenderBand = struct {
                 var i: usize = 0;
                 while (i < cw) : (i += lanes) {
                     const v: V = self.vrow[1 + i ..][0..lanes].*;
-                    crow[i..][0..lanes].* = @as(B, @intCast((v + @as(V, @splat(128))) >> @splat(8)));
+                    crow[i..][0..lanes].* = meta.narrowToBytes((v + @as(V, @splat(128))) >> @splat(8));
                 }
             },
             2 => self.upsampleRow(2, crow, cw),
@@ -2746,7 +2746,7 @@ const RenderBand = struct {
             const src: V = self.vrow[x / factor ..][0..lanes].*;
             const lo = @shuffle(i32, src, undefined, taps.lo);
             const hi = @shuffle(i32, src, undefined, taps.hi);
-            crow[x..][0..lanes].* = @as(B, @intCast((lo * w_lo + hi * w_hi + rounding) >> @splat(16)));
+            crow[x..][0..lanes].* = meta.narrowToBytes((lo * w_lo + hi * w_hi + rounding) >> @splat(16));
         }
     }
 
@@ -2763,17 +2763,17 @@ const RenderBand = struct {
             var g: B = undefined;
             var b: B = undefined;
             if (rgb_model) {
-                r = @intCast(yv);
-                g = @intCast(c1);
-                b = @intCast(c2);
+                r = meta.narrowToBytes(yv);
+                g = meta.narrowToBytes(c1);
+                b = meta.narrowToBytes(c2);
             } else {
                 const u = c1 - bias;
                 const v = c2 - bias;
                 const lo: V = @splat(0);
                 const hi: V = @splat(255);
-                r = @intCast(std.math.clamp(yv + ((@as(V, @splat(91881)) * v + rounding) >> @splat(16)), lo, hi));
-                g = @intCast(std.math.clamp(yv - ((@as(V, @splat(22554)) * u + @as(V, @splat(46802)) * v + rounding) >> @splat(16)), lo, hi));
-                b = @intCast(std.math.clamp(yv + ((@as(V, @splat(116130)) * u + rounding) >> @splat(16)), lo, hi));
+                r = meta.narrowToBytes(std.math.clamp(yv + ((@as(V, @splat(91881)) * v + rounding) >> @splat(16)), lo, hi));
+                g = meta.narrowToBytes(std.math.clamp(yv - ((@as(V, @splat(22554)) * u + @as(V, @splat(46802)) * v + rounding) >> @splat(16)), lo, hi));
+                b = meta.narrowToBytes(std.math.clamp(yv + ((@as(V, @splat(116130)) * u + rounding) >> @splat(16)), lo, hi));
             }
             const n = @min(lanes, width - px);
             const out = dst[px..][0..n];

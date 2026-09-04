@@ -124,6 +124,19 @@ pub fn clamp(comptime T: type, value: anytype) T {
     }
 }
 
+/// Narrows integer vector lanes already in 0..255 to bytes. `@intCast` to `u8` lanes is lowered
+/// as a signed saturating pack in release builds (zig 0.17.0-dev.1970), which turns 128..255
+/// into 127; truncating the unsigned view of the lanes sidesteps it.
+pub fn narrowToBytes(v: anytype) @Vector(@typeInfo(@TypeOf(v)).vector.len, u8) {
+    const info = @typeInfo(@TypeOf(v)).vector;
+    const V = @TypeOf(v);
+    if (std.debug.runtime_safety) {
+        std.debug.assert(@reduce(.And, v >= @as(V, @splat(0))) and @reduce(.And, v <= @as(V, @splat(255))));
+    }
+    const Unsigned = @Vector(info.len, @Int(.unsigned, @typeInfo(info.child).int.bits));
+    return @truncate(@as(Unsigned, @bitCast(v)));
+}
+
 /// Check if a type is an RGB or RGBA type with u8 components.
 /// Returns true for structs with 3 or 4 u8 fields named r, g, b[, a].
 ///
@@ -189,6 +202,16 @@ pub fn safeCast(comptime T: type, value: anytype) !T {
         },
         else => @compileError("safeCast only supports numeric target types"),
     }
+}
+
+test "meta.narrowToBytes keeps lanes above 127" {
+    var lanes: [16]i32 = undefined;
+    for (&lanes, 0..) |*lane, i| lane.* = @intCast(120 + 9 * i);
+    std.mem.doNotOptimizeAway(&lanes);
+    const bytes: [16]u8 = narrowToBytes(@as(@Vector(16, i32), lanes));
+    for (bytes, lanes) |byte, lane| try std.testing.expectEqual(lane, byte);
+    const wide: [8]u8 = narrowToBytes(@as(@Vector(8, i16), .{ 0, 1, 127, 128, 129, 200, 254, 255 }));
+    try std.testing.expectEqualSlices(u8, &.{ 0, 1, 127, 128, 129, 200, 254, 255 }, &wide);
 }
 
 test "meta.clamp" {

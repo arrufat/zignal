@@ -153,7 +153,7 @@ pub fn applyOrdered(img: Image(Rgb), pal: []const Rgb, lut: ColorLookupTable) vo
 
                 const clamped = @min(@max(result_i16, min_vec), max_vec);
 
-                const result_u8: @Vector(24, u8) = @intCast(clamped);
+                const result_u8: @Vector(24, u8) = meta.narrowToBytes(clamped);
                 const quantized_vec = result_u8 >> @as(@Vector(24, u3), @splat(8 - color_quantize_bits));
                 const q_arr: [24]u8 = quantized_vec;
 
