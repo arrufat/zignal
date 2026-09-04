@@ -209,6 +209,8 @@ fn Chains(comptime W: usize, comptime channels: usize) type {
 /// One line of `len` elements through the forward and backward passes. `acc` provides the
 /// source loads, the intermediate (forward) stores and loads, and the final stores.
 fn filterLine(comptime W: usize, comptime channels: usize, acc: anytype, len: usize, c: Coefficients, pad: []f32) void {
+    // The lane gathers unroll W x channels ways; 32 lanes exceed the default quota.
+    @setEvalBranchQuota(1 << 16);
     var chains: Chains(W, channels) = .init(acc, len, c);
     var i: usize = 0;
     while (i < len) : (i += channels) {
@@ -231,6 +233,7 @@ fn filterLine(comptime W: usize, comptime channels: usize, acc: anytype, len: us
 /// grouped so every block's channel pattern is fixed at comptime; the last partial group
 /// uses per-lane loads.
 fn filterRowBlock(comptime T: type, comptime channels: usize, src: Image(T), temp: Image(f32), r0: usize, c: Coefficients, pad: []f32) void {
+    @setEvalBranchQuota(1 << 16);
     const W = lanes;
     const V = @Vector(W, f32);
     const blocks = comptime channels / std.math.gcd(channels, W);
@@ -294,6 +297,7 @@ inline fn loadRowVec(comptime T: type, comptime W: usize, img: Image(T), row: us
 /// In-register transpose of a `W`×`W` block (`W` a power of two): `log2(W)` rounds of
 /// pairwise shuffles that swap `s`-wide sub-blocks between rows `i` and `i + s`.
 fn transpose(comptime W: usize, m: [W]@Vector(W, f32)) [W]@Vector(W, f32) {
+    @setEvalBranchQuota(1 << 16);
     comptime std.debug.assert(std.math.isPowerOfTwo(W));
     var rows = m;
     comptime var s: usize = 1;
