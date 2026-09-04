@@ -5,6 +5,8 @@ const std = @import("std");
 const zignal = @import("zignal");
 const Image = zignal.Image;
 const Rgb = zignal.Rgb(u8);
+const Rgba = zignal.Rgba(u8);
+const Rectangle = zignal.Rectangle;
 const Interpolation = zignal.Interpolation;
 const Point = zignal.Point;
 
@@ -20,11 +22,11 @@ fn skipped(name: []const u8, filter: ?[]const u8) bool {
 }
 
 fn fillRandom(comptime T: type, img: Image(T), random: std.Random) void {
-    for (img.data) |*px| px.* = switch (T) {
-        u8 => random.int(u8),
-        f32 => 255 * random.float(f32),
-        else => .{ .r = random.int(u8), .g = random.int(u8), .b = random.int(u8) },
-    };
+    if (T == f32) {
+        for (img.data) |*px| px.* = 255 * random.float(f32);
+    } else {
+        random.bytes(std.mem.sliceAsBytes(img.data));
+    }
 }
 
 /// Runs `ctx.run(run_io)` on a single-threaded `Io` and on `io`'s pool; reports both medians.
@@ -181,4 +183,69 @@ pub fn main(init: std.process.Init) !void {
     try benchRotate(u8, io, gpa, random, filter, 1080, 1920, .bicubic);
     try benchWarp(Rgb, io, gpa, random, filter, 1080, 1920);
     try benchExtract(Rgb, io, gpa, random, filter, 2160, 3840, 512);
+
+    try benchConvert(Rgb, u8, io, gpa, random, filter, 2160, 3840);
+    try benchConvert(Rgba, Rgb, io, gpa, random, filter, 2160, 3840);
+    try benchFlip(Rgb, io, gpa, random, filter, 2160, 3840);
+    try benchInsert(Rgba, io, gpa, random, filter, 1080, 1920, 480, 640);
+}
+
+fn benchConvert(comptime From: type, comptime To: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: u32, cols: u32) !void {
+    var name_buf: [96]u8 = undefined;
+    const name = try std.mem.print(&name_buf, "convert {s} -> {s}", .{ @typeName(From), @typeName(To) });
+    if (skipped(name, filter)) return;
+    var src: Image(From) = try .init(gpa, rows, cols);
+    defer src.deinit(gpa);
+    fillRandom(From, src, random);
+    var dst: Image(To) = try .init(gpa, rows, cols);
+    defer dst.deinit(gpa);
+    const Ctx = struct {
+        src: Image(From),
+        dst: Image(To),
+        fn run(self: @This(), run_io: std.Io) !void {
+            self.src.convertInto(run_io, To, self.dst);
+        }
+    };
+    try benchOp(io, name, rows, cols, Ctx{ .src = src, .dst = dst });
+}
+
+/// Both flips back to back, so the image is unchanged between iterations.
+fn benchFlip(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: u32, cols: u32) !void {
+    var name_buf: [96]u8 = undefined;
+    const name = try std.mem.print(&name_buf, "flip left-right + top-bottom {s}", .{@typeName(T)});
+    if (skipped(name, filter)) return;
+    var img: Image(T) = try .init(gpa, rows, cols);
+    defer img.deinit(gpa);
+    fillRandom(T, img, random);
+    const Ctx = struct {
+        img: Image(T),
+        fn run(self: @This(), run_io: std.Io) !void {
+            self.img.flipLeftRight(run_io);
+            self.img.flipTopBottom(run_io);
+        }
+    };
+    try benchOp(io, name, rows, cols, Ctx{ .img = img });
+}
+
+/// A rotated, scaled source blended into a canvas: the general `insert` path.
+fn benchInsert(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: u32, cols: u32, src_rows: u32, src_cols: u32) !void {
+    var name_buf: [96]u8 = undefined;
+    const name = try std.mem.print(&name_buf, "insert rotated 20deg {s} bilinear normal", .{@typeName(T)});
+    if (skipped(name, filter)) return;
+    var canvas: Image(T) = try .init(gpa, rows, cols);
+    defer canvas.deinit(gpa);
+    fillRandom(T, canvas, random);
+    var src: Image(T) = try .init(gpa, src_rows, src_cols);
+    defer src.deinit(gpa);
+    fillRandom(T, src, random);
+    const Ctx = struct {
+        canvas: Image(T),
+        src: Image(T),
+        fn run(self: @This(), run_io: std.Io) !void {
+            var dst = self.canvas;
+            const rect: Rectangle(f32) = .init(200, 100, 200 + 1.5 * 640, 100 + 1.5 * 480);
+            dst.insert(run_io, self.src, rect, std.math.pi / 9.0, .bilinear, .normal);
+        }
+    };
+    try benchOp(io, name, rows, cols, Ctx{ .canvas = canvas, .src = src });
 }

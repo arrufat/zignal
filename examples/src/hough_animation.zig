@@ -97,7 +97,7 @@ pub export fn render(img_ptr: [*]Rgba, acc_ptr: [*]Rgba, time_step: f32) void {
 
     // 5. Output Result Image (Copy input + Draw overlays)
     const result_img: Image(Rgba) = .initFromSlice(size, size, img_ptr[0 .. size * size]);
-    img.convertInto(Rgba, result_img);
+    img.convertInto(std.Io.failing, Rgba, result_img);
 
     const canvas: Canvas(Rgba) = .init(allocator, result_img);
 

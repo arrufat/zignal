@@ -98,15 +98,15 @@ pub fn copyFrom(self: *PyImage, src: PyImage) void {
     switch (self.data) {
         .gray => |*dst_img| switch (src.data) {
             .gray => |src_img| src_img.copy(dst_img.*),
-            inline else => |src_img| src_img.convertInto(u8, dst_img.*),
+            inline else => |src_img| src_img.convertInto(python.io, u8, dst_img.*),
         },
         .rgb => |*dst_img| switch (src.data) {
             .rgb => |src_img| src_img.copy(dst_img.*),
-            inline else => |src_img| src_img.convertInto(Rgb, dst_img.*),
+            inline else => |src_img| src_img.convertInto(python.io, Rgb, dst_img.*),
         },
         .rgba => |*dst_img| switch (src.data) {
             .rgba => |src_img| src_img.copy(dst_img.*),
-            inline else => |src_img| src_img.convertInto(Rgba, dst_img.*),
+            inline else => |src_img| src_img.convertInto(python.io, Rgba, dst_img.*),
         },
     }
 }

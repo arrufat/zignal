@@ -124,7 +124,7 @@ pub fn applyGray(io: Io, gpa: Allocator, img: zignal.Image(u8), out: zignal.Imag
 /// Pipeline-facing wrapper: detect edges on an RGBA image by bridging through
 /// grayscale, returning a freshly allocated RGBA image the caller owns.
 pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options: Args) !zignal.Image(zignal.Rgba(u8)) {
-    var gray = try img.convert(gpa, u8);
+    var gray = try img.convert(io, gpa, u8);
     defer gray.deinit(gpa);
 
     var edges_gray: zignal.Image(u8) = try .init(gpa, gray.rows, gray.cols);
@@ -132,7 +132,7 @@ pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options
 
     try applyGray(io, gpa, gray, edges_gray, options);
 
-    return edges_gray.convert(gpa, zignal.Rgba(u8));
+    return edges_gray.convert(io, gpa, zignal.Rgba(u8));
 }
 
 fn processImage(

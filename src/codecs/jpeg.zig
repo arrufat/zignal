@@ -6,6 +6,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
+const parallel = @import("../parallel.zig");
 
 const convertColor = @import("../color.zig").convertColor;
 const Image = @import("../image.zig").Image;
@@ -324,7 +325,7 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
         },
         Rgb => return encodeRgb(allocator, image, options),
         else => {
-            var converted = try image.convert(allocator, Rgb);
+            var converted = try image.convert(parallel.inline_io, allocator, Rgb);
             defer converted.deinit(allocator);
             return encodeRgb(allocator, converted, options);
         },
@@ -2999,7 +3000,7 @@ test "JPEG encode -> decode grayscale roundtrip" {
     try decodeInto(Rgb, &state, &out);
 
     // Convert original gray to RGB for PSNR
-    var gray_rgb = try img.convert(gpa, Rgb);
+    var gray_rgb = try img.convert(parallel.inline_io, gpa, Rgb);
     defer gray_rgb.deinit(gpa);
     const psnr = try gray_rgb.psnr(out);
     try std.testing.expect(psnr > 45);
@@ -3267,7 +3268,7 @@ test "JPEG restart intervals decode identically to a single interval" {
     const gpa = std.testing.allocator;
     var img = try gradientImage(gpa, 37, 29);
     defer img.deinit(gpa);
-    var gray = try img.convert(gpa, u8);
+    var gray = try img.convert(parallel.inline_io, gpa, u8);
     defer gray.deinit(gpa);
 
     for ([_]Subsampling{ .yuv444, .yuv422, .yuv420 }) |subsampling| {

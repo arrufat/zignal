@@ -190,7 +190,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
             .b = cell_t + y_offset + target_h,
         };
 
-        canvas.insert(img, dest_rect, 0, .bilinear, .none);
+        canvas.insert(io, img, dest_rect, 0, .bilinear, .none);
     }
     timer.logElapsed("tiling");
 

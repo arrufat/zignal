@@ -112,6 +112,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
         var canvas = try display.createHorizontalComposite(
             zignal.Rgba(u8),
+            io,
             gpa,
             &images,
             parsed.options.width,

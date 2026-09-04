@@ -7,6 +7,7 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const flate = std.compress.flate;
 const Io = std.Io;
+const parallel = @import("../parallel.zig");
 
 const convertColor = @import("../color.zig").convertColor;
 const Image = @import("../image.zig").Image;
@@ -1170,7 +1171,7 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u
                 return img.*;
             } else {
                 defer img.deinit(allocator);
-                return img.convert(allocator, T);
+                return img.convert(parallel.inline_io, allocator, T);
             }
         },
         .rgb => |*img| {
@@ -1179,7 +1180,7 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u
                 return img.*;
             } else {
                 defer img.deinit(allocator);
-                return img.convert(allocator, T);
+                return img.convert(parallel.inline_io, allocator, T);
             }
         },
         .rgba => |*img| {
@@ -1188,7 +1189,7 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, png_data: []const u
                 return img.*;
             } else {
                 defer img.deinit(allocator);
-                return img.convert(allocator, T);
+                return img.convert(parallel.inline_io, allocator, T);
             }
         },
     }
@@ -1418,7 +1419,7 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
             return encodeRaw(allocator, contiguous.asBytes(), image.cols, image.rows, color_type, 8, options);
         },
         else => {
-            var rgb_image = try image.convert(allocator, Rgb);
+            var rgb_image = try image.convert(parallel.inline_io, allocator, Rgb);
             defer rgb_image.deinit(allocator);
             return encodeRaw(allocator, rgb_image.asBytes(), image.cols, image.rows, color_type, 8, options);
         },

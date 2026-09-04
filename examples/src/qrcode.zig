@@ -56,7 +56,7 @@ pub export fn qr_encode(
 
     const size = @as(usize, image.rows) * image.cols;
     if (size > out_capacity) return -1;
-    image.convertInto(Rgba, .initFromSlice(image.rows, image.cols, out_ptr[0..size]));
+    image.convertInto(std.Io.failing, Rgba, .initFromSlice(image.rows, image.cols, out_ptr[0..size]));
     return @intCast(image.rows);
 }
 

@@ -86,6 +86,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
         var canvas = try display.createHorizontalComposite(
             Pixel,
+            io,
             gpa,
             &images,
             parsed.options.width,

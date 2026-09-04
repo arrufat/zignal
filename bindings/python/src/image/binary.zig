@@ -25,7 +25,7 @@ fn prepareGrayscale(pimg: *PyImage) ?GrayscaleHandle {
             handle.view = img;
         },
         .rgb => |*img| {
-            const converted = img.convert(allocator, u8) catch {
+            const converted = img.convert(python.io, allocator, u8) catch {
                 python.setMemoryError("image conversion");
                 return null;
             };
@@ -33,7 +33,7 @@ fn prepareGrayscale(pimg: *PyImage) ?GrayscaleHandle {
             handle.view = &handle.owned.?;
         },
         .rgba => |*img| {
-            const converted = img.convert(allocator, u8) catch {
+            const converted = img.convert(python.io, allocator, u8) catch {
                 python.setMemoryError("image conversion");
                 return null;
             };

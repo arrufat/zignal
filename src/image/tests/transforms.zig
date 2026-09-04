@@ -351,7 +351,7 @@ test "insert and extract inverse relationship" {
         var canvas = try Image(u8).init(allocator, 64, 64);
         defer canvas.deinit(allocator);
         @memset(canvas.data, 0);
-        canvas.insert(extracted, tc.rect, tc.angle, tc.method, color.Blending.none);
+        canvas.insert(io, extracted, tc.rect, tc.angle, tc.method, color.Blending.none);
 
         // Check reconstruction error in center region
         const cx = (tc.rect.l + tc.rect.r) * 0.5;
@@ -398,13 +398,13 @@ test "insert applies blending when requested" {
     const rect = Rectangle(f32).init(0, 0, 1, 1);
 
     // Without a blend mode the pixel should be copied directly.
-    dest.insert(source, rect, 0.0, Interpolation.nearest, color.Blending.none);
+    dest.insert(io, source, rect, 0.0, Interpolation.nearest, color.Blending.none);
     try expectEqualDeep(overlay, dest.at(0, 0).*);
 
     // Reset destination pixel and apply blending.
     dest.at(0, 0).* = base;
     const expected = base.blend(overlay, color.Blending.normal);
-    dest.insert(source, rect, 0.0, Interpolation.nearest, color.Blending.normal);
+    dest.insert(io, source, rect, 0.0, Interpolation.nearest, color.Blending.normal);
     try expectEqualDeep(expected, dest.at(0, 0).*);
 }
 
@@ -434,7 +434,7 @@ test "flipLeftRight" {
     };
     var image = Image(u8).initFromSlice(2, 3, &data);
 
-    image.flipLeftRight();
+    image.flipLeftRight(io);
     const expected = [_]u8{
         3, 2, 1,
         6, 5, 4,
@@ -449,7 +449,7 @@ test "flipTopBottom" {
         5, 6,
     };
     var image = Image(u8).initFromSlice(3, 2, &data);
-    image.flipTopBottom();
+    image.flipTopBottom(io);
     const expected = [_]u8{
         5, 6,
         3, 4,
@@ -466,8 +466,8 @@ test "insert with a rectangle outside the image or a NaN angle is a no-op" {
     var source = try Image(u8).init(allocator, 4, 4);
     defer source.deinit(allocator);
     source.fill(255);
-    dest.insert(source, .{ .l = -20, .t = -20, .r = -10, .b = -10 }, 0.3, .bilinear, color.Blending.none);
-    dest.insert(source, .{ .l = 2, .t = 2, .r = 6, .b = 6 }, std.math.nan(f32), .bilinear, color.Blending.none);
+    dest.insert(io, source, .{ .l = -20, .t = -20, .r = -10, .b = -10 }, 0.3, .bilinear, color.Blending.none);
+    dest.insert(io, source, .{ .l = 2, .t = 2, .r = 6, .b = 6 }, std.math.nan(f32), .bilinear, color.Blending.none);
     for (dest.data) |px| try std.testing.expectEqual(@as(u8, 0), px);
 }
 
@@ -502,7 +502,7 @@ test "extract, crop and insert agree on the half-open rect" {
     var dest: Image(u8) = try .init(allocator, 6, 7);
     defer dest.deinit(allocator);
     dest.fill(255);
-    dest.insert(cropped, rect, 1e-5, .nearest, color.Blending.none);
+    dest.insert(io, cropped, rect, 1e-5, .nearest, color.Blending.none);
     for (0..dest.rows) |r| for (0..dest.cols) |c| {
         const inside = r >= 1 and r < 4 and c >= 2 and c < 5;
         try expectEqual(if (inside) image.at(r, c).* else 255, dest.at(r, c).*);
@@ -582,5 +582,54 @@ test "transforms are identical on a thread pool" {
         src.extract(io, ext_a, rect, 0.3, .bilinear, .zero);
         src.extract(pool_io, ext_b, rect, 0.3, .bilinear, .zero);
         try Check.same(ext_a, ext_b);
+
+        // Flips: both back to back restore the image, so the pool pass runs on the same bytes.
+        var flip_a: Image(T) = try .initLike(allocator, src);
+        defer flip_a.deinit(allocator);
+        var flip_b: Image(T) = try .initLike(allocator, src);
+        defer flip_b.deinit(allocator);
+        src.copy(flip_a);
+        src.copy(flip_b);
+        flip_a.flipLeftRight(io);
+        flip_b.flipLeftRight(pool_io);
+        try Check.same(flip_a, flip_b);
+        flip_a.flipTopBottom(io);
+        flip_b.flipTopBottom(pool_io);
+        try Check.same(flip_a, flip_b);
+
+        // Insert: the axis-aligned copy path and the rotated resampling path.
+        var ins_a: Image(T) = try .init(allocator, 400, 500);
+        defer ins_a.deinit(allocator);
+        var ins_b: Image(T) = try .init(allocator, 400, 500);
+        defer ins_b.deinit(allocator);
+        for (ins_a.data, ins_b.data) |*a, *b| {
+            a.* = std.mem.zeroes(T);
+            b.* = std.mem.zeroes(T);
+        }
+        ins_a.insert(io, src, .init(30, 20, 430, 320), 0, .nearest, .none);
+        ins_b.insert(pool_io, src, .init(30, 20, 430, 320), 0, .nearest, .none);
+        try Check.same(ins_a, ins_b);
+        ins_a.insert(io, src, .init(60, 50, 360, 270), 0.4, .bilinear, .none);
+        ins_b.insert(pool_io, src, .init(60, 50, 360, 270), 0.4, .bilinear, .none);
+        try Check.same(ins_a, ins_b);
     }
+
+    // convert: Rgb -> u8 and u8 -> Rgb.
+    var rgb: Image(Rgb) = try .init(allocator, 300, 400);
+    defer rgb.deinit(allocator);
+    random.bytes(std.mem.sliceAsBytes(rgb.data));
+    var gray_a: Image(u8) = try .init(allocator, 300, 400);
+    defer gray_a.deinit(allocator);
+    var gray_b: Image(u8) = try .init(allocator, 300, 400);
+    defer gray_b.deinit(allocator);
+    rgb.convertInto(io, u8, gray_a);
+    rgb.convertInto(pool_io, u8, gray_b);
+    try std.testing.expectEqualSlices(u8, gray_a.data, gray_b.data);
+    var back_a: Image(Rgb) = try .initLike(allocator, rgb);
+    defer back_a.deinit(allocator);
+    var back_b: Image(Rgb) = try .initLike(allocator, rgb);
+    defer back_b.deinit(allocator);
+    gray_a.convertInto(io, Rgb, back_a);
+    gray_a.convertInto(pool_io, Rgb, back_b);
+    try std.testing.expectEqualSlices(Rgb, back_a.data, back_b.data);
 }

@@ -68,10 +68,10 @@ pub fn fromImage(
         } else {
             var scaled = try image.scale(io, gpa, scale, options.interpolation);
             defer scaled.deinit(gpa);
-            prepared_img = try scaled.convert(gpa, Rgb);
+            prepared_img = try scaled.convert(io, gpa, Rgb);
         }
     } else if (!is_rgb) {
-        prepared_img = try image.convert(gpa, Rgb);
+        prepared_img = try image.convert(io, gpa, Rgb);
     }
 
     const width: usize = if (prepared_img) |img| img.cols else image.cols;
@@ -100,7 +100,7 @@ pub fn fromImage(
 
     if (dither_mode != .none) {
         // Dithering mutates pixels, so an unscaled Rgb source needs a private copy.
-        if (prepared_img == null) prepared_img = try image.convert(gpa, Rgb);
+        if (prepared_img == null) prepared_img = try image.convert(io, gpa, Rgb);
         dither.apply(prepared_img.?, palette[0..palette_size], color_lut, dither_mode);
     }
 
