@@ -582,17 +582,20 @@ pub fn Matrix(comptime T: type) type {
             return self.gemm(io, true, self, false, 1.0, 0.0, null);
         }
 
-        /// C += alpha * A * B for row-major A (m×k) and B (k×n).
-        /// Blocked over k and n so the B block stays in L2 while every row of A streams past it,
-        /// with a `micro_rows` × `2·vec_len` register tile so each B load feeds `2·micro_rows` FMAs.
-        fn blockedGemm(comptime VecType: type, io: Io, c: Matrix(T), a: Matrix(T), b: Matrix(T), alpha: T) void {
+        /// C += alpha * op(A) * B for row-major B (k×n) and A either m×k or, with `trans_a`,
+        /// stored k×m and read down its columns (the kernel only broadcasts A's scalars, so
+        /// no transposed copy is needed). Blocked over k and n so the B block stays in L2
+        /// while every row of A streams past it, with a `micro_rows` × `2·vec_len` register
+        /// tile so each B load feeds `2·micro_rows` FMAs.
+        fn blockedGemm(comptime VecType: type, comptime trans_a: bool, io: Io, c: Matrix(T), a: Matrix(T), b: Matrix(T), alpha: T) void {
             // Bands are groups of `micro_rows` rows of C; the same k order per element makes the split invisible.
-            const groups = (@as(usize, a.rows) + micro_rows - 1) / micro_rows;
-            const ctx: GemmBands(VecType) = .{ .c = c, .a = a, .b = b, .alpha = alpha };
-            parallel.forRowBands(io, groups, parallel.bandCount(groups, micro_rows * b.cols), &ctx, GemmBands(VecType).band);
+            const m: usize = if (trans_a) a.cols else a.rows;
+            const groups = (m + micro_rows - 1) / micro_rows;
+            const ctx: GemmBands(VecType, trans_a) = .{ .c = c, .a = a, .b = b, .alpha = alpha };
+            parallel.forRowBands(io, groups, parallel.bandCount(groups, micro_rows * b.cols), &ctx, GemmBands(VecType, trans_a).band);
         }
 
-        fn GemmBands(comptime VecType: type) type {
+        fn GemmBands(comptime VecType: type, comptime trans_a: bool) type {
             return struct {
                 c: Matrix(T),
                 a: Matrix(T),
@@ -604,11 +607,10 @@ pub fn Matrix(comptime T: type) type {
                 fn band(ctx: *const @This(), _: usize, g0: usize, g1: usize) void {
                     const vec_len = @typeInfo(VecType).vector.len;
                     const tile_cols = 2 * vec_len;
-                    const block_k: usize = 256;
                     // ~512 KB of B per block, rounded to whole register tiles.
                     const block_n: usize = @max(tile_cols, (512 * 1024 / @sizeOf(T)) / block_k / tile_cols * tile_cols);
-                    const m: usize = ctx.a.rows;
-                    const k: usize = ctx.a.cols;
+                    const m: usize = if (trans_a) ctx.a.cols else ctx.a.rows;
+                    const k: usize = if (trans_a) ctx.a.rows else ctx.a.cols;
                     const n: usize = ctx.b.cols;
                     const i_start = g0 * micro_rows;
                     const i_end = @min(g1 * micro_rows, m);
@@ -622,7 +624,7 @@ pub fn Matrix(comptime T: type) type {
                             var i: usize = i_start;
                             while (i < i_end) : (i += micro_rows) {
                                 switch (@min(micro_rows, i_end - i)) {
-                                    inline 1...micro_rows => |rows| microTile(VecType, rows, ctx.c, ctx.a, ctx.b, ctx.alpha, i, k0, k1, j0, j1),
+                                    inline 1...micro_rows => |rows| microTile(VecType, trans_a, rows, ctx.c, ctx.a, ctx.b, ctx.alpha, i, k0, k1, j0, j1),
                                     else => unreachable,
                                 }
                             }
@@ -633,10 +635,12 @@ pub fn Matrix(comptime T: type) type {
         }
 
         const micro_rows = 4;
+        const block_k: usize = 256;
 
         /// Rows `i..i+rows` of C for columns `j0..j1`, accumulating over `k0..k1`.
         fn microTile(
             comptime VecType: type,
+            comptime trans_a: bool,
             comptime rows: usize,
             c: Matrix(T),
             a: Matrix(T),
@@ -650,9 +654,21 @@ pub fn Matrix(comptime T: type) type {
         ) void {
             const vec_len = @typeInfo(VecType).vector.len;
             const tile_cols = 2 * vec_len;
-            const k: usize = a.cols;
+            const lda: usize = a.cols;
             const n: usize = b.cols;
             const alpha_v: VecType = @splat(alpha);
+
+            // Row pointers of the A panel at `k0`: the rows themselves, or for a transposed A
+            // the tile's columns gathered once into a contiguous panel (the strided walk
+            // would otherwise touch one cache line per k for every j tile).
+            var panel: [rows][block_k]T = undefined;
+            if (trans_a) {
+                for (k0..k1) |kk| {
+                    inline for (0..rows) |r| panel[r][kk - k0] = a.items[kk * lda + i + r];
+                }
+            }
+            var a_rows: [rows][*]const T = undefined;
+            inline for (0..rows) |r| a_rows[r] = if (trans_a) &panel[r] else a.items[(i + r) * lda + k0 ..].ptr;
 
             var j = j0;
             while (j + tile_cols <= j1) : (j += tile_cols) {
@@ -663,7 +679,7 @@ pub fn Matrix(comptime T: type) type {
                     const b0: VecType = b_row[0..vec_len].*;
                     const b1: VecType = b_row[vec_len..][0..vec_len].*;
                     inline for (0..rows) |r| {
-                        const a_v: VecType = @splat(a.items[(i + r) * k + kk]);
+                        const a_v: VecType = @splat(a_rows[r][kk - k0]);
                         acc0[r] += a_v * b0;
                         acc1[r] += a_v * b1;
                     }
@@ -680,7 +696,7 @@ pub fn Matrix(comptime T: type) type {
             if (j < j1) {
                 inline for (0..rows) |r| {
                     for (k0..k1) |kk| {
-                        const a_ik = alpha * a.items[(i + r) * k + kk];
+                        const a_ik = alpha * a_rows[r][kk - k0];
                         for (c.items[(i + r) * n + j .. (i + r) * n + j1], b.items[kk * n + j .. kk * n + j1]) |*cv, bv| {
                             cv.* += a_ik * bv;
                         }
@@ -747,12 +763,15 @@ pub fn Matrix(comptime T: type) type {
 
             if (alpha != 0) {
                 if (std.simd.suggestVectorLength(T)) |vec_len| {
-                    // The kernel wants op(A) and op(B) row-major; only transposed operands are copied.
-                    var a_t: ?Matrix(T) = if (trans_a) try self.transpose() else null;
-                    defer if (a_t) |*t| t.deinit();
+                    // The kernel vector-loads B row-major, so only a transposed B is copied.
                     var b_t: ?Matrix(T) = if (trans_b) try other.transpose() else null;
                     defer if (b_t) |*t| t.deinit();
-                    blockedGemm(@Vector(vec_len, T), io, result, a_t orelse self, b_t orelse other, alpha);
+                    const b_op = b_t orelse other;
+                    if (trans_a) {
+                        blockedGemm(@Vector(vec_len, T), true, io, result, self, b_op, alpha);
+                    } else {
+                        blockedGemm(@Vector(vec_len, T), false, io, result, self, b_op, alpha);
+                    }
                 } else {
                     for (0..a_rows) |i| {
                         for (0..b_cols) |j| {

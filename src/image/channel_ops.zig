@@ -76,26 +76,12 @@ pub fn splitChannelsWithUniform(comptime T: type, io: Io, image: Image(T), alloc
     const num_channels = comptime Image(T).channels();
     const FieldType = FieldTypeOf(T);
 
-    const channels = try splitChannels(T, io, image, allocator);
-    errdefer for (channels) |plane| allocator.free(plane);
-
-    // Detecting uniformity on the split planes (SIMD, early-exit) beats per-pixel flags in the deinterleave loop.
+    // Each band checks its freshly written plane rows for uniformity (SIMD, early-exit),
+    // which beats per-pixel flags in the deinterleave loop.
     const bands = parallel.bandCount(image.rows, image.cols);
     const band_uniforms = try allocator.alloc(?FieldType, bands * num_channels);
     defer allocator.free(band_uniforms);
-    const Ctx = struct {
-        channels: [num_channels][]FieldType,
-        cols: usize,
-        band_uniforms: []?FieldType,
-
-        fn band(ctx: *const @This(), b: usize, r0: usize, r1: usize) void {
-            for (ctx.channels, 0..) |plane, i| {
-                ctx.band_uniforms[b * num_channels + i] = findUniformValue(FieldType, plane[r0 * ctx.cols .. r1 * ctx.cols]);
-            }
-        }
-    };
-    const ctx: Ctx = .{ .channels = channels, .cols = image.cols, .band_uniforms = band_uniforms };
-    parallel.forRowBands(io, image.rows, bands, &ctx, Ctx.band);
+    const channels = try splitChannelsBands(T, io, image, allocator, bands, band_uniforms);
 
     var uniforms: [num_channels]?FieldType = undefined;
     for (&uniforms, 0..) |*slot, i| {
@@ -126,11 +112,17 @@ fn fieldSlots(comptime T: type) [Image(T).channels()]usize {
 /// Allocates and fills channel planes for all fields.
 /// The caller is responsible for freeing the returned slices.
 pub fn splitChannels(comptime T: type, io: Io, image: Image(T), allocator: std.mem.Allocator) ![Image(T).channels()][]FieldTypeOf(T) {
+    return splitChannelsBands(T, io, image, allocator, parallel.bandCount(image.rows, image.cols), &.{});
+}
+
+/// `splitChannels` over `bands` bands; a non-empty `band_uniforms` (`bands * channels` slots)
+/// receives each band's per-plane uniform value.
+fn splitChannelsBands(comptime T: type, io: Io, image: Image(T), allocator: std.mem.Allocator, bands: usize, band_uniforms: []?FieldTypeOf(T)) ![Image(T).channels()][]FieldTypeOf(T) {
     const num_channels = comptime Image(T).channels();
     const plane_size = @as(usize, image.rows) * image.cols;
     const channels = try allocPlanes(FieldTypeOf(T), num_channels, allocator, plane_size);
-    const ctx: PlaneBands(T, []FieldTypeOf(T)) = .{ .image = image, .channels = channels };
-    parallel.forRowBands(io, image.rows, parallel.bandCount(image.rows, image.cols), &ctx, @TypeOf(ctx).split);
+    const ctx: PlaneBands(T, []FieldTypeOf(T)) = .{ .image = image, .channels = channels, .band_uniforms = band_uniforms };
+    parallel.forRowBands(io, image.rows, bands, &ctx, @TypeOf(ctx).split);
     return channels;
 }
 
@@ -150,10 +142,17 @@ fn PlaneBands(comptime T: type, comptime Plane: type) type {
 
         image: Image(T),
         channels: [num_channels]Plane,
+        /// Per band and plane, the plane's uniform value over the band's rows (split only).
+        band_uniforms: []?FieldType = &.{},
 
-        fn split(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
+        fn split(ctx: *const @This(), band: usize, r0: usize, r1: usize) void {
             const image = ctx.image;
             const channels = ctx.channels;
+            defer if (ctx.band_uniforms.len != 0) {
+                for (channels, 0..) |plane, i| {
+                    ctx.band_uniforms[band * num_channels + i] = findUniformValue(FieldType, plane[r0 * image.cols .. r1 * image.cols]);
+                }
+            };
             for (r0..r1) |r| {
                 const idx = r * image.cols;
                 const row = image.data[r * image.stride ..][0..image.cols];
@@ -213,7 +212,9 @@ pub fn resizePlaneNearest(
     comptime P: type,
     comptime channels: usize,
     src: []const P,
+    src_stride: usize,
     dst: []P,
+    dst_stride: usize,
     src_rows: u32,
     src_cols: u32,
     dst_rows: u32,
@@ -231,7 +232,7 @@ pub fn resizePlaneNearest(
         for (0..dst_cols) |c| {
             const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
             const src_x = @max(0, @min(src_cols - 1, @as(u32, @round(src_x_f))));
-            dst[(r * dst_cols + c) * channels ..][0..channels].* = src[(@as(usize, src_y) * src_cols + src_x) * channels ..][0..channels].*;
+            dst[r * dst_stride + c * channels ..][0..channels].* = src[src_y * src_stride + src_x * channels ..][0..channels].*;
         }
     }
 }
@@ -306,14 +307,15 @@ pub fn Accum(comptime P: type) type {
     };
 }
 
-/// Horizontal pass: source rows `[r_start, r_end)` of `src` (`src_cols` pixels wide)
-/// resampled through `x_taps` into `mid` (`dst_cols` pixels wide) as unnormalized sums.
-/// `channels` > 1 means interleaved pixels; the taps index pixels, every channel of each.
-pub fn resizeRows(comptime P: type, comptime channels: usize, src: []const P, src_cols: u32, x_taps: AxisTaps(P), mid: []Accum(P), dst_cols: u32, r_start: usize, r_end: usize) void {
+/// Horizontal pass: source rows `[r_start, r_end)` of `src` (`src_cols` pixels wide, rows
+/// `src_stride` elements apart) resampled through `x_taps` into `mid` (`dst_cols` pixels
+/// wide) as unnormalized sums. `channels` > 1 means interleaved pixels; the taps index
+/// pixels, every channel of each.
+pub fn resizeRows(comptime P: type, comptime channels: usize, src: []const P, src_stride: usize, src_cols: u32, x_taps: AxisTaps(P), mid: []Accum(P), dst_cols: u32, r_start: usize, r_end: usize) void {
     const A = Accum(P);
     const taps = x_taps.taps;
     for (r_start..r_end) |r| {
-        const row = src[r * src_cols * channels ..][0 .. src_cols * channels];
+        const row = src[r * src_stride ..][0 .. src_cols * channels];
         const out = mid[r * dst_cols * channels ..][0 .. dst_cols * channels];
         for (0..dst_cols) |c| {
             var acc: [channels]A = @splat(0);
@@ -325,9 +327,10 @@ pub fn resizeRows(comptime P: type, comptime channels: usize, src: []const P, sr
     }
 }
 
-/// Vertical pass: output rows `[r_start, r_end)` of `dst` (`cols` elements wide) from `mid`
-/// through `y_taps`; u8 planes are rounded and clamped, f32 planes stored as is.
-pub fn resizeColumns(comptime P: type, mid: []const Accum(P), cols: usize, y_taps: AxisTaps(P), dst: []P, r_start: usize, r_end: usize) void {
+/// Vertical pass: output rows `[r_start, r_end)` of `dst` (`cols` elements wide, rows
+/// `dst_stride` apart) from `mid` through `y_taps`; u8 planes are rounded and clamped, f32
+/// planes stored as is.
+pub fn resizeColumns(comptime P: type, mid: []const Accum(P), cols: usize, y_taps: AxisTaps(P), dst: []P, dst_stride: usize, r_start: usize, r_end: usize) void {
     const A = Accum(P);
     const vec_len = std.simd.suggestVectorLength(A) orelse 1;
     const V = @Vector(vec_len, A);
@@ -338,7 +341,7 @@ pub fn resizeColumns(comptime P: type, mid: []const Accum(P), cols: usize, y_tap
     for (r_start..r_end) |r| {
         const rows = y_taps.indices[r * taps ..][0..taps];
         const weights = y_taps.weightsAt(r);
-        const out = dst[r * cols ..][0..cols];
+        const out = dst[r * dst_stride ..][0..cols];
         var c: usize = 0;
         while (c + vec_len <= cols) : (c += vec_len) {
             var acc: V = @splat(half);

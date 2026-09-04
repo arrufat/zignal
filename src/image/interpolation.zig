@@ -110,34 +110,32 @@ pub fn resize(comptime T: type, io: Io, self: Image(T), out: Image(T), allocator
         return;
     }
 
-    // Contiguous planes take the separable resizers; u8 struct pixels run through them interleaved.
-    if (self.isContiguous() and out.isContiguous()) {
-        if (T == u8 or T == f32) {
-            resizePlane(T, 1, io, self.data, out.data, self.rows, self.cols, out.rows, out.cols, allocator, method) catch {
-                resizeGeneric(T, io, self, out, method);
-            };
-            return;
-        } else if (comptime @typeInfo(T) == .@"struct" and meta.allFieldsAreU8(T)) {
-            const n = comptime Image(T).channels();
-            resizePlane(u8, n, io, std.mem.sliceAsBytes(self.data), std.mem.sliceAsBytes(out.data), self.rows, self.cols, out.rows, out.cols, allocator, method) catch {
-                resizeGeneric(T, io, self, out, method);
-            };
-            return;
-        }
+    // Planes take the separable resizers; u8 struct pixels run through them interleaved.
+    if (T == u8 or T == f32) {
+        resizePlane(T, 1, io, self.data, self.stride, out.data, out.stride, self.rows, self.cols, out.rows, out.cols, allocator, method) catch {
+            resizeGeneric(T, io, self, out, method);
+        };
+        return;
+    } else if (comptime @typeInfo(T) == .@"struct" and meta.allFieldsAreU8(T)) {
+        const n = comptime Image(T).channels();
+        resizePlane(u8, n, io, std.mem.sliceAsBytes(self.data), self.stride * n, std.mem.sliceAsBytes(out.data), out.stride * n, self.rows, self.cols, out.rows, out.cols, allocator, method) catch {
+            resizeGeneric(T, io, self, out, method);
+        };
+        return;
     }
 
     // Fall back to generic implementation
     resizeGeneric(T, io, self, out, method);
 }
 
-/// One contiguous plane of `P` (`channels` elements per pixel when interleaved): nearest
-/// samples directly in output-row bands; every other kernel runs separably, a horizontal
-/// pass into an accumulator plane over the source rows and a vertical pass over the
-/// output rows.
-fn resizePlane(comptime P: type, comptime channels: usize, io: Io, src: []const P, dst: []P, src_rows: u32, src_cols: u32, dst_rows: u32, dst_cols: u32, allocator: Allocator, method: Interpolation) !void {
+/// One plane of `P` (`channels` elements per pixel when interleaved, strides in elements):
+/// nearest samples directly in output-row bands; every other kernel runs separably, a
+/// horizontal pass into an accumulator plane over the source rows and a vertical pass over
+/// the output rows.
+fn resizePlane(comptime P: type, comptime channels: usize, io: Io, src: []const P, src_stride: usize, dst: []P, dst_stride: usize, src_rows: u32, src_cols: u32, dst_rows: u32, dst_cols: u32, allocator: Allocator, method: Interpolation) !void {
     switch (method) {
         .nearest => {
-            const ctx: DirectPlane(P, channels) = .{ .src = src, .dst = dst, .src_rows = src_rows, .src_cols = src_cols, .dst_rows = dst_rows, .dst_cols = dst_cols };
+            const ctx: DirectPlane(P, channels) = .{ .src = src, .src_stride = src_stride, .dst = dst, .dst_stride = dst_stride, .src_rows = src_rows, .src_cols = src_cols, .dst_rows = dst_rows, .dst_cols = dst_cols };
             parallel.forRowBands(io, dst_rows, parallel.bandCount(dst_rows, dst_cols), &ctx, DirectPlane(P, channels).band);
         },
         .bilinear, .bicubic, .catmull_rom, .mitchell, .lanczos => {
@@ -148,7 +146,7 @@ fn resizePlane(comptime P: type, comptime channels: usize, io: Io, src: []const 
             const mid = try allocator.alloc(channel_ops.Accum(P), @as(usize, src_rows) * dst_cols * channels);
             defer allocator.free(mid);
 
-            const ctx: SeparablePlane(P, channels) = .{ .src = src, .mid = mid, .dst = dst, .src_cols = src_cols, .dst_cols = dst_cols, .x_taps = x_taps, .y_taps = y_taps };
+            const ctx: SeparablePlane(P, channels) = .{ .src = src, .src_stride = src_stride, .mid = mid, .dst = dst, .dst_stride = dst_stride, .src_cols = src_cols, .dst_cols = dst_cols, .x_taps = x_taps, .y_taps = y_taps };
             parallel.forRowBands(io, src_rows, parallel.bandCount(src_rows, dst_cols), &ctx, SeparablePlane(P, channels).rowsBand);
             parallel.forRowBands(io, dst_rows, parallel.bandCount(dst_rows, dst_cols), &ctx, SeparablePlane(P, channels).columnsBand);
         },
@@ -158,14 +156,16 @@ fn resizePlane(comptime P: type, comptime channels: usize, io: Io, src: []const 
 fn DirectPlane(comptime P: type, comptime channels: usize) type {
     return struct {
         src: []const P,
+        src_stride: usize,
         dst: []P,
+        dst_stride: usize,
         src_rows: u32,
         src_cols: u32,
         dst_rows: u32,
         dst_cols: u32,
 
         fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
-            channel_ops.resizePlaneNearest(P, channels, ctx.src, ctx.dst, ctx.src_rows, ctx.src_cols, ctx.dst_rows, ctx.dst_cols, r0, r1);
+            channel_ops.resizePlaneNearest(P, channels, ctx.src, ctx.src_stride, ctx.dst, ctx.dst_stride, ctx.src_rows, ctx.src_cols, ctx.dst_rows, ctx.dst_cols, r0, r1);
         }
     };
 }
@@ -173,19 +173,21 @@ fn DirectPlane(comptime P: type, comptime channels: usize) type {
 fn SeparablePlane(comptime P: type, comptime channels: usize) type {
     return struct {
         src: []const P,
+        src_stride: usize,
         mid: []channel_ops.Accum(P),
         dst: []P,
+        dst_stride: usize,
         src_cols: u32,
         dst_cols: u32,
         x_taps: channel_ops.AxisTaps(P),
         y_taps: channel_ops.AxisTaps(P),
 
         fn rowsBand(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
-            channel_ops.resizeRows(P, channels, ctx.src, ctx.src_cols, ctx.x_taps, ctx.mid, ctx.dst_cols, r0, r1);
+            channel_ops.resizeRows(P, channels, ctx.src, ctx.src_stride, ctx.src_cols, ctx.x_taps, ctx.mid, ctx.dst_cols, r0, r1);
         }
 
         fn columnsBand(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
-            channel_ops.resizeColumns(P, ctx.mid, @as(usize, ctx.dst_cols) * channels, ctx.y_taps, ctx.dst, r0, r1);
+            channel_ops.resizeColumns(P, ctx.mid, @as(usize, ctx.dst_cols) * channels, ctx.y_taps, ctx.dst, ctx.dst_stride, r0, r1);
         }
     };
 }
