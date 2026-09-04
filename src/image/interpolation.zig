@@ -141,9 +141,9 @@ fn resizePlane(comptime P: type, comptime channels: usize, io: Io, src: []const 
             parallel.forRowBands(io, dst_rows, parallel.bandCount(dst_rows, dst_cols), &ctx, DirectPlane(P, channels).band);
         },
         .bilinear, .bicubic, .catmull_rom, .mitchell, .lanczos => {
-            const x_taps: channel_ops.AxisTaps = try .init(allocator, src_cols, dst_cols, method);
+            const x_taps: channel_ops.AxisTaps(P) = try .init(allocator, src_cols, dst_cols, method);
             defer x_taps.deinit(allocator);
-            const y_taps: channel_ops.AxisTaps = try .init(allocator, src_rows, dst_rows, method);
+            const y_taps: channel_ops.AxisTaps(P) = try .init(allocator, src_rows, dst_rows, method);
             defer y_taps.deinit(allocator);
             const mid = try allocator.alloc(channel_ops.Accum(P), @as(usize, src_rows) * dst_cols * channels);
             defer allocator.free(mid);
@@ -177,8 +177,8 @@ fn SeparablePlane(comptime P: type, comptime channels: usize) type {
         dst: []P,
         src_cols: u32,
         dst_cols: u32,
-        x_taps: channel_ops.AxisTaps,
-        y_taps: channel_ops.AxisTaps,
+        x_taps: channel_ops.AxisTaps(P),
+        y_taps: channel_ops.AxisTaps(P),
 
         fn rowsBand(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
             channel_ops.resizeRows(P, channels, ctx.src, ctx.src_cols, ctx.x_taps, ctx.mid, ctx.dst_cols, r0, r1);
@@ -249,14 +249,12 @@ fn bicubicKernel(t: f32) f32 {
 pub fn Sampler(comptime T: type) type {
     return struct {
         const Self = @This();
-        const Kind = enum { nearest, bilinear, cubic4, lanczos6 };
         const lut_size = 256;
         const max_taps = 6;
 
         image: Image(T),
         method: Interpolation,
         border: BorderMode,
-        kind: Kind,
         /// Per-axis kernel weights for fractional position `i / lut_size`, normalized to unit
         /// gain; unused for nearest and bilinear.
         lut: [lut_size][max_taps]f32,
@@ -266,15 +264,9 @@ pub fn Sampler(comptime T: type) type {
                 .image = image,
                 .method = method,
                 .border = border,
-                .kind = switch (method) {
-                    .nearest => .nearest,
-                    .bilinear => .bilinear,
-                    .bicubic, .catmull_rom, .mitchell => .cubic4,
-                    .lanczos => .lanczos6,
-                },
                 .lut = undefined,
             };
-            if (self.kind == .cubic4 or self.kind == .lanczos6) {
+            if (method != .nearest and method != .bilinear) {
                 const taps = kernelTaps(method);
                 for (&self.lut, 0..) |*row, i| {
                     const frac = @as(f32, @floatFromInt(i)) / lut_size;
@@ -293,11 +285,11 @@ pub fn Sampler(comptime T: type) type {
 
         /// The pixel at (`x`, `y`); zeroes where `interpolate` would return null.
         pub inline fn sample(self: *const Self, x: f32, y: f32) T {
-            return switch (self.kind) {
+            return switch (self.method) {
                 .nearest => self.sampleNearest(x, y),
                 .bilinear => self.sampleBilinear(x, y),
-                .cubic4 => self.sampleKernel(4, x, y),
-                .lanczos6 => self.sampleKernel(6, x, y),
+                .bicubic, .catmull_rom, .mitchell => self.sampleKernel(4, x, y),
+                .lanczos => self.sampleKernel(6, x, y),
             };
         }
 
@@ -317,8 +309,8 @@ pub fn Sampler(comptime T: type) type {
             const rx = @round(x);
             const ry = @round(y);
             if (rx >= 0 and ry >= 0 and rx < @as(f32, @floatFromInt(img.cols)) and ry < @as(f32, @floatFromInt(img.rows))) {
-                const c: usize = @intFromFloat(rx);
-                const r: usize = @intFromFloat(ry);
+                const c: usize = @trunc(rx);
+                const r: usize = @trunc(ry);
                 return img.data[r * img.stride + c];
             }
             return self.fallback(x, y);
@@ -332,8 +324,8 @@ pub fn Sampler(comptime T: type) type {
             if (!(fx_floor >= 0 and fy_floor >= 0 and fx_floor + 1 < @as(f32, @floatFromInt(img.cols)) and fy_floor + 1 < @as(f32, @floatFromInt(img.rows)))) {
                 return self.fallback(x, y);
             }
-            const left: usize = @intFromFloat(fx_floor);
-            const top: usize = @intFromFloat(fy_floor);
+            const left: usize = @trunc(fx_floor);
+            const top: usize = @trunc(fy_floor);
             const base = top * img.stride + left;
             const tl = img.data[base];
             const tr = img.data[base + 1];
@@ -381,10 +373,10 @@ pub fn Sampler(comptime T: type) type {
             if (!(fx_floor - lead >= 0 and fy_floor - lead >= 0 and fx_floor - lead + taps <= @as(f32, @floatFromInt(img.cols)) and fy_floor - lead + taps <= @as(f32, @floatFromInt(img.rows)))) {
                 return self.fallback(x, y);
             }
-            const left: usize = @intFromFloat(fx_floor - lead);
-            const top: usize = @intFromFloat(fy_floor - lead);
-            const wx = self.lut[@intFromFloat((x - fx_floor) * lut_size)][0..taps];
-            const wy = self.lut[@intFromFloat((y - fy_floor) * lut_size)][0..taps];
+            const left: usize = @trunc(fx_floor - lead);
+            const top: usize = @trunc(fy_floor - lead);
+            const wx = self.lut[@as(usize, @trunc((x - fx_floor) * lut_size))][0..taps];
+            const wy = self.lut[@as(usize, @trunc((y - fy_floor) * lut_size))][0..taps];
 
             var out: T = undefined;
             switch (@typeInfo(T)) {

@@ -137,6 +137,29 @@ pub fn narrowToBytes(v: anytype) @Vector(@typeInfo(@TypeOf(v)).vector.len, u8) {
     return @truncate(@as(Unsigned, @bitCast(v)));
 }
 
+/// Rounds f32 lanes to bytes, clamping to 0..255 first.
+pub fn roundToBytes(v: anytype) @Vector(@typeInfo(@TypeOf(v)).vector.len, u8) {
+    const V = @TypeOf(v);
+    return @round(std.math.clamp(v, @as(V, @splat(0)), @as(V, @splat(255))));
+}
+
+/// Shuffle masks for a stride-`n` running window over `B` lanes: `repeat` broadcasts the
+/// `n` window sums across the block and `tail` picks the block's last `n` lanes.
+pub fn StrideMasks(comptime B: usize, comptime n: usize) type {
+    return struct {
+        pub const repeat: [B]i32 = blk: {
+            var m: [B]i32 = undefined;
+            for (&m, 0..) |*e, j| e.* = @intCast(j % n);
+            break :blk m;
+        };
+        pub const tail: [n]i32 = blk: {
+            var m: [n]i32 = undefined;
+            for (&m, 0..) |*e, t| e.* = @intCast(B - n + t);
+            break :blk m;
+        };
+    };
+}
+
 /// Check if a type is an RGB or RGBA type with u8 components.
 /// Returns true for structs with 3 or 4 u8 fields named r, g, b[, a].
 ///

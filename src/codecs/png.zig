@@ -1280,7 +1280,8 @@ fn adaptiveSampleRate(header: Header) u32 {
 
 /// Filters rows `[r0, r1)` of `data` into `filtered` (filter byte plus row each). Adaptive
 /// mode analyzes rows at the sample rate and the first and last three, reusing the last
-/// analyzed filter in between; `r0` must be on the sample rate.
+/// analyzed filter in between; `r0` must be on the sample rate. `filtered` holds rows
+/// `[r0, r1)` from its start.
 fn filterRows(filtered: []u8, data: []const u8, header: Header, mode: FilterMode, temp: []u8, r0: u32, r1: u32) void {
     const scanline_bytes = header.scanlineBytes();
     const bytes_per_pixel = header.bytesPerPixel();
@@ -1288,7 +1289,7 @@ fn filterRows(filtered: []u8, data: []const u8, header: Header, mode: FilterMode
     var last = FilterType.none;
     for (r0..r1) |y| {
         const src_row = data[y * scanline_bytes ..][0..scanline_bytes];
-        const dst_row = filtered[y * (scanline_bytes + 1) + 1 ..][0..scanline_bytes];
+        const dst_row = filtered[(y - r0) * (scanline_bytes + 1) + 1 ..][0..scanline_bytes];
         const previous_row: ?[]const u8 = if (y > 0) data[(y - 1) * scanline_bytes ..][0..scanline_bytes] else null;
         const filter: FilterType = switch (mode) {
             .none => .none,
@@ -1300,7 +1301,7 @@ fn filterRows(filtered: []u8, data: []const u8, header: Header, mode: FilterMode
                 break :blk last;
             },
         };
-        filtered[y * (scanline_bytes + 1)] = @backingInt(filter);
+        filtered[(y - r0) * (scanline_bytes + 1)] = @backingInt(filter);
         filterRow(filter, dst_row, src_row, previous_row, bytes_per_pixel);
     }
 }
@@ -1377,49 +1378,39 @@ fn adlerCombine(a: u32, b: u32, b_len: usize) u32 {
 /// the stream, and the zlib header and adler32 over all rows are written here. The
 /// compression itself is `std.compress.flate`; only the chunking is ours.
 fn deflateRows(io: Io, gpa: Allocator, image_data: []const u8, header: Header, options: EncodeOptions) ![]u8 {
-    const row_bytes = header.scanlineBytes() + 1;
     const rows_per_chunk: usize = chunkRows(header);
     const chunks = @max(1, (@as(usize, header.height) + rows_per_chunk - 1) / rows_per_chunk);
-    const bands = @min(parallel.bandCount(header.height, header.scanlineBytes()), chunks);
-
-    const filtered = try gpa.alloc(u8, @as(usize, header.height) * row_bytes);
-    defer gpa.free(filtered);
+    const bands = parallel.bandCount(chunks, rows_per_chunk * header.scanlineBytes());
 
     const Band = struct {
         out: Io.Writer.Allocating,
         adler: u32 = 1,
         len: usize = 0,
-        err: ?anyerror = null,
     };
     const Ctx = struct {
         gpa: Allocator,
         image_data: []const u8,
-        filtered: []u8,
         header: Header,
         options: EncodeOptions,
         rows_per_chunk: usize,
         chunks: usize,
         bands: []Band,
 
-        fn run(ctx: *const @This(), k: usize, c0: usize, c1: usize) void {
-            ctx.bands[k].err = null;
-            ctx.encodeChunks(&ctx.bands[k], c0, c1) catch |err| {
-                ctx.bands[k].err = err;
-            };
-        }
-
-        fn encodeChunks(ctx: *const @This(), band: *Band, c0: usize, c1: usize) !void {
+        fn run(ctx: *const @This(), k: usize, c0: usize, c1: usize) !void {
+            const band = &ctx.bands[k];
             const hdr = ctx.header;
             const rb = hdr.scanlineBytes() + 1;
             const window = try ctx.gpa.alloc(u8, flate.max_window_len);
             defer ctx.gpa.free(window);
             const temp = try ctx.gpa.alloc(u8, hdr.scanlineBytes());
             defer ctx.gpa.free(temp);
+            const filtered = try ctx.gpa.alloc(u8, ctx.rows_per_chunk * rb);
+            defer ctx.gpa.free(filtered);
             for (c0..c1) |chunk| {
                 const r0: u32 = @intCast(chunk * ctx.rows_per_chunk);
                 const r1: u32 = @intCast(@min(hdr.height, (chunk + 1) * ctx.rows_per_chunk));
-                filterRows(ctx.filtered, ctx.image_data, hdr, ctx.options.filter, temp, r0, r1);
-                const rows = ctx.filtered[r0 * rb .. r1 * rb];
+                filterRows(filtered, ctx.image_data, hdr, ctx.options.filter, temp, r0, r1);
+                const rows = filtered[0 .. (r1 - r0) * rb];
                 // The compressor needs a sized output buffer; half the input is the usual ratio.
                 try band.out.ensureUnusedCapacity(rows.len / 2 + 64);
                 var compressor: flate.Compress = try .init(&band.out.writer, window, .raw, ctx.options.compress_options);
@@ -1438,19 +1429,17 @@ fn deflateRows(io: Io, gpa: Allocator, image_data: []const u8, header: Header, o
     const ctx: Ctx = .{
         .gpa = gpa,
         .image_data = image_data,
-        .filtered = filtered,
         .header = header,
         .options = options,
         .rows_per_chunk = rows_per_chunk,
         .chunks = chunks,
         .bands = band_list,
     };
-    parallel.forRowBands(io, chunks, bands, &ctx, Ctx.run);
+    try parallel.forRowBandsTry(io, chunks, bands, &ctx, Ctx.run);
 
     var total: usize = flate.Container.zlib.size();
     var adler: u32 = 1;
     for (band_list) |*band| {
-        if (band.err) |err| return err;
         total += band.out.written().len;
         adler = adlerCombine(adler, band.adler, band.len);
     }

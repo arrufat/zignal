@@ -573,13 +573,13 @@ pub const NativeImage = union(enum) {
 
 /// Composes the first frame and returns it as `NativeImage`. Used by language
 /// bindings that pick the pixel type based on file metadata.
-pub fn toNativeImage(allocator: Allocator, state: GifState) !NativeImage {
+pub fn toNativeImage(io: Io, allocator: Allocator, state: GifState) !NativeImage {
     if (state.frames.len == 0) return error.MissingPixelData;
     const has_transparency = if (state.frames[0].gce) |g| g.has_transparent else false;
     if (has_transparency) {
-        return .{ .rgba = try composeFirstFrame(Rgba, parallel.inline_io, allocator, state) };
+        return .{ .rgba = try composeFirstFrame(Rgba, io, allocator, state) };
     }
-    return .{ .rgb = try composeFirstFrame(Rgb, parallel.inline_io, allocator, state) };
+    return .{ .rgb = try composeFirstFrame(Rgb, io, allocator, state) };
 }
 
 /// Loads a GIF from in-memory bytes. Returns frame 0 only — see
@@ -789,8 +789,6 @@ fn writeLzwImageData(allocator: Allocator, out: *std.ArrayList(u8), indices: []c
 
 /// Encodes a single-frame GIF from `image`. Caller frees the returned slice.
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
-    // Serial encoder; `io` keeps the codec entry points uniform.
-    _ = io;
     if (image.cols == 0 or image.rows == 0) return error.InvalidDimensions;
     if (image.cols > 65535 or image.rows > 65535) return error.ImageTooLarge;
 
@@ -824,7 +822,7 @@ pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), o
         } else {
             palette = custom;
         }
-        try mapImageToPalette(T, allocator, image, palette, indices, options.dither, if (has_transparent) transparent_index else null);
+        try mapImageToPalette(T, io, allocator, image, palette, indices, options.dither, if (has_transparent) transparent_index else null);
     } else if (T == u8) {
         // u8 → 256-entry linear gray palette; indices are the pixel values.
         @memcpy(&palette_buf, &quantize.linear_gray_256);
@@ -854,7 +852,7 @@ pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), o
             palette_size += 1;
         }
         palette = palette_buf[0..palette_size];
-        try mapImageToPalette(T, allocator, image, palette, indices, options.dither, if (has_transparent) transparent_index else null);
+        try mapImageToPalette(T, io, allocator, image, palette, indices, options.dither, if (has_transparent) transparent_index else null);
     }
 
     var min_code_size: u4 = 2;
@@ -911,6 +909,7 @@ inline fn writeU16Le(allocator: Allocator, out: *std.ArrayList(u8), v: u16) !voi
 /// the no-dither path converts per-pixel.
 fn mapImageToPalette(
     comptime T: type,
+    io: Io,
     allocator: Allocator,
     image: Image(T),
     palette: []const Rgb,
@@ -922,7 +921,7 @@ fn mapImageToPalette(
     const lut = quantize.ColorLookupTable.init(lookup_palette);
 
     if (use_dither) {
-        var work = try image.convert(parallel.inline_io, allocator, Rgb);
+        var work = try image.convert(io, allocator, Rgb);
         defer work.deinit(allocator);
         dither.applyFloydSteinberg(work, lookup_palette, lut);
         var i: usize = 0;
@@ -1103,7 +1102,7 @@ fn emitAnimatedFrame(
 
     const indices = try gpa.alloc(u8, num_pixels);
     defer gpa.free(indices);
-    try mapImageToPalette(T, gpa, frame, palette, indices, options.dither, if (has_transparent) transparent_index else null);
+    try mapImageToPalette(T, parallel.inline_io, gpa, frame, palette, indices, options.dither, if (has_transparent) transparent_index else null);
 
     var min_code_size: u4 = 2;
     while ((@as(u16, 1) << min_code_size) < palette.len) min_code_size += 1;

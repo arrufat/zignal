@@ -10,6 +10,7 @@ const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
 const parallel = @import("../parallel.zig");
 const resolveIndex = @import("border.zig").resolveIndex;
+const quantizeKernel = @import("convolution.zig").quantizeKernel;
 
 /// Find the uniform value of a channel if all values are the same.
 /// Returns the uniform value if all elements are identical, null otherwise.
@@ -245,65 +246,56 @@ const Interpolation = interpolation.Interpolation;
 /// Fixed-point weight precision; two passes leave 2·weight_shift bits of headroom in an i32
 /// (255 · 1.4 · 1024 per pass with the negative lobes).
 pub const weight_shift = 10;
-pub const weight_scale: i32 = 1 << weight_shift;
+pub const weight_scale = 1 << weight_shift;
 pub const max_taps = 6;
 
 /// Mirror-resolved source indices and weights for every output position along one axis,
 /// as fixed point for u8 planes (each position sums to exactly `weight_scale`) and as unit
 /// gain floats for f32 planes, so the passes need no per-pixel normalization; the kernel is
 /// evaluated `taps` times per output position instead of `taps²` per pixel.
-pub const AxisTaps = struct {
-    taps: usize,
-    indices: []u32,
-    weights: []i32,
-    floats: []f32,
+pub fn AxisTaps(comptime P: type) type {
+    return struct {
+        const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, src_len: u32, dst_len: u32, method: Interpolation) !AxisTaps {
-        const taps = interpolation.kernelTaps(method);
-        const indices = try allocator.alloc(u32, @as(usize, dst_len) * taps);
-        errdefer allocator.free(indices);
-        const weights = try allocator.alloc(i32, @as(usize, dst_len) * taps);
-        errdefer allocator.free(weights);
-        const floats = try allocator.alloc(f32, @as(usize, dst_len) * taps);
-        const ratio = @as(f32, @floatFromInt(src_len)) / @as(f32, @floatFromInt(dst_len));
+        taps: usize,
+        indices: []u32,
+        weights: []Accum(P),
 
-        for (0..dst_len) |i| {
-            const center = (@as(f32, @floatFromInt(i)) + 0.5) * ratio - 0.5;
-            const base: isize = @as(isize, @intFromFloat(@floor(center))) - @as(isize, @intCast(taps / 2 - 1));
-            var raw: [max_taps]f32 = undefined;
-            var sum: f32 = 0;
-            for (0..taps) |t| {
-                const x = base + @as(isize, @intCast(t));
-                raw[t] = interpolation.kernelWeight(method, center - @as(f32, @floatFromInt(x)));
-                sum += raw[t];
-                indices[i * taps + t] = @intCast(resolveIndex(x, @intCast(src_len), .mirror).?);
+        pub fn init(allocator: std.mem.Allocator, src_len: u32, dst_len: u32, method: Interpolation) !Self {
+            const taps = interpolation.kernelTaps(method);
+            const indices = try allocator.alloc(u32, @as(usize, dst_len) * taps);
+            errdefer allocator.free(indices);
+            const weights = try allocator.alloc(Accum(P), @as(usize, dst_len) * taps);
+            const ratio = @as(f32, @floatFromInt(src_len)) / @as(f32, @floatFromInt(dst_len));
+
+            for (0..dst_len) |i| {
+                const center = (@as(f32, @floatFromInt(i)) + 0.5) * ratio - 0.5;
+                const base: isize = @as(isize, @floor(center)) - @as(isize, @intCast(taps / 2 - 1));
+                var raw: [max_taps]f32 = undefined;
+                var sum: f32 = 0;
+                for (0..taps) |t| {
+                    const x = base + @as(isize, @intCast(t));
+                    raw[t] = interpolation.kernelWeight(method, center - @as(f32, @floatFromInt(x)));
+                    sum += raw[t];
+                    indices[i * taps + t] = @intCast(resolveIndex(x, @intCast(src_len), .mirror).?);
+                }
+                for (raw[0..taps]) |*r| r.* /= sum;
+                const w = weights[i * taps ..][0..taps];
+                if (P == u8) quantizeKernel(w, raw[0..taps], weight_scale) else @memcpy(w, raw[0..taps]);
             }
-            // Quantize to unit gain; the rounding residual lands on the largest tap.
-            const w = weights[i * taps ..][0..taps];
-            var quantized_sum: i32 = 0;
-            var largest: usize = 0;
-            for (w, 0..) |*q, t| {
-                q.* = @intFromFloat(@round(raw[t] / sum * @as(f32, @floatFromInt(weight_scale))));
-                quantized_sum += q.*;
-                if (@abs(q.*) > @abs(w[largest])) largest = t;
-            }
-            w[largest] += weight_scale - quantized_sum;
-            for (floats[i * taps ..][0..taps], raw[0..taps]) |*f, r| f.* = r / sum;
+            return .{ .taps = taps, .indices = indices, .weights = weights };
         }
-        return .{ .taps = taps, .indices = indices, .weights = weights, .floats = floats };
-    }
 
-    pub fn deinit(self: AxisTaps, allocator: std.mem.Allocator) void {
-        allocator.free(self.indices);
-        allocator.free(self.weights);
-        allocator.free(self.floats);
-    }
+        pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+            allocator.free(self.indices);
+            allocator.free(self.weights);
+        }
 
-    /// Weights in the accumulator type of plane type `P`.
-    fn weightsFor(self: AxisTaps, comptime P: type, pos: usize) []const Accum(P) {
-        return (if (P == u8) self.weights else self.floats)[pos * self.taps ..][0..self.taps];
-    }
-};
+        fn weightsAt(self: Self, pos: usize) []const Accum(P) {
+            return self.weights[pos * self.taps ..][0..self.taps];
+        }
+    };
+}
 
 /// Intermediate plane and accumulator type of the separable passes for plane type `P`.
 pub fn Accum(comptime P: type) type {
@@ -317,7 +309,7 @@ pub fn Accum(comptime P: type) type {
 /// Horizontal pass: source rows `[r_start, r_end)` of `src` (`src_cols` pixels wide)
 /// resampled through `x_taps` into `mid` (`dst_cols` pixels wide) as unnormalized sums.
 /// `channels` > 1 means interleaved pixels; the taps index pixels, every channel of each.
-pub fn resizeRows(comptime P: type, comptime channels: usize, src: []const P, src_cols: u32, x_taps: AxisTaps, mid: []Accum(P), dst_cols: u32, r_start: usize, r_end: usize) void {
+pub fn resizeRows(comptime P: type, comptime channels: usize, src: []const P, src_cols: u32, x_taps: AxisTaps(P), mid: []Accum(P), dst_cols: u32, r_start: usize, r_end: usize) void {
     const A = Accum(P);
     const taps = x_taps.taps;
     for (r_start..r_end) |r| {
@@ -325,7 +317,7 @@ pub fn resizeRows(comptime P: type, comptime channels: usize, src: []const P, sr
         const out = mid[r * dst_cols * channels ..][0 .. dst_cols * channels];
         for (0..dst_cols) |c| {
             var acc: [channels]A = @splat(0);
-            for (x_taps.indices[c * taps ..][0..taps], x_taps.weightsFor(P, c)) |idx, w| {
+            for (x_taps.indices[c * taps ..][0..taps], x_taps.weightsAt(c)) |idx, w| {
                 inline for (0..channels) |ch| acc[ch] += w * @as(A, row[idx * channels + ch]);
             }
             out[c * channels ..][0..channels].* = acc;
@@ -335,7 +327,7 @@ pub fn resizeRows(comptime P: type, comptime channels: usize, src: []const P, sr
 
 /// Vertical pass: output rows `[r_start, r_end)` of `dst` (`cols` elements wide) from `mid`
 /// through `y_taps`; u8 planes are rounded and clamped, f32 planes stored as is.
-pub fn resizeColumns(comptime P: type, mid: []const Accum(P), cols: usize, y_taps: AxisTaps, dst: []P, r_start: usize, r_end: usize) void {
+pub fn resizeColumns(comptime P: type, mid: []const Accum(P), cols: usize, y_taps: AxisTaps(P), dst: []P, r_start: usize, r_end: usize) void {
     const A = Accum(P);
     const vec_len = std.simd.suggestVectorLength(A) orelse 1;
     const V = @Vector(vec_len, A);
@@ -345,7 +337,7 @@ pub fn resizeColumns(comptime P: type, mid: []const Accum(P), cols: usize, y_tap
 
     for (r_start..r_end) |r| {
         const rows = y_taps.indices[r * taps ..][0..taps];
-        const weights = y_taps.weightsFor(P, r);
+        const weights = y_taps.weightsAt(r);
         const out = dst[r * cols ..][0..cols];
         var c: usize = 0;
         while (c + vec_len <= cols) : (c += vec_len) {
@@ -355,9 +347,7 @@ pub fn resizeColumns(comptime P: type, mid: []const Accum(P), cols: usize, y_tap
             }
             if (P == u8) {
                 const scaled = acc >> @splat(shift);
-                const clamped = @max(@as(V, @splat(0)), @min(@as(V, @splat(255)), scaled));
-                const bytes: @Vector(vec_len, u8) = meta.narrowToBytes(clamped);
-                out[c..][0..vec_len].* = bytes;
+                out[c..][0..vec_len].* = meta.narrowToBytes(std.math.clamp(scaled, @as(V, @splat(0)), @as(V, @splat(255))));
             } else {
                 out[c..][0..vec_len].* = acc;
             }
@@ -374,7 +364,7 @@ test "axis taps sum to unit gain and stay in bounds" {
     const allocator = std.testing.allocator;
     for ([_]Interpolation{ .bilinear, .bicubic, .catmull_rom, .{ .mitchell = .default }, .lanczos }) |method| {
         for ([_][2]u32{ .{ 640, 97 }, .{ 13, 401 }, .{ 5, 5 } }) |lens| {
-            const taps: AxisTaps = try .init(allocator, lens[0], lens[1], method);
+            const taps: AxisTaps(u8) = try .init(allocator, lens[0], lens[1], method);
             defer taps.deinit(allocator);
             for (0..lens[1]) |i| {
                 var sum: i32 = 0;

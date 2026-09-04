@@ -9,6 +9,7 @@ const Io = std.Io;
 const parallel = @import("../parallel.zig");
 
 const convertColor = @import("../color.zig").convertColor;
+const bt601 = @import("../color.zig").bt601;
 const Image = @import("../image.zig").Image;
 
 const Rgb = @import("../color.zig").Rgb(u8);
@@ -338,12 +339,7 @@ pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), o
     }
 
     switch (T) {
-        u8 => {
-            if (image.isContiguous()) return encodeGrayscale(io, allocator, image.asBytes(), @intCast(image.cols), @intCast(image.rows), options);
-            var contiguous = try image.dupe(allocator);
-            defer contiguous.deinit(allocator);
-            return encodeGrayscale(io, allocator, contiguous.asBytes(), @intCast(image.cols), @intCast(image.rows), options);
-        },
+        u8 => return encodeGrayscale(io, allocator, image, options),
         Rgb => return encodeRgb(io, allocator, image, options),
         else => {
             var converted = try image.convert(io, allocator, Rgb);
@@ -594,6 +590,18 @@ fn writeSOS(dst: *std.ArrayList(u8), gpa: Allocator, grayscale: bool) !void {
 // Encoder: entropy writer
 // -----------------------------
 
+/// Whether any byte of `word` is 0xFF (SWAR: the carry out of the low seven bits meets bit 7).
+inline fn hasByteFF(word: anytype) bool {
+    const T = @TypeOf(word);
+    const ones: T = std.math.maxInt(T) / 255;
+    return (word & (ones * 0x7F)) + ones & word & (ones * 0x80) != 0;
+}
+
+/// RSTn marker byte (0xD0..0xD7).
+inline fn isRstn(byte: u8) bool {
+    return byte >= 0xD0 and byte <= 0xD7;
+}
+
 /// Big-endian bit packer; every 0xFF byte gets its stuffed zero. Callers reserve room per
 /// block so the hot path never allocates, and code a block through a `Bits` register copy
 /// of the pending bits.
@@ -630,9 +638,8 @@ const BitWriter = struct {
     inline fn emitWord(self: *BitWriter, bits: *Bits) void {
         bits.count -= 32;
         const word: u32 = @truncate(bits.acc >> @intCast(bits.count));
-        const has_ff = (word & 0x7F7F7F7F) + 0x01010101 & word & 0x80808080;
         const bytes: [4]u8 = @bitCast(std.mem.nativeToBig(u32, word));
-        if (has_ff == 0) {
+        if (!hasByteFF(word)) {
             self.list.appendSliceAssumeCapacity(&bytes);
         } else {
             for (bytes) |byte| self.putByte(byte);
@@ -789,7 +796,7 @@ const Fdct = struct {
 
     const const_bits = 13;
     fn fix(comptime x: f32) i16 {
-        return @intFromFloat(@round(x * (1 << const_bits)));
+        return @round(x * (1 << const_bits));
     }
     const f0298 = fix(0.298631336);
     const f0390 = fix(0.390180644);
@@ -865,7 +872,7 @@ const Fdct = struct {
         for (0..8) |i| {
             const row_a: @Vector(8, u8) = a[i * stride ..][0..8].*;
             const row_b: @Vector(8, u8) = b[i * stride ..][0..8].*;
-            const samples: V16 = @intCast(@shuffle(u8, row_a, row_b, Dct.concat));
+            const samples: V16 = @shuffle(u8, row_a, row_b, Dct.concat);
             r[i] = samples - @as(V16, @splat(128));
         }
         // Rows first (lanes are rows after a transpose), then columns.
@@ -990,12 +997,12 @@ const EncodeBand = struct {
     }
 
     /// Copies grayscale rows into the luma plane, replicating edges.
-    fn fillGray(self: *EncodeBand, bytes: []const u8, cols: usize, rows_total: usize, mcu_y: usize) void {
+    fn fillGray(self: *EncodeBand, image: Image(u8), mcu_y: usize) void {
         for (0..8) |r| {
-            const src_row = @min(mcu_y * 8 + r, rows_total - 1);
+            const src_row = @min(mcu_y * 8 + r, image.rows - 1);
             const row = self.y[r * self.y_stride ..][0..self.y_stride];
-            @memcpy(row[0..cols], bytes[src_row * cols ..][0..cols]);
-            @memset(row[cols..], row[cols - 1]);
+            @memcpy(row[0..image.cols], image.data[src_row * image.stride ..][0..image.cols]);
+            @memset(row[image.cols..], row[image.cols - 1]);
         }
     }
 
@@ -1007,16 +1014,16 @@ const EncodeBand = struct {
         if (RenderBand.packed_rgb) {
             while (px + 16 <= src.len) : (px += 16) {
                 const bytes: @Vector(48, u8) = std.mem.sliceAsBytes(src[px..][0..16])[0..48].*;
-                const r: V = @intCast(@shuffle(u8, bytes, undefined, deinterleave_r));
-                const g: V = @intCast(@shuffle(u8, bytes, undefined, deinterleave_g));
-                const b: V = @intCast(@shuffle(u8, bytes, undefined, deinterleave_b));
+                const r: V = @shuffle(u8, bytes, undefined, deinterleave_r);
+                const g: V = @shuffle(u8, bytes, undefined, deinterleave_g);
+                const b: V = @shuffle(u8, bytes, undefined, deinterleave_b);
                 const half: V = @splat(32768);
                 const bias: V = @splat(128);
                 const lo: V = @splat(0);
                 const hi: V = @splat(255);
-                const yv = (@as(V, @splat(19595)) * r + @as(V, @splat(38470)) * g + @as(V, @splat(7471)) * b + half) >> @splat(16);
-                const cbv = ((@as(V, @splat(-11059)) * r + @as(V, @splat(-21710)) * g + @as(V, @splat(32768)) * b + half) >> @splat(16)) + bias;
-                const crv = ((@as(V, @splat(32768)) * r + @as(V, @splat(-27439)) * g + @as(V, @splat(-5329)) * b + half) >> @splat(16)) + bias;
+                const yv = (@as(V, @splat(bt601.y_r)) * r + @as(V, @splat(bt601.y_g)) * g + @as(V, @splat(bt601.y_b)) * b + half) >> @splat(16);
+                const cbv = ((@as(V, @splat(bt601.cb_r)) * r + @as(V, @splat(bt601.cb_g)) * g + @as(V, @splat(bt601.cb_b)) * b + half) >> @splat(16)) + bias;
+                const crv = ((@as(V, @splat(bt601.cr_r)) * r + @as(V, @splat(bt601.cr_g)) * g + @as(V, @splat(bt601.cr_b)) * b + half) >> @splat(16)) + bias;
                 y[px..][0..16].* = meta.narrowToBytes(std.math.clamp(yv, lo, hi));
                 cb[px..][0..16].* = meta.narrowToBytes(std.math.clamp(cbv, lo, hi));
                 cr[px..][0..16].* = meta.narrowToBytes(std.math.clamp(crv, lo, hi));
@@ -1063,11 +1070,11 @@ const EncodeBand = struct {
         const V = @Vector(16, u16);
         var cx: usize = 0;
         while (cx < count) : (cx += 16) {
-            var sum: W = @intCast(@as(@Vector(32, u8), top[2 * cx ..][0..32].*));
-            if (vertical) sum += @as(W, @intCast(@as(@Vector(32, u8), bottom[2 * cx ..][0..32].*)));
+            var sum: W = @as(@Vector(32, u8), top[2 * cx ..][0..32].*);
+            if (vertical) sum += @as(@Vector(32, u8), bottom[2 * cx ..][0..32].*);
             const pairs: V = @shuffle(u16, sum, undefined, evens) + @shuffle(u16, sum, undefined, odds);
             const avg = if (vertical) (pairs + @as(V, @splat(2))) >> @splat(2) else (pairs + @as(V, @splat(1))) >> @splat(1);
-            dst[cx..][0..16].* = @as(@Vector(16, u8), @intCast(avg));
+            dst[cx..][0..16].* = meta.narrowToBytes(avg);
         }
     }
 
@@ -1152,19 +1159,14 @@ fn encodeRgb(io: Io, allocator: Allocator, image: Image(Rgb), options: EncodeOpt
     try writeDQT(&out, allocator, &ql, &qc);
     try writeSOF0(&out, allocator, @intCast(image.cols), @intCast(image.rows), false, options.subsampling);
     try writeDHT(&out, allocator, false);
-    const mcu_width: usize = 8 * @as(usize, options.subsampling.lumaFactors() >> 4);
+    const factors = options.subsampling.lumaFactors();
+    const h_max: usize = factors >> 4;
+    const v_max: usize = factors & 0xF;
+    const mcu_width = 8 * h_max;
     const restart_interval = options.restart_interval.mcusFor((image.cols + mcu_width - 1) / mcu_width);
     if (restart_interval != 0) try writeDRI(&out, allocator, restart_interval);
     try writeSOS(&out, allocator, false);
 
-    const h_max: usize = switch (options.subsampling) {
-        .yuv444 => 1,
-        .yuv422, .yuv420 => 2,
-    };
-    const v_max: usize = switch (options.subsampling) {
-        .yuv444, .yuv422 => 1,
-        .yuv420 => 2,
-    };
     const tables = scanTables(&ql, &qc);
     try encodeScan(io, allocator, &out, .{ .rgb = image }, &tables, image.cols, image.rows, h_max, v_max, true, restart_interval);
 
@@ -1178,12 +1180,12 @@ fn encodeRgb(io: Io, allocator: Allocator, image: Image(Rgb), options: EncodeOpt
 /// Pixel source of an encode; a band fills its planes from it one MCU row at a time.
 const EncodeSource = union(enum) {
     rgb: Image(Rgb),
-    gray: struct { bytes: []const u8, cols: usize, rows: usize },
+    gray: Image(u8),
 
     fn fill(self: EncodeSource, band: *EncodeBand, mcu_y: usize) void {
         switch (self) {
             .rgb => |img| band.fillRgb(img, mcu_y),
-            .gray => |g| band.fillGray(g.bytes, g.cols, g.rows, mcu_y),
+            .gray => |img| band.fillGray(img, mcu_y),
         }
     }
 };
@@ -1199,15 +1201,8 @@ fn encodeScan(io: Io, allocator: Allocator, out: *std.ArrayList(u8), source: Enc
     const total = mcu_cols * mcu_rows;
     const interval: usize = restart_interval;
     const segments = if (interval == 0) 1 else (total + interval - 1) / interval;
-    const bands = @min(parallel.bandCount(mcu_rows, cols * 8 * v_max), segments);
+    const bands = parallel.bandCount(segments, interval * 64 * h_max * v_max);
 
-    const Band = struct {
-        mcu0: usize,
-        mcu1: usize,
-        seg0: usize,
-        w: BitWriter,
-        err: ?anyerror = null,
-    };
     const Ctx = struct {
         allocator: Allocator,
         source: EncodeSource,
@@ -1218,24 +1213,23 @@ fn encodeScan(io: Io, allocator: Allocator, out: *std.ArrayList(u8), source: Enc
         chroma: bool,
         mcu_cols: usize,
         restart_interval: u16,
-        bands: []Band,
+        total: usize,
+        segments: usize,
+        writers: []BitWriter,
 
-        fn run(ctx: *const @This(), k: usize, _: usize, _: usize) void {
-            ctx.bands[k].err = null;
-            ctx.encodeBand(&ctx.bands[k], k + 1 == ctx.bands.len) catch |err| {
-                ctx.bands[k].err = err;
-            };
-        }
-
-        fn encodeBand(ctx: *const @This(), band: *Band, last: bool) !void {
+        fn run(ctx: *const @This(), k: usize, seg0: usize, seg1: usize) !void {
+            const w = &ctx.writers[k];
+            const last = seg1 == ctx.segments;
+            const mcu0 = seg0 * ctx.restart_interval;
+            const mcu1 = if (last) ctx.total else seg1 * ctx.restart_interval;
             var planes: EncodeBand = try .init(ctx.allocator, ctx.cols, ctx.h_max, ctx.v_max, ctx.chroma);
             defer planes.deinit();
             var prev_dc: [3]i32 = @splat(0);
             var mcus_in_interval: u16 = 0;
             // The marker before this band's first segment is written by the previous band.
-            var rst_index: u3 = @intCast(band.seg0 % 8);
-            const row0 = band.mcu0 / ctx.mcu_cols;
-            const row1 = (band.mcu1 - 1) / ctx.mcu_cols + 1;
+            var rst_index: u3 = @intCast(seg0 % 8);
+            const row0 = mcu0 / ctx.mcu_cols;
+            const row1 = (mcu1 - 1) / ctx.mcu_cols + 1;
             for (row0..row1) |mcu_y| {
                 ctx.source.fill(&planes, mcu_y);
                 EncodeBand.transformPlane(planes.y, planes.y_stride, ctx.v_max, &ctx.tables.y_quant, planes.y_coefs);
@@ -1244,28 +1238,19 @@ fn encodeScan(io: Io, allocator: Allocator, out: *std.ArrayList(u8), source: Enc
                     EncodeBand.transformPlane(planes.cr, planes.c_stride, 1, &ctx.tables.c_quant, planes.cr_coefs);
                 }
                 const row_start = mcu_y * ctx.mcu_cols;
-                const x0 = @max(band.mcu0, row_start) - row_start;
-                const x1 = @min(band.mcu1, row_start + ctx.mcu_cols) - row_start;
-                try encodeBandScan(&band.w, &planes, ctx.tables, ctx.chroma, ctx.restart_interval, &mcus_in_interval, &rst_index, &prev_dc, x0, x1);
+                const x0 = @max(mcu0, row_start) - row_start;
+                const x1 = @min(mcu1, row_start + ctx.mcu_cols) - row_start;
+                try encodeBandScan(w, &planes, ctx.tables, ctx.chroma, ctx.restart_interval, &mcus_in_interval, &rst_index, &prev_dc, x0, x1);
             }
-            try band.w.reserve();
-            if (last) band.w.flush() else band.w.restart(rst_index);
+            try w.reserve();
+            if (last) w.flush() else w.restart(rst_index);
         }
     };
 
-    const band_list = try allocator.alloc(Band, bands);
-    defer allocator.free(band_list);
-    for (band_list, 0..) |*band, k| {
-        const seg0 = k * segments / bands;
-        const seg1 = (k + 1) * segments / bands;
-        band.* = .{
-            .mcu0 = seg0 * interval,
-            .mcu1 = if (k + 1 == bands) total else seg1 * interval,
-            .seg0 = seg0,
-            .w = .{ .gpa = allocator },
-        };
-    }
-    defer for (band_list) |*band| band.w.deinit();
+    const writers = try allocator.alloc(BitWriter, bands);
+    defer allocator.free(writers);
+    for (writers) |*w| w.* = .{ .gpa = allocator };
+    defer for (writers) |*w| w.deinit();
 
     const ctx: Ctx = .{
         .allocator = allocator,
@@ -1277,19 +1262,18 @@ fn encodeScan(io: Io, allocator: Allocator, out: *std.ArrayList(u8), source: Enc
         .chroma = chroma,
         .mcu_cols = mcu_cols,
         .restart_interval = restart_interval,
-        .bands = band_list,
+        .total = total,
+        .segments = segments,
+        .writers = writers,
     };
-    parallel.forRowBands(io, bands, bands, &ctx, Ctx.run);
+    try parallel.forRowBandsTry(io, segments, bands, &ctx, Ctx.run);
     var bytes: usize = 0;
-    for (band_list) |band| {
-        if (band.err) |err| return err;
-        bytes += band.w.list.items.len;
-    }
+    for (writers) |w| bytes += w.list.items.len;
     try out.ensureUnusedCapacity(allocator, bytes);
-    for (band_list) |band| out.appendSliceAssumeCapacity(band.w.list.items);
+    for (writers) |w| out.appendSliceAssumeCapacity(w.list.items);
 }
 
-fn encodeGrayscale(io: Io, allocator: Allocator, bytes: []const u8, width: u32, height: u32, options: EncodeOptions) ![]u8 {
+fn encodeGrayscale(io: Io, allocator: Allocator, image: Image(u8), options: EncodeOptions) ![]u8 {
     var out = std.ArrayList(u8).empty;
     defer out.deinit(allocator);
 
@@ -1310,14 +1294,14 @@ fn encodeGrayscale(io: Io, allocator: Allocator, bytes: []const u8, width: u32, 
     for (0..64) |i| try tmp_dqt.append(allocator, ql[zigzag[i]]);
     try writeSegment(&out, allocator, 0xFFDB, tmp_dqt.items);
 
-    try writeSOF0(&out, allocator, @intCast(width), @intCast(height), true, .yuv444);
+    try writeSOF0(&out, allocator, @intCast(image.cols), @intCast(image.rows), true, .yuv444);
     try writeDHT(&out, allocator, true);
-    const restart_interval = options.restart_interval.mcusFor((width + 7) / 8);
+    const restart_interval = options.restart_interval.mcusFor((image.cols + 7) / 8);
     if (restart_interval != 0) try writeDRI(&out, allocator, restart_interval);
     try writeSOS(&out, allocator, true);
 
     const tables = scanTables(&ql, &qc);
-    try encodeScan(io, allocator, &out, .{ .gray = .{ .bytes = bytes, .cols = width, .rows = height } }, &tables, width, height, 1, 1, false, restart_interval);
+    try encodeScan(io, allocator, &out, .{ .gray = image }, &tables, image.cols, image.rows, 1, 1, false, restart_interval);
 
     // EOI
     try out.append(allocator, 0xFF);
@@ -1951,8 +1935,7 @@ pub const BitReader = struct {
         // Fast path: no stuffing or marker in the next eight bytes, so load as many as fit at once.
         if (!self.marker_hit and self.byte_pos + 8 <= self.data.len) {
             const word = std.mem.readInt(u64, self.data[self.byte_pos..][0..8], .big);
-            const has_ff = (word & 0x7F7F7F7F7F7F7F7F) + 0x0101010101010101 & word & 0x8080808080808080;
-            if (has_ff == 0) {
+            if (!hasByteFF(word)) {
                 const free = 64 - self.bit_count;
                 self.bit_buffer |= word >> @intCast(self.bit_count);
                 self.byte_pos += free / 8;
@@ -2059,7 +2042,7 @@ pub const BitReader = struct {
         while (self.byte_pos + 1 < self.data.len) : (self.byte_pos += 1) {
             if (self.data[self.byte_pos] != 0xFF) continue;
             const m = self.data[self.byte_pos + 1];
-            if (m >= 0xD0 and m <= 0xD7) {
+            if (isRstn(m)) {
                 self.byte_pos += 2;
                 return true;
             }
@@ -2290,7 +2273,7 @@ fn findScanEnd(data: []const u8, start_pos: usize) usize {
         const ff = std.mem.indexOfScalarPos(u8, data, pos, 0xFF) orelse break;
         if (ff >= data.len - 1) return ff;
         const next = data[ff + 1];
-        if (next == 0x00 or (next >= 0xD0 and next <= 0xD7)) {
+        if (next == 0x00 or isRstn(next)) {
             pos = ff + 2;
             continue;
         }
@@ -2510,10 +2493,10 @@ const Dct = struct {
     }
     /// `x[2i] * c[2i] + x[2i+1] * c[2i+1]` as i32 (pmaddwd).
     inline fn madd(x: V16, c: V16) V8 {
-        const xe: V8 = @intCast(@shuffle(i16, x, undefined, even));
-        const xo: V8 = @intCast(@shuffle(i16, x, undefined, odd));
-        const ce: V8 = @intCast(@shuffle(i16, c, undefined, even));
-        const co: V8 = @intCast(@shuffle(i16, c, undefined, odd));
+        const xe: V8 = @shuffle(i16, x, undefined, even);
+        const xo: V8 = @shuffle(i16, x, undefined, odd);
+        const ce: V8 = @shuffle(i16, c, undefined, even);
+        const co: V8 = @shuffle(i16, c, undefined, odd);
         return xe * ce + xo * co;
     }
     /// Saturating pack of two halves (elements 0-3, 8-11 in `l`, the rest in `h`) into
@@ -2537,36 +2520,29 @@ const Dct = struct {
 const Idct = struct {
     const V16 = Dct.V16;
     const V8 = Dct.V8;
-    const pair = Dct.pair;
-    const unpacklo = Dct.unpacklo;
-    const unpackhi = Dct.unpackhi;
-    const madd = Dct.madd;
-    const packs = Dct.packs;
-    const transpose = Dct.transpose;
-    const concat = Dct.concat;
 
     fn f2f(comptime x: f32) i16 {
-        return @intFromFloat(@round(x * 4096));
+        return @round(x * 4096);
     }
-    const rot0_0 = pair(f2f(0.5411961), f2f(0.5411961) + f2f(-1.847759065));
-    const rot0_1 = pair(f2f(0.5411961) + f2f(0.765366865), f2f(0.5411961));
-    const rot1_0 = pair(f2f(1.175875602) + f2f(-0.899976223), f2f(1.175875602));
-    const rot1_1 = pair(f2f(1.175875602), f2f(1.175875602) + f2f(-2.562915447));
-    const rot2_0 = pair(f2f(-1.961570560) + f2f(0.298631336), f2f(-1.961570560));
-    const rot2_1 = pair(f2f(-1.961570560), f2f(-1.961570560) + f2f(3.072711026));
-    const rot3_0 = pair(f2f(-0.390180644) + f2f(2.053119869), f2f(-0.390180644));
-    const rot3_1 = pair(f2f(-0.390180644), f2f(-0.390180644) + f2f(1.501321110));
+    const rot0_0 = Dct.pair(f2f(0.5411961), f2f(0.5411961) + f2f(-1.847759065));
+    const rot0_1 = Dct.pair(f2f(0.5411961) + f2f(0.765366865), f2f(0.5411961));
+    const rot1_0 = Dct.pair(f2f(1.175875602) + f2f(-0.899976223), f2f(1.175875602));
+    const rot1_1 = Dct.pair(f2f(1.175875602), f2f(1.175875602) + f2f(-2.562915447));
+    const rot2_0 = Dct.pair(f2f(-1.961570560) + f2f(0.298631336), f2f(-1.961570560));
+    const rot2_1 = Dct.pair(f2f(-1.961570560), f2f(-1.961570560) + f2f(3.072711026));
+    const rot3_0 = Dct.pair(f2f(-0.390180644) + f2f(2.053119869), f2f(-0.390180644));
+    const rot3_1 = Dct.pair(f2f(-0.390180644), f2f(-0.390180644) + f2f(1.501321110));
 
     /// 32-bit intermediates: `l` holds elements 0-3 and 8-11, `h` the rest, the unpack order.
     const Wide = struct { l: V8, h: V8 };
     inline fn rot(x: V16, y: V16, c0: V16, c1: V16) struct { Wide, Wide } {
-        const lo = unpacklo(x, y);
-        const hi = unpackhi(x, y);
-        return .{ .{ .l = madd(lo, c0), .h = madd(hi, c0) }, .{ .l = madd(lo, c1), .h = madd(hi, c1) } };
+        const lo = Dct.unpacklo(x, y);
+        const hi = Dct.unpackhi(x, y);
+        return .{ .{ .l = Dct.madd(lo, c0), .h = Dct.madd(hi, c0) }, .{ .l = Dct.madd(lo, c1), .h = Dct.madd(hi, c1) } };
     }
     inline fn widen(x: V16) Wide {
-        const l: V8 = @intCast(@shuffle(i16, x, undefined, Dct.low_half));
-        const h: V8 = @intCast(@shuffle(i16, x, undefined, Dct.high_half));
+        const l: V8 = @shuffle(i16, x, undefined, Dct.low_half);
+        const h: V8 = @shuffle(i16, x, undefined, Dct.high_half);
         return .{ .l = l << @splat(12), .h = h << @splat(12) };
     }
     inline fn wadd(a: Wide, b: Wide) Wide {
@@ -2579,7 +2555,7 @@ const Idct = struct {
         const ab: Wide = .{ .l = a.l + @as(V8, @splat(bias)), .h = a.h + @as(V8, @splat(bias)) };
         const sum = wadd(ab, b);
         const dif = wsub(ab, b);
-        return .{ packs(sum.l >> @splat(shift), sum.h >> @splat(shift)), packs(dif.l >> @splat(shift), dif.h >> @splat(shift)) };
+        return .{ Dct.packs(sum.l >> @splat(shift), sum.h >> @splat(shift)), Dct.packs(dif.l >> @splat(shift), dif.h >> @splat(shift)) };
     }
 
     /// One 1-D pass over the eight vectors, with libjpeg's even/odd butterflies.
@@ -2612,8 +2588,8 @@ const Idct = struct {
         var r: [8]V16 = undefined;
         for (0..8) |i| {
             const q: @Vector(8, i16) = dequant[i * 8 ..][0..8].*;
-            const scale = @shuffle(i16, q, q, concat);
-            r[i] = @shuffle(i16, @as(@Vector(8, i16), a[i * 8 ..][0..8].*), @as(@Vector(8, i16), b[i * 8 ..][0..8].*), concat) *% scale;
+            const scale = @shuffle(i16, q, q, Dct.concat);
+            r[i] = @shuffle(i16, @as(@Vector(8, i16), a[i * 8 ..][0..8].*), @as(@Vector(8, i16), b[i * 8 ..][0..8].*), Dct.concat) *% scale;
         }
         var ac = r[0] & @as(V16, [_]i16{ 0, -1, -1, -1, -1, -1, -1, -1, 0, -1, -1, -1, -1, -1, -1, -1 });
         inline for (1..8) |i| ac |= r[i];
@@ -2627,9 +2603,9 @@ const Idct = struct {
             return;
         }
         pass(&r, 512, 10);
-        transpose(&r);
+        Dct.transpose(&r);
         pass(&r, 65536 + (128 << 17), 17);
-        transpose(&r);
+        Dct.transpose(&r);
         for (0..8) |i| {
             const bytes: [16]u8 = meta.narrowToBytes(std.math.clamp(r[i], @as(V16, @splat(0)), @as(V16, @splat(255))));
             if (single) dst[i * stride ..][0..8].* = bytes[0..8].* else dst[i * stride ..][0..16].* = bytes;
@@ -2771,7 +2747,7 @@ fn restartSegments(allocator: Allocator, data: []const u8) ![]usize {
         const ff = std.mem.indexOfScalarPos(u8, data, pos, 0xFF) orelse break;
         if (ff + 1 >= data.len) break;
         const m = data[ff + 1];
-        if (m >= 0xD0 and m <= 0xD7) try starts.append(allocator, ff + 2);
+        if (isRstn(m)) try starts.append(allocator, ff + 2);
         pos = ff + 1;
     }
     return starts.toOwnedSlice(allocator);
@@ -2789,31 +2765,25 @@ fn performBlockScanBanded(comptime T: type, io: Io, state: *JpegState, img: *Ima
     const bw: usize = state.block_width_actual;
 
     const Band = struct {
-        row0: usize,
-        row1: usize,
         render: RenderBand,
         blocks: [][4][64]i16,
-        err: ?anyerror = null,
     };
     const Ctx = struct {
         state: *const JpegState,
         layout: ScanLayout,
         img: *Image(T),
         starts: []const usize,
+        segments: usize,
         bands: []Band,
 
-        fn run(ctx: *const @This(), k: usize, _: usize, _: usize) void {
+        /// Each band owns whole MCU rows from the first row at or after its first segment.
+        fn run(ctx: *const @This(), k: usize, seg0: usize, seg1: usize) !void {
             const band = &ctx.bands[k];
-            band.err = null;
-            ctx.decodeBand(band) catch |err| {
-                band.err = err;
-            };
-        }
-
-        fn decodeBand(ctx: *const @This(), band: *Band) !void {
             const st = ctx.state;
             const lay = ctx.layout;
-            const first_mcu = band.row0 * lay.mcus_per_row;
+            const row0 = @min(lay.mcu_rows, (seg0 * st.restart_interval + lay.mcus_per_row - 1) / lay.mcus_per_row);
+            const row1 = if (seg1 == ctx.segments) lay.mcu_rows else @min(lay.mcu_rows, (seg1 * st.restart_interval + lay.mcus_per_row - 1) / lay.mcus_per_row);
+            const first_mcu = row0 * lay.mcus_per_row;
             const seg = first_mcu / st.restart_interval;
             // Past the last marker everything is zero, as in the single sweep.
             const has_data = seg < ctx.starts.len;
@@ -2824,7 +2794,7 @@ fn performBlockScanBanded(comptime T: type, io: Io, state: *JpegState, img: *Ima
                 _ = try cursor.next(st, lay, null, x);
                 x = if ((mcu + 1) % lay.mcus_per_row == 0) 0 else x + lay.x_step;
             }
-            for (band.row0..band.row1) |row| {
+            for (row0..row1) |row| {
                 try decodeRenderMcuRow(T, st, lay, &cursor, &band.render, band.blocks, row, ctx.img);
             }
         }
@@ -2837,26 +2807,16 @@ fn performBlockScanBanded(comptime T: type, io: Io, state: *JpegState, img: *Ima
         band.render.deinit();
         allocator.free(band.blocks);
     };
-    // Balance by restart segments; each band owns whole MCU rows from the first row at or after its first segment.
-    const segments = (layout.mcu_rows * layout.mcus_per_row + interval - 1) / interval;
-    for (band_list, 0..) |*band, k| {
-        const seg0 = k * segments / bands;
-        const seg1 = (k + 1) * segments / bands;
-        const row0 = @min(layout.mcu_rows, (seg0 * interval + layout.mcus_per_row - 1) / layout.mcus_per_row);
-        const row1 = if (k + 1 == bands) layout.mcu_rows else @min(layout.mcu_rows, (seg1 * interval + layout.mcus_per_row - 1) / layout.mcus_per_row);
-        band.* = .{
-            .row0 = row0,
-            .row1 = row1,
-            .render = try .init(allocator, state),
-            .blocks = undefined,
-        };
-        made = k + 1;
-        band.blocks = try allocator.alloc([4][64]i16, bw * layout.y_step);
+    for (band_list) |*band| {
+        const blocks = try allocator.alloc([4][64]i16, bw * layout.y_step);
+        errdefer allocator.free(blocks);
+        band.* = .{ .render = try .init(allocator, state), .blocks = blocks };
+        made += 1;
     }
 
-    const ctx: Ctx = .{ .state = state, .layout = layout, .img = img, .starts = starts, .bands = band_list };
-    parallel.forRowBands(io, bands, bands, &ctx, Ctx.run);
-    for (band_list) |band| if (band.err) |err| return err;
+    const segments = (layout.mcu_rows * layout.mcus_per_row + interval - 1) / interval;
+    const ctx: Ctx = .{ .state = state, .layout = layout, .img = img, .starts = starts, .segments = segments, .bands = band_list };
+    try parallel.forRowBandsTry(io, segments, bands, &ctx, Ctx.run);
 }
 
 /// Sample planes for one MCU row plus the chroma upsampling scratch, reused for every band.
@@ -3019,9 +2979,9 @@ const RenderBand = struct {
                 const v = c2 - bias;
                 const lo: V = @splat(0);
                 const hi: V = @splat(255);
-                r = meta.narrowToBytes(std.math.clamp(yv + ((@as(V, @splat(91881)) * v + rounding) >> @splat(16)), lo, hi));
-                g = meta.narrowToBytes(std.math.clamp(yv - ((@as(V, @splat(22554)) * u + @as(V, @splat(46802)) * v + rounding) >> @splat(16)), lo, hi));
-                b = meta.narrowToBytes(std.math.clamp(yv + ((@as(V, @splat(116130)) * u + rounding) >> @splat(16)), lo, hi));
+                r = meta.narrowToBytes(std.math.clamp(yv + ((@as(V, @splat(bt601.r_cr)) * v + rounding) >> @splat(16)), lo, hi));
+                g = meta.narrowToBytes(std.math.clamp(yv - ((@as(V, @splat(bt601.g_cb)) * u + @as(V, @splat(bt601.g_cr)) * v + rounding) >> @splat(16)), lo, hi));
+                b = meta.narrowToBytes(std.math.clamp(yv + ((@as(V, @splat(bt601.b_cb)) * u + rounding) >> @splat(16)), lo, hi));
             }
             const n = @min(lanes, width - px);
             const out = dst[px..][0..n];
@@ -3114,21 +3074,16 @@ fn renderBlockRows(comptime T: type, state: *const JpegState, band: *RenderBand,
 
 /// Baseline frames stream their scan; progressive frames render the full store band by band.
 fn decodeInto(comptime T: type, io: Io, state: *JpegState, img: *Image(T)) !void {
-    if (state.header.frame_type == .baseline) {
-        if (state.restart_interval != 0) {
-            const layout: ScanLayout = .init(state);
-            const starts = try restartSegments(state.allocator, state.bit_reader.data);
-            defer state.allocator.free(starts);
-            // One band per CPU, never more than there are segments or MCU rows.
-            const bands = @min(parallel.bandCount(layout.mcu_rows, @as(usize, state.header.width) * 8 * layout.y_step), starts.len);
-            if (bands > 1) return performBlockScanBanded(T, io, state, img, starts, bands);
-        }
-        var band: RenderBand = try .init(state.allocator, state);
-        defer band.deinit();
-        return performBlockScan(T, state, &band, img);
+    if (state.header.frame_type == .baseline and state.restart_interval != 0) {
+        const layout: ScanLayout = .init(state);
+        const starts = try restartSegments(state.allocator, state.bit_reader.data);
+        defer state.allocator.free(starts);
+        const bands = parallel.bandCount(starts.len, state.restart_interval * 64 * layout.x_step * layout.y_step);
+        if (bands > 1) return performBlockScanBanded(T, io, state, img, starts, bands);
     }
     var band: RenderBand = try .init(state.allocator, state);
     defer band.deinit();
+    if (state.header.frame_type == .baseline) return performBlockScan(T, state, &band, img);
     const full = state.block_storage orelse return error.BlockStorageNotAllocated;
     _, const max_v = state.maxSamplingFactors();
     const bw: usize = state.block_width_actual;
