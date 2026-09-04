@@ -788,7 +788,9 @@ fn writeLzwImageData(allocator: Allocator, out: *std.ArrayList(u8), indices: []c
 }
 
 /// Encodes a single-frame GIF from `image`. Caller frees the returned slice.
-pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
+pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
+    // Serial encoder; `io` keeps the codec entry points uniform.
+    _ = io;
     if (image.cols == 0 or image.rows == 0) return error.InvalidDimensions;
     if (image.cols > 65535 or image.rows > 65535) return error.ImageTooLarge;
 
@@ -956,7 +958,7 @@ fn mapImageToPalette(
 
 /// Saves `image` as a GIF to `file_path`.
 pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const data = try encode(T, allocator, image, .default);
+    const data = try encode(T, io, allocator, image, .default);
     defer allocator.free(data);
     try writeFile(io, file_path, data);
 }
@@ -1619,7 +1621,7 @@ test "encode — caller-supplied palette, exact round-trip" {
         .{ .r = 0, .g = 0, .b = 255 },
     };
 
-    const data = try encode(Rgb, gpa, img, .{ .palette = &palette });
+    const data = try encode(Rgb, parallel.inline_io, gpa, img, .{ .palette = &palette });
     defer gpa.free(data);
 
     var decoded = try loadFromBytes(Rgb, parallel.inline_io, gpa, data, .{});
@@ -1647,7 +1649,7 @@ test "encode — auto median-cut on 16x16 gradient" {
         }
     }
 
-    const data = try encode(Rgb, gpa, img, .{});
+    const data = try encode(Rgb, parallel.inline_io, gpa, img, .{});
     defer gpa.free(data);
 
     var decoded = try loadFromBytes(Rgb, parallel.inline_io, gpa, data, .{});
@@ -1667,7 +1669,7 @@ test "encode — Image(u8) gradient via linear gray palette" {
         }
     }
 
-    const data = try encode(u8, gpa, img, .{});
+    const data = try encode(u8, parallel.inline_io, gpa, img, .{});
     defer gpa.free(data);
 
     var decoded = try loadFromBytes(u8, parallel.inline_io, gpa, data, .{});
@@ -1693,7 +1695,7 @@ test "encode — Floyd–Steinberg dithering produces valid output" {
         }
     }
 
-    const data = try encode(Rgb, gpa, img, .{ .max_colors = 8, .dither = true });
+    const data = try encode(Rgb, parallel.inline_io, gpa, img, .{ .max_colors = 8, .dither = true });
     defer gpa.free(data);
 
     var decoded = try loadFromBytes(Rgb, parallel.inline_io, gpa, data, .{});
@@ -1709,7 +1711,7 @@ test "encode — getInfo on encoded output is consistent" {
     defer img.deinit(gpa);
     @memset(img.data, .{ .r = 64, .g = 128, .b = 192 });
 
-    const data = try encode(Rgb, gpa, img, .{});
+    const data = try encode(Rgb, parallel.inline_io, gpa, img, .{});
     defer gpa.free(data);
 
     var reader = Io.Reader.fixed(data);
@@ -1875,7 +1877,7 @@ test "GIF encode keeps the transparent pixels of an Rgba image" {
     for (img.data, 0..) |*p, i| {
         p.* = if (i % 3 == 0) .{ .r = 0, .g = 0, .b = 0, .a = 0 } else .{ .r = @intCast(i * 16), .g = 30, .b = 200, .a = 255 };
     }
-    const bytes = try encode(Rgba, gpa, img, .default);
+    const bytes = try encode(Rgba, parallel.inline_io, gpa, img, .default);
     defer gpa.free(bytes);
     var decoded = try loadFromBytes(Rgba, parallel.inline_io, gpa, bytes, .{});
     defer decoded.deinit(gpa);

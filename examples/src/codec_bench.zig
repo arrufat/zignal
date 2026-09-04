@@ -40,7 +40,7 @@ pub fn main(init: std.process.Init) !void {
         var jpeg_len: usize = 0;
         for (0..iters) |_| {
             const t = nowNs(io);
-            const bytes = try zignal.jpeg.encode(Rgb, gpa, probe, .default);
+            const bytes = try zignal.jpeg.encode(Rgb, io, gpa, probe, .default);
             jpeg_ns = @min(jpeg_ns, nowNs(io) - t);
             jpeg_len = bytes.len;
             gpa.free(bytes);
@@ -49,7 +49,7 @@ pub fn main(init: std.process.Init) !void {
         var png_len: usize = 0;
         for (0..iters) |_| {
             const t = nowNs(io);
-            const bytes = try zignal.png.encode(Rgb, gpa, probe, .default);
+            const bytes = try zignal.png.encode(Rgb, io, gpa, probe, .default);
             png_ns = @min(png_ns, nowNs(io) - t);
             png_len = bytes.len;
             gpa.free(bytes);

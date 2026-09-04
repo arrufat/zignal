@@ -1045,7 +1045,9 @@ fn encode8BppGray(allocator: Allocator, image: Image(u8), top_down: bool) ![]u8 
 }
 
 /// Encodes an image as a BMP byte buffer. Caller owns the returned slice.
-pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
+pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
+    // Serial encoder; `io` keeps the codec entry points uniform.
+    _ = io;
     if (T == Rgba) return encode32BppBitfields(allocator, image, options.top_down);
     if (T == u8 and options.use_palette_for_grayscale) return encode8BppGray(allocator, image, options.top_down);
     return encode24Bpp(T, allocator, image, options.top_down);
@@ -1053,7 +1055,7 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
 
 /// Encodes the image and writes it to `file_path`.
 pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const data = try encode(T, allocator, image, .default);
+    const data = try encode(T, io, allocator, image, .default);
     defer allocator.free(data);
 
     const file = try Io.Dir.cwd().createFile(io, file_path, .{});
@@ -1461,7 +1463,7 @@ test "BMP round-trip Rgb 24bpp gradient" {
         }
     }
 
-    const encoded = try encode(Rgb, gpa, src, .default);
+    const encoded = try encode(Rgb, parallel.inline_io, gpa, src, .default);
     defer gpa.free(encoded);
 
     var decoded = try loadFromBytes(Rgb, parallel.inline_io, gpa, encoded, .{});
@@ -1487,7 +1489,7 @@ test "BMP round-trip Rgb 24bpp top-down option" {
         }
     }
 
-    const encoded = try encode(Rgb, gpa, src, .{ .top_down = true });
+    const encoded = try encode(Rgb, parallel.inline_io, gpa, src, .{ .top_down = true });
     defer gpa.free(encoded);
 
     var decoded = try loadFromBytes(Rgb, parallel.inline_io, gpa, encoded, .{});
@@ -1517,7 +1519,7 @@ test "BMP round-trip width=3 (padding required)" {
     src.at(1, 1).* = .{ .r = 4, .g = 5, .b = 6 };
     src.at(1, 2).* = .{ .r = 7, .g = 8, .b = 9 };
 
-    const encoded = try encode(Rgb, gpa, src, .default);
+    const encoded = try encode(Rgb, parallel.inline_io, gpa, src, .default);
     defer gpa.free(encoded);
 
     var decoded = try loadFromBytes(Rgb, parallel.inline_io, gpa, encoded, .{});
@@ -1546,7 +1548,7 @@ test "BMP round-trip Rgba 32bpp BI_BITFIELDS preserves alpha" {
         }
     }
 
-    const encoded = try encode(Rgba, gpa, src, .default);
+    const encoded = try encode(Rgba, parallel.inline_io, gpa, src, .default);
     defer gpa.free(encoded);
 
     var decoded = try loadFromBytes(Rgba, parallel.inline_io, gpa, encoded, .{});
@@ -1933,7 +1935,7 @@ test "BMP round-trip Image(u8) with use_palette_for_grayscale" {
         }
     }
 
-    const encoded = try encode(u8, gpa, src, .{ .use_palette_for_grayscale = true });
+    const encoded = try encode(u8, parallel.inline_io, gpa, src, .{ .use_palette_for_grayscale = true });
     defer gpa.free(encoded);
 
     // Verify the encoded file is actually 8bpp indexed.
@@ -1963,7 +1965,7 @@ test "BMP round-trip Image(u8) without flag → 24bpp BGR" {
         }
     }
 
-    const encoded = try encode(u8, gpa, src, .default);
+    const encoded = try encode(u8, parallel.inline_io, gpa, src, .default);
     defer gpa.free(encoded);
 
     var reader = Io.Reader.fixed(encoded);

@@ -317,7 +317,7 @@ pub const EncodeOptions = struct {
 
 /// Save Image to JPEG file with baseline encoding.
 pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const bytes = try encode(T, allocator, image, .default);
+    const bytes = try encode(T, io, allocator, image, .default);
     defer allocator.free(bytes);
 
     const file = try Io.Dir.cwd().createFile(io, file_path, .{});
@@ -325,9 +325,10 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
     try file.writeStreamingAll(io, bytes);
 }
 
-/// Encode an image into baseline JPEG bytes (SOF0, 8-bit, Huffman).
-/// Supports grayscale (u8) and RGB (Rgb). Other types are converted to RGB.
-pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
+/// Encode an image into baseline JPEG bytes (SOF0, 8-bit, Huffman). Supports grayscale (u8)
+/// and RGB (Rgb); other types are converted to RGB. With restart intervals the scan is
+/// encoded in bands on `io`, one restart segment run per band.
+pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
     // Validate image dimensions
     if (image.rows == 0 or image.cols == 0) {
         return error.InvalidImageDimensions;
@@ -338,16 +339,16 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
 
     switch (T) {
         u8 => {
-            if (image.isContiguous()) return encodeGrayscale(allocator, image.asBytes(), @intCast(image.cols), @intCast(image.rows), options);
+            if (image.isContiguous()) return encodeGrayscale(io, allocator, image.asBytes(), @intCast(image.cols), @intCast(image.rows), options);
             var contiguous = try image.dupe(allocator);
             defer contiguous.deinit(allocator);
-            return encodeGrayscale(allocator, contiguous.asBytes(), @intCast(image.cols), @intCast(image.rows), options);
+            return encodeGrayscale(io, allocator, contiguous.asBytes(), @intCast(image.cols), @intCast(image.rows), options);
         },
-        Rgb => return encodeRgb(allocator, image, options),
+        Rgb => return encodeRgb(io, allocator, image, options),
         else => {
-            var converted = try image.convert(parallel.inline_io, allocator, Rgb);
+            var converted = try image.convert(io, allocator, Rgb);
             defer converted.deinit(allocator);
-            return encodeRgb(allocator, converted, options);
+            return encodeRgb(io, allocator, converted, options);
         },
     }
 }
@@ -1096,10 +1097,11 @@ const ScanTables = struct {
     ac_chroma: HuffmanEncoder,
 };
 
-/// Entropy-codes one MCU row from the band's coefficient blocks in interleaved order.
-fn encodeBandScan(w: *BitWriter, band: *const EncodeBand, tables: *const ScanTables, chroma: bool, restart_interval: u16, mcus_in_interval: *u16, rst_index: *u3, prev_dc: *[3]i32) !void {
+/// Entropy-codes MCUs `[x0, x1)` of the band's row from its coefficient blocks in
+/// interleaved order.
+fn encodeBandScan(w: *BitWriter, band: *const EncodeBand, tables: *const ScanTables, chroma: bool, restart_interval: u16, mcus_in_interval: *u16, rst_index: *u3, prev_dc: *[3]i32, x0: usize, x1: usize) !void {
     const blocks_per_row = band.y_stride / 8;
-    for (0..band.mcu_cols) |mcu_x| {
+    for (x0..x1) |mcu_x| {
         try w.reserve();
         if (restart_interval != 0 and mcus_in_interval.* == restart_interval) {
             w.restart(rst_index.*);
@@ -1134,7 +1136,7 @@ fn scanTables(ql: *const [64]u8, qc: *const [64]u8) ScanTables {
     };
 }
 
-fn encodeRgb(allocator: Allocator, image: Image(Rgb), options: EncodeOptions) ![]u8 {
+fn encodeRgb(io: Io, allocator: Allocator, image: Image(Rgb), options: EncodeOptions) ![]u8 {
     var out = std.ArrayList(u8).empty;
     defer out.deinit(allocator);
 
@@ -1165,26 +1167,7 @@ fn encodeRgb(allocator: Allocator, image: Image(Rgb), options: EncodeOptions) ![
         .yuv420 => 2,
     };
     const tables = scanTables(&ql, &qc);
-    var band: EncodeBand = try .init(allocator, image.cols, h_max, v_max, true);
-    defer band.deinit();
-    var w: BitWriter = .{ .gpa = allocator };
-    defer w.deinit();
-
-    var prev_dc: [3]i32 = @splat(0);
-    var mcus_in_interval: u16 = 0;
-    var rst_index: u3 = 0;
-    const mcu_rows = (image.rows + 8 * v_max - 1) / (8 * v_max);
-    for (0..mcu_rows) |mcu_y| {
-        band.fillRgb(image, mcu_y);
-        EncodeBand.transformPlane(band.y, band.y_stride, v_max, &tables.y_quant, band.y_coefs);
-        EncodeBand.transformPlane(band.cb, band.c_stride, 1, &tables.c_quant, band.cb_coefs);
-        EncodeBand.transformPlane(band.cr, band.c_stride, 1, &tables.c_quant, band.cr_coefs);
-        try encodeBandScan(&w, &band, &tables, true, restart_interval, &mcus_in_interval, &rst_index, &prev_dc);
-    }
-    try w.reserve();
-    w.flush();
-
-    try out.appendSlice(allocator, w.list.items);
+    try encodeScan(io, allocator, &out, .{ .rgb = image }, &tables, image.cols, image.rows, h_max, v_max, true, restart_interval);
 
     // EOI
     try out.append(allocator, 0xFF);
@@ -1193,7 +1176,121 @@ fn encodeRgb(allocator: Allocator, image: Image(Rgb), options: EncodeOptions) ![
     return out.toOwnedSlice(allocator);
 }
 
-fn encodeGrayscale(allocator: Allocator, bytes: []const u8, width: u32, height: u32, options: EncodeOptions) ![]u8 {
+/// Pixel source of an encode; a band fills its planes from it one MCU row at a time.
+const EncodeSource = union(enum) {
+    rgb: Image(Rgb),
+    gray: struct { bytes: []const u8, cols: usize, rows: usize },
+
+    fn fill(self: EncodeSource, band: *EncodeBand, mcu_y: usize) void {
+        switch (self) {
+            .rgb => |img| band.fillRgb(img, mcu_y),
+            .gray => |g| band.fillGray(g.bytes, g.cols, g.rows, mcu_y),
+        }
+    }
+};
+
+/// The scan: MCU rows are filled, transformed and entropy-coded in bands on `io`. Bands
+/// own balanced runs of restart segments, so each writes an independent bitstream from
+/// fresh DC predictors (re-filling at most the row shared at a boundary); appended in order
+/// with the RSTn markers between them, the result is byte-identical to a single sweep.
+/// Without restart markers there is one band.
+fn encodeScan(io: Io, allocator: Allocator, out: *std.ArrayList(u8), source: EncodeSource, tables: *const ScanTables, cols: usize, rows: usize, h_max: usize, v_max: usize, chroma: bool, restart_interval: u16) !void {
+    const mcu_cols = (cols + 8 * h_max - 1) / (8 * h_max);
+    const mcu_rows = (rows + 8 * v_max - 1) / (8 * v_max);
+    const total = mcu_cols * mcu_rows;
+    const interval: usize = restart_interval;
+    const segments = if (interval == 0) 1 else (total + interval - 1) / interval;
+    const bands = @min(parallel.bandCount(mcu_rows, cols * 8 * v_max), segments);
+
+    const Band = struct {
+        mcu0: usize,
+        mcu1: usize,
+        seg0: usize,
+        w: BitWriter,
+        err: ?anyerror = null,
+    };
+    const Ctx = struct {
+        allocator: Allocator,
+        source: EncodeSource,
+        tables: *const ScanTables,
+        cols: usize,
+        h_max: usize,
+        v_max: usize,
+        chroma: bool,
+        mcu_cols: usize,
+        restart_interval: u16,
+        bands: []Band,
+
+        fn run(ctx: *const @This(), k: usize, _: usize, _: usize) void {
+            ctx.bands[k].err = null;
+            ctx.encodeBand(&ctx.bands[k], k + 1 == ctx.bands.len) catch |err| {
+                ctx.bands[k].err = err;
+            };
+        }
+
+        fn encodeBand(ctx: *const @This(), band: *Band, last: bool) !void {
+            var planes: EncodeBand = try .init(ctx.allocator, ctx.cols, ctx.h_max, ctx.v_max, ctx.chroma);
+            defer planes.deinit();
+            var prev_dc: [3]i32 = @splat(0);
+            var mcus_in_interval: u16 = 0;
+            // The marker before this band's first segment is written by the previous band.
+            var rst_index: u3 = @intCast(band.seg0 % 8);
+            const row0 = band.mcu0 / ctx.mcu_cols;
+            const row1 = (band.mcu1 - 1) / ctx.mcu_cols + 1;
+            for (row0..row1) |mcu_y| {
+                ctx.source.fill(&planes, mcu_y);
+                EncodeBand.transformPlane(planes.y, planes.y_stride, ctx.v_max, &ctx.tables.y_quant, planes.y_coefs);
+                if (ctx.chroma) {
+                    EncodeBand.transformPlane(planes.cb, planes.c_stride, 1, &ctx.tables.c_quant, planes.cb_coefs);
+                    EncodeBand.transformPlane(planes.cr, planes.c_stride, 1, &ctx.tables.c_quant, planes.cr_coefs);
+                }
+                const row_start = mcu_y * ctx.mcu_cols;
+                const x0 = @max(band.mcu0, row_start) - row_start;
+                const x1 = @min(band.mcu1, row_start + ctx.mcu_cols) - row_start;
+                try encodeBandScan(&band.w, &planes, ctx.tables, ctx.chroma, ctx.restart_interval, &mcus_in_interval, &rst_index, &prev_dc, x0, x1);
+            }
+            try band.w.reserve();
+            if (last) band.w.flush() else band.w.restart(rst_index);
+        }
+    };
+
+    const band_list = try allocator.alloc(Band, bands);
+    defer allocator.free(band_list);
+    for (band_list, 0..) |*band, k| {
+        const seg0 = k * segments / bands;
+        const seg1 = (k + 1) * segments / bands;
+        band.* = .{
+            .mcu0 = seg0 * interval,
+            .mcu1 = if (k + 1 == bands) total else seg1 * interval,
+            .seg0 = seg0,
+            .w = .{ .gpa = allocator },
+        };
+    }
+    defer for (band_list) |*band| band.w.deinit();
+
+    const ctx: Ctx = .{
+        .allocator = allocator,
+        .source = source,
+        .tables = tables,
+        .cols = cols,
+        .h_max = h_max,
+        .v_max = v_max,
+        .chroma = chroma,
+        .mcu_cols = mcu_cols,
+        .restart_interval = restart_interval,
+        .bands = band_list,
+    };
+    parallel.forRowBands(io, bands, bands, &ctx, Ctx.run);
+    var bytes: usize = 0;
+    for (band_list) |band| {
+        if (band.err) |err| return err;
+        bytes += band.w.list.items.len;
+    }
+    try out.ensureUnusedCapacity(allocator, bytes);
+    for (band_list) |band| out.appendSliceAssumeCapacity(band.w.list.items);
+}
+
+fn encodeGrayscale(io: Io, allocator: Allocator, bytes: []const u8, width: u32, height: u32, options: EncodeOptions) ![]u8 {
     var out = std.ArrayList(u8).empty;
     defer out.deinit(allocator);
 
@@ -1221,26 +1318,12 @@ fn encodeGrayscale(allocator: Allocator, bytes: []const u8, width: u32, height: 
     try writeSOS(&out, allocator, true);
 
     const tables = scanTables(&ql, &qc);
-    const cols: usize = width;
-    const rows: usize = height;
-    var band: EncodeBand = try .init(allocator, cols, 1, 1, false);
-    defer band.deinit();
-    var w: BitWriter = .{ .gpa = allocator };
-    defer w.deinit();
+    try encodeScan(io, allocator, &out, .{ .gray = .{ .bytes = bytes, .cols = width, .rows = height } }, &tables, width, height, 1, 1, false, restart_interval);
 
-    var prev_dc: [3]i32 = @splat(0);
-    var mcus_in_interval: u16 = 0;
-    var rst_index: u3 = 0;
-    for (0..(rows + 7) / 8) |mcu_y| {
-        band.fillGray(bytes, cols, rows, mcu_y);
-        EncodeBand.transformPlane(band.y, band.y_stride, 1, &tables.y_quant, band.y_coefs);
-        try encodeBandScan(&w, &band, &tables, false, restart_interval, &mcus_in_interval, &rst_index, &prev_dc);
-    }
-    try w.reserve();
-    w.flush();
-    try out.appendSlice(allocator, w.list.items);
+    // EOI
     try out.append(allocator, 0xFF);
     try out.append(allocator, 0xD9);
+
     return out.toOwnedSlice(allocator);
 }
 
@@ -3151,7 +3234,7 @@ test "JPEG encode -> decode RGB roundtrip" {
         }
     }
 
-    const bytes = try encode(Rgb, gpa, img, .{ .quality = 85 });
+    const bytes = try encode(Rgb, parallel.inline_io, gpa, img, .{ .quality = 85 });
     defer gpa.free(bytes);
 
     var state = try decode(gpa, bytes, .{});
@@ -3174,7 +3257,7 @@ test "JPEG encode -> decode grayscale roundtrip" {
             img.at(y, x).* = @intCast(((x + y) * 255) / (img.cols + img.rows - 2));
         }
     }
-    const bytes = try encode(u8, gpa, img, .{ .quality = 85 });
+    const bytes = try encode(u8, parallel.inline_io, gpa, img, .{ .quality = 85 });
     defer gpa.free(bytes);
 
     var state = try decode(gpa, bytes, .{});
@@ -3208,7 +3291,7 @@ test "JPEG subsampling 4:2:2 roundtrip" {
         }
     }
 
-    const bytes = try encode(Rgb, gpa, img, .{ .quality = 85, .subsampling = .yuv422 });
+    const bytes = try encode(Rgb, parallel.inline_io, gpa, img, .{ .quality = 85, .subsampling = .yuv422 });
     defer gpa.free(bytes);
 
     var state = try decode(gpa, bytes, .{});
@@ -3239,7 +3322,7 @@ test "JPEG subsampling 4:2:0 roundtrip" {
         }
     }
 
-    const bytes = try encode(Rgb, gpa, img, .{ .quality = 92, .subsampling = .yuv420 });
+    const bytes = try encode(Rgb, parallel.inline_io, gpa, img, .{ .quality = 92, .subsampling = .yuv420 });
     defer gpa.free(bytes);
 
     var state = try decode(gpa, bytes, .{});
@@ -3272,7 +3355,7 @@ test "JPEG 4:2:0 odd-size roundtrip (non-multiple-of-MCU)" {
         }
     }
 
-    const bytes = try encode(Rgb, gpa, img, .{ .quality = 85, .subsampling = .yuv420 });
+    const bytes = try encode(Rgb, parallel.inline_io, gpa, img, .{ .quality = 85, .subsampling = .yuv420 });
     defer gpa.free(bytes);
 
     var state = try decode(gpa, bytes, .{});
@@ -3462,7 +3545,7 @@ test "banded restart-interval decode matches the single sweep" {
     // 1 and 3 MCUs, one row (25 MCUs at 4:2:0, 50 otherwise), and a run straddling rows.
     for ([_]Subsampling{ .yuv444, .yuv422, .yuv420 }) |subsampling| {
         for ([_]u16{ 1, 3, 25, 50, 77 }) |interval| {
-            const bytes = try encode(Rgb, gpa, img, .{ .subsampling = subsampling, .restart_interval = .{ .mcus = interval } });
+            const bytes = try encode(Rgb, parallel.inline_io, gpa, img, .{ .subsampling = subsampling, .restart_interval = .{ .mcus = interval } });
             defer gpa.free(bytes);
             var want = try loadFromBytes(Rgb, parallel.inline_io, gpa, bytes, .{});
             defer want.deinit(gpa);
@@ -3490,13 +3573,44 @@ test "banded restart-interval decode matches the single sweep" {
         }
     }
 
-    const bytes = try encode(u8, gpa, gray, .{ .restart_interval = .{ .mcus = 7 } });
+    const bytes = try encode(u8, parallel.inline_io, gpa, gray, .{ .restart_interval = .{ .mcus = 7 } });
     defer gpa.free(bytes);
     var want = try loadFromBytes(u8, parallel.inline_io, gpa, bytes, .{});
     defer want.deinit(gpa);
     var got = try loadFromBytes(u8, pool_io, gpa, bytes, .{});
     defer got.deinit(gpa);
     try std.testing.expectEqualSlices(u8, want.data, got.data);
+}
+
+test "banded encode is byte-identical to the single sweep" {
+    const gpa = std.testing.allocator;
+    var pool: std.Io.Threaded = .init(gpa, .{});
+    defer pool.deinit();
+    const pool_io = pool.io();
+    // 300x400 is several bands of MCU rows for every subsampling.
+    var img = try gradientImage(gpa, 300, 400);
+    defer img.deinit(gpa);
+    var gray = try img.convert(parallel.inline_io, gpa, u8);
+    defer gray.deinit(gpa);
+
+    // One row (the default), 1 and 3 MCUs, a run straddling rows, and none (one band).
+    const intervals = [_]RestartInterval{ .{ .rows = 1 }, .{ .mcus = 1 }, .{ .mcus = 3 }, .{ .mcus = 77 }, .{ .rows = 2 }, .none };
+    for ([_]Subsampling{ .yuv444, .yuv422, .yuv420 }) |subsampling| {
+        for (intervals) |interval| {
+            const want = try encode(Rgb, parallel.inline_io, gpa, img, .{ .subsampling = subsampling, .restart_interval = interval });
+            defer gpa.free(want);
+            const got = try encode(Rgb, pool_io, gpa, img, .{ .subsampling = subsampling, .restart_interval = interval });
+            defer gpa.free(got);
+            try std.testing.expectEqualSlices(u8, want, got);
+        }
+    }
+    for (intervals) |interval| {
+        const want = try encode(u8, parallel.inline_io, gpa, gray, .{ .restart_interval = interval });
+        defer gpa.free(want);
+        const got = try encode(u8, pool_io, gpa, gray, .{ .restart_interval = interval });
+        defer gpa.free(got);
+        try std.testing.expectEqualSlices(u8, want, got);
+    }
 }
 
 test "default encode writes one MCU row per restart interval" {
@@ -3508,12 +3622,12 @@ test "default encode writes one MCU row per restart interval" {
     defer gray.deinit(gpa);
 
     for ([_]struct { s: Subsampling, mcus: u16 }{ .{ .s = .yuv444, .mcus = 5 }, .{ .s = .yuv422, .mcus = 3 }, .{ .s = .yuv420, .mcus = 3 } }) |case| {
-        const bytes = try encode(Rgb, gpa, img, .{ .subsampling = case.s });
+        const bytes = try encode(Rgb, parallel.inline_io, gpa, img, .{ .subsampling = case.s });
         defer gpa.free(bytes);
         const dri = std.mem.indexOf(u8, bytes, &.{ 0xFF, 0xDD, 0x00, 0x04 }).?;
         try std.testing.expectEqual(case.mcus, std.mem.readInt(u16, bytes[dri + 4 ..][0..2], .big));
         // The markers change the bitstream, not the pixels.
-        const plain = try encode(Rgb, gpa, img, .{ .subsampling = case.s, .restart_interval = .none });
+        const plain = try encode(Rgb, parallel.inline_io, gpa, img, .{ .subsampling = case.s, .restart_interval = .none });
         defer gpa.free(plain);
         var want = try loadFromBytes(Rgb, parallel.inline_io, gpa, plain, .{});
         defer want.deinit(gpa);
@@ -3522,7 +3636,7 @@ test "default encode writes one MCU row per restart interval" {
         try std.testing.expectEqualSlices(u8, want.asBytes(), got.asBytes());
     }
 
-    const bytes = try encode(u8, gpa, gray, .{});
+    const bytes = try encode(u8, parallel.inline_io, gpa, gray, .{});
     defer gpa.free(bytes);
     const dri = std.mem.indexOf(u8, bytes, &.{ 0xFF, 0xDD, 0x00, 0x04 }).?;
     try std.testing.expectEqual(5, std.mem.readInt(u16, bytes[dri + 4 ..][0..2], .big));
@@ -3536,13 +3650,13 @@ test "JPEG restart intervals decode identically to a single interval" {
     defer gray.deinit(gpa);
 
     for ([_]Subsampling{ .yuv444, .yuv422, .yuv420 }) |subsampling| {
-        const plain = try encode(Rgb, gpa, img, .{ .subsampling = subsampling, .restart_interval = .none });
+        const plain = try encode(Rgb, parallel.inline_io, gpa, img, .{ .subsampling = subsampling, .restart_interval = .none });
         defer gpa.free(plain);
         try std.testing.expect(std.mem.indexOf(u8, plain, &.{ 0xFF, 0xDD }) == null);
         var want = try loadFromBytes(Rgb, parallel.inline_io, gpa, plain, .{});
         defer want.deinit(gpa);
         for ([_]u16{ 1, 3 }) |interval| {
-            const bytes = try encode(Rgb, gpa, img, .{ .subsampling = subsampling, .restart_interval = .{ .mcus = interval } });
+            const bytes = try encode(Rgb, parallel.inline_io, gpa, img, .{ .subsampling = subsampling, .restart_interval = .{ .mcus = interval } });
             defer gpa.free(bytes);
             try std.testing.expect(std.mem.indexOf(u8, bytes, &.{ 0xFF, 0xDD }) != null);
             var got = try loadFromBytes(Rgb, parallel.inline_io, gpa, bytes, .{});
@@ -3551,18 +3665,18 @@ test "JPEG restart intervals decode identically to a single interval" {
         }
     }
 
-    const plain = try encode(u8, gpa, gray, .{ .restart_interval = .none });
+    const plain = try encode(u8, parallel.inline_io, gpa, gray, .{ .restart_interval = .none });
     defer gpa.free(plain);
     var want = try loadFromBytes(u8, parallel.inline_io, gpa, plain, .{});
     defer want.deinit(gpa);
-    const bytes = try encode(u8, gpa, gray, .{ .restart_interval = .{ .mcus = 2 } });
+    const bytes = try encode(u8, parallel.inline_io, gpa, gray, .{ .restart_interval = .{ .mcus = 2 } });
     defer gpa.free(bytes);
     var got = try loadFromBytes(u8, parallel.inline_io, gpa, bytes, .{});
     defer got.deinit(gpa);
     try std.testing.expectEqualSlices(u8, want.data, got.data);
 
     // Truncated inside the third interval: the first MCU row (two intervals) is intact.
-    const rgb = try encode(Rgb, gpa, img, .{ .subsampling = .yuv420, .restart_interval = .{ .mcus = 1 } });
+    const rgb = try encode(Rgb, parallel.inline_io, gpa, img, .{ .subsampling = .yuv420, .restart_interval = .{ .mcus = 1 } });
     defer gpa.free(rgb);
     var full = try loadFromBytes(Rgb, parallel.inline_io, gpa, rgb, .{});
     defer full.deinit(gpa);
@@ -3578,7 +3692,7 @@ test "JPEG malformed SOS/SOF fields are rejected" {
     const gpa = std.testing.allocator;
     var img = try gradientImage(gpa, 8, 8);
     defer img.deinit(gpa);
-    const bytes = try encode(Rgb, gpa, img, .{ .subsampling = .yuv444 });
+    const bytes = try encode(Rgb, parallel.inline_io, gpa, img, .{ .subsampling = .yuv444 });
     defer gpa.free(bytes);
     const sos = std.mem.indexOf(u8, bytes, &.{ 0xFF, 0xDA }).?;
     const sof = std.mem.indexOf(u8, bytes, &.{ 0xFF, 0xC0 }).?;
@@ -3601,7 +3715,7 @@ test "JPEG Adobe APP14 transform 0 decodes the planes as RGB" {
     const gpa = std.testing.allocator;
     var img = try gradientImage(gpa, 16, 16);
     defer img.deinit(gpa);
-    const bytes = try encode(Rgb, gpa, img, .{ .subsampling = .yuv444, .quality = 100 });
+    const bytes = try encode(Rgb, parallel.inline_io, gpa, img, .{ .subsampling = .yuv444, .quality = 100 });
     defer gpa.free(bytes);
 
     // Swap the JFIF APP0 segment for an Adobe APP14 segment with transform flag 0.
