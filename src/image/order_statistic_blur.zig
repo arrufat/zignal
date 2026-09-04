@@ -98,12 +98,10 @@ fn applyScalarOpTwoLevel(
     const window = radius * 2 + 1;
     const rows = image.rows;
     const cols = image.cols;
-    // Every band seeds `window` rows of column histograms (O(1) per sample), so bands only
-    // need to be one window tall.
+    // Seeding a band costs one window of rows, so bands need only be one window tall.
     const bands = parallel.bandCountFor(rows, cols, window);
 
-    // Out-of-range horizontal window positions contribute `window` zeros, matching the
-    // flat path's zero_column.
+    // Out-of-range columns contribute `window` zeros, like the flat path's zero_column.
     var zero_col: TwoLevelColumn = .{};
     zero_col.coarse[0] = @intCast(window);
     zero_col.fine[0][0] = @intCast(window);
@@ -158,8 +156,7 @@ const TwoLevelBands = struct {
             }
         }
 
-        // The pointer table hoists all border resolution (which is row-invariant for
-        // columns) out of the per-pixel loops.
+        // Column border resolution is row-invariant, so it is hoisted out of the pixel loops.
         for (col_ptrs, 0..) |*ptr, i| {
             const idx = @as(isize, @intCast(i)) - radius_isize;
             ptr.* = if (border_module.resolveIndex(idx, @intCast(cols), border)) |resolved|
@@ -169,8 +166,7 @@ const TwoLevelBands = struct {
         }
 
         for (r0..r1) |row| {
-            // The fine-row cache is per-row: the vertical slide below mutates the column
-            // histograms, so it must not survive across rows.
+            // Per-row: the vertical slide mutates the column histograms, so the cache cannot survive a row.
             var coarse_win: Vec16 = @splat(0);
             for (col_ptrs[0..window]) |ptr| coarse_win += @as(Vec16, ptr.coarse);
 
@@ -184,10 +180,7 @@ const TwoLevelBands = struct {
                 const entering = col_ptrs[col + window - 1];
                 coarse_win -= @as(Vec16, leaving.coarse);
                 coarse_win += @as(Vec16, entering.coarse);
-                // Unconditional: fine_win must track the window for cached_bucket on
-                // every slide, even when the bucket changes below, or the cache goes
-                // stale. The leaving column's row is contained in fine_win by this
-                // invariant, so the lane-wise subtraction cannot underflow.
+                // Unconditional so fine_win tracks cached_bucket on every slide; the leaving column is in fine_win, so no underflow.
                 fine_win -= @as(Vec16, leaving.fine[cached_bucket]);
                 fine_win += @as(Vec16, entering.fine[cached_bucket]);
 
@@ -310,8 +303,7 @@ fn FlatBands(comptime Reducer: type) type {
                     }
                 }
 
-                // Border samples are counted into the histograms, so the population is
-                // always exactly window*window; no per-pixel bin scan needed.
+                // Border samples are counted too, so the population is always window*window.
                 const area = window * window;
                 out.at(row, 0).* = try reducer.compute(&window_hist, area);
 

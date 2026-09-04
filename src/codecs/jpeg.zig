@@ -804,8 +804,7 @@ const Fdct = struct {
     const f2562 = fix(2.562915447);
     const f3072 = fix(3.072711026);
 
-    // Even outputs from (tmp13, tmp12); odd outputs as two dot products over (tmp4, tmp7)
-    // and (tmp5, tmp6), the z1..z5 cross terms of jfdctint folded into the constants.
+    // Even outputs from (tmp13, tmp12); odd outputs as two dot products with jfdctint's z1..z5 cross terms folded into the constants.
     const c2 = Dct.pair(f0541 + f0765, f0541);
     const c6 = Dct.pair(f0541, f0541 - f1847);
     const c7a = Dct.pair(f0298 - f0899 - f1961 + f1175, f1175 - f0899);
@@ -1949,8 +1948,7 @@ pub const BitReader = struct {
 
     /// Tops the buffer up to at least 57 bits.
     fn fill(self: *BitReader) void {
-        // Common case: the next eight bytes hold neither stuffing nor a marker, so as many
-        // of them as fit go in at once.
+        // Fast path: no stuffing or marker in the next eight bytes, so load as many as fit at once.
         if (!self.marker_hit and self.byte_pos + 8 <= self.data.len) {
             const word = std.mem.readInt(u64, self.data[self.byte_pos..][0..8], .big);
             const has_ff = (word & 0x7F7F7F7F7F7F7F7F) + 0x0101010101010101 & word & 0x8080808080808080;
@@ -2477,10 +2475,6 @@ pub fn decode(allocator: Allocator, data: []const u8, limits: DecodeLimits) !Jpe
     return error.NoScanData;
 }
 
-// Inverse DCT: the stb_image SSE2 formulation of the libjpeg "islow" transform on 16-lane
-// vectors, two blocks side by side (lanes 0-7 block A, 8-15 block B). Every 16-bit
-// interleave stays within 128-bit lanes, so the two blocks never mix and the pair transposes
-// as two independent 8x8 tiles. Bit-exact with the 32-bit scalar transform.
 /// 16-lane building blocks shared by the forward and inverse DCT: two 8x8 blocks travel side
 /// by side (lanes 0-7 block A, 8-15 block B) and every 16-bit interleave stays within its
 /// 128-bit lane, so the pair transposes as two independent tiles.
@@ -2821,8 +2815,7 @@ fn performBlockScanBanded(comptime T: type, io: Io, state: *JpegState, img: *Ima
             const lay = ctx.layout;
             const first_mcu = band.row0 * lay.mcus_per_row;
             const seg = first_mcu / st.restart_interval;
-            // Fewer markers than MCUs need: like the single sweep, everything past the last
-            // marker is zero.
+            // Past the last marker everything is zero, as in the single sweep.
             const has_data = seg < ctx.starts.len;
             var cursor: McuCursor = .{ .br = .init(st.bit_reader.data[if (has_data) ctx.starts[seg] else 0..]), .dead = !has_data };
             var mcu = seg * st.restart_interval;
@@ -2844,8 +2837,7 @@ fn performBlockScanBanded(comptime T: type, io: Io, state: *JpegState, img: *Ima
         band.render.deinit();
         allocator.free(band.blocks);
     };
-    // Balance by restart segments, then own whole MCU rows from the row that starts at or
-    // after the band's first segment.
+    // Balance by restart segments; each band owns whole MCU rows from the first row at or after its first segment.
     const segments = (layout.mcu_rows * layout.mcus_per_row + interval - 1) / interval;
     for (band_list, 0..) |*band, k| {
         const seg0 = k * segments / bands;
@@ -3075,8 +3067,7 @@ fn renderBlockRows(comptime T: type, state: *const JpegState, band: *RenderBand,
     const max_h, const max_v = state.maxSamplingFactors();
     const rgb_model = nc == 3 and state.isRgbColorModel();
 
-    // A component's blocks sit at MCU columns below its horizontal factor; consecutive
-    // blocks of one component are adjacent in its plane, so they transform in pairs.
+    // Consecutive blocks of one component are adjacent in its plane, so they transform in pairs.
     for (0..block_rows) |v| {
         for (0..nc) |c| {
             const comp = state.components[c];
@@ -3553,8 +3544,7 @@ test "banded restart-interval decode matches the single sweep" {
             defer got.deinit(gpa);
             try std.testing.expectEqualSlices(u8, want.asBytes(), got.asBytes());
 
-            // Cut inside a middle segment and drop one marker: the damaged segments are zero
-            // and decoding resumes at the next marker, on both paths alike.
+            // Cut inside a middle segment: the damaged segments are zero and decoding resumes at the next marker on both paths.
             const second = std.mem.indexOfPos(u8, bytes, std.mem.indexOf(u8, bytes, &.{ 0xFF, 0xD0 }).? + 2, &.{ 0xFF, 0xD1 }).?;
             var want_cut = try loadFromBytes(Rgb, parallel.inline_io, gpa, bytes[0 .. second + 40], .{});
             defer want_cut.deinit(gpa);

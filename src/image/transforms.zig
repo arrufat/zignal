@@ -417,9 +417,7 @@ pub fn Transform(comptime T: type) type {
             const min_c: u32 = @floor(@max(0, left));
             const max_c: u32 = @min(self.cols, @as(u32, @ceil(@min(right, cols_f))) + 1);
 
-            // Only the rows of the bounding box, in bands. The band is instantiated per
-            // interpolation method: with the tag known at comptime the per-pixel dispatch
-            // folds away, as it did when the loop was inlined into callers passing a literal.
+            // Bands over the bounding-box rows, instantiated per interpolation method so the per-pixel dispatch folds away.
             const Blit = struct {
                 const Outer = @This();
 
@@ -442,7 +440,7 @@ pub fn Transform(comptime T: type) type {
                 fn Band(comptime tag: std.meta.Tag(Interpolation)) type {
                     return struct {
                         fn run(ctx: *const Outer, _: usize, r0: usize, r1: usize) void {
-                            // Locals: the pixel stores could alias `ctx`, which would reload every field per pixel.
+                            // Copy: the pixel stores could alias `ctx` and force per-pixel reloads.
                             const p = ctx.*;
                             const kind: Interpolation = if (tag == .mitchell) .{ .mitchell = p.method.mitchell } else @unionInit(Interpolation, @tagName(tag), {});
                             const src = p.source;

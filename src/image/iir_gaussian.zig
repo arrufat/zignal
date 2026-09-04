@@ -496,8 +496,7 @@ test "iir gaussian struct pixels match per-plane u8" {
     var prng = std.Random.DefaultPrng.init(9);
     const random = prng.random();
 
-    // 53 columns leave a partial block group for both channel counts; 37 rows leave rows
-    // below one block of lanes.
+    // 53 columns leave a partial block group for both channel counts; 37 rows a partial lane block.
     var green: Image(u8) = try .init(allocator, 37, 53);
     defer green.deinit(allocator);
     var green_out: Image(u8) = try .initLike(allocator, green);
