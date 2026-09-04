@@ -36,6 +36,11 @@ jobs:
         run: |
           zig build test --summary all
 
+      # Debug uses the self-hosted backend; LLVM-only miscompiles (e.g. vector narrowing) show up here.
+      - name: Tests ReleaseSafe
+        run: |
+          zig build test -Doptimize=ReleaseSafe --summary all
+
       - name: Linux modules
         run: |
           zig build check -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseFast

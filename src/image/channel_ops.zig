@@ -332,7 +332,7 @@ pub fn resizeColumnsU8(mid: []const i32, dst_cols: u32, y_taps: AxisTaps, dst: [
             }
             const scaled = acc >> @splat(shift);
             const clamped = @max(@as(V, @splat(0)), @min(@as(V, @splat(255)), scaled));
-            const bytes: @Vector(vec_len, u8) = @intCast(clamped);
+            const bytes: @Vector(vec_len, u8) = meta.narrowToBytes(clamped);
             out[c..][0..vec_len].* = bytes;
         }
         while (c < dst_cols) : (c += 1) {
