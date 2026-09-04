@@ -2745,8 +2745,7 @@ test "chunked PNG encode is identical on a thread pool and round-trips" {
     var prng = std.Random.DefaultPrng.init(0x9e6);
     const random = prng.random();
 
-    // 700 rows x 160 px RGB: 8-row sampling, ~340 KB filtered -> two deflate chunks, both
-    // shared and split between bands; 20 rows: one chunk. The ramp keeps every filter in play.
+    // 700x160 RGB: ~340 KB filtered, two deflate chunks split between bands; 20 rows: one chunk.
     for ([_][2]u32{ .{ 700, 160 }, .{ 20, 30 } }) |shape| {
         var img: Image(Rgb) = try .init(gpa, shape[0], shape[1]);
         defer img.deinit(gpa);

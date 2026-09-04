@@ -110,8 +110,7 @@ pub fn resize(comptime T: type, io: Io, self: Image(T), out: Image(T), allocator
         return;
     }
 
-    // Contiguous u8 and f32 planes take the separable resizers; struct pixels of u8 fields
-    // run through them interleaved (every channel of a pixel is an element).
+    // Contiguous planes take the separable resizers; u8 struct pixels run through them interleaved.
     if (self.isContiguous() and out.isContiguous()) {
         if (T == u8 or T == f32) {
             resizePlane(T, 1, io, self.data, out.data, self.rows, self.cols, out.rows, out.cols, allocator, method) catch {
@@ -215,7 +214,6 @@ fn GenericResize(comptime T: type) type {
                     if (interpolate(T, self, src_x, src_y, ctx.method, .mirror)) |val| {
                         out.at(r, c).* = val;
                     } else {
-                        // Fallback for failed interpolation (e.g., boundary conditions)
                         out.at(r, c).* = switch (@typeInfo(T)) {
                             .int, .float => 0,
                             .@"struct" => std.mem.zeroes(T),
@@ -304,8 +302,7 @@ pub fn Sampler(comptime T: type) type {
         }
 
         inline fn fallback(self: *const Self, x: f32, y: f32) T {
-            // A zero border and a window entirely outside the image is just zeroes; rotated
-            // outputs have whole corners of those.
+            // With a zero border, a window entirely outside the image is all zeroes (rotated corners).
             if (self.border == .zero) {
                 const reach: f32 = max_taps;
                 if (x < -reach or y < -reach or x > @as(f32, @floatFromInt(self.image.cols)) + reach or y > @as(f32, @floatFromInt(self.image.rows)) + reach) {

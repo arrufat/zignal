@@ -118,9 +118,8 @@ fn plane(comptime P: type, comptime mode: Mode, io: Io, src: Image(P), dst: Imag
     const rows: usize = src.rows;
     const cols: usize = src.cols;
 
-    // Integer sums are exact, so bands seeded mid-image match one sweep; f64 sums would
-    // round differently, so f32 planes stay a single band. Bands stay four windows tall
-    // because each re-seeds `2·radius + 1` rows.
+    // Integer sums are exact, so bands seeded mid-image match one sweep; f32 planes (f64 sums) stay one band.
+    // Each band re-seeds `2·radius + 1` rows, hence four windows tall.
     const bands = if (@typeInfo(SumT(P)) == .int) parallel.bandCountFor(rows, cols, 4 * (2 * radius + 1)) else 1;
     const ctx: BandContext(P, SumT(P), InvT(P), planeRows(P, mode)) = .{
         .src = src,

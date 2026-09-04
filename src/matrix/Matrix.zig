@@ -586,8 +586,7 @@ pub fn Matrix(comptime T: type) type {
         /// Blocked over k and n so the B block stays in L2 while every row of A streams past it,
         /// with a `micro_rows` × `2·vec_len` register tile so each B load feeds `2·micro_rows` FMAs.
         fn blockedGemm(comptime VecType: type, io: Io, c: *Matrix(T), a: Matrix(T), b: Matrix(T), alpha: T) void {
-            // Bands are groups of `micro_rows` rows of C: disjoint outputs, read-only inputs,
-            // and the same k order per element, so the result does not depend on the split.
+            // Bands are groups of `micro_rows` rows of C; the same k order per element makes the split invisible.
             const groups = (@as(usize, a.rows) + micro_rows - 1) / micro_rows;
             const ctx: GemmBands(VecType) = .{ .c = c.*, .a = a, .b = b, .alpha = alpha };
             parallel.forRowBands(io, groups, parallel.bandCount(a.rows, b.cols), &ctx, GemmBands(VecType).band);

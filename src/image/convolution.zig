@@ -564,8 +564,7 @@ pub fn convolveSeparable(
         if (T == u8) {
             try convolveSeparableAuto(u8, i32, 1, io, image, out, allocator, kernel_x_int, kernel_y_int, border_mode);
         } else {
-            // Struct pixels run interleaved: every byte is a lane, so there is no channel
-            // split/merge and no sequential per-plane pass.
+            // Struct pixels run interleaved: every byte is a lane, so no channel split/merge.
             const n = comptime Image(T).channels();
             try convolveSeparableAuto(u8, i32, n, io, elementView(T, image), elementView(T, out), allocator, kernel_x_int, kernel_y_int, border_mode);
         }
@@ -1018,9 +1017,7 @@ fn SeparablePass(comptime SrcT: type, comptime DstT: type, comptime AccumIntT: t
                     }
 
                     if (AccumT == i32 and SrcT == u8) {
-                        // The serial running sum vectorizes as an exclusive stride-`channels`
-                        // prefix sum of window deltas (exact integers -> identical to the
-                        // scalar loop).
+                        // The running sum as a stride-`channels` prefix sum of window deltas; exact integers, so identical to the scalar loop.
                         const k_vec: @Vector(B, AccumT) = @splat(k);
                         const r_vec: @Vector(B, AccumT) = @splat(residual);
                         const repeat_mask = comptime blk: {
@@ -1033,8 +1030,7 @@ fn SeparablePass(comptime SrcT: type, comptime DstT: type, comptime AccumIntT: t
                             for (&m, 0..) |*m_e, t| m_e.* = @intCast(B - channels + t);
                             break :blk m;
                         };
-                        // The last slide delta reads one pixel past the block's windows,
-                        // hence the `+ channels` in the bound.
+                        // The last slide delta reads one pixel past the block, hence `+ channels`.
                         while (e + B + channels <= e_end) : (e += B) {
                             const firsts: @Vector(B, AccumT) = @intCast(@as(@Vector(B, SrcT), src.data[src_offset + e - tap ..][0..B].*));
                             const highs: @Vector(B, AccumT) = @intCast(@as(@Vector(B, SrcT), src.data[src_offset + e - tap + window ..][0..B].*));
@@ -1203,12 +1199,10 @@ fn FusedSeparable(comptime PixelT: type, comptime TempT: type, comptime AccumInt
             const h_dense = HPass.isDense(kernel_x);
             const v_dense = VPass.isDense(kernel_y);
 
-            // Interior rows tap temp rows from r - half_y; bottom border rows tap the final
-            // window [rows - klen_y, rows), so a band starting late still produces from there.
+            // Interior rows start at r - half_y; bottom border rows tap the final window, so a late band seeds from there.
             var produced: usize = @min(r0 -| half_y, rows -| klen_y);
             for (r0..r1) |r| {
-                // Interior rows tap temp rows up to klen_y - 1 - half_y below r; top border rows tap
-                // the initial window and bottom border rows the final one.
+                // Interior rows need up to klen_y - 1 - half_y below r; border rows the initial or final window.
                 const need = @min(rows - 1, @max(klen_y - 1, r + klen_y - 1 - half_y));
                 while (produced <= need) : (produced += 1) {
                     const temp_row = ring[(produced % klen_y) * cols ..][0..cols];
@@ -1287,8 +1281,7 @@ test "fused separable matches standard path" {
                 defer temp.deinit(allocator);
                 inline for ([_]type{ i32, i64 }) |AccumIntT| {
                     try convolveSeparablePlane(T, TempT, AccumIntT, 1, io, src, expected, temp, allocator, kernel, kernel, mode);
-                    // 13 bands of 3 rows are shorter than the kernel, so late bands must seed
-                    // their ring from the final window.
+                    // 13 bands of 3 rows are shorter than the kernel, so late bands seed from the final window.
                     for ([_]usize{ 1, 5, 13 }) |bands| {
                         try convolveSeparablePlaneFused(T, TempT, AccumIntT, 1, io, bands, src, actual, allocator, kernel, kernel, mode);
                         try testing.expectEqualSlices(T, expected.data, actual.data);
@@ -1299,8 +1292,7 @@ test "fused separable matches standard path" {
     }
 }
 
-// Struct pixels convolve interleaved; every strategy (two-pass, fused ring, box passes,
-// identity axes) must match the same kernels run on each channel as a plane.
+// Every interleaved strategy must match the same kernels run per channel as a plane.
 test "interleaved separable matches per-channel planes" {
     const testing = std.testing;
     const allocator = testing.allocator;
@@ -1325,8 +1317,7 @@ test "interleaved separable matches per-channel planes" {
 
     inline for ([_]type{ Rgb, Rgba }) |T| {
         const n = comptime Image(T).channels();
-        // 37 columns leave a vector tail in every pass; the image is far below the fused
-        // threshold, so the fused path is driven explicitly below.
+        // 37 columns leave a vector tail; the fused path is driven explicitly below its size threshold.
         var src: Image(T) = try .init(allocator, 41, 37);
         defer src.deinit(allocator);
         for (std.mem.sliceAsBytes(src.data)) |*b| b.* = random.int(u8);

@@ -78,9 +78,7 @@ pub fn splitChannelsWithUniform(comptime T: type, io: Io, image: Image(T), alloc
     const channels = try splitChannels(T, io, image, allocator);
     errdefer for (channels) |plane| allocator.free(plane);
 
-    // Detecting uniformity on the split planes (SIMD, early-exit) is far cheaper than
-    // tracking it with per-pixel flag branches inside the deinterleave loop. Each band
-    // scans its rows; a plane is uniform when every band found the same value.
+    // Detecting uniformity on the split planes (SIMD, early-exit) beats per-pixel flags in the deinterleave loop.
     const bands = parallel.bandCount(image.rows, image.cols);
     const band_uniforms = try allocator.alloc(?FieldType, bands * num_channels);
     defer allocator.free(band_uniforms);
