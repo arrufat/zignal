@@ -1407,7 +1407,7 @@ fn encodeRaw(gpa: Allocator, image_data: []const u8, width: u32, height: u32, co
 }
 
 /// Generic PNG encoding function that works with any supported pixel type
-pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
+pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
     const color_type = getColorType(T);
 
     switch (T) {
@@ -1419,7 +1419,7 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
             return encodeRaw(allocator, contiguous.asBytes(), image.cols, image.rows, color_type, 8, options);
         },
         else => {
-            var rgb_image = try image.convert(parallel.inline_io, allocator, Rgb);
+            var rgb_image = try image.convert(io, allocator, Rgb);
             defer rgb_image.deinit(allocator);
             return encodeRaw(allocator, rgb_image.asBytes(), image.cols, image.rows, color_type, 8, options);
         },
@@ -1429,7 +1429,7 @@ pub fn encode(comptime T: type, allocator: Allocator, image: Image(T), options: 
 /// Encodes `image` to a PNG file at `file_path` using deflate compression with row filtering.
 /// Output color format is chosen from `T`: `u8`→grayscale, `Rgb`→RGB, `Rgba`→RGBA, others→RGB.
 pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const png_data = try encode(T, allocator, image, .default);
+    const png_data = try encode(T, io, allocator, image, .default);
     defer allocator.free(png_data);
 
     const file = try Io.Dir.cwd().createFile(io, file_path, .{});
@@ -2234,7 +2234,7 @@ fn makeTruncationTestPng(gpa: Allocator) ![]u8 {
     for (img.data, 0..) |*px, i| {
         px.* = .{ .r = @truncate(i * 3), .g = @truncate(i * 5 + 1), .b = @truncate(i * 7 + 2) };
     }
-    return encode(Rgb, gpa, img, .default);
+    return encode(Rgb, parallel.inline_io, gpa, img, .default);
 }
 
 fn findTestChunk(data: []const u8, name: *const [4]u8) ?struct { data_start: usize, data_len: usize } {
@@ -2609,7 +2609,7 @@ test "PNG round-trip encoding/decoding" {
     const original_image: Image(Rgb) = .initFromSlice(height, width, owned_data);
 
     // Encode to PNG
-    const png_data = try encode(Rgb, allocator, original_image, .default);
+    const png_data = try encode(Rgb, parallel.inline_io, allocator, original_image, .default);
     defer allocator.free(png_data);
 
     // Verify PNG signature
@@ -2705,7 +2705,7 @@ test "PNG fixed filters round-trip" {
 
     const filters = [_]FilterType{ .none, .sub, .up, .average, .paeth };
     for (filters) |filter| {
-        const png_data = try encode(Rgb, allocator, img, .{
+        const png_data = try encode(Rgb, parallel.inline_io, allocator, img, .{
             .filter = .{ .fixed = filter },
             .compress_options = .level_1,
         });
@@ -2838,7 +2838,7 @@ test "PNG encode with color management chunks" {
 
     // Test encoding with sRGB chunk
     const srgb_options: EncodeOptions = .{ .srgb_intent = .perceptual };
-    const srgb_png = try encode(Rgb, allocator, test_image, srgb_options);
+    const srgb_png = try encode(Rgb, parallel.inline_io, allocator, test_image, srgb_options);
     defer allocator.free(srgb_png);
 
     // Verify sRGB chunk is present
@@ -2859,7 +2859,7 @@ test "PNG encode with color management chunks" {
 
     // Test encoding with gAMA chunk
     const gamma_options: EncodeOptions = .{ .gamma = 1.0 / 2.2 };
-    const gamma_png = try encode(Rgb, allocator, test_image, gamma_options);
+    const gamma_png = try encode(Rgb, parallel.inline_io, allocator, test_image, gamma_options);
     defer allocator.free(gamma_png);
 
     // Verify gAMA chunk is present
@@ -3505,7 +3505,7 @@ test "PNG encode of a view packs only the visible pixels" {
     const view = img.view(.{ .l = 2, .t = 3, .r = 7, .b = 6 });
     try std.testing.expect(!view.isContiguous());
 
-    const bytes = try encode(Rgb, gpa, view, .default);
+    const bytes = try encode(Rgb, parallel.inline_io, gpa, view, .default);
     defer gpa.free(bytes);
     var decoded = try loadFromBytes(Rgb, parallel.inline_io, gpa, bytes, .{});
     defer decoded.deinit(gpa);

@@ -31,5 +31,5 @@ pub fn scaledPng(
         image_to_encode = scaled_image.?;
     }
 
-    return png.encode(T, gpa, image_to_encode, .default);
+    return png.encode(T, io, gpa, image_to_encode, .default);
 }

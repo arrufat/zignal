@@ -197,9 +197,9 @@ fn encodeSource(comptime codec: type, as_gray: u32, options: codec.EncodeOptions
     const source = g_source orelse return error.NoImage;
     if (as_gray != 0) {
         if (g_gray == null) g_gray = try source.convert(std.Io.failing, allocator, u8);
-        return codec.encode(u8, allocator, g_gray.?, options);
+        return codec.encode(u8, std.Io.failing, allocator, g_gray.?, options);
     }
-    return codec.encode(Rgba, allocator, source, options);
+    return codec.encode(Rgba, std.Io.failing, allocator, source, options);
 }
 
 /// Shared tail of the encode_* exports: time the encode and finish with stats JSON.
