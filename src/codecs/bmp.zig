@@ -798,7 +798,7 @@ fn decode24Bpp(allocator: Allocator, state: BmpState) !Image(Rgb) {
 }
 
 /// Loads a BMP from an in-memory byte buffer, converting to the requested pixel type.
-pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
+pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
     var state = try decode(allocator, data, limits);
     defer state.deinit(allocator);
 
@@ -807,17 +807,17 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8, l
         .grayscale => |*img| {
             if (T == u8) return img.*;
             defer img.deinit(allocator);
-            return img.convert(parallel.inline_io, allocator, T);
+            return img.convert(io, allocator, T);
         },
         .rgb => |*img| {
             if (T == Rgb) return img.*;
             defer img.deinit(allocator);
-            return img.convert(parallel.inline_io, allocator, T);
+            return img.convert(io, allocator, T);
         },
         .rgba => |*img| {
             if (T == Rgba) return img.*;
             defer img.deinit(allocator);
-            return img.convert(parallel.inline_io, allocator, T);
+            return img.convert(io, allocator, T);
         },
     }
 }
@@ -827,7 +827,7 @@ pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u
     const read_limit = if (limits.max_bmp_bytes == 0) std.math.maxInt(usize) else limits.max_bmp_bytes;
     const data = try Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
     defer allocator.free(data);
-    return loadFromBytes(T, allocator, data, limits);
+    return loadFromBytes(T, io, allocator, data, limits);
 }
 
 // ---------------------------------------------------------------------------
@@ -1356,7 +1356,7 @@ test "BMP decode 24bpp BI_RGB bottom-up" {
     try data.appendSlice(gpa, &green_row);
     try data.appendSlice(gpa, &red_row);
 
-    var image = try loadFromBytes(Rgb, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(@as(u32, w), image.cols);
@@ -1390,7 +1390,7 @@ test "BMP decode 24bpp BI_RGB top-down" {
     try data.appendSlice(gpa, &green_row);
     try data.appendSlice(gpa, &blue_row);
 
-    var image = try loadFromBytes(Rgb, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(Rgb{ .r = 255, .g = 0, .b = 0 }, image.data[0]);
@@ -1421,7 +1421,7 @@ test "BMP decode 24bpp BI_RGB respects row padding" {
     try data.appendSlice(gpa, &.{ 30, 20, 10, 60, 50, 40, 90, 80, 70 });
     try data.appendSlice(gpa, &padding);
 
-    var image = try loadFromBytes(Rgb, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(Rgb{ .r = 10, .g = 20, .b = 30 }, image.data[0]);
@@ -1443,7 +1443,7 @@ test "BMP decode 24bpp rejects truncated pixel data" {
     // Required: 4*3 = 12 bytes/row * 4 rows = 48 bytes. Provide only 24.
     try data.appendNTimes(gpa, 0, 24);
 
-    try std.testing.expectError(error.MissingPixelData, loadFromBytes(Rgb, gpa, data.items, .{}));
+    try std.testing.expectError(error.MissingPixelData, loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{}));
 }
 
 test "BMP round-trip Rgb 24bpp gradient" {
@@ -1464,7 +1464,7 @@ test "BMP round-trip Rgb 24bpp gradient" {
     const encoded = try encode(Rgb, gpa, src, .default);
     defer gpa.free(encoded);
 
-    var decoded = try loadFromBytes(Rgb, gpa, encoded, .{});
+    var decoded = try loadFromBytes(Rgb, parallel.inline_io, gpa, encoded, .{});
     defer decoded.deinit(gpa);
 
     try std.testing.expectEqual(src.rows, decoded.rows);
@@ -1490,7 +1490,7 @@ test "BMP round-trip Rgb 24bpp top-down option" {
     const encoded = try encode(Rgb, gpa, src, .{ .top_down = true });
     defer gpa.free(encoded);
 
-    var decoded = try loadFromBytes(Rgb, gpa, encoded, .{});
+    var decoded = try loadFromBytes(Rgb, parallel.inline_io, gpa, encoded, .{});
     defer decoded.deinit(gpa);
 
     for (0..src.rows) |y| {
@@ -1520,7 +1520,7 @@ test "BMP round-trip width=3 (padding required)" {
     const encoded = try encode(Rgb, gpa, src, .default);
     defer gpa.free(encoded);
 
-    var decoded = try loadFromBytes(Rgb, gpa, encoded, .{});
+    var decoded = try loadFromBytes(Rgb, parallel.inline_io, gpa, encoded, .{});
     defer decoded.deinit(gpa);
 
     for (0..src.rows) |y| {
@@ -1549,7 +1549,7 @@ test "BMP round-trip Rgba 32bpp BI_BITFIELDS preserves alpha" {
     const encoded = try encode(Rgba, gpa, src, .default);
     defer gpa.free(encoded);
 
-    var decoded = try loadFromBytes(Rgba, gpa, encoded, .{});
+    var decoded = try loadFromBytes(Rgba, parallel.inline_io, gpa, encoded, .{});
     defer decoded.deinit(gpa);
 
     try std.testing.expectEqual(src.rows, decoded.rows);
@@ -1583,7 +1583,7 @@ test "BMP decode 16bpp BI_BITFIELDS 5-6-5" {
     try writeLe(u16, &data, gpa, 0x001F); // r=0,g=0,b=31
     try writeLe(u16, &data, gpa, 0xFFFF); // r=31,g=63,b=31 → white
 
-    var image = try loadFromBytes(Rgb, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(@as(u8, 255), image.data[0].r);
@@ -1619,7 +1619,7 @@ test "BMP decode 32bpp BI_RGB heuristic: all-zero alpha → opaque Rgb" {
     try data.appendSlice(gpa, &.{ 0, 0xFF, 0, 0 }); // green
 
     // Should decode as Rgb (heuristic kicks in).
-    var image = try loadFromBytes(Rgb, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(Rgb{ .r = 255, .g = 0, .b = 0 }, image.data[0]);
@@ -1640,7 +1640,7 @@ test "BMP decode 32bpp BI_RGB: nonzero alpha is honoured as Rgba" {
     try data.appendSlice(gpa, &.{ 0, 0, 0xFF, 0x80 }); // red, semi-transparent
     try data.appendSlice(gpa, &.{ 0, 0xFF, 0, 0xFF }); // green, opaque
 
-    var image = try loadFromBytes(Rgba, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgba, parallel.inline_io, gpa, data.items, .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(@as(u8, 0x80), image.data[0].a);
@@ -1668,7 +1668,7 @@ test "BMP decode 8bpp indexed (gradient palette)" {
     // Pixel indices
     try data.appendSlice(gpa, &.{ 0, 64, 128, 255 });
 
-    var image = try loadFromBytes(Rgb, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(Rgb{ .r = 0, .g = 0, .b = 0 }, image.data[0]);
@@ -1698,7 +1698,7 @@ test "BMP decode 1bpp indexed (checkerboard)" {
     // Top row: 01010101 → 55
     try data.appendSlice(gpa, &.{ 0x55, 0, 0, 0 });
 
-    var image = try loadFromBytes(Rgb, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
     defer image.deinit(gpa);
 
     // Top row should alternate starting with black (0x55 = 0b01010101 MSB-first)
@@ -1731,7 +1731,7 @@ test "BMP decode 4bpp indexed" {
     // Pixels: indices 0, 5, 10, 15 packed as 0x05, 0xAF (high nibble first)
     try data.appendSlice(gpa, &.{ 0x05, 0xAF, 0, 0 });
 
-    var image = try loadFromBytes(Rgb, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(@as(u8, 0), image.data[0].r);
@@ -1759,7 +1759,7 @@ test "BMP decode 8bpp BITMAPCOREHEADER (3-byte palette entries)" {
     }
     try data.appendSlice(gpa, &.{ 10, 20, 30, 40 });
 
-    var image = try loadFromBytes(Rgb, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(@as(u8, 10), image.data[0].r);
@@ -1821,7 +1821,7 @@ test "BMP decode RLE8 with encoded + literal + EOL + EOI" {
     };
     try buildRleBmp(gpa, &data, 4, 2, 8, &stream);
 
-    var image = try loadFromBytes(Rgb, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
     defer image.deinit(gpa);
 
     // Top row (row 0): all index 1 → gray 16
@@ -1846,7 +1846,7 @@ test "BMP decode RLE8 absolute mode pads to 16-bit boundary" {
     };
     try buildRleBmp(gpa, &data, 5, 1, 8, &stream);
 
-    var image = try loadFromBytes(Rgb, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(@as(u8, 16), image.at(0, 0).*.r);
@@ -1868,7 +1868,7 @@ test "BMP decode RLE4 alternating nibbles" {
     };
     try buildRleBmp(gpa, &data, 4, 1, 4, &stream);
 
-    var image = try loadFromBytes(Rgb, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(@as(u8, 16), image.at(0, 0).*.r);
@@ -1889,7 +1889,7 @@ test "BMP decode RLE8 rejects overflow" {
     };
     try buildRleBmp(gpa, &data, 2, 1, 8, &stream);
 
-    try std.testing.expectError(error.RleOverflow, loadFromBytes(Rgb, gpa, data.items, .{}));
+    try std.testing.expectError(error.RleOverflow, loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{}));
 }
 
 test "BMP decode RLE delta escape" {
@@ -1910,7 +1910,7 @@ test "BMP decode RLE delta escape" {
     };
     try buildRleBmp(gpa, &data, 4, 2, 8, &stream);
 
-    var image = try loadFromBytes(Rgb, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
     defer image.deinit(gpa);
 
     // Bottom row x=0 should be index 1 (gray 16).
@@ -1942,7 +1942,7 @@ test "BMP round-trip Image(u8) with use_palette_for_grayscale" {
     try std.testing.expectEqual(@as(u8, 8), info.bit_depth);
     try std.testing.expectEqual(@as(u32, 256), info.palette_entries);
 
-    var decoded = try loadFromBytes(u8, gpa, encoded, .{});
+    var decoded = try loadFromBytes(u8, parallel.inline_io, gpa, encoded, .{});
     defer decoded.deinit(gpa);
 
     for (0..src.rows) |y| {
@@ -1970,7 +1970,7 @@ test "BMP round-trip Image(u8) without flag → 24bpp BGR" {
     const info = try getInfo(&reader, .{});
     try std.testing.expectEqual(@as(u8, 24), info.bit_depth);
 
-    var decoded = try loadFromBytes(u8, gpa, encoded, .{});
+    var decoded = try loadFromBytes(u8, parallel.inline_io, gpa, encoded, .{});
     defer decoded.deinit(gpa);
 
     for (0..src.rows) |y| {

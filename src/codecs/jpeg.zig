@@ -2133,19 +2133,6 @@ fn decodeBlockProgressive(state: *JpegState, scan_info: ScanInfo, scan_comp: Sca
 
 /// Decodes one baseline block into `block` (natural order). A block that consumed bits past
 /// the data reports `UnexpectedEndOfData`, whatever the padding decoded as.
-fn decodeBlockBaseline(state: *JpegState, scan_comp: ScanComponent, block: *[64]i16, dc_prediction: *i32) !void {
-    const dc_table = if (state.dc_tables[scan_comp.dc_table_id]) |*t| t else return error.MissingHuffmanTable;
-    const ac_table = if (state.ac_tables[scan_comp.ac_table_id]) |*t| t else return error.MissingHuffmanTable;
-    @memset(block, 0);
-    // Work on a local copy so the hot loop keeps the reader in registers.
-    var br = state.bit_reader;
-    defer state.bit_reader = br;
-    decodeBlockBits(&br, dc_table, ac_table, block, dc_prediction) catch |err| {
-        return if (br.overrun()) error.UnexpectedEndOfData else err;
-    };
-    if (br.overrun()) return error.UnexpectedEndOfData;
-}
-
 /// Every symbol plus its magnitude needs at most 27 bits, so one top-up per coefficient
 /// keeps the lookups check-free.
 fn decodeBlockBits(br: *BitReader, dc_table: *const HuffmanTable, ac_table: *const HuffmanTable, block: *[64]i16, dc_prediction: *i32) !void {
@@ -2551,65 +2538,227 @@ const Idct = struct {
 };
 
 // Decode the baseline scan into block storage
+/// Baseline scan geometry shared by the serial and banded drivers.
+const ScanLayout = struct {
+    noninterleaved: bool,
+    x_step: usize,
+    y_step: usize,
+    /// MCUs per MCU row and MCU rows in the image.
+    mcus_per_row: usize,
+    mcu_rows: usize,
+
+    fn init(state: *const JpegState) ScanLayout {
+        const max_h, const max_v = state.maxSamplingFactors();
+        const noninterleaved = state.isNoninterleaved(state.scan_components);
+        const x_step: usize = if (noninterleaved) 1 else max_h;
+        const y_step: usize = if (noninterleaved) 1 else max_v;
+        return .{
+            .noninterleaved = noninterleaved,
+            .x_step = x_step,
+            .y_step = y_step,
+            .mcus_per_row = (@as(usize, state.block_width) + x_step - 1) / x_step,
+            .mcu_rows = (@as(usize, state.block_height) + y_step - 1) / y_step,
+        };
+    }
+};
+
+/// One MCU at block column `x` of a one-MCU-row block store; `blocks` may be null to
+/// decode and discard. Truncation surfaces as `error.UnexpectedEndOfData`.
+inline fn decodeMcu(state: *const JpegState, layout: ScanLayout, br: *BitReader, blocks: ?[][4][64]i16, x: usize, prediction: *[4]i32) !void {
+    const bw: usize = state.block_width_actual;
+    var scratch: [64]i16 = undefined;
+    for (state.scan_components) |scan_comp| {
+        const ci = scan_comp.component_index;
+        const dc_table = if (state.dc_tables[scan_comp.dc_table_id]) |*t| t else return error.MissingHuffmanTable;
+        const ac_table = if (state.ac_tables[scan_comp.ac_table_id]) |*t| t else return error.MissingHuffmanTable;
+        const comp = state.components[ci];
+        const v_max: usize = if (layout.noninterleaved) 1 else comp.v_sampling;
+        const h_max: usize = if (layout.noninterleaved) 1 else comp.h_sampling;
+        for (0..v_max) |v| {
+            for (0..h_max) |h| {
+                const block = if (blocks) |b| &b[v * bw + x + h][ci] else &scratch;
+                @memset(block, 0);
+                decodeBlockBits(br, dc_table, ac_table, block, &prediction[ci]) catch |err| {
+                    return if (br.overrun()) error.UnexpectedEndOfData else err;
+                };
+                if (br.overrun()) return error.UnexpectedEndOfData;
+            }
+        }
+    }
+}
+
+/// Entropy decoder position within a baseline scan: the reader plus the DC predictors and
+/// the MCU count since the last restart marker. When the data of a restart segment runs
+/// out, the rest of that segment is zero and decoding resumes at the next marker; without
+/// markers (or once they are exhausted) everything after the failure is zero.
+const McuCursor = struct {
+    br: BitReader,
+    prediction: [4]i32 = @splat(0),
+    since_restart: u32 = 0,
+    /// MCUs still to emit as zeros before the next marker resumes decoding.
+    lost: u32 = 0,
+    /// No data or markers left: every remaining MCU is zero.
+    dead: bool = false,
+
+    /// Whether the next MCU decoded or is zero; `blocks` may be null to discard it.
+    fn next(self: *McuCursor, state: *const JpegState, layout: ScanLayout, blocks: ?[][4][64]i16, x: usize) !enum { decoded, zero } {
+        const interval = state.restart_interval;
+        if (interval != 0 and self.since_restart == interval) {
+            self.prediction = @splat(0);
+            self.since_restart = 0;
+            self.lost = 0;
+            if (!self.dead and !self.br.consumeRestartMarker()) self.dead = true;
+        }
+        self.since_restart += 1;
+        if (self.dead or self.lost > 0) {
+            self.lost -|= 1;
+            if (blocks) |b| zeroMcu(state, layout, b, x);
+            return .zero;
+        }
+        decodeMcu(state, layout, &self.br, blocks, x, &self.prediction) catch |err| switch (err) {
+            error.UnexpectedEndOfData => {
+                if (interval == 0) self.dead = true else self.lost = interval - self.since_restart;
+                if (blocks) |b| zeroMcu(state, layout, b, x);
+                return .zero;
+            },
+            else => return err,
+        };
+        return .decoded;
+    }
+};
+
+/// Zeroes the blocks of the MCU at block column `x` (partially written on a failed decode).
+fn zeroMcu(state: *const JpegState, layout: ScanLayout, blocks: [][4][64]i16, x: usize) void {
+    const bw: usize = state.block_width_actual;
+    for (0..layout.y_step) |v| {
+        for (x..@min(x + layout.x_step, bw)) |bx| {
+            for (&blocks[v * bw + bx]) |*block| @memset(block, 0);
+        }
+    }
+}
+
+/// Decodes MCU row `row` into `blocks` (one MCU row of blocks) and renders it.
+fn decodeRenderMcuRow(comptime T: type, state: *const JpegState, layout: ScanLayout, cursor: *McuCursor, render: *RenderBand, blocks: [][4][64]i16, row: usize, img: *Image(T)) !void {
+    var x: usize = 0;
+    while (x < state.block_width) : (x += layout.x_step) {
+        _ = try cursor.next(state, layout, blocks, x);
+    }
+    const y = row * layout.y_step;
+    try renderBlockRows(T, state, render, blocks, y, @min(layout.y_step, state.block_height - y), img);
+}
+
 /// Baseline scan, one MCU row at a time: decode into the band store, render, repeat.
 fn performBlockScan(comptime T: type, state: *JpegState, band: *RenderBand, img: *Image(T)) !void {
     const blocks = state.block_storage orelse return error.BlockStorageNotAllocated;
-    const max_h_factor, const max_v_factor = state.maxSamplingFactors();
-    const noninterleaved = state.isNoninterleaved(state.scan_components);
-    const y_step: usize = if (noninterleaved) 1 else max_v_factor;
-    const x_step: usize = if (noninterleaved) 1 else max_h_factor;
+    const layout: ScanLayout = .init(state);
+    // The reader lives in a local for the whole scan so the hot loop keeps it in registers.
+    var cursor: McuCursor = .{ .br = state.bit_reader };
+    defer state.bit_reader = cursor.br;
+    for (0..layout.mcu_rows) |row| {
+        try decodeRenderMcuRow(T, state, layout, &cursor, band, blocks, row, img);
+    }
+}
+
+/// Byte offsets into the entropy data at which restart segments begin: `starts[k]` is the
+/// first byte after the k-th RSTn marker (`starts[0] = 0`), so segment k holds MCUs
+/// `[k * interval, (k + 1) * interval)`.
+fn restartSegments(allocator: Allocator, data: []const u8) ![]usize {
+    var starts: std.ArrayList(usize) = .empty;
+    errdefer starts.deinit(allocator);
+    try starts.append(allocator, 0);
+    var pos: usize = 0;
+    while (pos + 1 < data.len) {
+        const ff = std.mem.indexOfScalarPos(u8, data, pos, 0xFF) orelse break;
+        if (ff + 1 >= data.len) break;
+        const m = data[ff + 1];
+        if (m >= 0xD0 and m <= 0xD7) try starts.append(allocator, ff + 2);
+        pos = ff + 1;
+    }
+    return starts.toOwnedSlice(allocator);
+}
+
+/// Baseline scan with restart intervals on `io`: bands own balanced runs of MCU rows, each
+/// starting its entropy decoder at the restart segment holding its first MCU (discarding
+/// the segment's earlier MCUs, under one MCU row) and rendering through its own scratch.
+/// Every band re-derives the same DC predictors and restart cadence as a single sweep, so
+/// the output is identical.
+fn performBlockScanBanded(comptime T: type, io: Io, state: *JpegState, img: *Image(T), starts: []const usize, bands: usize) !void {
+    const layout: ScanLayout = .init(state);
+    const allocator = state.allocator;
+    const interval: usize = state.restart_interval;
     const bw: usize = state.block_width_actual;
 
-    var prediction_values: [4]i32 = @splat(0);
-    var mcus_since_restart: u32 = 0;
-    // Truncated data keeps what was decoded; the rest renders as zero blocks.
-    var truncated = false;
+    const Band = struct {
+        row0: usize,
+        row1: usize,
+        render: RenderBand,
+        blocks: [][4][64]i16,
+        err: ?anyerror = null,
+    };
+    const Ctx = struct {
+        state: *const JpegState,
+        layout: ScanLayout,
+        img: *Image(T),
+        starts: []const usize,
+        bands: []Band,
 
-    var y: usize = 0;
-    while (y < state.block_height) : (y += y_step) {
-        var x: usize = 0;
-        if (!truncated) {
-            scan: while (x < state.block_width) : (x += x_step) {
-                if (state.restart_interval != 0 and mcus_since_restart == state.restart_interval) {
-                    prediction_values = @splat(0);
-                    mcus_since_restart = 0;
-                    if (!state.bit_reader.consumeRestartMarker()) {
-                        truncated = true;
-                        break :scan;
-                    }
-                }
-                mcus_since_restart += 1;
-                for (state.scan_components) |scan_comp| {
-                    const component_index = scan_comp.component_index;
-                    const frame_component = state.components[component_index];
-                    const v_max: usize = if (noninterleaved) 1 else frame_component.v_sampling;
-                    const h_max: usize = if (noninterleaved) 1 else frame_component.h_sampling;
+        fn run(ctx: *const @This(), k: usize, _: usize, _: usize) void {
+            const band = &ctx.bands[k];
+            band.err = null;
+            ctx.decodeBand(band) catch |err| {
+                band.err = err;
+            };
+        }
 
-                    for (0..v_max) |v| {
-                        for (0..h_max) |h| {
-                            const block = &blocks[v * bw + x + h][component_index];
-                            decodeBlockBaseline(state, scan_comp, block, &prediction_values[component_index]) catch |err| switch (err) {
-                                error.UnexpectedEndOfData => {
-                                    truncated = true;
-                                    break :scan;
-                                },
-                                else => return err,
-                            };
-                        }
-                    }
-                }
+        fn decodeBand(ctx: *const @This(), band: *Band) !void {
+            const st = ctx.state;
+            const lay = ctx.layout;
+            const first_mcu = band.row0 * lay.mcus_per_row;
+            const seg = first_mcu / st.restart_interval;
+            // Fewer markers than MCUs need: like the single sweep, everything past the last
+            // marker is zero.
+            const has_data = seg < ctx.starts.len;
+            var cursor: McuCursor = .{ .br = .init(st.bit_reader.data[if (has_data) ctx.starts[seg] else 0..]), .dead = !has_data };
+            var mcu = seg * st.restart_interval;
+            var x = (mcu % lay.mcus_per_row) * lay.x_step;
+            while (mcu < first_mcu) : (mcu += 1) {
+                _ = try cursor.next(st, lay, null, x);
+                x = if ((mcu + 1) % lay.mcus_per_row == 0) 0 else x + lay.x_step;
+            }
+            for (band.row0..band.row1) |row| {
+                try decodeRenderMcuRow(T, st, lay, &cursor, &band.render, band.blocks, row, ctx.img);
             }
         }
-        if (truncated) {
-            // Blocks from the failing MCU onwards were never written.
-            for (0..y_step) |v| {
-                for (x..bw) |bx| {
-                    for (&blocks[v * bw + bx]) |*block| @memset(block, 0);
-                }
-            }
-        }
-        try renderBlockRows(T, state, band, blocks, y, @min(y_step, state.block_height - y), img);
+    };
+
+    const band_list = try allocator.alloc(Band, bands);
+    defer allocator.free(band_list);
+    var made: usize = 0;
+    defer for (band_list[0..made]) |*band| {
+        band.render.deinit();
+        allocator.free(band.blocks);
+    };
+    // Balance by restart segments, then own whole MCU rows from the row that starts at or
+    // after the band's first segment.
+    const segments = (layout.mcu_rows * layout.mcus_per_row + interval - 1) / interval;
+    for (band_list, 0..) |*band, k| {
+        const seg0 = k * segments / bands;
+        const seg1 = (k + 1) * segments / bands;
+        const row0 = @min(layout.mcu_rows, (seg0 * interval + layout.mcus_per_row - 1) / layout.mcus_per_row);
+        const row1 = if (k + 1 == bands) layout.mcu_rows else @min(layout.mcu_rows, (seg1 * interval + layout.mcus_per_row - 1) / layout.mcus_per_row);
+        band.* = .{
+            .row0 = row0,
+            .row1 = row1,
+            .render = try .init(allocator, state),
+            .blocks = undefined,
+        };
+        made = k + 1;
+        band.blocks = try allocator.alloc([4][64]i16, bw * layout.y_step);
     }
+
+    const ctx: Ctx = .{ .state = state, .layout = layout, .img = img, .starts = starts, .bands = band_list };
+    parallel.forRowBands(io, bands, bands, &ctx, Ctx.run);
+    for (band_list) |band| if (band.err) |err| return err;
 }
 
 /// Sample planes for one MCU row plus the chroma upsampling scratch, reused for every band.
@@ -2814,7 +2963,7 @@ const RenderBand = struct {
 /// Dequantizes, inverse-transforms and colour-converts block rows `[block_row0, block_row0 +
 /// block_rows)` into `img`. `blocks` holds those rows from index 0, `block_width_actual` wide,
 /// as whole MCU rows so chroma is upsampled within its MCU row.
-fn renderBlockRows(comptime T: type, state: *JpegState, band: *RenderBand, blocks: [][4][64]i16, block_row0: usize, block_rows: usize, img: *Image(T)) !void {
+fn renderBlockRows(comptime T: type, state: *const JpegState, band: *RenderBand, blocks: [][4][64]i16, block_row0: usize, block_rows: usize, img: *Image(T)) !void {
     const nc: usize = state.header.num_components;
     const bw: usize = state.block_width_actual;
     const max_h, const max_v = state.maxSamplingFactors();
@@ -2867,10 +3016,22 @@ fn renderBlockRows(comptime T: type, state: *JpegState, band: *RenderBand, block
 }
 
 /// Baseline frames stream their scan; progressive frames render the full store band by band.
-fn decodeInto(comptime T: type, state: *JpegState, img: *Image(T)) !void {
+fn decodeInto(comptime T: type, io: Io, state: *JpegState, img: *Image(T)) !void {
+    if (state.header.frame_type == .baseline) {
+        if (state.restart_interval != 0) {
+            const layout: ScanLayout = .init(state);
+            const starts = try restartSegments(state.allocator, state.bit_reader.data);
+            defer state.allocator.free(starts);
+            // One band per CPU, never more than there are segments or MCU rows.
+            const bands = @min(parallel.bandCount(layout.mcu_rows, @as(usize, state.header.width) * 8 * layout.y_step), starts.len);
+            if (bands > 1) return performBlockScanBanded(T, io, state, img, starts, bands);
+        }
+        var band: RenderBand = try .init(state.allocator, state);
+        defer band.deinit();
+        return performBlockScan(T, state, &band, img);
+    }
     var band: RenderBand = try .init(state.allocator, state);
     defer band.deinit();
-    if (state.header.frame_type == .baseline) return performBlockScan(T, state, &band, img);
     const full = state.block_storage orelse return error.BlockStorageNotAllocated;
     _, const max_v = state.maxSamplingFactors();
     const bw: usize = state.block_width_actual;
@@ -2880,28 +3041,28 @@ fn decodeInto(comptime T: type, state: *JpegState, img: *Image(T)) !void {
     }
 }
 
-pub fn toNativeImage(allocator: Allocator, state: *JpegState) !union(enum) {
+pub fn toNativeImage(io: Io, allocator: Allocator, state: *JpegState) !union(enum) {
     grayscale: Image(u8),
     rgb: Image(Rgb),
 } {
     if (state.header.num_components == 1) {
         var img: Image(u8) = try .init(allocator, state.header.height, state.header.width);
         errdefer img.deinit(allocator);
-        try decodeInto(u8, state, &img);
+        try decodeInto(u8, io, state, &img);
         return .{ .grayscale = img };
     }
     var img: Image(Rgb) = try .init(allocator, state.header.height, state.header.width);
     errdefer img.deinit(allocator);
-    try decodeInto(Rgb, state, &img);
+    try decodeInto(Rgb, io, state, &img);
     return .{ .rgb = img };
 }
 
-pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
+pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
     var state = try decode(allocator, data, limits);
     defer state.deinit();
     var img: Image(T) = try .init(allocator, state.header.height, state.header.width);
     errdefer img.deinit(allocator);
-    try decodeInto(T, &state, &img);
+    try decodeInto(T, io, &state, &img);
     return img;
 }
 
@@ -2909,7 +3070,7 @@ pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u
     const read_limit = if (limits.max_jpeg_bytes == 0) std.math.maxInt(usize) else limits.max_jpeg_bytes;
     const jpeg_data = try Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
     defer allocator.free(jpeg_data);
-    return loadFromBytes(T, allocator, jpeg_data, limits);
+    return loadFromBytes(T, io, allocator, jpeg_data, limits);
 }
 
 test "quantizer reciprocals match integer division for every table value" {
@@ -2974,7 +3135,7 @@ test "JPEG encode -> decode RGB roundtrip" {
     defer state.deinit();
     var out: Image(Rgb) = try .init(gpa, state.header.height, state.header.width);
     defer out.deinit(gpa);
-    try decodeInto(Rgb, &state, &out);
+    try decodeInto(Rgb, parallel.inline_io, &state, &out);
 
     // One 4:2:0 MCU at quality 85: integer chroma upsampling lands at ~38.7 dB.
     const psnr = try img.psnr(out);
@@ -2997,7 +3158,7 @@ test "JPEG encode -> decode grayscale roundtrip" {
     defer state.deinit();
     var out: Image(Rgb) = try .init(gpa, state.header.height, state.header.width);
     defer out.deinit(gpa);
-    try decodeInto(Rgb, &state, &out);
+    try decodeInto(Rgb, parallel.inline_io, &state, &out);
 
     // Convert original gray to RGB for PSNR
     var gray_rgb = try img.convert(parallel.inline_io, gpa, Rgb);
@@ -3031,7 +3192,7 @@ test "JPEG subsampling 4:2:2 roundtrip" {
     defer state.deinit();
     var out: Image(Rgb) = try .init(gpa, state.header.height, state.header.width);
     defer out.deinit(gpa);
-    try decodeInto(Rgb, &state, &out);
+    try decodeInto(Rgb, parallel.inline_io, &state, &out);
 
     const psnr = try img.psnr(out);
     try std.testing.expect(psnr > 40);
@@ -3062,7 +3223,7 @@ test "JPEG subsampling 4:2:0 roundtrip" {
     defer state.deinit();
     var out: Image(Rgb) = try .init(gpa, state.header.height, state.header.width);
     defer out.deinit(gpa);
-    try decodeInto(Rgb, &state, &out);
+    try decodeInto(Rgb, parallel.inline_io, &state, &out);
 
     const psnr = try img.psnr(out);
     try std.testing.expect(psnr > 45);
@@ -3095,7 +3256,7 @@ test "JPEG 4:2:0 odd-size roundtrip (non-multiple-of-MCU)" {
     defer state.deinit();
     var out: Image(Rgb) = try .init(gpa, state.header.height, state.header.width);
     defer out.deinit(gpa);
-    try decodeInto(Rgb, &state, &out);
+    try decodeInto(Rgb, parallel.inline_io, &state, &out);
 
     // We expect a decent reconstruction quality even with 4:2:0 on odd dimensions.
     const psnr = try img.psnr(out);
@@ -3144,7 +3305,7 @@ const test_progressive_jpeg = signature ++ test_progressive_dqt ++ test_progress
     test_progressive_eoi;
 
 test "JPEG progressive full decode of hand-built stream" {
-    var img = try loadFromBytes(u8, std.testing.allocator, &test_progressive_jpeg, .{});
+    var img = try loadFromBytes(u8, parallel.inline_io, std.testing.allocator, &test_progressive_jpeg, .{});
     defer img.deinit(std.testing.allocator);
     try std.testing.expectEqual(8, img.rows);
     try std.testing.expectEqual(8, img.cols);
@@ -3153,7 +3314,7 @@ test "JPEG progressive full decode of hand-built stream" {
 
 test "JPEG progressive scan limit returns partial image" {
     // Only the first two of three DC scans are decoded: DC = 14 -> pixel 142.
-    var img = try loadFromBytes(u8, std.testing.allocator, &test_progressive_jpeg, .{ .max_scans = 2 });
+    var img = try loadFromBytes(u8, parallel.inline_io, std.testing.allocator, &test_progressive_jpeg, .{ .max_scans = 2 });
     defer img.deinit(std.testing.allocator);
     for (img.data) |px| try std.testing.expectEqual(142, px);
 
@@ -3170,7 +3331,7 @@ test "JPEG duplicate SOF is rejected" {
 
 test "JPEG truncated progressive stream decodes partially" {
     // Scan 3 loses its entropy data (and EOI): refinement hits EOF, DC stays at 14.
-    var img = try loadFromBytes(u8, std.testing.allocator, test_progressive_jpeg[0 .. test_progressive_jpeg.len - 4], .{});
+    var img = try loadFromBytes(u8, parallel.inline_io, std.testing.allocator, test_progressive_jpeg[0 .. test_progressive_jpeg.len - 4], .{});
     defer img.deinit(std.testing.allocator);
     for (img.data) |px| try std.testing.expectEqual(142, px);
 
@@ -3178,7 +3339,7 @@ test "JPEG truncated progressive stream decodes partially" {
     // the DC-first Huffman read hits EOF, leaving all coefficients zero.
     const headers_only = signature ++ test_progressive_dqt ++ test_progressive_sof2 ++
         test_progressive_dht ++ test_progressive_scan1[0 .. test_progressive_scan1.len - 1].*;
-    var img2 = try loadFromBytes(u8, std.testing.allocator, &headers_only, .{});
+    var img2 = try loadFromBytes(u8, parallel.inline_io, std.testing.allocator, &headers_only, .{});
     defer img2.deinit(std.testing.allocator);
     for (img2.data) |px| try std.testing.expectEqual(128, px);
 }
@@ -3187,7 +3348,7 @@ test "JPEG DC-only progressive scan decodes" {
     // Single DC scan at Al=2: DC = 12 -> flat image of value 140.
     const dc_only = signature ++ test_progressive_dqt ++ test_progressive_sof2 ++
         test_progressive_dht ++ test_progressive_scan1 ++ test_progressive_eoi;
-    var img = try loadFromBytes(u8, std.testing.allocator, &dc_only, .{});
+    var img = try loadFromBytes(u8, parallel.inline_io, std.testing.allocator, &dc_only, .{});
     defer img.deinit(std.testing.allocator);
     for (img.data) |px| try std.testing.expectEqual(140, px);
 }
@@ -3264,6 +3425,57 @@ fn gradientImage(gpa: Allocator, rows: u32, cols: u32) !Image(Rgb) {
     return img;
 }
 
+test "banded restart-interval decode matches the single sweep" {
+    const gpa = std.testing.allocator;
+    var pool: std.Io.Threaded = .init(gpa, .{});
+    defer pool.deinit();
+    const pool_io = pool.io();
+    // 300x400 is several bands worth of MCU rows for every subsampling.
+    var img = try gradientImage(gpa, 300, 400);
+    defer img.deinit(gpa);
+    var gray = try img.convert(parallel.inline_io, gpa, u8);
+    defer gray.deinit(gpa);
+
+    // 1 and 3 MCUs, one row (25 MCUs at 4:2:0, 50 otherwise), and a run straddling rows.
+    for ([_]Subsampling{ .yuv444, .yuv422, .yuv420 }) |subsampling| {
+        for ([_]u16{ 1, 3, 25, 50, 77 }) |interval| {
+            const bytes = try encode(Rgb, gpa, img, .{ .subsampling = subsampling, .restart_interval = interval });
+            defer gpa.free(bytes);
+            var want = try loadFromBytes(Rgb, parallel.inline_io, gpa, bytes, .{});
+            defer want.deinit(gpa);
+            var got = try loadFromBytes(Rgb, pool_io, gpa, bytes, .{});
+            defer got.deinit(gpa);
+            try std.testing.expectEqualSlices(u8, want.asBytes(), got.asBytes());
+
+            // Cut inside a middle segment and drop one marker: the damaged segments are zero
+            // and decoding resumes at the next marker, on both paths alike.
+            const second = std.mem.indexOfPos(u8, bytes, std.mem.indexOf(u8, bytes, &.{ 0xFF, 0xD0 }).? + 2, &.{ 0xFF, 0xD1 }).?;
+            var want_cut = try loadFromBytes(Rgb, parallel.inline_io, gpa, bytes[0 .. second + 40], .{});
+            defer want_cut.deinit(gpa);
+            var got_cut = try loadFromBytes(Rgb, pool_io, gpa, bytes[0 .. second + 40], .{});
+            defer got_cut.deinit(gpa);
+            try std.testing.expectEqualSlices(u8, want_cut.asBytes(), got_cut.asBytes());
+
+            const damaged = try gpa.dupe(u8, bytes);
+            defer gpa.free(damaged);
+            damaged[second + 1] = 0x00;
+            var want_dmg = try loadFromBytes(Rgb, parallel.inline_io, gpa, damaged, .{});
+            defer want_dmg.deinit(gpa);
+            var got_dmg = try loadFromBytes(Rgb, pool_io, gpa, damaged, .{});
+            defer got_dmg.deinit(gpa);
+            try std.testing.expectEqualSlices(u8, want_dmg.asBytes(), got_dmg.asBytes());
+        }
+    }
+
+    const bytes = try encode(u8, gpa, gray, .{ .restart_interval = 7 });
+    defer gpa.free(bytes);
+    var want = try loadFromBytes(u8, parallel.inline_io, gpa, bytes, .{});
+    defer want.deinit(gpa);
+    var got = try loadFromBytes(u8, pool_io, gpa, bytes, .{});
+    defer got.deinit(gpa);
+    try std.testing.expectEqualSlices(u8, want.data, got.data);
+}
+
 test "JPEG restart intervals decode identically to a single interval" {
     const gpa = std.testing.allocator;
     var img = try gradientImage(gpa, 37, 29);
@@ -3274,13 +3486,13 @@ test "JPEG restart intervals decode identically to a single interval" {
     for ([_]Subsampling{ .yuv444, .yuv422, .yuv420 }) |subsampling| {
         const plain = try encode(Rgb, gpa, img, .{ .subsampling = subsampling });
         defer gpa.free(plain);
-        var want = try loadFromBytes(Rgb, gpa, plain, .{});
+        var want = try loadFromBytes(Rgb, parallel.inline_io, gpa, plain, .{});
         defer want.deinit(gpa);
         for ([_]u16{ 1, 3 }) |interval| {
             const bytes = try encode(Rgb, gpa, img, .{ .subsampling = subsampling, .restart_interval = interval });
             defer gpa.free(bytes);
             try std.testing.expect(std.mem.indexOf(u8, bytes, &.{ 0xFF, 0xDD }) != null);
-            var got = try loadFromBytes(Rgb, gpa, bytes, .{});
+            var got = try loadFromBytes(Rgb, parallel.inline_io, gpa, bytes, .{});
             defer got.deinit(gpa);
             try std.testing.expectEqualSlices(u8, want.asBytes(), got.asBytes());
         }
@@ -3288,21 +3500,21 @@ test "JPEG restart intervals decode identically to a single interval" {
 
     const plain = try encode(u8, gpa, gray, .{});
     defer gpa.free(plain);
-    var want = try loadFromBytes(u8, gpa, plain, .{});
+    var want = try loadFromBytes(u8, parallel.inline_io, gpa, plain, .{});
     defer want.deinit(gpa);
     const bytes = try encode(u8, gpa, gray, .{ .restart_interval = 2 });
     defer gpa.free(bytes);
-    var got = try loadFromBytes(u8, gpa, bytes, .{});
+    var got = try loadFromBytes(u8, parallel.inline_io, gpa, bytes, .{});
     defer got.deinit(gpa);
     try std.testing.expectEqualSlices(u8, want.data, got.data);
 
     // Truncated inside the third interval: the first MCU row (two intervals) is intact.
     const rgb = try encode(Rgb, gpa, img, .{ .subsampling = .yuv420, .restart_interval = 1 });
     defer gpa.free(rgb);
-    var full = try loadFromBytes(Rgb, gpa, rgb, .{});
+    var full = try loadFromBytes(Rgb, parallel.inline_io, gpa, rgb, .{});
     defer full.deinit(gpa);
     const cut = std.mem.indexOf(u8, rgb, &.{ 0xFF, 0xD1 }).? + 3;
-    var partial = try loadFromBytes(Rgb, gpa, rgb[0..cut], .{});
+    var partial = try loadFromBytes(Rgb, parallel.inline_io, gpa, rgb[0..cut], .{});
     defer partial.deinit(gpa);
     for (0..16) |r| {
         try std.testing.expectEqualSlices(u8, std.mem.sliceAsBytes(full.data[r * full.cols ..][0..full.cols]), std.mem.sliceAsBytes(partial.data[r * partial.cols ..][0..partial.cols]));
@@ -3328,7 +3540,7 @@ test "JPEG malformed SOS/SOF fields are rejected" {
         const corrupt = try gpa.dupe(u8, bytes);
         defer gpa.free(corrupt);
         corrupt[case.offset] = case.value;
-        try std.testing.expectError(case.err, loadFromBytes(Rgb, gpa, corrupt, .{}));
+        try std.testing.expectError(case.err, loadFromBytes(Rgb, parallel.inline_io, gpa, corrupt, .{}));
     }
 }
 
@@ -3356,12 +3568,12 @@ test "JPEG Adobe APP14 transform 0 decodes the planes as RGB" {
         const ycc = convertColor(Ycbcr, px);
         w.* = .{ .r = ycc.y, .g = ycc.cb, .b = ycc.cr };
     }
-    var got = try loadFromBytes(Rgb, gpa, patched.items, .{});
+    var got = try loadFromBytes(Rgb, parallel.inline_io, gpa, patched.items, .{});
     defer got.deinit(gpa);
     try std.testing.expect(try want.psnr(got) > 40);
 
     // With the JFIF segment the same scan is YCbCr.
-    var plain = try loadFromBytes(Rgb, gpa, bytes, .{});
+    var plain = try loadFromBytes(Rgb, parallel.inline_io, gpa, bytes, .{});
     defer plain.deinit(gpa);
     try std.testing.expect(try img.psnr(plain) > 40);
 }

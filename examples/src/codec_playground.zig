@@ -136,7 +136,7 @@ pub export fn load_image(ptr: [*]const u8, len: usize) i32 {
         return fail("UnsupportedFormat", "Unrecognized image format. Supported: PNG, JPEG, BMP, GIF.");
 
     const t0 = js.nowFn();
-    const image = Image(Rgba).loadFromBytes(allocator, data) catch |err| return failErr(err);
+    const image = Image(Rgba).loadFromBytes(std.Io.failing, allocator, data) catch |err| return failErr(err);
     const decode_ms = js.nowFn() - t0;
 
     if (g_source) |*old| old.deinit(allocator);
@@ -177,7 +177,7 @@ fn finishEncode(format: ImageFormat, bytes: []u8, encode_ms: f32) i32 {
     if (g_output) |*old| old.deinit(allocator);
     g_output = null;
 
-    g_output = Image(Rgba).loadFromBytes(allocator, bytes) catch |err| return failErr(err);
+    g_output = Image(Rgba).loadFromBytes(std.Io.failing, allocator, bytes) catch |err| return failErr(err);
 
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();

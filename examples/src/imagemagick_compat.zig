@@ -87,7 +87,7 @@ fn roundtrip(
 ) !void {
     const bytes = try codec.encode(Rgba, gpa, src, .default);
     defer gpa.free(bytes);
-    var back = try codec.loadFromBytes(Rgba, gpa, bytes, .{});
+    var back = try codec.loadFromBytes(Rgba, io, gpa, bytes, .{});
     defer back.deinit(gpa);
 
     const db = try back.psnr(src);

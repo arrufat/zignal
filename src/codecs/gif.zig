@@ -538,7 +538,7 @@ fn parseImageBlock(
 /// For `T == Rgba` transparent indices preserve `alpha=0`; for any other `T`
 /// the canvas starts at `palette[bg]` so transparent pixels show the GIF's
 /// declared background color.
-fn composeFirstFrame(comptime T: type, allocator: Allocator, state: GifState) !Image(T) {
+fn composeFirstFrame(comptime T: type, io: Io, allocator: Allocator, state: GifState) !Image(T) {
     if (state.frames.len == 0) return error.MissingPixelData;
     const frame = state.frames[0];
 
@@ -560,7 +560,7 @@ fn composeFirstFrame(comptime T: type, allocator: Allocator, state: GifState) !I
 
     if (T == Rgba) return canvas;
     defer canvas.deinit(allocator);
-    return canvas.convert(parallel.inline_io, allocator, T);
+    return canvas.convert(io, allocator, T);
 }
 
 /// First-frame composition pre-converted to `Rgb`/`Rgba`. The Rgba variant is
@@ -577,17 +577,17 @@ pub fn toNativeImage(allocator: Allocator, state: GifState) !NativeImage {
     if (state.frames.len == 0) return error.MissingPixelData;
     const has_transparency = if (state.frames[0].gce) |g| g.has_transparent else false;
     if (has_transparency) {
-        return .{ .rgba = try composeFirstFrame(Rgba, allocator, state) };
+        return .{ .rgba = try composeFirstFrame(Rgba, parallel.inline_io, allocator, state) };
     }
-    return .{ .rgb = try composeFirstFrame(Rgb, allocator, state) };
+    return .{ .rgb = try composeFirstFrame(Rgb, parallel.inline_io, allocator, state) };
 }
 
 /// Loads a GIF from in-memory bytes. Returns frame 0 only — see
 /// `loadAnimatedFromBytes` for full multi-frame access.
-pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
+pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
     var state = try decode(allocator, data, limits);
     defer state.deinit(allocator);
-    return composeFirstFrame(T, allocator, state);
+    return composeFirstFrame(T, io, allocator, state);
 }
 
 // ---------------------------------------------------------------------------
@@ -597,7 +597,7 @@ pub fn loadFromBytes(comptime T: type, allocator: Allocator, data: []const u8, l
 /// Composes all frames into an `AnimatedImage(T)`. Each output frame is the
 /// fully-rendered canvas at that point in playback, so callers don't have to
 /// know about disposal methods or transparent indices.
-fn composeAnimated(comptime T: type, allocator: Allocator, state: GifState) !AnimatedImage(T) {
+fn composeAnimated(comptime T: type, io: Io, allocator: Allocator, state: GifState) !AnimatedImage(T) {
     const screen_w: u32 = state.header.width;
     const screen_h: u32 = state.header.height;
 
@@ -653,7 +653,7 @@ fn composeAnimated(comptime T: type, allocator: Allocator, state: GifState) !Ani
             frames_out[i] = rgba_frame;
         } else {
             defer rgba_frame.deinit(allocator);
-            frames_out[i] = try rgba_frame.convert(parallel.inline_io, allocator, T);
+            frames_out[i] = try rgba_frame.convert(io, allocator, T);
         }
         frames_init = i + 1;
 
@@ -702,10 +702,10 @@ fn compositeFrameOntoCanvas(canvas: *Image(Rgba), frame: FrameRecord) !void {
 /// Loads all frames from a GIF byte buffer into an `AnimatedImage(T)`.
 /// Disposal and transparency are absorbed by the decoder — every output frame
 /// is fully composed.
-pub fn loadAnimatedFromBytes(comptime T: type, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
+pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
     var state = try decode(allocator, data, limits);
     defer state.deinit(allocator);
-    return composeAnimated(T, allocator, state);
+    return composeAnimated(T, io, allocator, state);
 }
 
 fn readGifFile(io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) ![]u8 {
@@ -717,14 +717,14 @@ fn readGifFile(io: Io, allocator: Allocator, file_path: []const u8, limits: Deco
 pub fn loadAnimated(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
     const data = try readGifFile(io, allocator, file_path, limits);
     defer allocator.free(data);
-    return loadAnimatedFromBytes(T, allocator, data, limits);
+    return loadAnimatedFromBytes(T, io, allocator, data, limits);
 }
 
 /// Loads a GIF from a file path. Returns frame 0 only.
 pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
     const data = try readGifFile(io, allocator, file_path, limits);
     defer allocator.free(data);
-    return loadFromBytes(T, allocator, data, limits);
+    return loadFromBytes(T, io, allocator, data, limits);
 }
 
 // ---------------------------------------------------------------------------
@@ -1428,7 +1428,7 @@ test "loadFromBytes — 1x1 red pixel" {
     try b.appendImageWithLzw(gpa, .{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
     try b.appendTrailer(gpa);
 
-    var img = try loadFromBytes(Rgb, gpa, b.list.items, .{});
+    var img = try loadFromBytes(Rgb, parallel.inline_io, gpa, b.list.items, .{});
     defer img.deinit(gpa);
 
     try expectEqual(@as(usize, 1), img.rows);
@@ -1448,7 +1448,7 @@ test "loadFromBytes — 2x2 with global palette" {
     try b.appendImageWithLzw(gpa, .{ .width = 2, .height = 2 }, null, &.{ 0x44, 0x34, 0x05 });
     try b.appendTrailer(gpa);
 
-    var img = try loadFromBytes(Rgb, gpa, b.list.items, .{});
+    var img = try loadFromBytes(Rgb, parallel.inline_io, gpa, b.list.items, .{});
     defer img.deinit(gpa);
 
     try expectEqual(Rgb{ .r = 0, .g = 0, .b = 0 }, img.at(0, 0).*);
@@ -1480,7 +1480,7 @@ test "loadFromBytes — local color table overrides global" {
     );
     try b.appendTrailer(gpa);
 
-    var img = try loadFromBytes(Rgb, gpa, b.list.items, .{});
+    var img = try loadFromBytes(Rgb, parallel.inline_io, gpa, b.list.items, .{});
     defer img.deinit(gpa);
 
     try expectEqual(Rgb{ .r = 255, .g = 255, .b = 255 }, img.at(0, 0).*);
@@ -1498,7 +1498,7 @@ test "loadFromBytes — frame outside screen rejected via descriptor checks" {
     try b.appendImageWithLzw(gpa, .{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
     try b.appendTrailer(gpa);
 
-    try expectError(error.ImageTooLarge, loadFromBytes(Rgb, gpa, b.list.items, .{ .max_width = 2 }));
+    try expectError(error.ImageTooLarge, loadFromBytes(Rgb, parallel.inline_io, gpa, b.list.items, .{ .max_width = 2 }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1526,7 +1526,7 @@ test "loadAnimated — two frames, do_not_dispose, per-frame delays" {
 
     try b.appendTrailer(gpa);
 
-    var anim = try loadAnimatedFromBytes(Rgba, gpa, b.list.items, .{});
+    var anim = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, b.list.items, .{});
     defer anim.deinit(gpa);
 
     try expectEqual(@as(usize, 2), anim.frameCount());
@@ -1559,7 +1559,7 @@ test "loadAnimated — restore_to_background blanks the previous rect" {
 
     try b.appendTrailer(gpa);
 
-    var anim = try loadAnimatedFromBytes(Rgba, gpa, b.list.items, .{});
+    var anim = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, b.list.items, .{});
     defer anim.deinit(gpa);
 
     try expectEqual(@as(usize, 2), anim.frameCount());
@@ -1588,7 +1588,7 @@ test "loadAnimated — transparent index → alpha=0 on Rgba" {
 
     try b.appendTrailer(gpa);
 
-    var anim = try loadAnimatedFromBytes(Rgba, gpa, b.list.items, .{});
+    var anim = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, b.list.items, .{});
     defer anim.deinit(gpa);
 
     // Pixel 0: index 0 is transparent → alpha=0 (canvas was initialized to all transparent).
@@ -1622,7 +1622,7 @@ test "encode — caller-supplied palette, exact round-trip" {
     const data = try encode(Rgb, gpa, img, .{ .palette = &palette });
     defer gpa.free(data);
 
-    var decoded = try loadFromBytes(Rgb, gpa, data, .{});
+    var decoded = try loadFromBytes(Rgb, parallel.inline_io, gpa, data, .{});
     defer decoded.deinit(gpa);
 
     try expectEqual(@as(usize, 2), decoded.rows);
@@ -1650,7 +1650,7 @@ test "encode — auto median-cut on 16x16 gradient" {
     const data = try encode(Rgb, gpa, img, .{});
     defer gpa.free(data);
 
-    var decoded = try loadFromBytes(Rgb, gpa, data, .{});
+    var decoded = try loadFromBytes(Rgb, parallel.inline_io, gpa, data, .{});
     defer decoded.deinit(gpa);
 
     try expectEqual(@as(usize, 16), decoded.rows);
@@ -1670,7 +1670,7 @@ test "encode — Image(u8) gradient via linear gray palette" {
     const data = try encode(u8, gpa, img, .{});
     defer gpa.free(data);
 
-    var decoded = try loadFromBytes(u8, gpa, data, .{});
+    var decoded = try loadFromBytes(u8, parallel.inline_io, gpa, data, .{});
     defer decoded.deinit(gpa);
 
     try expectEqual(@as(usize, 4), decoded.rows);
@@ -1696,7 +1696,7 @@ test "encode — Floyd–Steinberg dithering produces valid output" {
     const data = try encode(Rgb, gpa, img, .{ .max_colors = 8, .dither = true });
     defer gpa.free(data);
 
-    var decoded = try loadFromBytes(Rgb, gpa, data, .{});
+    var decoded = try loadFromBytes(Rgb, parallel.inline_io, gpa, data, .{});
     defer decoded.deinit(gpa);
 
     try expectEqual(@as(usize, 8), decoded.rows);
@@ -1746,7 +1746,7 @@ test "encodeAnimated — 2 Rgb frames round-trip with delays and loop count" {
     const data = try encodeAnimated(Rgb, gpa, anim, .{});
     defer gpa.free(data);
 
-    var decoded = try loadAnimatedFromBytes(Rgba, gpa, data, .{});
+    var decoded = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, data, .{});
     defer decoded.deinit(gpa);
 
     try expectEqual(@as(usize, 2), decoded.frameCount());
@@ -1773,7 +1773,7 @@ test "encodeAnimated — Rgba transparent pixel round-trips alpha=0" {
     const data = try encodeAnimated(Rgba, gpa, anim, .{});
     defer gpa.free(data);
 
-    var decoded = try loadAnimatedFromBytes(Rgba, gpa, data, .{});
+    var decoded = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, data, .{});
     defer decoded.deinit(gpa);
 
     try expectEqual(@as(u8, 0), decoded.frame(0).at(0, 0).a);
@@ -1808,7 +1808,7 @@ test "encodeAnimated — caller-supplied global palette uses GCT, no per-frame L
     try expectEqual(@as(u16, 4), info.global_color_table_size);
     try expectEqual(@as(u32, 2), info.frame_count);
 
-    var decoded = try loadAnimatedFromBytes(Rgb, gpa, data, .{});
+    var decoded = try loadAnimatedFromBytes(Rgb, parallel.inline_io, gpa, data, .{});
     defer decoded.deinit(gpa);
     try expectEqual(Rgb{ .r = 255, .g = 0, .b = 0 }, decoded.frame(0).at(0, 0).*);
     try expectEqual(Rgb{ .r = 0, .g = 0, .b = 255 }, decoded.frame(1).at(0, 0).*);
@@ -1847,7 +1847,7 @@ test "loadFromBytes — missing global color table without LCT" {
     try b.appendImageWithLzw(gpa, .{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
     try b.appendTrailer(gpa);
 
-    try expectError(error.MissingGlobalColorTable, loadFromBytes(Rgb, gpa, b.list.items, .{}));
+    try expectError(error.MissingGlobalColorTable, loadFromBytes(Rgb, parallel.inline_io, gpa, b.list.items, .{}));
 }
 
 test "getInfo — image descriptor with local color table" {
@@ -1877,7 +1877,7 @@ test "GIF encode keeps the transparent pixels of an Rgba image" {
     }
     const bytes = try encode(Rgba, gpa, img, .default);
     defer gpa.free(bytes);
-    var decoded = try loadFromBytes(Rgba, gpa, bytes, .{});
+    var decoded = try loadFromBytes(Rgba, parallel.inline_io, gpa, bytes, .{});
     defer decoded.deinit(gpa);
     for (img.data, decoded.data) |want, got| {
         try std.testing.expectEqual(want.a, got.a);

@@ -25,14 +25,14 @@ pub fn main(init: std.process.Init) !void {
     while (args.next()) |path| {
         const data = try std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(1 << 30));
         defer gpa.free(data);
-        var probe = try Image(Rgb).loadFromBytes(gpa, data);
+        var probe = try Image(Rgb).loadFromBytes(io, gpa, data);
         defer probe.deinit(gpa);
         const iters: usize = if (probe.rows * probe.cols > 4_000_000) 3 else 7;
 
         var decode: i96 = std.math.maxInt(i96);
         for (0..iters) |_| {
             const t = nowNs(io);
-            var img = try Image(Rgb).loadFromBytes(gpa, data);
+            var img = try Image(Rgb).loadFromBytes(io, gpa, data);
             decode = @min(decode, nowNs(io) - t);
             img.deinit(gpa);
         }
