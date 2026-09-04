@@ -332,3 +332,66 @@ test "separable u8 resize matches the float path" {
         }
     }
 }
+
+// f32 planes take the separable float passes; against the per-pixel 2-D kernel the only
+// difference is float summation order.
+test "separable f32 resize matches the per-pixel kernel" {
+    const allocator = std.testing.allocator;
+    const interpolation = @import("../interpolation.zig");
+    var prng = std.Random.DefaultPrng.init(0xf10a7);
+    const random = prng.random();
+
+    var src: Image(f32) = try .init(allocator, 97, 131);
+    defer src.deinit(allocator);
+    for (src.data) |*v| v.* = 255 * random.float(f32);
+
+    for ([_]Interpolation{ .bilinear, .bicubic, .catmull_rom, .{ .mitchell = .default }, .lanczos }) |method| {
+        for ([_][2]u32{ .{ 61, 47 }, .{ 200, 150 } }) |shape| {
+            var out: Image(f32) = try .init(allocator, shape[0], shape[1]);
+            defer out.deinit(allocator);
+            src.resize(io, allocator, out, method);
+            const scale_x = @as(f32, @floatFromInt(src.cols)) / @as(f32, @floatFromInt(out.cols));
+            const scale_y = @as(f32, @floatFromInt(src.rows)) / @as(f32, @floatFromInt(out.rows));
+            for (0..out.rows) |r| {
+                for (0..out.cols) |c| {
+                    const x = (@as(f32, @floatFromInt(c)) + 0.5) * scale_x - 0.5;
+                    const y = (@as(f32, @floatFromInt(r)) + 0.5) * scale_y - 0.5;
+                    const expected = interpolation.interpolate(f32, src, x, y, method, .mirror).?;
+                    try std.testing.expect(@abs(expected - out.at(r, c).*) <= 1e-2);
+                }
+            }
+        }
+    }
+}
+
+// Struct pixels resize interleaved; every channel must match the u8 plane path bit for bit.
+test "interleaved struct resize matches per-channel planes" {
+    const allocator = std.testing.allocator;
+    const Rgba = @import("../../color.zig").Rgba(u8);
+    var prng = std.Random.DefaultPrng.init(0x1e4);
+    const random = prng.random();
+
+    inline for ([_]type{ Rgb, Rgba }) |T| {
+        const n = comptime Image(T).channels();
+        var src: Image(T) = try .init(allocator, 53, 71);
+        defer src.deinit(allocator);
+        for (std.mem.sliceAsBytes(src.data)) |*b| b.* = random.int(u8);
+        var plane: Image(u8) = try .init(allocator, src.rows, src.cols);
+        defer plane.deinit(allocator);
+
+        for ([_]Interpolation{ .nearest, .bilinear, .bicubic, .{ .mitchell = .default }, .lanczos }) |method| {
+            for ([_][2]u32{ .{ 30, 40 }, .{ 120, 90 } }) |shape| {
+                var out: Image(T) = try .init(allocator, shape[0], shape[1]);
+                defer out.deinit(allocator);
+                var plane_out: Image(u8) = try .init(allocator, shape[0], shape[1]);
+                defer plane_out.deinit(allocator);
+                src.resize(io, allocator, out, method);
+                for (0..n) |ch| {
+                    for (plane.data, 0..) |*px, i| px.* = std.mem.sliceAsBytes(src.data)[i * n + ch];
+                    plane.resize(io, allocator, plane_out, method);
+                    for (plane_out.data, 0..) |px, i| try std.testing.expectEqual(px, std.mem.sliceAsBytes(out.data)[i * n + ch]);
+                }
+            }
+        }
+    }
+}

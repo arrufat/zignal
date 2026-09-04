@@ -86,8 +86,9 @@ pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Int
 }
 
 /// Resizes `self` into the pre-allocated `out` image using the given interpolation `method`,
-/// in output-row bands on `io`. For RGB/RGBA pixel types, processing is channel-separated and
-/// uses `allocator` for temporary buffers; other pixel types do not allocate.
+/// in row bands on `io`. Contiguous u8, f32 and u8-struct images take the separable passes
+/// and use `allocator` for the tap tables and the accumulator plane; other pixel types (and
+/// strided views) sample per pixel and do not allocate.
 pub fn resize(comptime T: type, io: Io, self: Image(T), out: Image(T), allocator: Allocator, method: Interpolation) void {
     // Check for scale = 1 (just copy)
     if (self.rows == out.rows and self.cols == out.cols) {
@@ -109,97 +110,86 @@ pub fn resize(comptime T: type, io: Io, self: Image(T), out: Image(T), allocator
         return;
     }
 
-    // u8 planes, bare or RGB/RGBA channels, take the fixed-point plane resizers.
-    if (T == u8) {
-        if (self.isContiguous() and out.isContiguous()) {
-            resizePlane(io, self.data, out.data, self.rows, self.cols, out.rows, out.cols, allocator, method) catch {
+    // Contiguous u8 and f32 planes take the separable resizers; struct pixels of u8 fields
+    // run through them interleaved (every channel of a pixel is an element).
+    if (self.isContiguous() and out.isContiguous()) {
+        if (T == u8 or T == f32) {
+            resizePlane(T, 1, io, self.data, out.data, self.rows, self.cols, out.rows, out.cols, allocator, method) catch {
+                resizeGeneric(T, io, self, out, method);
+            };
+            return;
+        } else if (comptime @typeInfo(T) == .@"struct" and meta.allFieldsAreU8(T)) {
+            const n = comptime Image(T).channels();
+            resizePlane(u8, n, io, std.mem.sliceAsBytes(self.data), std.mem.sliceAsBytes(out.data), self.rows, self.cols, out.rows, out.cols, allocator, method) catch {
                 resizeGeneric(T, io, self, out, method);
             };
             return;
         }
-    } else if (comptime meta.isRgb(T)) {
-        const channels = channel_ops.splitChannels(T, io, self, allocator) catch {
-            // Fallback to generic implementation on allocation failure
-            resizeGeneric(T, io, self, out, method);
-            return;
-        };
-        defer for (channels) |channel| allocator.free(channel);
-
-        const out_plane_size = @as(usize, out.rows) * out.cols;
-        const out_channels = channel_ops.allocPlanes(u8, channels.len, allocator, out_plane_size) catch {
-            resizeGeneric(T, io, self, out, method);
-            return;
-        };
-        defer for (out_channels) |ch| allocator.free(ch);
-
-        inline for (channels, out_channels) |src_ch, dst_ch| {
-            resizePlane(io, src_ch, dst_ch, self.rows, self.cols, out.rows, out.cols, allocator, method) catch {
-                resizeGeneric(T, io, self, out, method);
-                return;
-            };
-        }
-        channel_ops.mergeChannels(T, io, out_channels, out);
-        return;
     }
 
     // Fall back to generic implementation
     resizeGeneric(T, io, self, out, method);
 }
 
-/// One contiguous u8 plane: nearest samples directly in output-row bands; every other
-/// kernel runs separably, a horizontal pass into an i32 plane over the source rows and a
-/// vertical pass over the output rows.
-fn resizePlane(io: Io, src: []const u8, dst: []u8, src_rows: u32, src_cols: u32, dst_rows: u32, dst_cols: u32, allocator: Allocator, method: Interpolation) !void {
+/// One contiguous plane of `P` (`channels` elements per pixel when interleaved): nearest
+/// samples directly in output-row bands; every other kernel runs separably, a horizontal
+/// pass into an accumulator plane over the source rows and a vertical pass over the
+/// output rows.
+fn resizePlane(comptime P: type, comptime channels: usize, io: Io, src: []const P, dst: []P, src_rows: u32, src_cols: u32, dst_rows: u32, dst_cols: u32, allocator: Allocator, method: Interpolation) !void {
     switch (method) {
         .nearest => {
-            const ctx: DirectPlane = .{ .src = src, .dst = dst, .src_rows = src_rows, .src_cols = src_cols, .dst_rows = dst_rows, .dst_cols = dst_cols };
-            parallel.forRowBands(io, dst_rows, parallel.bandCount(dst_rows, dst_cols), &ctx, DirectPlane.band);
+            const ctx: DirectPlane(P, channels) = .{ .src = src, .dst = dst, .src_rows = src_rows, .src_cols = src_cols, .dst_rows = dst_rows, .dst_cols = dst_cols };
+            parallel.forRowBands(io, dst_rows, parallel.bandCount(dst_rows, dst_cols), &ctx, DirectPlane(P, channels).band);
         },
         .bilinear, .bicubic, .catmull_rom, .mitchell, .lanczos => {
             const x_taps: channel_ops.AxisTaps = try .init(allocator, src_cols, dst_cols, method);
             defer x_taps.deinit(allocator);
             const y_taps: channel_ops.AxisTaps = try .init(allocator, src_rows, dst_rows, method);
             defer y_taps.deinit(allocator);
-            const mid = try allocator.alloc(i32, @as(usize, src_rows) * dst_cols);
+            const mid = try allocator.alloc(channel_ops.Accum(P), @as(usize, src_rows) * dst_cols * channels);
             defer allocator.free(mid);
 
-            const ctx: SeparablePlane = .{ .src = src, .mid = mid, .dst = dst, .src_cols = src_cols, .dst_cols = dst_cols, .x_taps = x_taps, .y_taps = y_taps };
-            parallel.forRowBands(io, src_rows, parallel.bandCount(src_rows, dst_cols), &ctx, SeparablePlane.rowsBand);
-            parallel.forRowBands(io, dst_rows, parallel.bandCount(dst_rows, dst_cols), &ctx, SeparablePlane.columnsBand);
+            const ctx: SeparablePlane(P, channels) = .{ .src = src, .mid = mid, .dst = dst, .src_cols = src_cols, .dst_cols = dst_cols, .x_taps = x_taps, .y_taps = y_taps };
+            parallel.forRowBands(io, src_rows, parallel.bandCount(src_rows, dst_cols), &ctx, SeparablePlane(P, channels).rowsBand);
+            parallel.forRowBands(io, dst_rows, parallel.bandCount(dst_rows, dst_cols), &ctx, SeparablePlane(P, channels).columnsBand);
         },
     }
 }
 
-const DirectPlane = struct {
-    src: []const u8,
-    dst: []u8,
-    src_rows: u32,
-    src_cols: u32,
-    dst_rows: u32,
-    dst_cols: u32,
+fn DirectPlane(comptime P: type, comptime channels: usize) type {
+    return struct {
+        src: []const P,
+        dst: []P,
+        src_rows: u32,
+        src_cols: u32,
+        dst_rows: u32,
+        dst_cols: u32,
 
-    fn band(ctx: *const DirectPlane, _: usize, r0: usize, r1: usize) void {
-        channel_ops.resizePlaneNearestU8(ctx.src, ctx.dst, ctx.src_rows, ctx.src_cols, ctx.dst_rows, ctx.dst_cols, r0, r1);
-    }
-};
+        fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
+            channel_ops.resizePlaneNearest(P, channels, ctx.src, ctx.dst, ctx.src_rows, ctx.src_cols, ctx.dst_rows, ctx.dst_cols, r0, r1);
+        }
+    };
+}
 
-const SeparablePlane = struct {
-    src: []const u8,
-    mid: []i32,
-    dst: []u8,
-    src_cols: u32,
-    dst_cols: u32,
-    x_taps: channel_ops.AxisTaps,
-    y_taps: channel_ops.AxisTaps,
+fn SeparablePlane(comptime P: type, comptime channels: usize) type {
+    return struct {
+        src: []const P,
+        mid: []channel_ops.Accum(P),
+        dst: []P,
+        src_cols: u32,
+        dst_cols: u32,
+        x_taps: channel_ops.AxisTaps,
+        y_taps: channel_ops.AxisTaps,
 
-    fn rowsBand(ctx: *const SeparablePlane, _: usize, r0: usize, r1: usize) void {
-        channel_ops.resizeRowsU8(ctx.src, ctx.src_cols, ctx.x_taps, ctx.mid, ctx.dst_cols, r0, r1);
-    }
+        fn rowsBand(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
+            channel_ops.resizeRows(P, channels, ctx.src, ctx.src_cols, ctx.x_taps, ctx.mid, ctx.dst_cols, r0, r1);
+        }
 
-    fn columnsBand(ctx: *const SeparablePlane, _: usize, r0: usize, r1: usize) void {
-        channel_ops.resizeColumnsU8(ctx.mid, ctx.dst_cols, ctx.y_taps, ctx.dst, r0, r1);
-    }
-};
+        fn columnsBand(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
+            channel_ops.resizeColumns(P, ctx.mid, @as(usize, ctx.dst_cols) * channels, ctx.y_taps, ctx.dst, r0, r1);
+        }
+    };
+}
 
 /// Generic per-pixel resize fallback, in output-row bands.
 fn resizeGeneric(comptime T: type, io: Io, self: Image(T), out: Image(T), method: Interpolation) void {
