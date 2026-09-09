@@ -16,6 +16,7 @@
 - **Python `Font` replaces `BitmapFont`**: `Font.load` detects the format and `Canvas.draw_text` takes a pixel `size`. ([#403](https://github.com/arrufat/zignal/pull/403))
 - **JPEG encodes write a restart marker per MCU row by default** (`EncodeOptions.restart_interval`, about 0.1 % larger files) so they decode in parallel; `.none` restores the old bytes. ([#466](https://github.com/arrufat/zignal/pull/466))
 - **`ImagePyramid.init(io, allocator, source, options)`**: `build` is renamed `init` and takes an `Options` struct (`n_levels`, `scale_factor`, `blur_sigma`, `min_size`, `.default` is the ORB preset) in place of three positional parameters; the pyramid no longer stores its allocator, so `deinit(allocator)` takes it like `Image`; `buildDefault` and the write-only `blur_sigma` field are gone.
+- **`HoughTransform.deinit(allocator)`**: the transform no longer stores its allocator, matching `Image`.
 - **Minimum Zig version is 0.17.0-dev.1970.**
 
 ### Features

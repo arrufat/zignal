@@ -55,7 +55,7 @@ pub export fn init() void {
 pub export fn deinit() void {
     if (!initialized) return;
     const allocator = std.heap.wasm_allocator;
-    hough.deinit();
+    hough.deinit(allocator);
     img.deinit(allocator);
     accumulator.deinit(allocator);
     initialized = false;
