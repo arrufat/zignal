@@ -36,9 +36,6 @@ pub fn ImagePyramid(comptime T: type) type {
         /// Number of levels actually built
         n_levels: u8,
 
-        /// Allocator used for the pyramid (needed for cleanup)
-        allocator: Allocator,
-
         /// Build an image pyramid from the source image
         pub fn init(io: Io, allocator: Allocator, source: Image(T), options: Options) !Self {
             const n_levels = options.n_levels;
@@ -87,14 +84,13 @@ pub fn ImagePyramid(comptime T: type) type {
                 .levels = levels,
                 .scale_factor = scale_factor,
                 .n_levels = @intCast(count),
-                .allocator = allocator,
             };
         }
 
         /// Free all owned pyramid levels
-        pub fn deinit(self: *Self) void {
-            for (self.levels[1..]) |*level| level.deinit(self.allocator);
-            self.allocator.free(self.levels);
+        pub fn deinit(self: *Self, allocator: Allocator) void {
+            for (self.levels[1..]) |*level| level.deinit(allocator);
+            allocator.free(self.levels);
         }
 
         /// Get the scale factor for a specific level
@@ -151,7 +147,7 @@ test "ImagePyramid basic construction" {
     }
 
     var pyramid = try ImagePyramid(u8).init(test_io, allocator, image, .{ .n_levels = 5, .scale_factor = 1.5, .blur_sigma = 1.0 });
-    defer pyramid.deinit();
+    defer pyramid.deinit(allocator);
 
     try expectEqual(@as(u8, 5), pyramid.n_levels);
     try expectEqual(@as(f32, 1.5), pyramid.scale_factor);
@@ -180,7 +176,7 @@ test "ImagePyramid scale calculations" {
     defer image.deinit(allocator);
 
     var pyramid = try ImagePyramid(u8).init(test_io, allocator, image, .{ .n_levels = 4, .scale_factor = 1.2, .blur_sigma = 1.0 });
-    defer pyramid.deinit();
+    defer pyramid.deinit(allocator);
 
     try expectApproxEqAbs(@as(f32, 1.0), pyramid.getScale(0), 0.01);
     try expectApproxEqAbs(@as(f32, 1.2), pyramid.getScale(1), 0.01);
@@ -204,7 +200,7 @@ test "ImagePyramid truncation for small images" {
 
     // Request more levels than the 8x8 minimum allows.
     var pyramid = try ImagePyramid(u8).init(test_io, allocator, image, .{ .n_levels = 10, .scale_factor = 2.0, .blur_sigma = 1.0 });
-    defer pyramid.deinit();
+    defer pyramid.deinit(allocator);
 
     try expect(pyramid.n_levels < 10);
     const last_level = pyramid.levels[pyramid.n_levels - 1];
@@ -219,7 +215,7 @@ test "ImagePyramid memory usage" {
     defer image.deinit(allocator);
 
     var pyramid = try ImagePyramid(u8).init(test_io, allocator, image, .{ .n_levels = 4, .scale_factor = 1.5, .blur_sigma = 1.0 });
-    defer pyramid.deinit();
+    defer pyramid.deinit(allocator);
 
     const total_pixels = pyramid.totalPixels();
     const memory = pyramid.memoryUsage();

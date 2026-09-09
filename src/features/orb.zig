@@ -119,7 +119,7 @@ pub fn detect(self: Orb, io: Io, allocator: Allocator, image: Image(u8)) ![]KeyP
         .n_levels = self.n_levels,
         .scale_factor = self.scale_factor,
     });
-    defer pyramid.deinit();
+    defer pyramid.deinit(allocator);
 
     return self.detectWithPyramid(allocator, pyramid);
 }
@@ -130,7 +130,7 @@ pub fn compute(self: Orb, io: Io, allocator: Allocator, image: Image(u8), keypoi
         .n_levels = self.n_levels,
         .scale_factor = self.scale_factor,
     });
-    defer pyramid.deinit();
+    defer pyramid.deinit(allocator);
 
     return computeWithPyramid(allocator, pyramid, keypoints);
 }
@@ -250,7 +250,7 @@ pub fn detectAndCompute(
         .n_levels = self.n_levels,
         .scale_factor = self.scale_factor,
     });
-    defer pyramid.deinit();
+    defer pyramid.deinit(allocator);
 
     // Detect keypoints using the pyramid
     const keypoints = try self.detectWithPyramid(allocator, pyramid);
