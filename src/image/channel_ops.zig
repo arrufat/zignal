@@ -233,10 +233,18 @@ pub fn resizePlaneNearest(
     const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
     const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
 
+    var prev_y: ?u32 = null;
     for (r_start..r_end) |r| {
         const src_y = nearestIndex(r, src_rows, y_ratio);
         const src_row = src[src_y * src_stride ..][0 .. @as(usize, src_cols) * channels];
         const dst_row = dst[r * dst_stride ..][0 .. @as(usize, dst_cols) * channels];
+
+        // Upscales repeat source rows; the previous output row is already that gather.
+        if (prev_y == src_y) {
+            @memcpy(dst_row, dst[(r - 1) * dst_stride ..][0..dst_row.len]);
+            continue;
+        }
+        prev_y = src_y;
 
         if (col_idx) |cols| {
             for (cols, 0..) |src_x, c| {
