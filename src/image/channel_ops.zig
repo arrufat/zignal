@@ -248,7 +248,6 @@ const Interpolation = interpolation.Interpolation;
 /// (255 · 1.4 · 1024 per pass with the negative lobes).
 pub const weight_shift = 10;
 pub const weight_scale = 1 << weight_shift;
-pub const max_taps = 6;
 
 /// Mirror-resolved source indices and weights for every output position along one axis,
 /// as fixed point for u8 planes (each position sums to exactly `weight_scale`) and as unit
@@ -272,7 +271,7 @@ pub fn AxisTaps(comptime P: type) type {
             for (0..dst_len) |i| {
                 const center = (@as(f32, @floatFromInt(i)) + 0.5) * ratio - 0.5;
                 const base: isize = @as(isize, @floor(center)) - @as(isize, @intCast(taps / 2 - 1));
-                var raw: [max_taps]f32 = undefined;
+                var raw: [interpolation.max_taps]f32 = undefined;
                 var sum: f32 = 0;
                 for (0..taps) |t| {
                     const x = base + @as(isize, @intCast(t));
