@@ -15,18 +15,8 @@
 //! ```zig
 //! var small = try Image(Rgba).load(io, allocator, "small.png");
 //! var large = try Image(Rgba).init(allocator, 512, 512);
-//! small.resize(allocator, large, .lanczos); // High quality upscaling
+//! small.resize(io, allocator, large, .lanczos); // High quality upscaling
 //! ```
-//!
-//! ## Performance Guide
-//!
-//! Approximate performance on 512x512 RGBA images (Mpix/s):
-//! - Nearest neighbor: ~400 Mpix/s
-//! - Bilinear: ~100 Mpix/s
-//! - Bicubic: ~25 Mpix/s
-//! - Catmull-Rom: ~25 Mpix/s
-//! - Lanczos: ~8.5 Mpix/s
-//! - Mitchell: ~22 Mpix/s
 
 const std = @import("std");
 const Io = std.Io;
@@ -36,10 +26,12 @@ const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
 const as = meta.as;
 const clamp = meta.clamp;
-const BorderMode = @import("border.zig").BorderMode;
+const border_ops = @import("border.zig");
+const BorderMode = border_ops.BorderMode;
+const resolveIndex = border_ops.resolveIndex;
 const channel_ops = @import("channel_ops.zig");
+const elementView = @import("convolution.zig").elementView;
 const parallel = @import("../parallel.zig");
-const resolveIndex = @import("border.zig").resolveIndex;
 
 /// Interpolation method for image resizing and sampling
 ///
@@ -78,98 +70,70 @@ pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Int
     return switch (method) {
         .nearest => interpolateNearest(T, self, x, y, border),
         .bilinear => interpolateBilinear(T, self, x, y, border),
-        .bicubic => interpolateBicubic(T, self, x, y, border),
-        .catmull_rom => interpolateCatmullRom(T, self, x, y, border),
-        .lanczos => interpolateLanczos(T, self, x, y, border),
-        .mitchell => |m| interpolateMitchell(T, self, x, y, m.b, m.c, border),
+        .bicubic, .catmull_rom, .mitchell => interpolateWithKernel(T, self, x, y, comptime kernelTaps(.bicubic), method, border),
+        .lanczos => interpolateWithKernel(T, self, x, y, comptime kernelTaps(.lanczos), method, border),
     };
 }
 
 /// Resizes `self` into the pre-allocated `out` image using the given interpolation `method`,
-/// in row bands on `io`. Contiguous u8, f32 and u8-struct images take the separable passes
-/// and use `allocator` for the tap tables and the accumulator plane; other pixel types (and
-/// strided views) sample per pixel and do not allocate.
+/// in row bands on `io`. u8, f32 and u8-struct images (views included) take the separable
+/// passes and use `allocator` for the tap tables and the row rings, sampling per pixel if
+/// that allocation fails; other pixel types sample per pixel and do not allocate.
 pub fn resize(comptime T: type, io: Io, self: Image(T), out: Image(T), allocator: Allocator, method: Interpolation) void {
-    // Check for scale = 1 (just copy)
-    if (self.rows == out.rows and self.cols == out.cols) {
-        if (self.data.ptr == out.data.ptr) return;
-
-        if (self.isContiguous() and out.isContiguous()) {
-            const total = @as(usize, self.rows) * self.cols;
-            @memcpy(out.data[0..total], self.data[0..total]);
-        } else {
-            for (0..self.rows) |r| {
-                const src_row_start = r * self.stride;
-                const dst_row_start = r * out.stride;
-                @memcpy(
-                    out.data[dst_row_start .. dst_row_start + out.cols],
-                    self.data[src_row_start .. src_row_start + self.cols],
-                );
-            }
-        }
-        return;
-    }
+    if (self.rows == out.rows and self.cols == out.cols) return self.copy(out);
 
     // Planes take the separable resizers; u8 struct pixels run through them interleaved.
-    if (T == u8 or T == f32) {
-        resizePlane(T, 1, io, self.data, self.stride, out.data, out.stride, self.rows, self.cols, out.rows, out.cols, allocator, method) catch {
-            resizeGeneric(T, io, self, out, method);
-        };
-        return;
-    } else if (comptime @typeInfo(T) == .@"struct" and meta.allFieldsAreU8(T)) {
-        const n = comptime Image(T).channels();
-        resizePlane(u8, n, io, std.mem.sliceAsBytes(self.data), self.stride * n, std.mem.sliceAsBytes(out.data), out.stride * n, self.rows, self.cols, out.rows, out.cols, allocator, method) catch {
-            resizeGeneric(T, io, self, out, method);
-        };
-        return;
+    const P = comptime if (T == u8 or T == f32) T else if (@typeInfo(T) == .@"struct" and meta.allFieldsAreU8(T)) u8 else void;
+    if (P == void) {
+        resizeGeneric(T, io, self, out, method);
+    } else {
+        const src = if (P == T) self else elementView(T, self);
+        const dst = if (P == T) out else elementView(T, out);
+        resizePlane(P, comptime Image(T).channels(), io, src, dst, allocator, method) catch resizeGeneric(T, io, self, out, method);
     }
-
-    // Fall back to generic implementation
-    resizeGeneric(T, io, self, out, method);
 }
 
-/// One plane of `P` (`channels` elements per pixel when interleaved, strides in elements):
-/// nearest samples directly in output-row bands; every other kernel runs separably in
-/// output-row bands, each band resampling the source rows its output taps horizontally
-/// into a small ring and blending them vertically from there.
-fn resizePlane(comptime P: type, comptime channels: usize, io: Io, src: []const P, src_stride: usize, dst: []P, dst_stride: usize, src_rows: u32, src_cols: u32, dst_rows: u32, dst_cols: u32, allocator: Allocator, method: Interpolation) !void {
+/// One plane of `P` whose columns are `channels` elements per pixel (`elementView`): nearest
+/// samples directly in output-row bands; every other kernel runs separably in output-row
+/// bands, each band resampling the source rows its output taps horizontally into a small
+/// ring and blending them vertically from there.
+fn resizePlane(comptime P: type, comptime channels: usize, io: Io, src: Image(P), dst: Image(P), allocator: Allocator, method: Interpolation) !void {
+    const ch: u32 = channels;
+    const src_cols = src.cols / ch;
+    const dst_cols = dst.cols / ch;
     switch (method) {
         .nearest => {
-            const ctx: DirectPlane(P, channels) = .{ .src = src, .src_stride = src_stride, .dst = dst, .dst_stride = dst_stride, .src_rows = src_rows, .src_cols = src_cols, .dst_rows = dst_rows, .dst_cols = dst_cols };
-            parallel.forRowBands(io, dst_rows, parallel.bandCount(dst_rows, dst_cols), &ctx, DirectPlane(P, channels).band);
+            const ctx: DirectPlane(P, channels) = .{ .src = src, .dst = dst };
+            parallel.forRowBands(io, dst.rows, parallel.bandCount(dst.rows, dst_cols), &ctx, DirectPlane(P, channels).band);
         },
         .bilinear, .bicubic, .catmull_rom, .mitchell, .lanczos => {
             const x_taps: channel_ops.AxisTaps(P) = try .init(allocator, src_cols, dst_cols, method);
             defer x_taps.deinit(allocator);
-            const y_taps: channel_ops.AxisTaps(P) = try .init(allocator, src_rows, dst_rows, method);
+            const y_taps: channel_ops.AxisTaps(P) = try .init(allocator, src.rows, dst.rows, method);
             defer y_taps.deinit(allocator);
-            // Consecutive output rows tap windows that slide by the row ratio; twice the taps
-            // keeps every window that overlaps the previous one resident.
-            const ring_rows = 2 * x_taps.taps;
-            const row_len = @as(usize, dst_cols) * channels;
-            const bands = parallel.bandCount(dst_rows, dst_cols);
-            const rings = try allocator.alloc(channel_ops.Accum(P), bands * ring_rows * row_len);
+            // A window spans at most `taps` source rows, so `taps` slots keep every row the next
+            // window still needs while the rows it adds overwrite only rows behind it.
+            const ring_rows = y_taps.taps;
+            const bands = parallel.bandCount(dst.rows, dst_cols);
+            const rings = try allocator.alloc(channel_ops.Accum(P), bands * ring_rows * dst.cols);
             defer allocator.free(rings);
 
-            const ctx: SeparablePlane(P, channels) = .{ .src = src, .src_stride = src_stride, .dst = dst, .dst_stride = dst_stride, .src_cols = src_cols, .dst_cols = dst_cols, .x_taps = x_taps, .y_taps = y_taps, .rings = rings, .ring_rows = ring_rows };
-            parallel.forRowBands(io, dst_rows, bands, &ctx, SeparablePlane(P, channels).band);
+            const ctx: SeparablePlane(P, channels) = .{ .src = src, .dst = dst, .x_taps = x_taps, .y_taps = y_taps, .rings = rings, .ring_rows = ring_rows };
+            parallel.forRowBands(io, dst.rows, bands, &ctx, SeparablePlane(P, channels).band);
         },
     }
 }
 
 fn DirectPlane(comptime P: type, comptime channels: usize) type {
     return struct {
-        src: []const P,
-        src_stride: usize,
-        dst: []P,
-        dst_stride: usize,
-        src_rows: u32,
-        src_cols: u32,
-        dst_rows: u32,
-        dst_cols: u32,
+        src: Image(P),
+        dst: Image(P),
 
         fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
-            channel_ops.resizePlaneNearest(P, channels, ctx.src, ctx.src_stride, ctx.dst, ctx.dst_stride, ctx.src_rows, ctx.src_cols, ctx.dst_rows, ctx.dst_cols, r0, r1);
+            const src = ctx.src;
+            const dst = ctx.dst;
+            const ch: u32 = channels;
+            channel_ops.resizePlaneNearest(P, channels, src.data, src.stride, dst.data, dst.stride, src.rows, src.cols / ch, dst.rows, dst.cols / ch, r0, r1);
         }
     };
 }
@@ -178,12 +142,8 @@ fn SeparablePlane(comptime P: type, comptime channels: usize) type {
     return struct {
         const A = channel_ops.Accum(P);
 
-        src: []const P,
-        src_stride: usize,
-        dst: []P,
-        dst_stride: usize,
-        src_cols: u32,
-        dst_cols: u32,
+        src: Image(P),
+        dst: Image(P),
         x_taps: channel_ops.AxisTaps(P),
         y_taps: channel_ops.AxisTaps(P),
         /// `ring_rows` horizontally resampled source rows per band, slot `row % ring_rows`.
@@ -196,31 +156,28 @@ fn SeparablePlane(comptime P: type, comptime channels: usize) type {
         /// resampled and each band recomputes at most one window of halo.
         fn band(ctx: *const @This(), k: usize, r0: usize, r1: usize) void {
             const taps = ctx.x_taps.taps;
-            const row_len = @as(usize, ctx.dst_cols) * channels;
+            const row_len: usize = ctx.dst.cols;
+            const dst_cols = row_len / channels;
             const ring = ctx.rings[k * ctx.ring_rows * row_len ..][0 .. ctx.ring_rows * row_len];
             var lo: usize = 0;
             var hi: usize = 0;
             for (r0..r1) |r| {
                 const rows = ctx.y_taps.indices[r * taps ..][0..taps];
-                var need_lo: usize = rows[0];
-                var need_hi: usize = rows[0] + 1;
-                for (rows) |sr| {
-                    need_lo = @min(need_lo, sr);
-                    need_hi = @max(need_hi, sr + 1);
-                }
+                const need_lo: usize = std.mem.min(u32, rows);
+                const need_hi: usize = std.mem.max(u32, rows) + 1;
                 if (need_lo < lo or need_hi > hi) {
                     var from = need_lo;
                     if (need_lo >= lo and need_lo <= hi) from = hi else lo = need_lo;
                     for (from..need_hi) |sr| {
-                        const src_row = ctx.src[sr * ctx.src_stride ..][0 .. @as(usize, ctx.src_cols) * channels];
-                        channel_ops.resizeRow(P, channels, src_row, ctx.x_taps, ring[(sr % ctx.ring_rows) * row_len ..][0..row_len], ctx.dst_cols);
+                        const src_row = ctx.src.data[sr * ctx.src.stride ..][0..ctx.src.cols];
+                        channel_ops.resizeRow(P, channels, src_row, ctx.x_taps, ring[(sr % ctx.ring_rows) * row_len ..][0..row_len], dst_cols);
                     }
                     hi = need_hi;
                     lo = @max(lo, hi -| ctx.ring_rows);
                 }
-                var srcs: [channel_ops.max_taps][*]const A = undefined;
+                var srcs: [max_taps][*]const A = undefined;
                 for (rows, 0..) |sr, t| srcs[t] = ring[(sr % ctx.ring_rows) * row_len ..].ptr;
-                channel_ops.blendRows(P, srcs[0..taps], ctx.y_taps.weightsAt(r), ctx.dst[r * ctx.dst_stride ..][0..row_len]);
+                channel_ops.blendRows(P, srcs[0..taps], ctx.y_taps.weightsAt(r), ctx.dst.data[r * ctx.dst.stride ..][0..row_len]);
             }
         }
     };
@@ -247,35 +204,11 @@ fn GenericResize(comptime T: type) type {
                 const src_y = (@as(f32, @floatFromInt(r)) + 0.5) * scale_y - 0.5;
                 for (0..out.cols) |c| {
                     const src_x = (@as(f32, @floatFromInt(c)) + 0.5) * scale_x - 0.5;
-                    if (interpolate(T, self, src_x, src_y, ctx.method, .mirror)) |val| {
-                        out.at(r, c).* = val;
-                    } else {
-                        out.at(r, c).* = switch (@typeInfo(T)) {
-                            .int, .float => 0,
-                            .@"struct" => std.mem.zeroes(T),
-                            else => @compileError("Unsupported type for fallback in resizeGeneric: " ++ @typeName(T)),
-                        };
-                    }
+                    out.at(r, c).* = interpolate(T, self, src_x, src_y, ctx.method, .mirror) orelse std.mem.zeroes(T);
                 }
             }
         }
     };
-}
-
-// ============================================================================
-// Kernel Functions
-// ============================================================================
-
-/// Bicubic kernel function
-/// Classic bicubic interpolation kernel with a=-1.0
-fn bicubicKernel(t: f32) f32 {
-    const at = @abs(t);
-    if (at <= 1) {
-        return 1 - 2 * at * at + at * at * at;
-    } else if (at <= 2) {
-        return 4 - 8 * at + 5 * at * at - at * at * at;
-    }
-    return 0;
 }
 
 /// Repeated sampling of one image with one method and border mode, for the geometric
@@ -286,7 +219,6 @@ pub fn Sampler(comptime T: type) type {
     return struct {
         const Self = @This();
         const lut_size = 256;
-        const max_taps = 6;
 
         image: Image(T),
         method: Interpolation,
@@ -324,8 +256,8 @@ pub fn Sampler(comptime T: type) type {
             return switch (self.method) {
                 .nearest => self.sampleNearest(x, y),
                 .bilinear => self.sampleBilinear(x, y),
-                .bicubic, .catmull_rom, .mitchell => self.sampleKernel(4, x, y),
-                .lanczos => self.sampleKernel(6, x, y),
+                .bicubic, .catmull_rom, .mitchell => self.sampleKernel(comptime kernelTaps(.bicubic), x, y),
+                .lanczos => self.sampleKernel(comptime kernelTaps(.lanczos), x, y),
             };
         }
 
@@ -363,41 +295,7 @@ pub fn Sampler(comptime T: type) type {
             const left: usize = @trunc(fx_floor);
             const top: usize = @trunc(fy_floor);
             const base = top * img.stride + left;
-            const tl = img.data[base];
-            const tr = img.data[base + 1];
-            const bl = img.data[base + img.stride];
-            const br = img.data[base + img.stride + 1];
-            const lr_frac = x - fx_floor;
-            const tb_frac = y - fy_floor;
-            // Same fixed-point lerp as `interpolateBilinear`, so interior pixels are identical.
-            const scale = 256;
-            const fx: i32 = @round(lr_frac * scale);
-            const fy: i32 = @round(tb_frac * scale);
-
-            var out: T = undefined;
-            switch (@typeInfo(T)) {
-                .int, .float => out = lerpField(T, tl, tr, bl, br, fx, fy, lr_frac, tb_frac),
-                .@"struct" => {
-                    inline for (comptime meta.structFields(T)) |f| {
-                        @field(out, f.name) = lerpField(f.type, @field(tl, f.name), @field(tr, f.name), @field(bl, f.name), @field(br, f.name), fx, fy, lr_frac, tb_frac);
-                    }
-                },
-                else => @compileError("Unsupported type for bilinear sampling: " ++ @typeName(T)),
-            }
-            return out;
-        }
-
-        inline fn lerpField(comptime P: type, tl: P, tr: P, bl: P, br: P, fx: i32, fy: i32, lr_frac: f32, tb_frac: f32) P {
-            const info = @typeInfo(P);
-            if (info == .int and info.int.bits <= 16) {
-                const scale = 256;
-                const Intermediate = if (info.int.bits <= 8) i32 else i64;
-                const top_val = @as(Intermediate, tl) * (scale - fx) + @as(Intermediate, tr) * fx;
-                const bottom_val = @as(Intermediate, bl) * (scale - fx) + @as(Intermediate, br) * fx;
-                return clamp(P, @divTrunc(top_val * (scale - fy) + bottom_val * fy + (scale * scale / 2), scale * scale));
-            }
-            return clamp(P, (1 - tb_frac) * ((1 - lr_frac) * as(f32, tl) + lr_frac * as(f32, tr)) +
-                tb_frac * ((1 - lr_frac) * as(f32, bl) + lr_frac * as(f32, br)));
+            return lerpPixel(T, img.data[base], img.data[base + 1], img.data[base + img.stride], img.data[base + img.stride + 1], x - fx_floor, y - fy_floor);
         }
 
         inline fn sampleKernel(self: *const Self, comptime taps: usize, x: f32, y: f32) T {
@@ -414,44 +312,30 @@ pub fn Sampler(comptime T: type) type {
             const wx = self.lut[@as(usize, @trunc((x - fx_floor) * lut_size))][0..taps];
             const wy = self.lut[@as(usize, @trunc((y - fy_floor) * lut_size))][0..taps];
 
-            var out: T = undefined;
-            switch (@typeInfo(T)) {
-                .int, .float => {
-                    var sum: f32 = 0;
-                    inline for (0..taps) |j| {
-                        const row = img.data[(top + j) * img.stride + left ..][0..taps];
-                        var row_sum: f32 = 0;
-                        inline for (0..taps) |i| row_sum += as(f32, row[i]) * wx[i];
-                        sum += row_sum * wy[j];
-                    }
-                    out = clamp(T, sum);
-                },
-                .@"struct" => {
-                    const fields = comptime meta.structFields(T);
-                    var sums: [fields.len]f32 = @splat(0);
-                    inline for (0..taps) |j| {
-                        const row = img.data[(top + j) * img.stride + left ..][0..taps];
-                        var row_sums: [fields.len]f32 = @splat(0);
-                        inline for (0..taps) |i| {
-                            inline for (fields, 0..) |f, fi| row_sums[fi] += as(f32, @field(row[i], f.name)) * wx[i];
-                        }
-                        inline for (0..fields.len) |fi| sums[fi] += row_sums[fi] * wy[j];
-                    }
-                    inline for (fields, 0..) |f, fi| @field(out, f.name) = clamp(f.type, sums[fi]);
-                },
-                else => @compileError("Unsupported type for kernel sampling: " ++ @typeName(T)),
+            const n = comptime Image(T).channels();
+            var sums: [n]f32 = @splat(0);
+            inline for (0..taps) |j| {
+                const row = img.data[(top + j) * img.stride + left ..][0..taps];
+                var row_sums: [n]f32 = @splat(0);
+                inline for (0..taps) |i| {
+                    inline for (0..n) |ch| row_sums[ch] += channelOf(row[i], ch) * wx[i];
+                }
+                inline for (0..n) |ch| sums[ch] += row_sums[ch] * wy[j];
             }
-            return out;
+            return fromChannels(T, sums);
         }
     };
 }
+
+/// Widest separable kernel: `kernelTaps(.lanczos)`.
+pub const max_taps = 6;
 
 /// Support of a separable kernel along one axis, for the plane resizers.
 pub fn kernelTaps(method: Interpolation) usize {
     return switch (method) {
         .bilinear => 2,
         .bicubic, .catmull_rom, .mitchell => 4,
-        .lanczos => 6,
+        .lanczos => max_taps,
         .nearest => unreachable,
     };
 }
@@ -468,8 +352,23 @@ pub fn kernelWeight(method: Interpolation, x: f32) f32 {
     };
 }
 
-/// Catmull-Rom kernel function
-/// Catmull-Rom spline - a special case of cubic interpolation
+/// `kernelWeight` for the per-pixel path, where Lanczos reads its table instead of two sines per tap.
+fn kernelWeightFast(method: Interpolation, x: f32) f32 {
+    return if (method == .lanczos) lanczos3KernelLut(x) else kernelWeight(method, x);
+}
+
+/// Classic bicubic kernel with a = -1.
+fn bicubicKernel(t: f32) f32 {
+    const at = @abs(t);
+    if (at <= 1) {
+        return 1 - 2 * at * at + at * at * at;
+    } else if (at <= 2) {
+        return 4 - 8 * at + 5 * at * at - at * at * at;
+    }
+    return 0;
+}
+
+/// Catmull-Rom spline, a special case of cubic interpolation.
 fn catmullRomKernel(x: f32) f32 {
     const ax = @abs(x);
     if (ax <= 1) {
@@ -480,8 +379,7 @@ fn catmullRomKernel(x: f32) f32 {
     return 0;
 }
 
-/// Lanczos kernel function
-/// Lanczos windowed sinc function with parameter a (typically 3)
+/// Lanczos windowed sinc with parameter `a` (typically 3).
 fn lanczosKernel(x: f32, a: f32) f32 {
     if (x == 0) return 1;
     if (@abs(x) >= a) return 0;
@@ -491,35 +389,28 @@ fn lanczosKernel(x: f32, a: f32) f32 {
     return (a * @sin(pi_x) * @sin(pi_x_over_a)) / (pi_x * pi_x);
 }
 
-/// Lanczos3 Look-Up Table for fast weight calculation
+/// Lanczos3 over [0, 3) at `lanczos3_lut_step` entries per unit distance.
+const lanczos3_lut_step = 1024.0 / 3.0;
 const lanczos3_lut: [1025]f32 = blk: {
-    const size = 1024;
-    const max_dist: f32 = 3.0;
-    const step = size / max_dist;
     @setEvalBranchQuota(4000);
-    var vals: [size + 1]f32 = undefined;
-    for (0..1025) |i| {
-        const x = @as(f32, @floatFromInt(i)) / step;
-        vals[i] = lanczosKernel(x, 3.0);
-    }
+    var vals: [1025]f32 = undefined;
+    for (&vals, 0..) |*v, i| v.* = lanczosKernel(@as(f32, @floatFromInt(i)) / lanczos3_lut_step, 3);
     break :blk vals;
 };
 
-/// Lanczos3 kernel function using a pre-calculated LUT
+/// Lanczos3 kernel linearly interpolated from `lanczos3_lut`.
 fn lanczos3KernelLut(x: f32) f32 {
     const ax = @abs(x);
     if (ax >= 3.0) return 0;
 
-    const step = 1024.0 / 3.0;
-    const pos = ax * step;
+    const pos = ax * lanczos3_lut_step;
     const idx: usize = @trunc(pos);
     const frac = pos - @as(f32, @floatFromInt(idx));
 
     return lanczos3_lut[idx] * (1.0 - frac) + lanczos3_lut[idx + 1] * frac;
 }
 
-/// Mitchell-Netravali kernel function
-/// Parameterized cubic filter with control over blur (m_b) and ringing (m_c)
+/// Mitchell-Netravali cubic with blur `m_b` and ringing `m_c` parameters.
 fn mitchellKernel(x: f32, m_b: f32, m_c: f32) f32 {
     const ax = @abs(x);
     const ax2 = ax * ax;
@@ -538,222 +429,131 @@ fn mitchellKernel(x: f32, m_b: f32, m_c: f32) f32 {
     return 0;
 }
 
-// ============================================================================
-// Generic Interpolation Functions
-// ============================================================================
+/// Channel `i` of a scalar or struct pixel as f32.
+inline fn channelOf(px: anytype, comptime i: usize) f32 {
+    return switch (@typeInfo(@TypeOf(px))) {
+        .@"struct" => |s| as(f32, @field(px, s.field_names[i])),
+        else => as(f32, px),
+    };
+}
+
+/// A pixel from per-channel values, clamped to each channel's type.
+inline fn fromChannels(comptime T: type, values: [Image(T).channels()]f32) T {
+    switch (@typeInfo(T)) {
+        .int, .float => return clamp(T, values[0]),
+        .@"struct" => {
+            var out: T = undefined;
+            inline for (comptime meta.structFields(T), 0..) |f, i| @field(out, f.name) = clamp(f.type, values[i]);
+            return out;
+        },
+        else => @compileError("Unsupported pixel type for interpolation: " ++ @typeName(T)),
+    }
+}
+
+/// Fixed-point precision of the bilinear lerp for integer channels.
+const lerp_scale = 256;
+
+/// Bilinear blend of a 2x2 window at fractional offsets (`lr`, `tb`) from the top-left.
+inline fn lerpPixel(comptime T: type, tl: T, tr: T, bl: T, br: T, lr: f32, tb: f32) T {
+    const fx: i32 = @round(lr * lerp_scale);
+    const fy: i32 = @round(tb * lerp_scale);
+    switch (@typeInfo(T)) {
+        .int, .float => return lerpField(T, tl, tr, bl, br, fx, fy, lr, tb),
+        .@"struct" => {
+            var out: T = undefined;
+            inline for (comptime meta.structFields(T)) |f| {
+                @field(out, f.name) = lerpField(f.type, @field(tl, f.name), @field(tr, f.name), @field(bl, f.name), @field(br, f.name), fx, fy, lr, tb);
+            }
+            return out;
+        },
+        else => @compileError("Unsupported pixel type for bilinear interpolation: " ++ @typeName(T)),
+    }
+}
+
+/// One channel of `lerpPixel`: fixed point up to 16-bit integers, float otherwise.
+inline fn lerpField(comptime P: type, tl: P, tr: P, bl: P, br: P, fx: i32, fy: i32, lr: f32, tb: f32) P {
+    const info = @typeInfo(P);
+    if (info == .int and info.int.bits <= 16) {
+        const Intermediate = if (info.int.bits <= 8) i32 else i64;
+        const top_val = @as(Intermediate, tl) * (lerp_scale - fx) + @as(Intermediate, tr) * fx;
+        const bottom_val = @as(Intermediate, bl) * (lerp_scale - fx) + @as(Intermediate, br) * fx;
+        return clamp(P, @divTrunc(top_val * (lerp_scale - fy) + bottom_val * fy + (lerp_scale * lerp_scale / 2), lerp_scale * lerp_scale));
+    }
+    return clamp(P, (1 - tb) * ((1 - lr) * as(f32, tl) + lr * as(f32, tr)) +
+        tb * ((1 - lr) * as(f32, bl) + lr * as(f32, br)));
+}
 
 fn interpolateNearest(comptime T: type, self: Image(T), x: f32, y: f32, border: BorderMode) ?T {
-    const col = resolveIndex(@round(x), @intCast(self.cols), border) orelse return null;
-    const row = resolveIndex(@round(y), @intCast(self.rows), border) orelse return null;
-
-    return self.at(row, col).*;
+    const at = border_ops.computeCoords(@round(y), @round(x), @intCast(self.rows), @intCast(self.cols), border) orelse return null;
+    return self.at(at.row, at.col).*;
 }
 
 fn interpolateBilinear(comptime T: type, self: Image(T), x: f32, y: f32, border: BorderMode) ?T {
     const left: isize = @floor(x);
     const top: isize = @floor(y);
-    const right = left + 1;
-    const bottom = top + 1;
-
-    const r0_opt = resolveIndex(top, @intCast(self.rows), border);
-    const r1_opt = resolveIndex(bottom, @intCast(self.rows), border);
-    const c0_opt = resolveIndex(left, @intCast(self.cols), border);
-    const c1_opt = resolveIndex(right, @intCast(self.cols), border);
-
-    const getPixel = struct {
-        fn get(img: Image(T), r: ?usize, c: ?usize) T {
-            if (r) |rr| {
-                if (c) |cc| {
-                    return img.at(rr, cc).*;
-                }
-            }
-            return std.mem.zeroes(T);
-        }
-    }.get;
+    const r0 = resolveIndex(top, @intCast(self.rows), border);
+    const r1 = resolveIndex(top + 1, @intCast(self.rows), border);
+    const c0 = resolveIndex(left, @intCast(self.cols), border);
+    const c1 = resolveIndex(left + 1, @intCast(self.cols), border);
 
     // With .mirror any out-of-bounds neighbor yields null; .zero continues with zeroes.
-    if (border == .mirror) {
-        if (r0_opt == null or r1_opt == null or c0_opt == null or c1_opt == null) return null;
-    }
+    if (border == .mirror and (r0 == null or r1 == null or c0 == null or c1 == null)) return null;
 
-    const tl: T = getPixel(self, r0_opt, c0_opt);
-    const tr: T = getPixel(self, r0_opt, c1_opt);
-    const bl: T = getPixel(self, r1_opt, c0_opt);
-    const br: T = getPixel(self, r1_opt, c1_opt);
-
-    const lr_frac: f32 = x - as(f32, left);
-    const tb_frac: f32 = y - as(f32, top);
-
-    const scale = 256;
-    const fx: i32 = @round(lr_frac * scale);
-    const fy: i32 = @round(tb_frac * scale);
-
-    const lerpInt = struct {
-        fn lerp(comptime P: type, p_tl: P, p_tr: P, p_bl: P, p_br: P, p_fx: i32, p_fy: i32) P {
-            const info = @typeInfo(P).int;
-            const Intermediate = if (info.bits <= 8) i32 else i64;
-
-            const tl_i = @as(Intermediate, @intCast(p_tl));
-            const tr_i = @as(Intermediate, @intCast(p_tr));
-            const bl_i = @as(Intermediate, @intCast(p_bl));
-            const br_i = @as(Intermediate, @intCast(p_br));
-
-            const top_val = tl_i * (scale - p_fx) + tr_i * p_fx;
-            const bottom_val = bl_i * (scale - p_fx) + br_i * p_fx;
-            const result = @divTrunc(top_val * (scale - p_fy) + bottom_val * p_fy + (scale * scale / 2), scale * scale);
-            return clamp(P, result);
-        }
-    }.lerp;
-
-    const lerpFloat = struct {
-        fn lerp(comptime P: type, p_tl: P, p_tr: P, p_bl: P, p_br: P, p_lr_frac: f32, p_tb_frac: f32) P {
-            return clamp(P, (1 - p_tb_frac) * ((1 - p_lr_frac) * as(f32, p_tl) +
-                p_lr_frac * as(f32, p_tr)) +
-                p_tb_frac * ((1 - p_lr_frac) * as(f32, p_bl) +
-                    p_lr_frac * as(f32, p_br)));
-        }
-    }.lerp;
-
-    // Handle different pixel types
-    var temp: T = undefined;
-    switch (@typeInfo(T)) {
-        .int => |info| {
-            temp = if (info.bits <= 16)
-                lerpInt(T, tl, tr, bl, br, fx, fy)
-            else
-                lerpFloat(T, tl, tr, bl, br, lr_frac, tb_frac);
-        },
-        .float => temp = lerpFloat(T, tl, tr, bl, br, lr_frac, tb_frac),
-        .@"struct" => {
-            inline for (comptime meta.structFields(T)) |f| {
-                const f_tl = @field(tl, f.name);
-                const f_tr = @field(tr, f.name);
-                const f_bl = @field(bl, f.name);
-                const f_br = @field(br, f.name);
-
-                const info = @typeInfo(f.type);
-                @field(temp, f.name) = if (info == .int and info.int.bits <= 16)
-                    lerpInt(f.type, f_tl, f_tr, f_bl, f_br, fx, fy)
-                else
-                    lerpFloat(f.type, f_tl, f_tr, f_bl, f_br, lr_frac, tb_frac);
-            }
-        },
-        else => @compileError("Unsupported type for bilinear interpolation: " ++ @typeName(T)),
-    }
-
-    return temp;
+    return lerpPixel(
+        T,
+        pixelOrZero(T, self, r0, c0),
+        pixelOrZero(T, self, r0, c1),
+        pixelOrZero(T, self, r1, c0),
+        pixelOrZero(T, self, r1, c1),
+        x - as(f32, left),
+        y - as(f32, top),
+    );
 }
 
-fn interpolateBicubic(comptime T: type, self: Image(T), x: f32, y: f32, border: BorderMode) ?T {
-    return interpolateWithKernel(T, self, x, y, 2, bicubicKernel, .{}, border);
+fn pixelOrZero(comptime T: type, img: Image(T), r: ?usize, c: ?usize) T {
+    return if (r != null and c != null) img.at(r.?, c.?).* else std.mem.zeroes(T);
 }
 
-fn interpolateCatmullRom(comptime T: type, self: Image(T), x: f32, y: f32, border: BorderMode) ?T {
-    return interpolateWithKernel(T, self, x, y, 2, catmullRomKernel, .{}, border);
-}
-
-fn interpolateLanczos(comptime T: type, self: Image(T), x: f32, y: f32, border: BorderMode) ?T {
-    return interpolateWithKernel(T, self, x, y, 3, lanczos3KernelLut, .{}, border);
-}
-
-fn interpolateMitchell(comptime T: type, self: Image(T), x: f32, y: f32, m_b: f32, m_c: f32, border: BorderMode) ?T {
-    return interpolateWithKernel(T, self, x, y, 2, mitchellKernel, .{ m_b, m_c }, border);
-}
-
-/// Generic kernel-based interpolation function
-fn interpolateWithKernel(
-    comptime T: type,
-    self: Image(T),
-    x: f32,
-    y: f32,
-    comptime window_radius: usize,
-    kernel_fn: anytype,
-    kernel_params: anytype,
-    border: BorderMode,
-) ?T {
+/// Separable `taps` x `taps` kernel window around (`x`, `y`), normalized over the taps that
+/// resolve inside the image under `border`.
+fn interpolateWithKernel(comptime T: type, self: Image(T), x: f32, y: f32, comptime taps: usize, method: Interpolation, border: BorderMode) ?T {
     const ix: isize = @floor(x);
     const iy: isize = @floor(y);
     const fx = x - as(f32, ix);
     const fy = y - as(f32, iy);
+    const lead: isize = taps / 2 - 1;
 
-    const window_size = window_radius * 2;
+    // Per-axis taps and weights, resolved once instead of once per window cell.
+    var cols: [taps]?usize = undefined;
+    var rows: [taps]?usize = undefined;
+    var wx: [taps]f32 = undefined;
+    var wy: [taps]f32 = undefined;
+    inline for (0..taps) |t| {
+        const offset: isize = @as(isize, t) - lead;
+        const d: f32 = @floatFromInt(offset);
+        wx[t] = kernelWeightFast(method, d - fx);
+        wy[t] = kernelWeightFast(method, d - fy);
+        cols[t] = resolveIndex(ix + offset, @intCast(self.cols), border);
+        rows[t] = resolveIndex(iy + offset, @intCast(self.rows), border);
+    }
 
-    // Calculate weights
-    var x_weights: [6]f32 = undefined; // Max window size is 6 for Lanczos3
-    var y_weights: [6]f32 = undefined;
-
-    inline for (0..window_size) |i| {
-        const offset = @as(f32, @floatFromInt(@as(isize, @intCast(i)) - @as(isize, @intCast(window_radius - 1)))) - fx;
-        if (kernel_params.len == 0) {
-            x_weights[i] = kernel_fn(offset);
-            y_weights[i] = kernel_fn(@as(f32, @floatFromInt(@as(isize, @intCast(i)) - @as(isize, @intCast(window_radius - 1)))) - fy);
-        } else if (kernel_params.len == 1) {
-            x_weights[i] = kernel_fn(offset, kernel_params[0]);
-            y_weights[i] = kernel_fn(@as(f32, @floatFromInt(@as(isize, @intCast(i)) - @as(isize, @intCast(window_radius - 1)))) - fy, kernel_params[0]);
-        } else if (kernel_params.len == 2) {
-            x_weights[i] = kernel_fn(offset, kernel_params[0], kernel_params[1]);
-            y_weights[i] = kernel_fn(@as(f32, @floatFromInt(@as(isize, @intCast(i)) - @as(isize, @intCast(window_radius - 1)))) - fy, kernel_params[0], kernel_params[1]);
-        } else {
-            @compileError("Unsupported number of kernel parameters");
+    const n = comptime Image(T).channels();
+    var sums: [n]f32 = @splat(0);
+    var weight_sum: f32 = 0;
+    inline for (0..taps) |j| {
+        if (rows[j]) |r| {
+            inline for (0..taps) |i| {
+                if (cols[i]) |c| {
+                    const px = self.at(r, c).*;
+                    const w = wx[i] * wy[j];
+                    inline for (0..n) |ch| sums[ch] += channelOf(px, ch) * w;
+                    weight_sum += w;
+                }
+            }
         }
     }
-
-    // Apply kernel
-    var result: T = undefined;
-    switch (@typeInfo(T)) {
-        .int, .float => {
-            var sum: f32 = 0;
-            var weight_sum: f32 = 0;
-
-            inline for (0..window_size) |j| {
-                const row_idx = iy - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(j));
-                if (resolveIndex(row_idx, @intCast(self.rows), border)) |pixel_y| {
-                    inline for (0..window_size) |i| {
-                        const col_idx = ix - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(i));
-                        if (resolveIndex(col_idx, @intCast(self.cols), border)) |pixel_x| {
-                            const pixel = self.at(pixel_y, pixel_x).*;
-                            const weight = x_weights[i] * y_weights[j];
-                            sum += as(f32, pixel) * weight;
-                            weight_sum += weight;
-                        }
-                    }
-                }
-            }
-
-            const val = if (weight_sum != 0) sum / weight_sum else 0;
-            result = clamp(T, val);
-        },
-        .@"struct" => {
-            const fields = comptime meta.structFields(T);
-            var sums: [fields.len]f32 = @splat(0);
-            var weight_sum: f32 = 0;
-
-            inline for (0..window_size) |j| {
-                const row_idx = iy - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(j));
-                if (resolveIndex(row_idx, @intCast(self.rows), border)) |pixel_y| {
-                    inline for (0..window_size) |i| {
-                        const col_idx = ix - @as(isize, @intCast(window_radius - 1)) + @as(isize, @intCast(i));
-                        if (resolveIndex(col_idx, @intCast(self.cols), border)) |pixel_x| {
-                            const pixel = self.at(pixel_y, pixel_x).*;
-                            const weight = x_weights[i] * y_weights[j];
-                            inline for (fields, 0..) |f, f_idx| {
-                                sums[f_idx] += as(f32, @field(pixel, f.name)) * weight;
-                            }
-                            weight_sum += weight;
-                        }
-                    }
-                }
-            }
-
-            inline for (fields, 0..) |f, f_idx| {
-                const val = if (weight_sum != 0) sums[f_idx] / weight_sum else 0;
-                @field(result, f.name) = clamp(f.type, val);
-            }
-        },
-        else => @compileError("Unsupported type for kernel interpolation: " ++ @typeName(T)),
-    }
-
-    return result;
+    for (&sums) |*s| s.* = if (weight_sum != 0) s.* / weight_sum else 0;
+    return fromChannels(T, sums);
 }
 
 test "sampler matches interpolate away from the borders" {
