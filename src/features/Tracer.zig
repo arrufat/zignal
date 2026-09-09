@@ -15,8 +15,6 @@ const Point = geometry.Point;
 const Image = @import("../image.zig").Image;
 
 pub const Tracer = struct {
-    allocator: Allocator,
-
     /// Minimum length (in pixels) for a path to be kept.
     min_path_length: usize = 5,
 
@@ -27,53 +25,43 @@ pub const Tracer = struct {
     pub const Path = ArrayList(Point(2, f32));
     pub const PathList = ArrayList(Path);
 
-    /// Initializes a new Tracer instance.
-    pub fn init(allocator: Allocator, options: struct {
-        min_path_length: usize = 5,
-        simplification_epsilon: f32 = 1.0,
-    }) Tracer {
-        return .{
-            .allocator = allocator,
-            .min_path_length = options.min_path_length,
-            .simplification_epsilon = options.simplification_epsilon,
-        };
-    }
+    pub const default: Tracer = .{};
 
     /// Traces connected components in a binary edge image.
     /// Input `edges` should be a u8 image where > 0 indicates an edge.
     /// Returns a list of paths, where each path is a list of Points.
     /// Caller owns the returned memory (must deinit the list and each path).
-    pub fn trace(self: Tracer, edges: Image(u8)) !PathList {
+    pub fn trace(self: Tracer, allocator: Allocator, edges: Image(u8)) !PathList {
         var paths: PathList = .empty;
         errdefer {
-            for (paths.items) |*p| p.deinit(self.allocator);
-            paths.deinit(self.allocator);
+            for (paths.items) |*p| p.deinit(allocator);
+            paths.deinit(allocator);
         }
 
         // Keep track of visited pixels to avoid infinite loops and duplicate paths
-        var visited: Image(u8) = try .init(self.allocator, edges.rows, edges.cols);
-        defer visited.deinit(self.allocator);
+        var visited: Image(u8) = try .init(allocator, edges.rows, edges.cols);
+        defer visited.deinit(allocator);
         @memset(visited.data, 0);
 
         for (0..edges.rows) |r| {
             for (0..edges.cols) |c| {
                 // Find a starting point: an unvisited edge pixel
                 if (edges.at(r, c).* > 0 and visited.at(r, c).* == 0) {
-                    var raw_path = try self.followPath(edges, &visited, r, c);
+                    var raw_path = try followPath(allocator, edges, &visited, r, c);
 
                     if (raw_path.items.len >= self.min_path_length) {
                         if (self.simplification_epsilon > 0) {
-                            const simplified = self.simplifyPath(raw_path.items) catch |err| {
-                                raw_path.deinit(self.allocator);
+                            const simplified = self.simplifyPath(allocator, raw_path.items) catch |err| {
+                                raw_path.deinit(allocator);
                                 return err;
                             };
-                            raw_path.deinit(self.allocator);
-                            try paths.append(self.allocator, simplified);
+                            raw_path.deinit(allocator);
+                            try paths.append(allocator, simplified);
                         } else {
-                            try paths.append(self.allocator, raw_path);
+                            try paths.append(allocator, raw_path);
                         }
                     } else {
-                        raw_path.deinit(self.allocator);
+                        raw_path.deinit(allocator);
                     }
                 }
             }
@@ -109,13 +97,13 @@ pub const Tracer = struct {
 
     /// Follows connected neighbors, preferring those that maintain the current direction (inertia).
     /// This prevents sharp 90-degree turns at junctions when a straight path is available.
-    fn followPath(self: Tracer, edges: Image(u8), visited: *Image(u8), start_r: usize, start_c: usize) !Path {
+    fn followPath(allocator: Allocator, edges: Image(u8), visited: *Image(u8), start_r: usize, start_c: usize) !Path {
         var path: Path = .empty;
         var curr_r = start_r;
         var curr_c = start_c;
 
         // Add start point
-        try path.append(self.allocator, .init(.{ @as(f32, @floatFromInt(curr_c)), @as(f32, @floatFromInt(curr_r)) }));
+        try path.append(allocator, .init(.{ @as(f32, @floatFromInt(curr_c)), @as(f32, @floatFromInt(curr_r)) }));
         visited.at(curr_r, curr_c).* = 1;
 
         while (true) {
@@ -167,7 +155,7 @@ pub const Tracer = struct {
                 const c = best_c.?;
                 curr_r = r;
                 curr_c = c;
-                try path.append(self.allocator, .init(.{ @as(f32, @floatFromInt(curr_c)), @as(f32, @floatFromInt(curr_r)) }));
+                try path.append(allocator, .init(.{ @as(f32, @floatFromInt(curr_c)), @as(f32, @floatFromInt(curr_r)) }));
                 visited.at(curr_r, curr_c).* = 1;
             } else break;
         }
@@ -176,40 +164,40 @@ pub const Tracer = struct {
     }
 
     /// Simplifies a path using the Ramer-Douglas-Peucker algorithm.
-    fn simplifyPath(self: Tracer, points: []const Point(2, f32)) !Path {
+    fn simplifyPath(self: Tracer, allocator: Allocator, points: []const Point(2, f32)) !Path {
         if (points.len < 3) {
-            var new_path: Path = try .initCapacity(self.allocator, points.len);
-            try new_path.appendSlice(self.allocator, points);
+            var new_path: Path = try .initCapacity(allocator, points.len);
+            try new_path.appendSlice(allocator, points);
             return new_path;
         }
 
         // Track which points to keep
-        var keep = try self.allocator.alloc(bool, points.len);
-        defer self.allocator.free(keep);
+        var keep = try allocator.alloc(bool, points.len);
+        defer allocator.free(keep);
         @memset(keep, false);
 
         keep[0] = true;
         keep[points.len - 1] = true;
 
-        try self.douglasPeucker(points, keep, 0, points.len - 1);
+        try self.douglasPeucker(allocator, points, keep, 0, points.len - 1);
 
         // Build the final path
         var simplified: Path = .empty;
         for (points, 0..) |p, i| {
             if (keep[i]) {
-                try simplified.append(self.allocator, p);
+                try simplified.append(allocator, p);
             }
         }
         return simplified;
     }
 
     /// Iterative RDP implementation using an explicit stack to avoid recursion depth limits.
-    fn douglasPeucker(self: Tracer, points: []const Point(2, f32), keep: []bool, start_idx: usize, end_idx: usize) !void {
+    fn douglasPeucker(self: Tracer, allocator: Allocator, points: []const Point(2, f32), keep: []bool, start_idx: usize, end_idx: usize) !void {
         const Range = struct { start: usize, end: usize };
         var stack: ArrayList(Range) = .empty;
-        defer stack.deinit(self.allocator);
+        defer stack.deinit(allocator);
 
-        try stack.append(self.allocator, .{ .start = start_idx, .end = end_idx });
+        try stack.append(allocator, .{ .start = start_idx, .end = end_idx });
 
         while (stack.pop()) |range| {
             if (range.end <= range.start + 1) continue;
@@ -232,8 +220,8 @@ pub const Tracer = struct {
 
             if (max_dist > self.simplification_epsilon) {
                 keep[index] = true;
-                try stack.append(self.allocator, .{ .start = range.start, .end = index });
-                try stack.append(self.allocator, .{ .start = index, .end = range.end });
+                try stack.append(allocator, .{ .start = range.start, .end = index });
+                try stack.append(allocator, .{ .start = index, .end = range.end });
             }
         }
     }

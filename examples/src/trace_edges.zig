@@ -40,12 +40,12 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("Tracing edges...\n", .{});
 
     // Initialize tracer with noise reduction and simplification
-    const tracer = zignal.Tracer.init(init.gpa, .{
+    const tracer: zignal.Tracer = .{
         .min_path_length = 10,
         .simplification_epsilon = 1.5,
-    });
+    };
 
-    var paths = try tracer.trace(edges);
+    var paths = try tracer.trace(init.gpa, edges);
     defer {
         for (paths.items) |*path| path.deinit(init.gpa);
         paths.deinit(init.gpa);
