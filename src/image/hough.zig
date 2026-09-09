@@ -29,7 +29,6 @@ pub const HoughTransform = struct {
     cos_table: []i32,
     sin_table: []i32,
     y_cache: []i32,
-    allocator: Allocator,
 
     const Self = @This();
 
@@ -61,14 +60,13 @@ pub const HoughTransform = struct {
             .cos_table = cos_table,
             .sin_table = sin_table,
             .y_cache = y_cache,
-            .allocator = allocator,
         };
     }
 
-    pub fn deinit(self: *Self) void {
-        self.allocator.free(self.cos_table);
-        self.allocator.free(self.sin_table);
-        self.allocator.free(self.y_cache);
+    pub fn deinit(self: *Self, allocator: Allocator) void {
+        allocator.free(self.cos_table);
+        allocator.free(self.sin_table);
+        allocator.free(self.y_cache);
     }
 
     /// Performs the Hough Transform on a binary edge image, adding votes to `accumulator`,
@@ -266,7 +264,7 @@ test "HoughTransform: detect horizontal line" {
     for (0..size) |c| edges.at(32, c).* = 255;
 
     var hough: HoughTransform = try .init(allocator, size);
-    defer hough.deinit();
+    defer hough.deinit(allocator);
     var accumulator: Image(u32) = try .init(allocator, size, size);
     defer accumulator.deinit(allocator);
     accumulator.fill(0);
