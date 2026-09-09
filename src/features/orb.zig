@@ -115,32 +115,24 @@ pub const ScoreType = enum {
 
 /// Detect keypoints in the image at multiple scales
 pub fn detect(self: Orb, io: Io, allocator: Allocator, image: Image(u8)) ![]KeyPoint {
-    var pyramid = try ImagePyramid(u8).build(
-        io,
-        allocator,
-        image,
-        self.n_levels,
-        self.scale_factor,
-        1.6, // blur_sigma for anti-aliasing
-    );
-    defer pyramid.deinit();
+    var pyramid = try ImagePyramid(u8).init(io, allocator, image, .{
+        .n_levels = self.n_levels,
+        .scale_factor = self.scale_factor,
+    });
+    defer pyramid.deinit(allocator);
 
     return self.detectWithPyramid(allocator, pyramid);
 }
 
 /// Compute descriptors for detected keypoints
 pub fn compute(self: Orb, io: Io, allocator: Allocator, image: Image(u8), keypoints: []const KeyPoint) ![]BinaryDescriptor {
-    var pyramid = try ImagePyramid(u8).build(
-        io,
-        allocator,
-        image,
-        self.n_levels,
-        self.scale_factor,
-        1.6, // blur_sigma for anti-aliasing
-    );
-    defer pyramid.deinit();
+    var pyramid = try ImagePyramid(u8).init(io, allocator, image, .{
+        .n_levels = self.n_levels,
+        .scale_factor = self.scale_factor,
+    });
+    defer pyramid.deinit(allocator);
 
-    return self.computeWithPyramid(allocator, pyramid, keypoints);
+    return computeWithPyramid(allocator, pyramid, keypoints);
 }
 
 /// Detect keypoints using a pre-built pyramid
@@ -191,7 +183,7 @@ fn detectWithPyramid(self: Orb, allocator: Allocator, pyramid: ImagePyramid(u8))
 
         // Compute orientation and scale coordinates
         // Scale-aware edge margin: smaller at higher pyramid levels
-        const scale = std.math.pow(f32, self.scale_factor, @as(f32, @floatFromInt(level)));
+        const scale = pyramid.getScale(@intCast(level));
         const edge_margin = @as(f32, self.edge_threshold) / scale;
         const min_margin = 3.0; // Minimum margin for FAST detector
         const actual_margin = @max(min_margin, edge_margin);
@@ -221,7 +213,7 @@ fn detectWithPyramid(self: Orb, allocator: Allocator, pyramid: ImagePyramid(u8))
 }
 
 /// Compute descriptors using a pre-built pyramid
-fn computeWithPyramid(self: Orb, allocator: Allocator, pyramid: ImagePyramid(u8), keypoints: []const KeyPoint) ![]BinaryDescriptor {
+fn computeWithPyramid(allocator: Allocator, pyramid: ImagePyramid(u8), keypoints: []const KeyPoint) ![]BinaryDescriptor {
     var descriptors = try allocator.alloc(BinaryDescriptor, keypoints.len);
 
     for (keypoints, 0..) |kp, i| {
@@ -229,7 +221,7 @@ fn computeWithPyramid(self: Orb, allocator: Allocator, pyramid: ImagePyramid(u8)
         const level_image = pyramid.levels[level];
 
         // Scale keypoint to pyramid level
-        const scale = std.math.pow(f32, self.scale_factor, @as(f32, @floatFromInt(level)));
+        const scale = pyramid.getScale(@intCast(level));
         const level_kp = KeyPoint{
             .x = kp.x / scale,
             .y = kp.y / scale,
@@ -254,22 +246,18 @@ pub fn detectAndCompute(
     image: Image(u8),
 ) !struct { keypoints: []KeyPoint, descriptors: []BinaryDescriptor } {
     // Build pyramid once for both detection and description
-    var pyramid = try ImagePyramid(u8).build(
-        io,
-        allocator,
-        image,
-        self.n_levels,
-        self.scale_factor,
-        1.6, // blur_sigma for anti-aliasing
-    );
-    defer pyramid.deinit();
+    var pyramid = try ImagePyramid(u8).init(io, allocator, image, .{
+        .n_levels = self.n_levels,
+        .scale_factor = self.scale_factor,
+    });
+    defer pyramid.deinit(allocator);
 
     // Detect keypoints using the pyramid
     const keypoints = try self.detectWithPyramid(allocator, pyramid);
     errdefer allocator.free(keypoints);
 
     // Compute descriptors using the same pyramid
-    const descriptors = try self.computeWithPyramid(allocator, pyramid, keypoints);
+    const descriptors = try computeWithPyramid(allocator, pyramid, keypoints);
 
     return .{
         .keypoints = keypoints,
