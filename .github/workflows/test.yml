@@ -2,6 +2,7 @@ name: test
 
 on:
   push:
+    branches: [master]
     paths:
       - ".github/workflows/test.yml"
       - "**.zig"
