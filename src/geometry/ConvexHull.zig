@@ -9,22 +9,16 @@ const Rectangle = @import("Rectangle.zig").Rectangle;
 /// Struct that encapsulates all logic for a Convex Hull computation.
 pub fn ConvexHull(comptime T: type) type {
     return struct {
-        gpa: Allocator,
         points: std.ArrayList(Point(2, T)),
         hull: std.ArrayList(Point(2, T)),
 
         const Self = @This();
-        pub fn init(gpa: Allocator) Self {
-            return Self{
-                .gpa = gpa,
-                .points = .empty,
-                .hull = .empty,
-            };
-        }
 
-        pub fn deinit(self: *Self) void {
-            self.points.deinit(self.gpa);
-            self.hull.deinit(self.gpa);
+        pub const empty: Self = .{ .points = .empty, .hull = .empty };
+
+        pub fn deinit(self: *Self, allocator: Allocator) void {
+            self.points.deinit(allocator);
+            self.hull.deinit(allocator);
         }
 
         /// Compares the points by polar angle in clockwise order.
@@ -37,14 +31,14 @@ pub fn ConvexHull(comptime T: type) type {
         }
 
         /// Returns the convex hull of a set of points using the Graham's scan algorithm.
-        pub fn find(self: *Self, points: []const Point(2, T)) !?[]Point(2, T) {
+        pub fn find(self: *Self, allocator: Allocator, points: []const Point(2, T)) !?[]Point(2, T) {
             self.hull.clearRetainingCapacity();
             // We need at least 3 points to compute a hull.
             if (points.len < 3) {
                 return null;
             }
             self.points.clearRetainingCapacity();
-            try self.points.appendSlice(self.gpa, points);
+            try self.points.appendSlice(allocator, points);
 
             // Find the topmost-leftmost point (lowest y, then lowest x)
             var lowest_idx: usize = 0;
@@ -64,7 +58,7 @@ pub fn ConvexHull(comptime T: type) type {
             // Sort remaining points by polar angle in clockwise order
             std.mem.sort(Point(2, T), self.points.items[1..], lowest, clockwiseOrder);
 
-            try self.hull.append(self.gpa, lowest); // Add pivot first
+            try self.hull.append(allocator, lowest); // Add pivot first
 
             // Process remaining points
             for (self.points.items[1..]) |p| {
@@ -75,7 +69,7 @@ pub fn ConvexHull(comptime T: type) type {
                 ) != .clockwise) {
                     _ = self.hull.pop();
                 }
-                try self.hull.append(self.gpa, p);
+                try self.hull.append(allocator, p);
             }
 
             // Handle the case where all input points were collinear.
@@ -133,9 +127,9 @@ test "convex hull contains" {
         .init(.{ 2.0, 2.0 }),
         .init(.{ 0.0, 2.0 }),
     };
-    var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
-    defer convex_hull.deinit();
-    _ = (try convex_hull.find(points)).?;
+    var convex_hull: ConvexHull(f32) = .empty;
+    defer convex_hull.deinit(std.testing.allocator);
+    _ = (try convex_hull.find(std.testing.allocator, points)).?;
 
     // Points inside
     try expectEqual(convex_hull.contains(.init(.{ 1.0, 1.0 })), true);
@@ -166,9 +160,9 @@ test "convex hull" {
         .init(.{ 2.0, 4.0 }),
         .init(.{ 1.0, 3.0 }),
     };
-    var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
-    defer convex_hull.deinit();
-    const hull = (try convex_hull.find(points)).?;
+    var convex_hull: ConvexHull(f32) = .empty;
+    defer convex_hull.deinit(std.testing.allocator);
+    const hull = (try convex_hull.find(std.testing.allocator, points)).?;
     try expectEqual(hull.len, 4);
     try expectEqualDeep(hull[0], points[0]);
     try expectEqualDeep(hull[1], points[6]);
@@ -176,13 +170,13 @@ test "convex hull" {
     try expectEqualDeep(hull[3], points[4]);
 
     // check passing an empty slice
-    var empty = convex_hull.find(&.{});
+    var empty = convex_hull.find(std.testing.allocator, &.{});
     try expectEqual(empty, null);
     // check passing less than 3 points
-    empty = convex_hull.find(points[3..5]);
+    empty = convex_hull.find(std.testing.allocator, points[3..5]);
     try expectEqual(empty, null);
     // check passing aligned points
-    empty = convex_hull.find(points[0..3]);
+    empty = convex_hull.find(std.testing.allocator, points[0..3]);
     try expectEqual(empty, null);
 }
 
@@ -220,9 +214,9 @@ test "convex hull square" {
         .init(.{ 1.0, 1.0 }),
         .init(.{ 0.0, 1.0 }),
     };
-    var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
-    defer convex_hull.deinit();
-    const result = (try convex_hull.find(points)).?;
+    var convex_hull: ConvexHull(f32) = .empty;
+    defer convex_hull.deinit(std.testing.allocator);
+    const result = (try convex_hull.find(std.testing.allocator, points)).?;
     try expectEqual(result.len, 4);
     const expected = [_]Point(2, f32){ points[0], points[3], points[2], points[1] };
     try expectEqualDeep(result, &expected);
@@ -237,9 +231,9 @@ test "convex hull triangle" {
         .init(.{ 1.0, 0.0 }),
         .init(.{ 0.5, 1.0 }),
     };
-    var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
-    defer convex_hull.deinit();
-    const result = (try convex_hull.find(points)).?;
+    var convex_hull: ConvexHull(f32) = .empty;
+    defer convex_hull.deinit(std.testing.allocator);
+    const result = (try convex_hull.find(std.testing.allocator, points)).?;
     try expectEqual(result.len, 3);
     const expected = [_]Point(2, f32){ points[0], points[2], points[1] };
     try expectEqualDeep(result, &expected);
@@ -253,9 +247,9 @@ test "convex hull with interior points" {
         .init(.{ 1.0, 1.0 }), // Interior point
         .init(.{ 0.5, 0.5 }), // Interior point
     };
-    var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
-    defer convex_hull.deinit();
-    const hull = (try convex_hull.find(points)).?;
+    var convex_hull: ConvexHull(f32) = .empty;
+    defer convex_hull.deinit(std.testing.allocator);
+    const hull = (try convex_hull.find(std.testing.allocator, points)).?;
     try expectEqual(hull.len, 3);
     const expected = [_]Point(2, f32){ points[0], points[2], points[1] };
     try expectEqualDeep(hull, &expected);
@@ -270,9 +264,9 @@ test "convex hull duplicate points" {
         .init(.{ 0.0, 0.0 }), // Duplicate
         .init(.{ 1.0, 0.0 }), // Duplicate
     };
-    var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
-    defer convex_hull.deinit();
-    const result = (try convex_hull.find(points)).?;
+    var convex_hull: ConvexHull(f32) = .empty;
+    defer convex_hull.deinit(std.testing.allocator);
+    const result = (try convex_hull.find(std.testing.allocator, points)).?;
     try expectEqual(result.len, 4);
     const expected = [_]Point(2, f32){ points[0], points[3], points[2], points[1] };
     try expectEqualDeep(result, &expected);
@@ -285,12 +279,12 @@ test "convex hull bounding rectangle requires valid hull" {
         .init(.{ 2.0, 2.0 }),
         .init(.{ 3.0, 3.0 }),
     };
-    var convex_hull: ConvexHull(f32) = .init(std.testing.allocator);
-    defer convex_hull.deinit();
+    var convex_hull: ConvexHull(f32) = .empty;
+    defer convex_hull.deinit(std.testing.allocator);
 
     try expectEqual(convex_hull.isValid(), false);
     try expectEqual(convex_hull.getRectangle(), null);
-    const degenerate = try convex_hull.find(collinear);
+    const degenerate = try convex_hull.find(std.testing.allocator, collinear);
     try expectEqual(degenerate, null);
     try expectEqual(convex_hull.isValid(), false);
     try expectEqual(convex_hull.getRectangle(), null);
@@ -302,7 +296,7 @@ test "convex hull bounding rectangle requires valid hull" {
         .init(.{ -2.0, 1.5 }),
     };
 
-    _ = (try convex_hull.find(points)).?;
+    _ = (try convex_hull.find(std.testing.allocator, points)).?;
     try expectEqual(convex_hull.isValid(), true);
     const rect = convex_hull.getRectangle().?;
     try expectEqualDeep(rect, Rectangle(f32).init(-2.0, -2.0, 3.0, 4.0));
