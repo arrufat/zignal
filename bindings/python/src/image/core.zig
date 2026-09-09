@@ -75,7 +75,7 @@ fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
                 setDecodeError(kind, err);
                 return null;
             };
-            defer decoded.deinit();
+            defer decoded.deinit(allocator);
             const native = zignal.jpeg.toNativeImage(python.io, allocator, &decoded) catch |err| {
                 setDecodeError(kind, err);
                 return null;
@@ -203,7 +203,7 @@ fn decodeFile(comptime format: ImageFormat, data: []const u8, path: []const u8, 
                 python.setErrorWithPath(err, path);
                 return null;
             };
-            defer decoded.deinit();
+            defer decoded.deinit(allocator);
             const native = zignal.jpeg.toNativeImage(python.io, allocator, &decoded) catch |err| {
                 python.setErrorWithPath(err, path);
                 return null;

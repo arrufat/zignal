@@ -1420,8 +1420,6 @@ const FrameType = enum {
 
 // JPEG state state
 pub const JpegState = struct {
-    allocator: Allocator,
-
     // Image properties
     header: Header,
     components: [4]Component = undefined,
@@ -1467,19 +1465,16 @@ pub const JpegState = struct {
     saw_jfif: bool = false,
     adobe_transform: ?u8 = null,
 
-    pub fn init(allocator: Allocator) JpegState {
-        return .{
-            .allocator = allocator,
-            .header = .{
-                .width = 0,
-                .height = 0,
-                .frame_type = .baseline,
-                .num_components = 0,
-                .precision = 8,
-            },
-            .scan_components = &[_]ScanComponent{},
-        };
-    }
+    pub const empty: JpegState = .{
+        .header = .{
+            .width = 0,
+            .height = 0,
+            .frame_type = .baseline,
+            .num_components = 0,
+            .precision = 8,
+        },
+        .scan_components = &[_]ScanComponent{},
+    };
 
     /// Records the colour-model hints carried by APP0 (JFIF) and APP14 (Adobe).
     fn noteAppSegment(self: *JpegState, marker: Marker, payload: []const u8) void {
@@ -1522,12 +1517,10 @@ pub const JpegState = struct {
         return comp.h_sampling == max_h and comp.v_sampling == max_v;
     }
 
-    pub fn deinit(self: *JpegState) void {
-        self.allocator.free(self.scan_components);
-        self.allocator.free(self.restart_starts);
-        if (self.block_storage) |storage| {
-            self.allocator.free(storage);
-        }
+    pub fn deinit(self: *JpegState, allocator: Allocator) void {
+        allocator.free(self.scan_components);
+        allocator.free(self.restart_starts);
+        if (self.block_storage) |storage| allocator.free(storage);
     }
 
     /// Progressive-scan symbol read; reports consumption past the data as truncation.
@@ -1549,7 +1542,7 @@ pub const JpegState = struct {
     }
 
     // Parse Start of Frame (SOF0/SOF2) marker
-    pub fn parseSOF(self: *JpegState, data: []const u8, frame_type: FrameType, limits: DecodeLimits) !void {
+    pub fn parseSOF(self: *JpegState, allocator: Allocator, data: []const u8, frame_type: FrameType, limits: DecodeLimits) !void {
         // One frame header per stream; block_storage is only set by a successful parseSOF.
         if (self.block_storage != null) return error.DuplicateSOF;
         self.header.frame_type = frame_type;
@@ -1665,7 +1658,7 @@ pub const JpegState = struct {
         // Progressive scans accumulate into the whole-image store; baseline streams one MCU row.
         _, const max_v = self.maxSamplingFactors();
         const count = if (frame_type == .progressive) total_blocks else @as(usize, self.block_width_actual) * max_v;
-        self.block_storage = try self.allocator.alloc([4][64]i16, count);
+        self.block_storage = try allocator.alloc([4][64]i16, count);
         @memset(std.mem.sliceAsBytes(self.block_storage.?), 0);
     }
 
@@ -1821,7 +1814,7 @@ pub const JpegState = struct {
     }
 
     // Parse Start of Scan (SOS) marker
-    pub fn parseSOS(self: *JpegState, data: []const u8) !ScanInfo {
+    pub fn parseSOS(self: *JpegState, allocator: Allocator, data: []const u8) !ScanInfo {
         if (data.len < 6) return error.InvalidSOS;
 
         const num_components = data[0];
@@ -1829,8 +1822,8 @@ pub const JpegState = struct {
         if (self.header.frame_type == .baseline and num_components != self.header.num_components) return error.InvalidSOS;
         if (self.header.frame_type == .progressive and (num_components == 0 or num_components > self.header.num_components)) return error.InvalidSOS;
 
-        const scan_components = try self.allocator.alloc(ScanComponent, num_components);
-        errdefer self.allocator.free(scan_components);
+        const scan_components = try allocator.alloc(ScanComponent, num_components);
+        errdefer allocator.free(scan_components);
 
         var pos: usize = 1;
         for (0..num_components) |i| {
@@ -2295,7 +2288,7 @@ fn readMarkerLength(data: []const u8, pos: usize) !u16 {
 }
 
 // Helper function to process a Start of Scan marker
-fn processScanMarker(state: *JpegState, data: []const u8, pos: usize) !usize {
+fn processScanMarker(state: *JpegState, allocator: Allocator, data: []const u8, pos: usize) !usize {
     const header_len = try readMarkerLength(data, pos + 2);
     if (header_len < 2) return error.InvalidMarker;
     const marker_end = pos + 2 + header_len;
@@ -2303,17 +2296,17 @@ fn processScanMarker(state: *JpegState, data: []const u8, pos: usize) !usize {
 
     const payload_start = pos + 4;
     if (payload_start > marker_end) return error.InvalidMarker;
-    const scan_info = try state.parseSOS(data[payload_start..marker_end]);
+    const scan_info = try state.parseSOS(allocator, data[payload_start..marker_end]);
     const scan_start = marker_end;
 
     const banded = state.header.frame_type == .baseline and state.restart_interval != 0;
     var starts: std.ArrayList(usize) = .empty;
-    defer starts.deinit(state.allocator);
-    if (banded) try starts.append(state.allocator, 0);
-    const scan_end = try findScanEnd(data, scan_start, state.allocator, if (banded) &starts else null);
+    defer starts.deinit(allocator);
+    if (banded) try starts.append(allocator, 0);
+    const scan_end = try findScanEnd(data, scan_start, allocator, if (banded) &starts else null);
     if (banded) {
-        state.allocator.free(state.restart_starts);
-        state.restart_starts = try starts.toOwnedSlice(state.allocator);
+        allocator.free(state.restart_starts);
+        state.restart_starts = try starts.toOwnedSlice(allocator);
     }
     state.bit_reader = BitReader.init(data[scan_start..scan_end]);
 
@@ -2325,14 +2318,8 @@ fn processScanMarker(state: *JpegState, data: []const u8, pos: usize) !usize {
     }
 
     // For progressive JPEG, perform the scan
-    performProgressiveScan(state, scan_info) catch |err| {
-        // Free scan components before propagating error
-        state.allocator.free(scan_info.components);
-        return err;
-    };
-
-    // Free scan components for progressive (don't store in state)
-    state.allocator.free(scan_info.components);
+    defer allocator.free(scan_info.components);
+    try performProgressiveScan(state, scan_info);
     return scan_end;
 }
 
@@ -2352,8 +2339,8 @@ fn readMarkerPayload(data: []const u8, pos: *usize, total_marker_bytes: *usize, 
 }
 
 pub fn decode(allocator: Allocator, data: []const u8, limits: DecodeLimits) !JpegState {
-    var state = JpegState.init(allocator);
-    errdefer state.deinit();
+    var state: JpegState = .empty;
+    errdefer state.deinit(allocator);
 
     // Check for JPEG SOI marker
     if (data.len < 2 or !std.mem.eql(u8, data[0..2], &signature)) {
@@ -2399,7 +2386,7 @@ pub fn decode(allocator: Allocator, data: []const u8, limits: DecodeLimits) !Jpe
             .SOF0, .SOF2 => {
                 const frame_type: FrameType = if (marker == .SOF0) .baseline else .progressive;
                 const payload = try readMarkerPayload(data, &pos, &total_marker_bytes, limits);
-                try state.parseSOF(payload, frame_type, limits);
+                try state.parseSOF(allocator, payload, frame_type, limits);
             },
 
             .SOF1 => return error.UnsupportedExtendedSequential,
@@ -2428,7 +2415,7 @@ pub fn decode(allocator: Allocator, data: []const u8, limits: DecodeLimits) !Jpe
                     break;
                 }
                 scan_count += 1;
-                const scan_end = try processScanMarker(&state, data, pos);
+                const scan_end = try processScanMarker(&state, allocator, data, pos);
                 const scan_consumed = scan_end - pos;
                 try accumulateWithLimit(&total_marker_bytes, scan_consumed, limits.max_marker_bytes, error.MarkerDataLimitExceeded);
                 // For baseline JPEG, return immediately after first scan
@@ -2757,9 +2744,8 @@ fn performBlockScan(comptime T: type, state: *JpegState, band: *RenderBand, img:
 /// the segment's earlier MCUs, under one MCU row) and rendering through its own scratch.
 /// Every band re-derives the same DC predictors and restart cadence as a single sweep, so
 /// the output is identical.
-fn performBlockScanBanded(comptime T: type, io: Io, state: *JpegState, img: *Image(T), starts: []const usize, bands: usize) !void {
+fn performBlockScanBanded(comptime T: type, io: Io, allocator: Allocator, state: *JpegState, img: *Image(T), starts: []const usize, bands: usize) !void {
     const layout: ScanLayout = .init(state);
-    const allocator = state.allocator;
     const interval: usize = state.restart_interval;
     const bw: usize = state.block_width_actual;
 
@@ -3072,22 +3058,22 @@ fn renderBlockRows(comptime T: type, state: *const JpegState, band: *RenderBand,
 }
 
 /// Baseline frames stream their scan; progressive frames render the full store in bands.
-fn decodeInto(comptime T: type, io: Io, state: *JpegState, img: *Image(T)) !void {
-    if (state.header.frame_type != .baseline) return renderProgressive(T, io, state, img);
+fn decodeInto(comptime T: type, io: Io, allocator: Allocator, state: *JpegState, img: *Image(T)) !void {
+    if (state.header.frame_type != .baseline) return renderProgressive(T, io, allocator, state, img);
     const starts = state.restart_starts;
     if (starts.len > 1) {
         const layout: ScanLayout = .init(state);
         const bands = parallel.bandCount(starts.len, state.restart_interval * 64 * layout.x_step * layout.y_step);
-        if (bands > 1) return performBlockScanBanded(T, io, state, img, starts, bands);
+        if (bands > 1) return performBlockScanBanded(T, io, allocator, state, img, starts, bands);
     }
-    var band: RenderBand = try .init(state.allocator, state);
+    var band: RenderBand = try .init(allocator, state);
     defer band.deinit();
     return performBlockScan(T, state, &band, img);
 }
 
 /// The whole-image block store of a progressive frame rendered in bands of MCU rows on
 /// `io`, each through its own scratch.
-fn renderProgressive(comptime T: type, io: Io, state: *JpegState, img: *Image(T)) !void {
+fn renderProgressive(comptime T: type, io: Io, allocator: Allocator, state: *JpegState, img: *Image(T)) !void {
     const full = state.block_storage orelse return error.BlockStorageNotAllocated;
     _, const max_v = state.maxSamplingFactors();
     const block_rows: usize = state.block_height;
@@ -3111,12 +3097,12 @@ fn renderProgressive(comptime T: type, io: Io, state: *JpegState, img: *Image(T)
         }
     };
 
-    const renders = try state.allocator.alloc(RenderBand, bands);
-    defer state.allocator.free(renders);
+    const renders = try allocator.alloc(RenderBand, bands);
+    defer allocator.free(renders);
     var made: usize = 0;
     defer for (renders[0..made]) |*r| r.deinit();
     for (renders) |*r| {
-        r.* = try .init(state.allocator, state);
+        r.* = try .init(allocator, state);
         made += 1;
     }
     const ctx: Ctx = .{ .state = state, .img = img, .full = full, .max_v = max_v, .renders = renders };
@@ -3130,21 +3116,21 @@ pub fn toNativeImage(io: Io, allocator: Allocator, state: *JpegState) !union(enu
     if (state.header.num_components == 1) {
         var img: Image(u8) = try .init(allocator, state.header.height, state.header.width);
         errdefer img.deinit(allocator);
-        try decodeInto(u8, io, state, &img);
+        try decodeInto(u8, io, allocator, state, &img);
         return .{ .grayscale = img };
     }
     var img: Image(Rgb) = try .init(allocator, state.header.height, state.header.width);
     errdefer img.deinit(allocator);
-    try decodeInto(Rgb, io, state, &img);
+    try decodeInto(Rgb, io, allocator, state, &img);
     return .{ .rgb = img };
 }
 
 pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
     var state = try decode(allocator, data, limits);
-    defer state.deinit();
+    defer state.deinit(allocator);
     var img: Image(T) = try .init(allocator, state.header.height, state.header.width);
     errdefer img.deinit(allocator);
-    try decodeInto(T, io, &state, &img);
+    try decodeInto(T, io, allocator, &state, &img);
     return img;
 }
 
@@ -3214,10 +3200,10 @@ test "JPEG encode -> decode RGB roundtrip" {
     defer gpa.free(bytes);
 
     var state = try decode(gpa, bytes, .{});
-    defer state.deinit();
+    defer state.deinit(gpa);
     var out: Image(Rgb) = try .init(gpa, state.header.height, state.header.width);
     defer out.deinit(gpa);
-    try decodeInto(Rgb, parallel.inline_io, &state, &out);
+    try decodeInto(Rgb, parallel.inline_io, gpa, &state, &out);
 
     // One 4:2:0 MCU at quality 85: integer chroma upsampling lands at ~38.7 dB.
     const psnr = try img.psnr(out);
@@ -3237,10 +3223,10 @@ test "JPEG encode -> decode grayscale roundtrip" {
     defer gpa.free(bytes);
 
     var state = try decode(gpa, bytes, .{});
-    defer state.deinit();
+    defer state.deinit(gpa);
     var out: Image(Rgb) = try .init(gpa, state.header.height, state.header.width);
     defer out.deinit(gpa);
-    try decodeInto(Rgb, parallel.inline_io, &state, &out);
+    try decodeInto(Rgb, parallel.inline_io, gpa, &state, &out);
 
     // Convert original gray to RGB for PSNR
     var gray_rgb = try img.convert(parallel.inline_io, gpa, Rgb);
@@ -3271,10 +3257,10 @@ test "JPEG subsampling 4:2:2 roundtrip" {
     defer gpa.free(bytes);
 
     var state = try decode(gpa, bytes, .{});
-    defer state.deinit();
+    defer state.deinit(gpa);
     var out: Image(Rgb) = try .init(gpa, state.header.height, state.header.width);
     defer out.deinit(gpa);
-    try decodeInto(Rgb, parallel.inline_io, &state, &out);
+    try decodeInto(Rgb, parallel.inline_io, gpa, &state, &out);
 
     const psnr = try img.psnr(out);
     try std.testing.expect(psnr > 40);
@@ -3302,10 +3288,10 @@ test "JPEG subsampling 4:2:0 roundtrip" {
     defer gpa.free(bytes);
 
     var state = try decode(gpa, bytes, .{});
-    defer state.deinit();
+    defer state.deinit(gpa);
     var out: Image(Rgb) = try .init(gpa, state.header.height, state.header.width);
     defer out.deinit(gpa);
-    try decodeInto(Rgb, parallel.inline_io, &state, &out);
+    try decodeInto(Rgb, parallel.inline_io, gpa, &state, &out);
 
     const psnr = try img.psnr(out);
     try std.testing.expect(psnr > 45);
@@ -3335,10 +3321,10 @@ test "JPEG 4:2:0 odd-size roundtrip (non-multiple-of-MCU)" {
     defer gpa.free(bytes);
 
     var state = try decode(gpa, bytes, .{});
-    defer state.deinit();
+    defer state.deinit(gpa);
     var out: Image(Rgb) = try .init(gpa, state.header.height, state.header.width);
     defer out.deinit(gpa);
-    try decodeInto(Rgb, parallel.inline_io, &state, &out);
+    try decodeInto(Rgb, parallel.inline_io, gpa, &state, &out);
 
     // We expect a decent reconstruction quality even with 4:2:0 on odd dimensions.
     const psnr = try img.psnr(out);
@@ -3360,12 +3346,12 @@ test "JPEG marker byte limit" {
 }
 
 test "JPEG block limit prevents excessive allocation" {
-    var state: JpegState = .init(std.testing.allocator);
-    defer state.deinit();
+    var state: JpegState = .empty;
+    defer state.deinit(std.testing.allocator);
 
     const sof_data = [_]u8{ 0x08, 0x00, 0x10, 0x00, 0x10, 0x01, 0x01, 0x11, 0x00 };
     const limits: DecodeLimits = .{ .max_blocks = 1 };
-    const result = state.parseSOF(&sof_data, .baseline, limits);
+    const result = state.parseSOF(std.testing.allocator, &sof_data, .baseline, limits);
     try std.testing.expectError(error.BlockMemoryLimitExceeded, result);
 }
 
@@ -3401,7 +3387,7 @@ test "JPEG progressive scan limit returns partial image" {
     for (img.data) |px| try std.testing.expectEqual(142, px);
 
     var state = try decode(std.testing.allocator, &test_progressive_jpeg, .{ .max_scans = 2 });
-    defer state.deinit();
+    defer state.deinit(std.testing.allocator);
     try std.testing.expect(state.scan_limit_reached);
 }
 
