@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Breaking Changes
-- **`io: Io` parameter**: image filters, resampling transforms, order-statistic filters, `convert`/flips/`insert`, codec `encode`/`loadFromBytes`, `Matrix` products, `Pca`, `ImagePyramid.build` and `Orb.detect` take an `io: Io` after `self` and run in row bands on it; a `process.Init` pool runs them in parallel, `Io.Threaded.global_single_threaded.io()` or `std.Io.failing` runs them serially, output is byte-identical either way. ([#437](https://github.com/arrufat/zignal/pull/437)-[#448](https://github.com/arrufat/zignal/pull/448), [#464](https://github.com/arrufat/zignal/pull/464)-[#468](https://github.com/arrufat/zignal/pull/468))
+- **`io: Io` parameter**: image filters, resampling transforms, order-statistic filters, `convert`/flips/`insert`, codec `encode`/`loadFromBytes`, `Matrix` products, `Pca`, `ImagePyramid.init` and `Orb.detect` take an `io: Io` after `self` and run in row bands on it; a `process.Init` pool runs them in parallel, `Io.Threaded.global_single_threaded.io()` or `std.Io.failing` runs them serially, output is byte-identical either way. ([#437](https://github.com/arrufat/zignal/pull/437)-[#448](https://github.com/arrufat/zignal/pull/448), [#464](https://github.com/arrufat/zignal/pull/464)-[#468](https://github.com/arrufat/zignal/pull/468))
 - **Argument order**: out-param image methods follow `(self, io, allocator, out, ...)`, `diff` takes `(self, other, out, opts)`, ORB helpers take the allocator first. ([#354](https://github.com/arrufat/zignal/pull/354), [#359](https://github.com/arrufat/zignal/pull/359), [#434](https://github.com/arrufat/zignal/pull/434))
 - **`DrawOptions`**: canvas primitives take `opts: DrawOptions { mode, blending }` instead of a `DrawMode`; the `.soft`/`.fast` presets reproduce the old output, every primitive can use any of the 12 blend modes, and `setPixel`/`setPoint` gain a `blending` parameter. ([#400](https://github.com/arrufat/zignal/pull/400))
 - **`Canvas.drawText(font: Font, size: ?f32)`**: takes the `Font` union and a pixel size instead of a `BitmapFont` and a scale (`null` uses `font.defaultSize()`), and returns `!void`. ([#403](https://github.com/arrufat/zignal/pull/403))
@@ -15,6 +15,7 @@
 - **Python draws antialiased by default**: canvas methods default to `DrawMode.SOFT` and an omitted `blending` follows the mode's preset; pass `mode=DrawMode.FAST, blending=Blending.NORMAL` for the old output. ([#424](https://github.com/arrufat/zignal/pull/424))
 - **Python `Font` replaces `BitmapFont`**: `Font.load` detects the format and `Canvas.draw_text` takes a pixel `size`. ([#403](https://github.com/arrufat/zignal/pull/403))
 - **JPEG encodes write a restart marker per MCU row by default** (`EncodeOptions.restart_interval`, about 0.1 % larger files) so they decode in parallel; `.none` restores the old bytes. ([#466](https://github.com/arrufat/zignal/pull/466))
+- **`ImagePyramid.init(io, allocator, source, options)`**: `build` is renamed `init` and takes an `Options` struct (`n_levels`, `scale_factor`, `blur_sigma`, `min_size`, `.default` is the ORB preset) in place of three positional parameters; the pyramid no longer stores its allocator, so `deinit(allocator)` takes it like `Image`; `buildDefault` and the write-only `blur_sigma` field are gone.
 - **Minimum Zig version is 0.17.0-dev.1970.**
 
 ### Features
