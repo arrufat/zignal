@@ -17,7 +17,12 @@ const convex_hull_new = python.genericNew(ConvexHullObject);
 
 fn convex_hull_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
     const self = python.safeCast(ConvexHullObject, self_obj);
-    self.hull = python.allocate(ConvexHull, .{python.allocator}) catch return -1;
+    const hull = python.allocator.create(ConvexHull) catch {
+        python.setMemoryError("ConvexHull");
+        return -1;
+    };
+    hull.* = .empty;
+    self.hull = hull;
 
     // Parse optional points argument
     const Params = struct {
@@ -33,7 +38,7 @@ fn convex_hull_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     defer python.allocator.free(points);
 
     // Find convex hull
-    _ = self.hull.?.find(points) catch |err| {
+    _ = hull.find(python.allocator, points) catch |err| {
         python.mapZigError(err, "ConvexHull");
         return -1;
     };
@@ -43,7 +48,10 @@ fn convex_hull_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 
 // Helper function for custom cleanup
 fn convexHullDeinit(self: *ConvexHullObject) void {
-    python.destroyHeapObject(ConvexHull, self.hull);
+    if (self.hull) |hull| {
+        hull.deinit(python.allocator);
+        python.allocator.destroy(hull);
+    }
 }
 
 // Using genericDealloc helper
@@ -105,7 +113,7 @@ fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     defer python.allocator.free(points);
 
     // Find convex hull with improved error handling
-    const hull_points = hull.find(points) catch |err| {
+    const hull_points = hull.find(python.allocator, points) catch |err| {
         python.setRuntimeError("Failed to compute convex hull: {s}", .{@errorName(err)});
         return null;
     };
