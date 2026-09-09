@@ -395,3 +395,67 @@ test "interleaved struct resize matches per-channel planes" {
         }
     }
 }
+
+// Other pixel types gather the taps x taps window through the same tap tables as the planes;
+// against per-pixel `interpolate` (mirror-normalized over the same window) the difference
+// is float summation order, the exact Lanczos kernel against the per-pixel LUT, and integer
+// rounding. Bilinear u16 is checked against the f32 plane instead: `interpolate` quantizes
+// the bilinear fraction to 1/256, which is coarser than a 16-bit sample.
+test "tapped generic resize matches the per-pixel kernel" {
+    const allocator = std.testing.allocator;
+    const interpolation = @import("../interpolation.zig");
+    const Rgbf = color.Rgb(f32);
+    var prng = std.Random.DefaultPrng.init(0x7a95);
+    const random = prng.random();
+    const methods = [_]Interpolation{ .bilinear, .bicubic, .catmull_rom, .{ .mitchell = .default }, .lanczos };
+
+    inline for ([_]type{ u16, Rgbf }) |T| {
+        // Odd sources (one row, one column) exercise the mirrored window on tiny extents.
+        for ([_][2]u32{ .{ 97, 131 }, .{ 1, 131 }, .{ 97, 1 } }) |src_shape| {
+            var src: Image(T) = try .init(allocator, src_shape[0], src_shape[1]);
+            defer src.deinit(allocator);
+            for (src.data) |*px| px.* = if (T == u16) random.int(u16) else .{ .r = 255 * random.float(f32), .g = 255 * random.float(f32), .b = 255 * random.float(f32) };
+
+            for (methods) |method| {
+                for ([_][2]u32{ .{ 61, 47 }, .{ 200, 150 } }) |shape| {
+                    var out: Image(T) = try .init(allocator, shape[0], shape[1]);
+                    defer out.deinit(allocator);
+                    src.resize(io, allocator, out, method);
+                    const scale_x = @as(f32, @floatFromInt(src.cols)) / @as(f32, @floatFromInt(out.cols));
+                    const scale_y = @as(f32, @floatFromInt(src.rows)) / @as(f32, @floatFromInt(out.rows));
+                    for (0..out.rows) |r| {
+                        for (0..out.cols) |c| {
+                            const x = (@as(f32, @floatFromInt(c)) + 0.5) * scale_x - 0.5;
+                            const y = (@as(f32, @floatFromInt(r)) + 0.5) * scale_y - 0.5;
+                            const got = out.at(r, c).*;
+                            const expected = interpolation.interpolate(T, src, x, y, method, .mirror).?;
+                            if (T == u16) {
+                                if (method == .bilinear) continue;
+                                try std.testing.expect(@abs(@as(i32, got) - @as(i32, expected)) <= 1);
+                            } else {
+                                inline for (.{ "r", "g", "b" }) |f| try std.testing.expect(@abs(@field(got, f) - @field(expected, f)) <= 2e-3);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Bilinear u16 against the separable f32 plane of the same samples: within rounding.
+    var src: Image(u16) = try .init(allocator, 97, 131);
+    defer src.deinit(allocator);
+    for (src.data) |*px| px.* = random.int(u16);
+    var src_f: Image(f32) = try .init(allocator, src.rows, src.cols);
+    defer src_f.deinit(allocator);
+    for (src_f.data, src.data) |*f, v| f.* = @as(f32, v);
+    for ([_][2]u32{ .{ 61, 47 }, .{ 200, 150 } }) |shape| {
+        var out: Image(u16) = try .init(allocator, shape[0], shape[1]);
+        defer out.deinit(allocator);
+        var out_f: Image(f32) = try .init(allocator, shape[0], shape[1]);
+        defer out_f.deinit(allocator);
+        src.resize(io, allocator, out, .bilinear);
+        src_f.resize(io, allocator, out_f, .bilinear);
+        for (out.data, out_f.data) |v, f| try std.testing.expect(@abs(@as(f32, v) - f) <= 1);
+    }
+}
