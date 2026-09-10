@@ -104,7 +104,14 @@ fn resizePlane(comptime P: type, comptime channels: usize, io: Io, src: Image(P)
     const dst_cols = dst.cols / ch;
     switch (method) {
         .nearest => {
-            const ctx: DirectPlane(P, channels) = .{ .src = src, .dst = dst };
+            // One column table for every row; without it each row recomputes its columns.
+            const col_idx: ?[]u32 = allocator.alloc(u32, dst_cols) catch null;
+            defer if (col_idx) |cols| allocator.free(cols);
+            if (col_idx) |cols| {
+                const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
+                for (cols, 0..) |*src_x, c| src_x.* = channel_ops.nearestIndex(c, src_cols, x_ratio);
+            }
+            const ctx: DirectPlane(P, channels) = .{ .src = src, .dst = dst, .col_idx = col_idx };
             parallel.forRowBands(io, dst.rows, parallel.bandCount(dst.rows, dst_cols), &ctx, DirectPlane(P, channels).band);
         },
         .bilinear, .bicubic, .catmull_rom, .mitchell, .lanczos => {
@@ -129,12 +136,13 @@ fn DirectPlane(comptime P: type, comptime channels: usize) type {
     return struct {
         src: Image(P),
         dst: Image(P),
+        col_idx: ?[]const u32,
 
         fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
             const src = ctx.src;
             const dst = ctx.dst;
             const ch: u32 = channels;
-            channel_ops.resizePlaneNearest(P, channels, src.data, src.stride, dst.data, dst.stride, src.rows, src.cols / ch, dst.rows, dst.cols / ch, r0, r1);
+            channel_ops.resizePlaneNearest(P, channels, src.data, src.stride, dst.data, dst.stride, src.rows, src.cols / ch, dst.rows, dst.cols / ch, ctx.col_idx, r0, r1);
         }
     };
 }
