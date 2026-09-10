@@ -206,8 +206,15 @@ fn PlaneBands(comptime T: type, comptime Plane: type) type {
 // Direct plane resize: output rows [r_start, r_end) of a dst_rows x dst_cols plane
 // ============================================================================
 
+/// Source index nearest to output position `i` along an axis of `src_len` resampled to `dst_len`.
+pub fn nearestIndex(i: usize, src_len: u32, ratio: f32) u32 {
+    const center = (@as(f32, @floatFromInt(i)) + 0.5) * ratio - 0.5;
+    return @max(0, @min(src_len - 1, @as(u32, @round(center))));
+}
+
 /// Nearest neighbor resize of a contiguous plane; `channels` > 1 means interleaved pixels
-/// of `channels` elements each (dimensions count pixels).
+/// of `channels` elements each (dimensions count pixels). `col_idx`, when given, holds
+/// `nearestIndex` for every output column so rows are pure gathers.
 pub fn resizePlaneNearest(
     comptime P: type,
     comptime channels: usize,
@@ -219,20 +226,35 @@ pub fn resizePlaneNearest(
     src_cols: u32,
     dst_rows: u32,
     dst_cols: u32,
+    col_idx: ?[]const u32,
     r_start: usize,
     r_end: usize,
 ) void {
     const x_ratio = @as(f32, @floatFromInt(src_cols)) / @as(f32, @floatFromInt(dst_cols));
     const y_ratio = @as(f32, @floatFromInt(src_rows)) / @as(f32, @floatFromInt(dst_rows));
 
+    var prev_y: ?u32 = null;
     for (r_start..r_end) |r| {
-        const src_y_f = (@as(f32, @floatFromInt(r)) + 0.5) * y_ratio - 0.5;
-        const src_y = @max(0, @min(src_rows - 1, @as(u32, @round(src_y_f))));
+        const src_y = nearestIndex(r, src_rows, y_ratio);
+        const src_row = src[src_y * src_stride ..][0 .. @as(usize, src_cols) * channels];
+        const dst_row = dst[r * dst_stride ..][0 .. @as(usize, dst_cols) * channels];
 
-        for (0..dst_cols) |c| {
-            const src_x_f = (@as(f32, @floatFromInt(c)) + 0.5) * x_ratio - 0.5;
-            const src_x = @max(0, @min(src_cols - 1, @as(u32, @round(src_x_f))));
-            dst[r * dst_stride + c * channels ..][0..channels].* = src[src_y * src_stride + src_x * channels ..][0..channels].*;
+        // Upscales repeat source rows; the previous output row is already that gather.
+        if (prev_y == src_y) {
+            @memcpy(dst_row, dst[(r - 1) * dst_stride ..][0..dst_row.len]);
+            continue;
+        }
+        prev_y = src_y;
+
+        if (col_idx) |cols| {
+            for (cols, 0..) |src_x, c| {
+                dst_row[c * channels ..][0..channels].* = src_row[src_x * channels ..][0..channels].*;
+            }
+        } else {
+            for (0..dst_cols) |c| {
+                const src_x = nearestIndex(c, src_cols, x_ratio);
+                dst_row[c * channels ..][0..channels].* = src_row[src_x * channels ..][0..channels].*;
+            }
         }
     }
 }
