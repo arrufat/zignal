@@ -77,19 +77,20 @@ pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Int
 
 /// Resizes `self` into the pre-allocated `out` image using the given interpolation `method`,
 /// in row bands on `io`. u8, f32 and u8-struct images (views included) take the separable
-/// passes and use `allocator` for the tap tables and the row rings, sampling per pixel if
-/// that allocation fails; other pixel types sample per pixel and do not allocate.
+/// passes and use `allocator` for the tap tables and the row rings; other pixel types gather
+/// the `taps x taps` window per pixel through the same tap tables. Every path samples per
+/// pixel, without allocating, when the tables cannot be allocated.
 pub fn resize(comptime T: type, io: Io, self: Image(T), out: Image(T), allocator: Allocator, method: Interpolation) void {
     if (self.rows == out.rows and self.cols == out.cols) return self.copy(out);
 
     // Planes take the separable resizers; u8 struct pixels run through them interleaved.
     const P = comptime if (T == u8 or T == f32) T else if (@typeInfo(T) == .@"struct" and meta.allFieldsAreU8(T)) u8 else void;
     if (P == void) {
-        resizeGeneric(T, io, self, out, method);
+        resizeGeneric(T, io, self, out, allocator, method);
     } else {
         const src = if (P == T) self else elementView(T, self);
         const dst = if (P == T) out else elementView(T, out);
-        resizePlane(P, comptime Image(T).channels(), io, src, dst, allocator, method) catch resizeGeneric(T, io, self, out, method);
+        resizePlane(P, comptime Image(T).channels(), io, src, dst, allocator, method) catch resizePerPixel(T, io, self, out, method);
     }
 }
 
@@ -191,13 +192,71 @@ fn SeparablePlane(comptime P: type, comptime channels: usize) type {
     };
 }
 
-/// Generic per-pixel resize fallback, in output-row bands.
-fn resizeGeneric(comptime T: type, io: Io, self: Image(T), out: Image(T), method: Interpolation) void {
-    const ctx: GenericResize(T) = .{ .src = self, .out = out, .method = method };
-    parallel.forRowBands(io, out.rows, parallel.bandCount(out.rows, out.cols), &ctx, GenericResize(T).band);
+/// Any pixel type, in output-row bands: the x and y tap tables are built once and every
+/// output pixel gathers its `taps x taps` source window directly (no per-pixel kernel
+/// evaluation, index mirroring or normalization). Nearest, empty sources and table
+/// allocation failure sample per pixel instead.
+fn resizeGeneric(comptime T: type, io: Io, self: Image(T), out: Image(T), allocator: Allocator, method: Interpolation) void {
+    if (method != .nearest and self.rows > 0 and self.cols > 0) tapped: {
+        const x_taps = channel_ops.AxisTaps(f32).init(allocator, self.cols, out.cols, method) catch break :tapped;
+        defer x_taps.deinit(allocator);
+        const y_taps = channel_ops.AxisTaps(f32).init(allocator, self.rows, out.rows, method) catch break :tapped;
+        defer y_taps.deinit(allocator);
+        const ctx: TappedResize(T) = .{ .src = self, .out = out, .x_taps = x_taps, .y_taps = y_taps };
+        parallel.forRowBands(io, out.rows, parallel.bandCount(out.rows, out.cols), &ctx, TappedResize(T).band);
+        return;
+    }
+    resizePerPixel(T, io, self, out, method);
 }
 
-fn GenericResize(comptime T: type) type {
+fn TappedResize(comptime T: type) type {
+    return struct {
+        src: Image(T),
+        out: Image(T),
+        x_taps: channel_ops.AxisTaps(f32),
+        y_taps: channel_ops.AxisTaps(f32),
+
+        fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
+            switch (ctx.x_taps.taps) {
+                inline 2, 4, 6 => |taps| ctx.rows(taps, r0, r1),
+                else => unreachable,
+            }
+        }
+
+        fn rows(ctx: *const @This(), comptime taps: usize, r0: usize, r1: usize) void {
+            const src = ctx.src;
+            const out = ctx.out;
+            for (r0..r1) |r| {
+                const wy = ctx.y_taps.weights[r * taps ..][0..taps];
+                var src_rows: [taps][*]const T = undefined;
+                for (ctx.y_taps.indices[r * taps ..][0..taps], &src_rows) |y, *row| row.* = src.data[y * src.stride ..].ptr;
+                for (out.data[r * out.stride ..][0..out.cols], 0..) |*px, c| {
+                    const xs = ctx.x_taps.indices[c * taps ..][0..taps];
+                    const wx = ctx.x_taps.weights[c * taps ..][0..taps];
+                    const n = comptime Image(T).channels();
+                    var sums: [n]f32 = @splat(0);
+                    inline for (0..taps) |j| {
+                        var row_sums: [n]f32 = @splat(0);
+                        inline for (0..taps) |i| {
+                            const pixel = src_rows[j][xs[i]];
+                            inline for (0..n) |ch| row_sums[ch] += channelOf(pixel, ch) * wx[i];
+                        }
+                        inline for (0..n) |ch| sums[ch] += row_sums[ch] * wy[j];
+                    }
+                    px.* = fromChannels(T, sums);
+                }
+            }
+        }
+    };
+}
+
+/// Per-pixel `interpolate` resize, in output-row bands; allocation-free.
+fn resizePerPixel(comptime T: type, io: Io, self: Image(T), out: Image(T), method: Interpolation) void {
+    const ctx: PerPixelResize(T) = .{ .src = self, .out = out, .method = method };
+    parallel.forRowBands(io, out.rows, parallel.bandCount(out.rows, out.cols), &ctx, PerPixelResize(T).band);
+}
+
+fn PerPixelResize(comptime T: type) type {
     return struct {
         src: Image(T),
         out: Image(T),
