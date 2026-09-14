@@ -50,6 +50,32 @@ test "invert" {
     try expectEqualDeep(Rgba{ .r = 255, .g = 127, .b = 0, .a = 64 }, rgba.at(0, 0).*);
 }
 
+test "invertInto and equalizeInto match the in-place versions through views" {
+    const gpa = std.testing.allocator;
+    inline for (.{ u8, Rgb, Rgba }) |T| {
+        var base: Image(T) = try .init(gpa, 9, 13);
+        defer base.deinit(gpa);
+        var prng = std.Random.DefaultPrng.init(3);
+        for (std.mem.sliceAsBytes(base.data)) |*b| b.* = prng.random().int(u8);
+        const src = base.view(.{ .l = 2, .t = 1, .r = 11, .b = 8 });
+        var dst_base: Image(T) = try .init(gpa, 9, 13);
+        defer dst_base.deinit(gpa);
+        const dst = dst_base.view(.{ .l = 0, .t = 2, .r = 9, .b = 9 });
+
+        var expected = try src.dupe(gpa);
+        defer expected.deinit(gpa);
+
+        expected.invert();
+        src.invertInto(dst);
+        try expectEqual(0, try expected.meanPixelError(dst));
+
+        src.copy(expected);
+        expected.equalize();
+        src.equalizeInto(dst);
+        try expectEqual(0, try expected.meanPixelError(dst));
+    }
+}
+
 test "boxBlur radius 0 with views" {
     var image: Image(u8) = try .init(std.testing.allocator, 6, 8);
     defer image.deinit(std.testing.allocator);

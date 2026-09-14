@@ -505,9 +505,19 @@ pub fn Image(comptime T: type) type {
             return Transform(T).flipLeftRight(self, io);
         }
 
+        /// Flips an image from left to right into `out`, in row bands on `io`.
+        pub fn flipLeftRightInto(self: Self, io: Io, out: Self) void {
+            return Transform(T).flipLeftRightInto(self, io, out);
+        }
+
         /// Flips an image from top to bottom (upside down effect), in row bands on `io`.
         pub fn flipTopBottom(self: Self, io: Io) void {
             return Transform(T).flipTopBottom(self, io);
+        }
+
+        /// Flips an image from top to bottom into `out`, in row bands on `io`.
+        pub fn flipTopBottomInto(self: Self, io: Io, out: Self) void {
+            return Transform(T).flipTopBottomInto(self, io, out);
         }
 
         /// Inverts the colors of an image in-place.
@@ -515,22 +525,21 @@ pub fn Image(comptime T: type) type {
         /// For RGB colors: inverts each channel as 255 - channel
         /// For RGBA colors: inverts RGB channels but preserves alpha
         pub fn invert(self: Self) void {
-            if (T == u8) {
-                for (0..self.rows) |r| {
-                    for (0..self.cols) |c| {
-                        const pixel = self.at(r, c);
-                        pixel.* = 255 - pixel.*;
-                    }
-                }
-            } else if (@hasDecl(T, "invert")) {
-                for (0..self.rows) |r| {
-                    for (0..self.cols) |c| {
-                        const pixel = self.at(r, c);
-                        pixel.* = pixel.invert();
-                    }
-                }
-            } else {
+            self.invertInto(self);
+        }
+
+        /// Inverts the colors of an image into `out`.
+        pub fn invertInto(self: Self, out: Self) void {
+            assert(self.hasSameShape(out));
+            comptime if (T != u8 and !@hasDecl(T, "invert")) {
                 @compileError("invert() requires pixel types with an invert() method or u8 grayscale pixels");
+            };
+            for (0..self.rows) |r| {
+                const src_row = self.data[r * self.stride ..][0..self.cols];
+                const dst_row = out.data[r * out.stride ..][0..out.cols];
+                for (src_row, dst_row) |s, *d| {
+                    d.* = if (T == u8) 255 - s else s.invert();
+                }
             }
         }
 
@@ -844,6 +853,11 @@ pub fn Image(comptime T: type) type {
         /// ```
         pub fn equalize(self: Self) void {
             return Enhancement(T).equalize(self);
+        }
+
+        /// Equalizes the histogram to improve contrast, writing the result into `out`.
+        pub fn equalizeInto(self: Self, out: Self) void {
+            return Enhancement(T).equalizeInto(self, out);
         }
 
         /// Fills a contiguous region of pixels starting from `start_row` and `start_col`
@@ -1175,26 +1189,42 @@ pub fn Image(comptime T: type) type {
         /// Supported types: u8, Rgb, Rgba
         /// Returns a Histogram struct with channel-specific bins.
         pub fn histogram(self: Self) Histogram(T) {
-            var hist: Histogram(T) = .init();
+            comptime if (T != u8 and T != Rgb and T != Rgba) {
+                @compileError("histogram() only supports u8, Rgb, and Rgba types");
+            };
+            const n_channels = comptime Self.channels();
+            // Consecutive pixels count into different lane tables so a run of equal values
+            // does not serialize on store-to-load forwarding of the same bin.
+            const lanes = 4;
+            var sub: [n_channels][lanes][256]u32 = @splat(@splat(@splat(0)));
 
-            var iter = self.pixels();
-            while (iter.next()) |pixel| {
-                switch (T) {
-                    u8 => {
-                        hist.values[pixel.*] += 1;
-                    },
-                    Rgb => {
-                        hist.r[pixel.r] += 1;
-                        hist.g[pixel.g] += 1;
-                        hist.b[pixel.b] += 1;
-                    },
-                    Rgba => {
-                        hist.r[pixel.r] += 1;
-                        hist.g[pixel.g] += 1;
-                        hist.b[pixel.b] += 1;
-                        hist.a[pixel.a] += 1;
-                    },
-                    else => @compileError("histogram() only supports u8, Rgb, and Rgba types"),
+            for (0..self.rows) |r| {
+                const row = self.data[r * self.stride ..][0..self.cols];
+                for (row, 0..) |pixel, i| {
+                    const lane = i % lanes;
+                    if (T == u8) {
+                        sub[0][lane][pixel] += 1;
+                    } else {
+                        sub[0][lane][pixel.r] += 1;
+                        sub[1][lane][pixel.g] += 1;
+                        sub[2][lane][pixel.b] += 1;
+                        if (T == Rgba) sub[3][lane][pixel.a] += 1;
+                    }
+                }
+            }
+
+            var hist: Histogram(T) = .init();
+            const bins: [n_channels]*[256]u32 = switch (T) {
+                u8 => .{&hist.values},
+                Rgb => .{ &hist.r, &hist.g, &hist.b },
+                Rgba => .{ &hist.r, &hist.g, &hist.b, &hist.a },
+                else => unreachable,
+            };
+            for (bins, 0..) |bin, ch| {
+                for (bin, 0..) |*count, v| {
+                    var sum: u32 = 0;
+                    for (0..lanes) |lane| sum += sub[ch][lane][v];
+                    count.* = sum;
                 }
             }
             return hist;
