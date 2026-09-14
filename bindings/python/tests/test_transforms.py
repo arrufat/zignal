@@ -147,6 +147,23 @@ class TestTransforms:
         tl = extracted_replicate[0, 0]
         assert (tl.r, tl.g, tl.b) == (255, 255, 255)
 
+    def test_rotate_expand_false_keeps_size(self):
+        import math
+
+        img = zignal.Image(10, 14, dtype=zignal.Rgb)
+        img.fill(zignal.Rgb(255, 255, 255))
+
+        expanded = img.rotate(math.radians(45))
+        cropped = img.rotate(math.radians(45), expand=False)
+        assert (cropped.rows, cropped.cols) == (10, 14)
+        assert expanded.rows > 10 and expanded.cols > 14
+        # The centre pixel is the same source point in both outputs.
+        c_e = expanded[expanded.rows // 2, expanded.cols // 2]
+        c_c = cropped[5, 7]
+        assert (c_e.r, c_e.g, c_e.b) == (c_c.r, c_c.g, c_c.b) == (255, 255, 255)
+        # expand=True is the default and accepts the keyword explicitly.
+        assert img.rotate(math.radians(45), expand=True).rows == expanded.rows
+
     def test_rotate_angle_validation(self):
         import math
 

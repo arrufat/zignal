@@ -245,12 +245,14 @@ pub fn image_letterbox(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyO
 pub const image_rotate_doc =
     \\Rotate the image by the specified angle around its center.
     \\
-    \\The output image is automatically sized to fit the entire rotated image without clipping.
+    \\By default the output grows to fit the entire rotated image without clipping; pass
+    \\`expand=False` to keep the input size and clip the corners, like Pillow.
     \\
     \\## Parameters
     \\- `angle` (float): Rotation angle in radians counter-clockwise.
     \\- `method` (`Interpolation`, optional): Interpolation method to use. Default is `Interpolation.BILINEAR`.
     \\- `border` (`BorderMode`, optional): Border handling mode. Default is `BorderMode.ZERO`.
+    \\- `expand` (bool, optional): Grow the canvas to fit the rotated content. Default is `True`.
     \\
     \\## Examples
     \\```python
@@ -265,6 +267,9 @@ pub const image_rotate_doc =
     \\
     \\# Rotate with mirror border
     \\rotated = img.rotate(math.radians(45), border=BorderMode.MIRROR)
+    \\
+    \\# Keep the original size and clip the corners
+    \\rotated = img.rotate(math.radians(45), expand=False)
     \\```
 ;
 
@@ -277,11 +282,17 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
         angle: f64,
         method: c_long = 1,
         border: c_long = 0,
+        expand: ?*c.PyObject = null,
     };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const angle = params.angle;
+    const output: zignal.RotateSize = if (params.expand) |obj| blk: {
+        const truth = c.PyObject_IsTrue(obj);
+        if (truth < 0) return null;
+        break :blk if (truth == 1) .expand else .crop;
+    } else .expand;
     const method_value = params.method;
     const border_value = params.border;
 
@@ -292,9 +303,9 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
 
     if (!validateF32(angle, "Angle")) return null;
 
-    return self.py_image.?.dispatch(.{ angle, method, border }, struct {
-        fn apply(img: anytype, a: f64, m: Interpolation, b: zignal.BorderMode) ?*c.PyObject {
-            const out = python.withoutGil(@TypeOf(img.*).rotate, .{ img.*, python.io, allocator, @as(f32, @floatCast(a)), m, b }) catch {
+    return self.py_image.?.dispatch(.{ angle, method, border, output }, struct {
+        fn apply(img: anytype, a: f64, m: Interpolation, b: zignal.BorderMode, o: zignal.RotateSize) ?*c.PyObject {
+            const out = python.withoutGil(@TypeOf(img.*).rotate, .{ img.*, python.io, allocator, @as(f32, @floatCast(a)), m, b, o }) catch {
                 python.setMemoryError("image rotate");
                 return null;
             };

@@ -362,6 +362,16 @@ def main() -> None:
             lambda: cv2.warpAffine(cv_rgb, rot_matrix, out_size, flags=cv2.INTER_LINEAR),
         )
     )
+    if cv2 is not None:
+        crop_matrix = cv2.getRotationMatrix2D((cols / 2.0, rows / 2.0), rot_deg, 1.0)
+    cat["items"].append(
+        bench_case(
+            f"Rotate 45° (Bilinear, cropped to {cols}x{rows})",
+            lambda: zg_rgb.rotate(rot_rad, zignal.Interpolation.BILINEAR, expand=False),
+            lambda: pil_rgb.rotate(rot_deg, resample=PILImage.Resampling.BILINEAR),
+            lambda: cv2.warpAffine(cv_rgb, crop_matrix, (cols, rows), flags=cv2.INTER_LINEAR),
+        )
+    )
     categories.append(cat)
 
     # --------------------------------------------------------------------------
