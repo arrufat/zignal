@@ -179,22 +179,22 @@ test "rotate orthogonal fast paths" {
     image.at(2, 3).* = 12;
 
     // Test 0 degree rotation
-    var rotated_0 = try image.rotate(io, std.testing.allocator, 0, .bilinear, .mirror);
+    var rotated_0 = try image.rotate(io, std.testing.allocator, 0, .bilinear, .mirror, .expand);
     defer rotated_0.deinit(std.testing.allocator);
     try expectEqual(@as(u8, 1), rotated_0.at(0, 0).*);
 
     // Test 90 degree rotation
-    var rotated_90 = try image.rotate(io, std.testing.allocator, std.math.pi / 2.0, .bilinear, .mirror);
+    var rotated_90 = try image.rotate(io, std.testing.allocator, std.math.pi / 2.0, .bilinear, .mirror, .expand);
     defer rotated_90.deinit(std.testing.allocator);
     // After 90° rotation, top-left becomes bottom-left
     // Original (0,0)=1 should be at (2,0) in rotated image (accounting for centering)
 
     // Test 180 degree rotation
-    var rotated_180 = try image.rotate(io, std.testing.allocator, std.math.pi, .bilinear, .mirror);
+    var rotated_180 = try image.rotate(io, std.testing.allocator, std.math.pi, .bilinear, .mirror, .expand);
     defer rotated_180.deinit(std.testing.allocator);
 
     // Test 270 degree rotation
-    var rotated_270 = try image.rotate(io, std.testing.allocator, 3.0 * std.math.pi / 2.0, .bilinear, .mirror);
+    var rotated_270 = try image.rotate(io, std.testing.allocator, 3.0 * std.math.pi / 2.0, .bilinear, .mirror, .expand);
     defer rotated_270.deinit(std.testing.allocator);
 
     // Verify dimensions are as expected
@@ -211,6 +211,26 @@ test "rotate orthogonal fast paths" {
     try expectEqual(@as(u32, 3), rotated_270.cols);
 }
 
+test "rotate crop keeps the input size and the same centre" {
+    // 8x6 expands to 10x10 at 45°, an even margin on both axes, so the two outputs share pixel centres.
+    var image: Image(u8) = try .init(std.testing.allocator, 8, 6);
+    defer image.deinit(std.testing.allocator);
+    for (image.data, 0..) |*px, i| px.* = @truncate(i * 7);
+
+    var expanded = try image.rotate(io, std.testing.allocator, std.math.pi / 4.0, .bilinear, .zero, .expand);
+    defer expanded.deinit(std.testing.allocator);
+    var cropped = try image.rotate(io, std.testing.allocator, std.math.pi / 4.0, .bilinear, .zero, .crop);
+    defer cropped.deinit(std.testing.allocator);
+
+    try expectEqual(image.rows, cropped.rows);
+    try expectEqual(image.cols, cropped.cols);
+    // Both outputs are centred on the same source point, so the cropped image is the middle of the expanded one.
+    const dr = (expanded.rows - cropped.rows) / 2;
+    const dc = (expanded.cols - cropped.cols) / 2;
+    const middle = expanded.view(.{ .l = dc, .t = dr, .r = dc + cropped.cols, .b = dr + cropped.rows });
+    try std.testing.expect(try middle.meanPixelError(cropped) < 0.05);
+}
+
 test "rotate arbitrary angle" {
     var image: Image(u8) = try .init(std.testing.allocator, 10, 10);
     defer image.deinit(std.testing.allocator);
@@ -223,7 +243,7 @@ test "rotate arbitrary angle" {
     }
 
     // Test 45 degree rotation
-    var rotated = try image.rotate(io, std.testing.allocator, std.math.pi / 4.0, .bilinear, .mirror);
+    var rotated = try image.rotate(io, std.testing.allocator, std.math.pi / 4.0, .bilinear, .mirror, .expand);
     defer rotated.deinit(std.testing.allocator);
 
     // Should be larger than original to fit rotated content
