@@ -445,11 +445,11 @@ pub fn image_flip_left_right(self_obj: ?*c.PyObject, args: ?*c.PyObject) callcon
 
     return self.py_image.?.dispatch(.{}, struct {
         fn apply(img: anytype) ?*c.PyObject {
-            var out = img.dupe(allocator) catch |err| {
+            const out = @TypeOf(img.*).initLike(allocator, img.*) catch |err| {
                 python.mapZigError(err, "flip image");
                 return null;
             };
-            out.flipLeftRight(python.io);
+            python.withoutGil(@TypeOf(img.*).flipLeftRightInto, .{ img.*, python.io, out });
             return @ptrCast(moveImageToPython(out) orelse return null);
         }
     }.apply);
@@ -471,11 +471,11 @@ pub fn image_flip_top_bottom(self_obj: ?*c.PyObject, args: ?*c.PyObject) callcon
 
     return self.py_image.?.dispatch(.{}, struct {
         fn apply(img: anytype) ?*c.PyObject {
-            var out = img.dupe(allocator) catch |err| {
+            const out = @TypeOf(img.*).initLike(allocator, img.*) catch |err| {
                 python.mapZigError(err, "flip image");
                 return null;
             };
-            out.flipTopBottom(python.io);
+            python.withoutGil(@TypeOf(img.*).flipTopBottomInto, .{ img.*, python.io, out });
             return @ptrCast(moveImageToPython(out) orelse return null);
         }
     }.apply);

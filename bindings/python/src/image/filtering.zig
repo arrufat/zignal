@@ -512,11 +512,11 @@ pub fn image_invert(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c
 
     return self.py_image.?.dispatch(.{}, struct {
         fn apply(img: anytype) ?*c.PyObject {
-            var out = img.dupe(allocator) catch {
+            const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
                 python.setMemoryError("image data");
                 return null;
             };
-            out.invert();
+            python.withoutGil(@TypeOf(img.*).invertInto, .{ img.*, out });
             return @ptrCast(moveImageToPython(out) orelse return null);
         }
     }.apply);
@@ -656,12 +656,11 @@ pub fn image_equalize(self_obj: ?*c.PyObject, _: ?*c.PyObject) callconv(.c) ?*c.
     // Apply equalization
     return self.py_image.?.dispatch(.{}, struct {
         fn apply(img: anytype) ?*c.PyObject {
-            // Make a copy since equalize now works in-place
-            var out = img.dupe(allocator) catch {
+            const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
                 python.setMemoryError("image operation");
                 return null;
             };
-            out.equalize();
+            python.withoutGil(@TypeOf(img.*).equalizeInto, .{ img.*, out });
             return @ptrCast(moveImageToPython(out) orelse return null);
         }
     }.apply);
