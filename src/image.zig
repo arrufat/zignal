@@ -41,6 +41,7 @@ const binary = @import("image/binary.zig");
 const meta = @import("meta.zig");
 const Transform = @import("image/transforms.zig").Transform;
 const RotateBounds = @import("image/transforms.zig").RotateBounds;
+pub const RotateSize = @import("image/transforms.zig").RotateSize;
 const interpolation = @import("image/interpolation.zig");
 const OrderStatisticBlurOps = @import("image/order_statistic_blur.zig").OrderStatisticBlurOps;
 
@@ -579,16 +580,16 @@ pub fn Image(comptime T: type) type {
             return Transform(T).letterbox(self, io, out, allocator, method);
         }
 
-        /// Rotates the image by `angle` (radians) around its center, returning a new image sized
-        /// to fit the rotated content. Caller must `deinit` the result.
+        /// Rotates the image by `angle` (radians) around its center. `.expand` sizes the result to
+        /// fit the rotated content, `.crop` keeps the input dimensions. Caller must `deinit` the result.
         ///
         /// Example:
         /// ```zig
-        /// var rotated = try image.rotate(io, allocator, std.math.pi / 4.0, .bilinear, .zero);
+        /// var rotated = try image.rotate(io, allocator, std.math.pi / 4.0, .bilinear, .zero, .expand);
         /// defer rotated.deinit(allocator);
         /// ```
-        pub fn rotate(self: Self, io: Io, allocator: Allocator, angle: f32, method: Interpolation, border: BorderMode) !Self {
-            return Transform(T).rotate(self, io, allocator, angle, method, border);
+        pub fn rotate(self: Self, io: Io, allocator: Allocator, angle: f32, method: Interpolation, border: BorderMode, output: RotateSize) !Self {
+            return Transform(T).rotate(self, io, allocator, angle, method, border, output);
         }
 
         /// Rotates the image into the pre-allocated `out`, centered with `border` padding for any
