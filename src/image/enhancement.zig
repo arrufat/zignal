@@ -1,3 +1,4 @@
+const std = @import("std");
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
 const Image = @import("../image.zig").Image;
@@ -82,6 +83,12 @@ pub fn Enhancement(comptime T: type) type {
         /// Equalizes the histogram to improve contrast.
         /// Modifies the image in-place.
         pub fn equalize(image: Image(T)) void {
+            equalizeInto(image, image);
+        }
+
+        /// Equalizes the histogram to improve contrast, writing the result into `out`.
+        pub fn equalizeInto(image: Image(T), out: Image(T)) void {
+            std.debug.assert(image.hasSameShape(out));
             const total_pixels: u32 = @intCast(image.rows * image.cols);
 
             switch (@typeInfo(T)) {
@@ -124,11 +131,12 @@ pub fn Enhancement(comptime T: type) type {
                         }
                     }
 
-                    // Apply the lookup table in-place
+                    // Apply the lookup table
                     for (0..image.rows) |r| {
-                        for (0..image.cols) |c| {
-                            const val = image.at(r, c).*;
-                            image.at(r, c).* = lut[val];
+                        const src_row = image.data[r * image.stride ..][0..image.cols];
+                        const dst_row = out.data[r * out.stride ..][0..out.cols];
+                        for (src_row, dst_row) |s, *d| {
+                            d.* = lut[s];
                         }
                     }
                 },
@@ -227,20 +235,15 @@ pub fn Enhancement(comptime T: type) type {
                             lut_a = createLut(&cdf_a, cdf_min_a, total_pixels);
                         }
 
-                        // Apply the lookup tables in-place
+                        // Apply the lookup tables
                         for (0..image.rows) |r| {
-                            for (0..image.cols) |c| {
-                                const pixel = image.at(r, c).*;
-                                var new_pixel = pixel;
-
-                                new_pixel.r = lut_r[pixel.r];
-                                new_pixel.g = lut_g[pixel.g];
-                                new_pixel.b = lut_b[pixel.b];
-                                if (T == Rgba) {
-                                    new_pixel.a = lut_a[pixel.a];
-                                }
-
-                                image.at(r, c).* = new_pixel;
+                            const src_row = image.data[r * image.stride ..][0..image.cols];
+                            const dst_row = out.data[r * out.stride ..][0..out.cols];
+                            for (src_row, dst_row) |s, *d| {
+                                d.* = if (T == Rgba)
+                                    .{ .r = lut_r[s.r], .g = lut_g[s.g], .b = lut_b[s.b], .a = lut_a[s.a] }
+                                else
+                                    .{ .r = lut_r[s.r], .g = lut_g[s.g], .b = lut_b[s.b] };
                             }
                         }
                     } else {

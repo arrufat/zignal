@@ -458,6 +458,31 @@ test "flipTopBottom" {
     try expectEqualDeep(expected, data);
 }
 
+test "flipLeftRightInto and flipTopBottomInto match the in-place flips through views" {
+    const gpa = std.testing.allocator;
+    var base: Image(Rgb) = try .init(gpa, 9, 11);
+    defer base.deinit(gpa);
+    var prng = std.Random.DefaultPrng.init(7);
+    for (base.data) |*px| px.* = .{ .r = prng.random().int(u8), .g = prng.random().int(u8), .b = prng.random().int(u8) };
+    // Strided source and destination so the row bases go through `stride`, not `cols`.
+    const src = base.view(.{ .l = 1, .t = 2, .r = 8, .b = 7 });
+    var dst_base: Image(Rgb) = try .init(gpa, 9, 11);
+    defer dst_base.deinit(gpa);
+    const dst = dst_base.view(.{ .l = 3, .t = 1, .r = 10, .b = 6 });
+
+    var expected = try src.dupe(gpa);
+    defer expected.deinit(gpa);
+
+    expected.flipLeftRight(io);
+    src.flipLeftRightInto(io, dst);
+    try expectEqual(0, try expected.meanPixelError(dst));
+
+    src.copy(expected);
+    expected.flipTopBottom(io);
+    src.flipTopBottomInto(io, dst);
+    try expectEqual(0, try expected.meanPixelError(dst));
+}
+
 test "insert with a rectangle outside the image or a NaN angle is a no-op" {
     const allocator = std.testing.allocator;
     var dest = try Image(u8).init(allocator, 10, 10);
