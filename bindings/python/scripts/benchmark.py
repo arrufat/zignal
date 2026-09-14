@@ -345,17 +345,20 @@ def main() -> None:
 
     # Zignal always expands the canvas to the rotated bounds, so give Pillow and OpenCV the
     # same output size instead of letting them crop to the input rectangle.
-    zg_rot = zg_rgb.rotate(45.0, zignal.Interpolation.BILINEAR)
+    # zignal takes radians; Pillow and OpenCV take degrees.
+    rot_deg = 45.0
+    rot_rad = math.radians(rot_deg)
+    zg_rot = zg_rgb.rotate(rot_rad, zignal.Interpolation.BILINEAR)
     out_size = (zg_rot.cols, zg_rot.rows)
     if cv2 is not None:
-        rot_matrix = cv2.getRotationMatrix2D((cols / 2.0, rows / 2.0), 45.0, 1.0)
+        rot_matrix = cv2.getRotationMatrix2D((cols / 2.0, rows / 2.0), rot_deg, 1.0)
         rot_matrix[0, 2] += (out_size[0] - cols) / 2.0
         rot_matrix[1, 2] += (out_size[1] - rows) / 2.0
     cat["items"].append(
         bench_case(
             f"Rotate 45° (Bilinear, expanded canvas {out_size[0]}x{out_size[1]})",
-            lambda: zg_rgb.rotate(45.0, zignal.Interpolation.BILINEAR),
-            lambda: pil_rgb.rotate(45.0, resample=PILImage.Resampling.BILINEAR, expand=True),
+            lambda: zg_rgb.rotate(rot_rad, zignal.Interpolation.BILINEAR),
+            lambda: pil_rgb.rotate(rot_deg, resample=PILImage.Resampling.BILINEAR, expand=True),
             lambda: cv2.warpAffine(cv_rgb, rot_matrix, out_size, flags=cv2.INTER_LINEAR),
         )
     )
