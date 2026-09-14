@@ -43,6 +43,28 @@ pub fn Transform(comptime T: type) type {
             parallel.forRowBands(io, self.rows, parallel.bandCount(self.rows, self.cols), &ctx, Ctx.band);
         }
 
+        /// Flips an image from left to right into `out`.
+        pub fn flipLeftRightInto(self: Self, io: Io, out: Self) void {
+            std.debug.assert(self.hasSameShape(out));
+            const Ctx = struct {
+                src: Self,
+                dst: Self,
+
+                fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
+                    const cols = ctx.src.cols;
+                    for (r0..r1) |r| {
+                        const src_row = ctx.src.data[r * ctx.src.stride ..][0..cols];
+                        const dst_row = ctx.dst.data[r * ctx.dst.stride ..][0..cols];
+                        for (0..cols) |c| {
+                            dst_row[c] = src_row[cols - 1 - c];
+                        }
+                    }
+                }
+            };
+            const ctx: Ctx = .{ .src = self, .dst = out };
+            parallel.forRowBands(io, self.rows, parallel.bandCount(self.rows, self.cols), &ctx, Ctx.band);
+        }
+
         /// Flips an image from top to bottom (upside down effect); bands cover row pairs.
         pub fn flipTopBottom(self: Self, io: Io) void {
             const Ctx = struct {
@@ -50,16 +72,46 @@ pub fn Transform(comptime T: type) type {
 
                 fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
                     const img = ctx.img;
+                    var tmp: [@max(1, 4096 / @sizeOf(T))]T = undefined;
                     for (r0..r1) |r| {
                         const top_row = img.data[r * img.stride ..][0..img.cols];
                         const bot_row = img.data[(img.rows - r - 1) * img.stride ..][0..img.cols];
-                        for (top_row, bot_row) |*t, *b| std.mem.swap(T, t, b);
+                        var c: usize = 0;
+                        while (c < img.cols) {
+                            const n = @min(tmp.len, img.cols - c);
+                            const t = top_row[c..][0..n];
+                            const b = bot_row[c..][0..n];
+                            @memcpy(tmp[0..n], t);
+                            @memcpy(t, b);
+                            @memcpy(b, tmp[0..n]);
+                            c += n;
+                        }
                     }
                 }
             };
             const ctx: Ctx = .{ .img = self };
             const pairs = self.rows / 2;
             parallel.forRowBands(io, pairs, parallel.bandCount(pairs, 2 * self.cols), &ctx, Ctx.band);
+        }
+
+        /// Flips an image from top to bottom into `out`.
+        pub fn flipTopBottomInto(self: Self, io: Io, out: Self) void {
+            std.debug.assert(self.hasSameShape(out));
+            const Ctx = struct {
+                src: Self,
+                dst: Self,
+
+                fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
+                    const cols = ctx.src.cols;
+                    for (r0..r1) |r| {
+                        const src_row = ctx.src.data[(ctx.src.rows - 1 - r) * ctx.src.stride ..][0..cols];
+                        const dst_row = ctx.dst.data[r * ctx.dst.stride ..][0..cols];
+                        @memcpy(dst_row, src_row);
+                    }
+                }
+            };
+            const ctx: Ctx = .{ .src = self, .dst = out };
+            parallel.forRowBands(io, self.rows, parallel.bandCount(self.rows, self.cols), &ctx, Ctx.band);
         }
 
         /// Resizes an image to fit within the output dimensions while preserving aspect ratio.
@@ -243,15 +295,25 @@ pub fn Transform(comptime T: type) type {
             origin_y: f32 = 0,
 
             /// Output pixel centres map through scale and origin (identity for rotate), then
-            /// rotate by +angle (CCW) about `dst_c` onto `src_c`.
+            /// rotate by +angle (CCW) about `dst_c` onto `src_c`. The source position is linear
+            /// in the column, so each row steps it by a constant; the step accumulates in f64 so
+            /// the f32 drift (0.2 px across a 4096-wide row) does not shear the far edge.
             fn band(ctx: *const Resample, _: usize, r0: usize, r1: usize) void {
+                const cols = ctx.out.cols;
+                const d_src_x: f64 = ctx.cos * ctx.scale_x;
+                const d_src_y: f64 = ctx.sin * ctx.scale_x;
+                const dx0 = ctx.origin_x + 0.5 * ctx.scale_x - 0.5 - ctx.dst_cx;
+
                 for (r0..r1) |r| {
                     const dy = ctx.origin_y + (@as(f32, @floatFromInt(r)) + 0.5) * ctx.scale_y - 0.5 - ctx.dst_cy;
-                    for (0..ctx.out.cols) |c| {
-                        const dx = ctx.origin_x + (@as(f32, @floatFromInt(c)) + 0.5) * ctx.scale_x - 0.5 - ctx.dst_cx;
-                        const src_x = ctx.cos * dx - ctx.sin * dy + ctx.src_cx;
-                        const src_y = ctx.sin * dx + ctx.cos * dy + ctx.src_cy;
-                        ctx.out.at(r, c).* = ctx.sampler.sample(src_x, src_y);
+                    var src_x: f64 = ctx.cos * dx0 - ctx.sin * dy + ctx.src_cx;
+                    var src_y: f64 = ctx.sin * dx0 + ctx.cos * dy + ctx.src_cy;
+
+                    const out_row = ctx.out.data[r * ctx.out.stride ..][0..cols];
+                    for (out_row) |*dst_px| {
+                        dst_px.* = ctx.sampler.sample(@floatCast(src_x), @floatCast(src_y));
+                        src_x += d_src_x;
+                        src_y += d_src_y;
                     }
                 }
             }
