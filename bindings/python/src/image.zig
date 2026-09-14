@@ -1077,7 +1077,7 @@ pub const image_methods_metadata = blk: {
             .meth = @ptrCast(&transforms.image_rotate),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,
             .doc = transforms.image_rotate_doc,
-            .params = "self, angle: float, method: Interpolation = Interpolation.BILINEAR",
+            .params = "self, angle: float, method: Interpolation = Interpolation.BILINEAR, border: BorderMode = BorderMode.ZERO, expand: bool = True",
             .returns = "Image",
         },
         .{

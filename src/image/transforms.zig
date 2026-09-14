@@ -22,6 +22,14 @@ const Interpolation = @import("interpolation.zig").Interpolation;
 /// Output size that fits an image rotated by an angle.
 pub const RotateBounds = struct { rows: u32, cols: u32 };
 
+/// How `rotate` sizes its output.
+pub const RotateSize = enum {
+    /// Grow the canvas to `rotateBounds` so nothing is clipped.
+    expand,
+    /// Keep the input dimensions; the corners of the rotated content fall outside.
+    crop,
+};
+
 pub fn Transform(comptime T: type) type {
     return struct {
         const Self = Image(T);
@@ -219,9 +227,12 @@ pub fn Transform(comptime T: type) type {
         }
 
         /// Rotates the image by `angle` (radians) around its center, returning a new image sized
-        /// by `rotateBounds` to fit the rotated content.
-        pub fn rotate(self: Self, io: Io, gpa: Allocator, angle: f32, method: Interpolation, border: BorderMode) !Self {
-            const bounds = rotateBounds(self, angle);
+        /// by `rotateBounds` (`.expand`) or matching the input (`.crop`).
+        pub fn rotate(self: Self, io: Io, gpa: Allocator, angle: f32, method: Interpolation, border: BorderMode, output: RotateSize) !Self {
+            const bounds: RotateBounds = switch (output) {
+                .expand => rotateBounds(self, angle),
+                .crop => .{ .rows = self.rows, .cols = self.cols },
+            };
             const rotated = try Self.init(gpa, bounds.rows, bounds.cols);
             rotateInto(self, io, rotated, angle, method, border);
             return rotated;
