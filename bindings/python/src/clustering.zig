@@ -1,3 +1,4 @@
+const std = @import("std");
 const zignal = @import("zignal");
 const clustering = zignal.clustering;
 const Matrix = zignal.Matrix;
@@ -20,7 +21,8 @@ const chinese_whispers_clustering_doc =
     \\`threshold` ends up alone in its own cluster.
     \\
     \\## Parameters
-    \\- `embeddings`: a `Matrix`, or a sequence of equal-length float sequences, one row per item
+    \\- `embeddings`: one row per item: a `Matrix`, a C-contiguous float32 or float64 NumPy array
+    \\  (clustered in place, in its own precision), or a sequence of equal-length float sequences
     \\- `threshold`: maximum Euclidean distance for two embeddings to be connected
     \\- `iterations`: passes over the graph (default 100)
     \\- `seed`: seed for the node visit order (default 0)
@@ -38,16 +40,35 @@ const chinese_whispers_clustering_doc =
     \\```
 ;
 
+const Params = struct {
+    embeddings: ?*c.PyObject,
+    threshold: f64,
+    iterations: u32 = option_defaults.iterations,
+    seed: u64 = option_defaults.seed,
+};
+
 fn chinese_whispers_clustering(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     _ = self;
-    const Params = struct {
-        embeddings: ?*c.PyObject,
-        threshold: f64,
-        iterations: u32 = option_defaults.iterations,
-        seed: u64 = option_defaults.seed,
-    };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
+
+    // A C-contiguous float32 or float64 buffer (a numpy array) is clustered in place, in its own
+    // precision, without going through a Matrix.
+    var buffer: c.Py_buffer = std.mem.zeroes(c.Py_buffer);
+    if (c.PyObject_GetBuffer(params.embeddings, &buffer, c.PyBUF_FORMAT | c.PyBUF_ND | c.PyBUF_STRIDES) == 0) {
+        defer c.PyBuffer_Release(&buffer);
+        if (buffer.ndim == 2 and buffer.format != null and buffer.format[1] == 0) {
+            const rows: usize = @intCast(buffer.shape[0]);
+            const cols: usize = @intCast(buffer.shape[1]);
+            inline for (.{ .{ 'f', f32 }, .{ 'd', f64 } }) |entry| {
+                const T = entry[1];
+                if (buffer.format[0] == entry[0] and buffer.strides[1] == @sizeOf(T) and buffer.strides[0] == @as(isize, @intCast(cols * @sizeOf(T)))) {
+                    const items = @as([*]const T, @ptrCast(@alignCast(buffer.buf.?)))[0 .. rows * cols];
+                    return cluster(T, items, rows, cols, params);
+                }
+            }
+        }
+    } else c.PyErr_Clear();
 
     // Either borrowed from a Matrix argument or built from a nested sequence.
     var owned: ?*Matrix(f64) = null;
@@ -58,22 +79,25 @@ fn chinese_whispers_clustering(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
         owned = matrix_module.matrixFromSequence(params.embeddings) catch return null;
         break :blk owned.?.*;
     };
+    return cluster(f64, matrix.items, matrix.rows, matrix.cols, params);
+}
 
-    const embeddings = allocator.alloc([]const f64, matrix.rows) catch {
+fn cluster(comptime T: type, items: []const T, rows: usize, cols: usize, params: Params) ?*c.PyObject {
+    const embeddings = allocator.alloc([]const T, rows) catch {
         python.setMemoryError("embeddings");
         return null;
     };
     defer allocator.free(embeddings);
-    for (embeddings, 0..) |*row, i| row.* = matrix.items[i * matrix.cols ..][0..matrix.cols];
+    for (embeddings, 0..) |*row, i| row.* = items[i * cols ..][0..cols];
 
-    const labels = allocator.alloc(u32, embeddings.len) catch {
+    const labels = allocator.alloc(u32, rows) catch {
         python.setMemoryError("labels");
         return null;
     };
     defer allocator.free(labels);
 
     _ = python.withoutGil(clustering.chineseWhispers, .{
-        f64,
+        T,
         python.io,
         allocator,
         embeddings,
@@ -99,7 +123,7 @@ pub const module_functions_metadata = [_]python.FunctionWithMetadata{
         .meth = @ptrCast(&chinese_whispers_clustering),
         .flags = c.METH_VARARGS | c.METH_KEYWORDS,
         .doc = chinese_whispers_clustering_doc,
-        .params = "embeddings: Matrix | Sequence[Sequence[float]], threshold: float, iterations: int = 100, seed: int = 0",
+        .params = "embeddings: Matrix | NDArray[np.float32] | NDArray[np.float64] | Sequence[Sequence[float]], threshold: float, iterations: int = 100, seed: int = 0",
         .returns = "list[int]",
     },
 };

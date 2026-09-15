@@ -43,6 +43,16 @@ def test_accepts_a_matrix():
     assert zignal.chinese_whispers_clustering(matrix, 1.0) == zignal.chinese_whispers_clustering(BLOBS, 1.0)
 
 
+def test_accepts_numpy_arrays_in_either_precision():
+    np = pytest.importorskip("numpy")
+    expected = zignal.chinese_whispers_clustering(BLOBS, 1.0)
+    for dtype in (np.float32, np.float64):
+        assert zignal.chinese_whispers_clustering(np.array(BLOBS, dtype=dtype), 1.0) == expected
+    # A non-contiguous view falls back to the sequence path and still works.
+    wide = np.array([row + [100.0] for row in BLOBS])
+    assert zignal.chinese_whispers_clustering(wide[:, :2], 1.0) == expected
+
+
 def test_is_deterministic_for_a_seed():
     first = zignal.chinese_whispers_clustering(BLOBS, 1.0, seed=7)
     assert first == zignal.chinese_whispers_clustering(BLOBS, 1.0, seed=7)

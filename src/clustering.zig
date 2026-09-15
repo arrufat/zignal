@@ -134,6 +134,10 @@ pub fn chineseWhispers(
 
 const Pair = struct { a: u32, b: u32 };
 
+/// Rows compared together against each `j`, so that `j` is read from memory once per tile rather
+/// than once per row: the pairwise pass is bandwidth-bound once the embeddings outgrow the cache.
+const tile_rows = 32;
+
 /// Every pair of embeddings within `threshold`. The total is not known ahead of time, so each
 /// band grows its own list.
 fn findNeighbors(
@@ -144,10 +148,11 @@ fn findNeighbors(
     threshold: f64,
 ) ![]ArrayList(Pair) {
     const n = embeddings.len;
-    // Row i costs n-1-i, so even row bands would leave band 0 with a quarter of the work. Pairing
-    // row i with row n-1-i makes every band cost the same, since the two always sum to n-1.
-    const half = (n + 1) / 2;
-    const bands = parallel.bandCount(half, n * embeddings[0].len);
+    const tiles = (n + tile_rows - 1) / tile_rows;
+    // Tile t costs about n - t * tile_rows, so even bands would leave band 0 with a quarter of the
+    // work. Pairing tile t with tile tiles-1-t makes every band cost the same.
+    const half = (tiles + 1) / 2;
+    const bands = parallel.bandCount(half, tile_rows * n * embeddings[0].len);
     const lists = try allocator.alloc(ArrayList(Pair), bands);
     @memset(lists, .empty);
     errdefer {
@@ -160,52 +165,67 @@ fn findNeighbors(
         lists: []ArrayList(Pair),
         allocator: Allocator,
         limit: f64,
+        tiles: usize,
 
-        fn band(c: @This(), index: usize, row_start: usize, row_end: usize) !void {
+        fn band(c: @This(), index: usize, tile_start: usize, tile_end: usize) !void {
             const list = &c.lists[index];
-            for (row_start..row_end) |i| {
-                try c.scanRow(list, i);
-                const mirror = c.embeddings.len - 1 - i;
-                if (mirror > i) try c.scanRow(list, mirror);
+            for (tile_start..tile_end) |t| {
+                try c.scanTile(list, t);
+                const mirror = c.tiles - 1 - t;
+                if (mirror > t) try c.scanTile(list, mirror);
             }
         }
 
-        fn scanRow(c: @This(), list: *ArrayList(Pair), i: usize) !void {
-            const a = c.embeddings[i];
-            for (i + 1..c.embeddings.len) |j| {
-                if (withinDistance(T, a, c.embeddings[j], c.limit)) {
-                    try list.append(c.allocator, .{ .a = @intCast(i), .b = @intCast(j) });
+        fn scanTile(c: @This(), list: *ArrayList(Pair), t: usize) !void {
+            const first = t * tile_rows;
+            const last = @min(first + tile_rows, c.embeddings.len);
+            for (first + 1..c.embeddings.len) |j| {
+                const b = c.embeddings[j];
+                for (first..@min(last, j)) |i| {
+                    if (withinDistance(T, c.embeddings[i], b, c.limit)) {
+                        try list.append(c.allocator, .{ .a = @intCast(i), .b = @intCast(j) });
+                    }
                 }
             }
         }
     };
-    const ctx: Ctx = .{ .embeddings = embeddings, .lists = lists, .allocator = allocator, .limit = threshold * threshold };
+    const ctx: Ctx = .{ .embeddings = embeddings, .lists = lists, .allocator = allocator, .limit = threshold * threshold, .tiles = tiles };
     try parallel.forRowBandsTry(io, half, bands, ctx, Ctx.band);
 
     return lists;
 }
 
-/// Whether the squared Euclidean distance between `a` and `b` stays below `limit`. Tests the
-/// running sum every `block` elements and bails out early: a threshold that rejects most pairs
-/// usually settles them in the first few dimensions, and every term is non-negative, so the
-/// answer matches summing all of them. Each block accumulates in `T` across lanes (a serial
-/// `sum += d * d` chain is reassociation-bound and will not auto-vectorize) and widens once.
+/// Whether the squared Euclidean distance between `a` and `b` stays below `limit`. Every term is
+/// non-negative, so once the running sum passes `limit` the answer is settled and the scan bails
+/// out; the result matches summing all dimensions. The sum is checked after 16 elements, then
+/// after a block that doubles each time: a far pair is rejected almost at once, while a close
+/// pair in a wide embedding is not slowed by a horizontal reduce every 16 elements. Each block
+/// accumulates in `T` across four independent vectors (a single chain is latency-bound) and
+/// widens to f64 once.
 fn withinDistance(comptime T: type, a: []const T, b: []const T, limit: f64) bool {
     const lanes = std.simd.suggestVectorLength(T) orelse 1;
-    // 16 elements settle most rejected pairs; a wider block only delays the exit.
-    const block = @max(16, lanes);
+    const V = @Vector(lanes, T);
     var sum: f64 = 0;
     var i: usize = 0;
+    var block: usize = @max(16, lanes);
     while (i < a.len) {
         const end = @min(i + block, a.len);
-        var acc: @Vector(lanes, T) = @splat(0);
-        while (i + lanes <= end) : (i += lanes) {
-            const av: @Vector(lanes, T) = a[i..][0..lanes].*;
-            const bv: @Vector(lanes, T) = b[i..][0..lanes].*;
-            const d = av - bv;
-            acc += d * d;
+        var acc: [4]V = @splat(@splat(0));
+        while (i + 4 * lanes <= end) : (i += 4 * lanes) {
+            inline for (0..4) |k| {
+                const av: V = a[i + k * lanes ..][0..lanes].*;
+                const bv: V = b[i + k * lanes ..][0..lanes].*;
+                const d = av - bv;
+                acc[k] += d * d;
+            }
         }
-        var partial: T = @reduce(.Add, acc);
+        while (i + lanes <= end) : (i += lanes) {
+            const av: V = a[i..][0..lanes].*;
+            const bv: V = b[i..][0..lanes].*;
+            const d = av - bv;
+            acc[0] += d * d;
+        }
+        var partial: T = @reduce(.Add, (acc[0] + acc[1]) + (acc[2] + acc[3]));
         for (a[i..end], b[i..end]) |x, y| {
             const d = x - y;
             partial += d * d;
@@ -213,6 +233,7 @@ fn withinDistance(comptime T: type, a: []const T, b: []const T, limit: f64) bool
         sum += partial;
         i = end;
         if (sum >= limit) return false;
+        block *= 2;
     }
     return sum < limit;
 }
