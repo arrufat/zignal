@@ -394,7 +394,7 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
         \\from __future__ import annotations
         \\
         \\from enum import IntEnum
-        \\from typing import Callable, Iterable, Literal, TypeAlias
+        \\from typing import Callable, Iterable, Literal, Sequence, TypeAlias
         \\
         \\import numpy as np
         \\from numpy.typing import NDArray
