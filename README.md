@@ -7,11 +7,15 @@ Zignal is a zero-dependency image processing library inspired by [dlib](https://
 
 ## Features
 
-- **Core Math:** Matrices (`SMatrix`, `Matrix`, SVD), PCA, ND Geometry (SIMD Points, affine/projective transforms, convex hull), Statistics, Optimization, Clustering (Chinese Whispers).
-- **Computer Vision:** Feature detection and matching (FAST, ORB), Edge detection (Shen-Castan), Hough Transform, QR code encoding and decoding, Feature Distribution Matching (style transfer).
-- **Image Processing:** Spatial transforms (resize, crop, rotate), morphology, convolution filters (blur, sharpen), thresholding, advanced Color Spaces (Lab, Oklab, Oklch, Xyb, Lms, etc.), Perlin noise generation.
-- **I/O & Graphics:** Pure-Zig PNG/JPEG codecs, Canvas API (antialiasing, Bézier curves, nonzero/even-odd polygon fills), Bitmap (BDF/PCF), TrueType and CFF OpenType fonts (optional glyph cache) with text boxes (wrap, align, spacing) and outlined text, Colormaps, Terminal graphics (Kitty/Sixel).
-- **Platform Support:** Native Zig, first-class Python bindings, and WASM compilation for the web.
+Zignal covers the building blocks of an image processing pipeline in a single dependency:
+
+- **Images:** pure-Zig PNG, JPEG, BMP and GIF codecs, geometric transforms, filters, color spaces, enhancement and drawing with an antialiased canvas, bitmap and vector fonts, and terminal graphics.
+- **Vision:** feature detection and matching, edge detection, Hough transform, QR codes, style transfer and quality metrics.
+- **Math:** matrices and decompositions, geometry, statistics, PCA, global optimization and clustering.
+- **Parallelism:** heavy operations run on a thread pool through `std.Io` and give byte-identical results when run serially.
+- **Platforms:** native Zig, Python bindings and WASM for the web.
+
+See the [documentation](https://arrufat.github.io/zignal/) for the full API.
 
 ## Status
 
@@ -53,23 +57,18 @@ Requires Python 3.10+, no external dependencies
 
 ### CLI
 
-Zignal includes a command-line interface for common operations.
+Zignal includes a command-line interface to display images in the terminal, inspect them, resize, blur, detect edges, tile them into a grid, apply style transfer, encode and decode QR codes, compare them with visual diffs and quality metrics, and chain operations into pipelines.
 
 ```bash
 # Build the CLI
 zig build
 
-# Run commands
-zig-out/bin/zignal <command> [options]
-```
+# List the available commands
+zig-out/bin/zignal help
 
-**Available commands:**
-- `display` - View images in the terminal (supports Kitty, Sixel, etc.)
-- `resize` - Resize images with various filters
-- `tile` - Combine multiple images into a grid
-- `fdm` - Apply style transfer (Feature Distribution Matching)
-- `qr` - Encode text as QR codes or decode them from images
-- `info` - Show image metadata
+# Show the options of a specific command
+zig-out/bin/zignal help <command>
+```
 
 ## Examples
 
@@ -87,6 +86,7 @@ zig-out/bin/zignal <command> [options]
 - [Metrics analyzer](https://arrufat.github.io/zignal/examples/metrics.html) - PSNR and SSIM comparison for reference vs. distorted images
 - [Global optimization](https://arrufat.github.io/zignal/examples/global-optimization.html) - Type a JavaScript function and watch the MaxLIPO+TR optimizer search for its optimum
 - [QR code](https://arrufat.github.io/zignal/examples/qrcode.html) - Encode text into QR codes and decode them from your camera or images
+- [Image codec playground](https://arrufat.github.io/zignal/examples/codec-playground.html) - Inspect how an image is encoded and re-encode it with the PNG, JPEG, BMP and GIF codecs
 
 
 ## Sponsors
