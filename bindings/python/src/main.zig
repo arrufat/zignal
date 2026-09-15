@@ -3,6 +3,7 @@ const zignal = @import("zignal");
 
 const font = @import("font.zig");
 const canvas = @import("canvas.zig");
+const clustering = @import("clustering.zig");
 const color = @import("color.zig");
 const colormaps = @import("colormaps.zig");
 const convex_hull = @import("convex_hull.zig");
@@ -40,7 +41,7 @@ var zignal_module = c.PyModuleDef{
 };
 
 // Module function metadata - combines functions from various modules
-pub const module_functions_metadata = optimization.module_functions_metadata ++ perlin.perlin_functions_metadata ++ qrcode.qrcode_functions_metadata;
+pub const module_functions_metadata = clustering.module_functions_metadata ++ optimization.module_functions_metadata ++ perlin.perlin_functions_metadata ++ qrcode.qrcode_functions_metadata;
 
 // Generate PyMethodDef array at compile time
 var zignal_methods = python.functionsToPyMethodDefArray(&module_functions_metadata);
