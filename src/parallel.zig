@@ -1,8 +1,9 @@
-//! Row-band parallelism for image filters on an `Io` pool.
+//! Band parallelism on an `Io` pool.
 //!
-//! Filters split their rows into contiguous bands and run one task per band through
-//! `Io.Group`; a single-threaded `Io` runs the bands inline, in order. Band functions never
-//! allocate and never touch another band's rows, so the output is identical to a serial run.
+//! A range of `n` items -- image rows, but also jpeg segments, png chunks or gemm groups -- is
+//! split into contiguous bands, one task per band through `Io.Group`; a single-threaded `Io` runs
+//! them inline, in order. A band never touches another band's items, so the output is identical to
+//! a serial run. Bands may allocate, provided the allocator is thread-safe: an arena is not.
 const std = @import("std");
 const builtin = @import("builtin");
 const Io = std.Io;

@@ -74,16 +74,10 @@ fn matrix_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return -1;
 
-    const list_obj = params.data;
-
-    // Check if it's a list
-    if (c.PyList_Check(list_obj) != 1) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Matrix data must be a list of lists");
-        return -1;
-    }
-
-    // Initialize from list of lists
-    return matrix_init_from_list(self, list_obj);
+    self.matrix_ptr = matrixFromSequence(params.data) catch return -1;
+    self.owns_memory = true;
+    self.numpy_ref = null;
+    return 0;
 }
 
 const matrix_full_doc =
@@ -145,65 +139,40 @@ fn matrix_full(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) c
     return allocation.py_obj;
 }
 
-fn matrix_init_from_list(self: *MatrixObject, list_obj: ?*c.PyObject) c_int {
-    // Get dimensions
-    const n_rows = python.validatePositive(u32, c.PyList_Size(list_obj), "rows") catch return -1;
+/// Length of a Python sequence as a positive count; a non-sequence keeps Python's own TypeError.
+fn sequenceLen(obj: ?*c.PyObject, name: []const u8) !u32 {
+    const len = c.PySequence_Size(obj);
+    if (len < 0) return error.InvalidSequence;
+    return python.validatePositive(u32, len, name);
+}
 
-    // Check first row to get number of columns
-    const first_row = c.PyList_GetItem(list_obj, 0);
-    if (c.PyList_Check(first_row) != 1) {
-        c.PyErr_SetString(c.PyExc_TypeError, "Matrix data must be a list of lists");
-        return -1;
-    }
+/// Builds a Matrix from a nested Python sequence of floats: a list, tuple or any other sequence.
+pub fn matrixFromSequence(obj: ?*c.PyObject) !*Matrix(f64) {
+    const n_rows = try sequenceLen(obj, "rows");
+    const first_row = c.PySequence_GetItem(obj, 0) orelse return error.InvalidSequence;
+    defer c.Py_DecRef(first_row);
+    const n_cols = try sequenceLen(first_row, "cols");
 
-    const n_cols = python.validatePositive(u32, c.PyList_Size(first_row), "cols") catch return -1;
+    const matrix = python.allocate(Matrix(f64), .{ allocator, n_rows, n_cols }) catch return error.InvalidSequence;
+    errdefer python.destroyHeapObject(Matrix(f64), matrix);
 
-    const matrix = python.allocate(Matrix(f64), .{ allocator, n_rows, n_cols }) catch return -1;
-
-    // Fill matrix with data from list
-    var row_idx: u32 = 0;
-    while (row_idx < n_rows) : (row_idx += 1) {
-        const row_obj = c.PyList_GetItem(list_obj, @intCast(row_idx));
-
-        // Check that this is a list
-        if (c.PyList_Check(row_obj) != 1) {
-            matrix.deinit();
-            allocator.destroy(matrix);
-            python.setTypeError("list", row_obj);
-            return -1;
+    for (0..n_rows) |row_idx| {
+        const row = c.PySequence_GetItem(obj, @intCast(row_idx)) orelse return error.InvalidSequence;
+        defer c.Py_DecRef(row);
+        if (c.PySequence_Size(row) != @as(isize, n_cols)) {
+            python.setValueError("every row must have {d} elements", .{n_cols});
+            return error.InvalidSequence;
         }
-
-        // Check that row has correct number of columns
-        const row_size = c.PyList_Size(row_obj);
-        if (row_size != @as(isize, n_cols)) {
-            matrix.deinit();
-            allocator.destroy(matrix);
-            python.setValueError("All rows must have the same number of columns", .{});
-            return -1;
-        }
-
-        // Extract values from row
-        var col_idx: u32 = 0;
-        while (col_idx < n_cols) : (col_idx += 1) {
-            const item = c.PyList_GetItem(row_obj, col_idx);
-
-            const value = python.parse(f64, item) catch {
-                matrix.deinit();
-                allocator.destroy(matrix);
-                c.PyErr_Clear(); // Clear the generic error from python.parse
-                c.PyErr_SetString(c.PyExc_TypeError, "Matrix elements must be numeric");
-                return -1;
+        for (0..n_cols) |col_idx| {
+            const item = c.PySequence_GetItem(row, @intCast(col_idx)) orelse return error.InvalidSequence;
+            defer c.Py_DecRef(item);
+            matrix.at(row_idx, col_idx).* = python.parse(f64, item) catch {
+                python.setTypeError("float", item);
+                return error.InvalidSequence;
             };
-
-            matrix.at(row_idx, col_idx).* = value;
         }
     }
-
-    self.matrix_ptr = matrix;
-    self.owns_memory = true;
-    self.numpy_ref = null;
-
-    return 0;
+    return matrix;
 }
 
 // Helper function for custom cleanup
