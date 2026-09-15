@@ -134,6 +134,9 @@ pub const BruteForceMatcher = features.BruteForceMatcher;
 pub const Match = features.Match;
 pub const MatchStats = features.MatchStats;
 
+// Clustering
+pub const clustering = @import("clustering.zig");
+
 // Optimization algorithms
 pub const optimization = @import("optimization.zig");
 pub const GlobalOptimizer = optimization.GlobalOptimizer;
@@ -157,6 +160,7 @@ test {
     _ = @import("terminal.zig");
     _ = @import("font.zig");
     _ = @import("features.zig");
+    _ = @import("clustering.zig");
     _ = @import("optimization.zig");
     _ = @import("qrcode.zig");
     _ = @import("meta.zig");

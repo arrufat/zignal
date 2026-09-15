@@ -7,7 +7,7 @@ Zignal is a zero-dependency image processing library inspired by [dlib](https://
 
 ## Features
 
-- **Core Math:** Matrices (`SMatrix`, `Matrix`, SVD), PCA, ND Geometry (SIMD Points, affine/projective transforms, convex hull), Statistics, Optimization.
+- **Core Math:** Matrices (`SMatrix`, `Matrix`, SVD), PCA, ND Geometry (SIMD Points, affine/projective transforms, convex hull), Statistics, Optimization, Clustering (Chinese Whispers).
 - **Computer Vision:** Feature detection and matching (FAST, ORB), Edge detection (Shen-Castan), Hough Transform, QR code encoding and decoding, Feature Distribution Matching (style transfer).
 - **Image Processing:** Spatial transforms (resize, crop, rotate), morphology, convolution filters (blur, sharpen), thresholding, advanced Color Spaces (Lab, Oklab, Oklch, Xyb, Lms, etc.), Perlin noise generation.
 - **I/O & Graphics:** Pure-Zig PNG/JPEG codecs, Canvas API (antialiasing, Bézier curves, nonzero/even-odd polygon fills), Bitmap (BDF/PCF), TrueType and CFF OpenType fonts (optional glyph cache) with text boxes (wrap, align, spacing) and outlined text, Colormaps, Terminal graphics (Kitty/Sixel).
