@@ -72,22 +72,8 @@ zig-out/bin/zignal help <command>
 
 ## Examples
 
-[Interactive demos](https://arrufat.github.io/zignal/examples) showcasing Zignal's capabilities:
-
-- [Color space conversions](https://arrufat.github.io/zignal/examples/colorspaces.html) - Convert between RGB, HSL, Lab, Oklab, and more
-- [Face alignment](https://arrufat.github.io/zignal/examples/face-alignment.html) - Facial landmark detection and alignment
-- [Perlin noise generation](https://arrufat.github.io/zignal/examples/perlin-noise.html) - Procedural texture generation
-- [Seam carving](https://arrufat.github.io/zignal/examples/seam-carving.html) - Content-aware image resizing
-- [Feature distribution matching](https://arrufat.github.io/zignal/examples/fdm.html) - Statistical color transfer
-- [Contrast enhancement](https://arrufat.github.io/zignal/examples/contrast-enhancement.html) - Autocontrast and histogram equalization side-by-side
-- [White balance](https://arrufat.github.io/zignal/examples/white-balance.html) - Automatic color correction
-- [Feature matching](https://arrufat.github.io/zignal/examples/feature_matching.html) - ORB feature detection and matching between images
-- [Hough transform animation](https://arrufat.github.io/zignal/examples/hough-animation.html) - Real-time visualization of line detection
-- [Metrics analyzer](https://arrufat.github.io/zignal/examples/metrics.html) - PSNR and SSIM comparison for reference vs. distorted images
-- [Global optimization](https://arrufat.github.io/zignal/examples/global-optimization.html) - Type a JavaScript function and watch the MaxLIPO+TR optimizer search for its optimum
-- [QR code](https://arrufat.github.io/zignal/examples/qrcode.html) - Encode text into QR codes and decode them from your camera or images
-- [Image codec playground](https://arrufat.github.io/zignal/examples/codec-playground.html) - Inspect how an image is encoded and re-encode it with the PNG, JPEG, BMP and GIF codecs
-
+The [interactive demos](https://arrufat.github.io/zignal/examples) run Zignal in the browser through WASM and showcase color spaces, face alignment, seam carving, feature matching, global optimization, QR codes and more.
+Their sources live in the [examples](examples) directory alongside native Zig programs.
 
 ## Sponsors
 
