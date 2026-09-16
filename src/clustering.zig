@@ -2,6 +2,7 @@
 //! [dlib](https://dlib.net/dlib/clustering/chinese_whispers.h.html).
 
 const std = @import("std");
+const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const Io = std.Io;
@@ -24,7 +25,7 @@ pub const Error = error{
 /// Inputs to `chineseWhispers`. `threshold` has no default because the right value depends on the
 /// embedding space; the tuning knobs default to dlib's.
 pub const Options = struct {
-    /// Maximum Euclidean distance for two embeddings to be connected.
+    /// Two embeddings are connected when their Euclidean distance is below this.
     threshold: f64,
     /// Passes over the graph. Each pass updates as many randomly chosen nodes as there are nodes.
     iterations: u32 = 100,
@@ -32,9 +33,10 @@ pub const Options = struct {
     seed: u64 = 0,
 };
 
-/// Clusters `embeddings` by connecting every pair closer than `options.threshold` and propagating
-/// labels over that graph. Returns the number of clusters; ids are contiguous from 0, and an
-/// embedding with no neighbour within the threshold ends up alone in its own cluster.
+/// Clusters `embeddings` by connecting every pair with Euclidean distance strictly less than
+/// `options.threshold` and propagating labels over that graph. Returns the number of clusters;
+/// ids are contiguous from 0, and an embedding with no neighbour within the threshold ends up
+/// alone in its own cluster.
 ///
 /// The O(n^2 * dim) pairwise pass runs in row bands on `io` and allocates per band, so
 /// `allocator` must be thread-safe; propagation is sequential.
@@ -48,6 +50,7 @@ pub fn chineseWhispers(
     labels: []u32,
     options: Options,
 ) Error!u32 {
+    comptime assert(@typeInfo(T) == .float);
     if (!std.math.isFinite(options.threshold) or options.threshold < 0) return error.InvalidThreshold;
     if (labels.len != embeddings.len) return error.LabelCountMismatch;
     const n: u32 = @intCast(embeddings.len);
@@ -65,7 +68,7 @@ pub fn chineseWhispers(
     // Compressed sparse row adjacency, each pair stored in both directions. Degrees are counted
     // two slots ahead so that `offsets[i + 1]` doubles as node i's fill cursor: once it has
     // advanced to the end of node i, its neighbours are `targets[offsets[i]..offsets[i + 1]]`.
-    const offsets = try allocator.alloc(u32, n + 2);
+    const offsets = try allocator.alloc(usize, n + 2);
     defer allocator.free(offsets);
     @memset(offsets, 0);
     for (neighbors) |band| for (band.items) |pair| {
@@ -138,7 +141,7 @@ const Pair = struct { a: u32, b: u32 };
 /// than once per row: the pairwise pass is bandwidth-bound once the embeddings outgrow the cache.
 const tile_rows = 32;
 
-/// Every pair of embeddings within `threshold`. The total is not known ahead of time, so each
+/// Every pair of embeddings closer than `threshold`. The total is not known ahead of time, so each
 /// band grows its own list.
 fn findNeighbors(
     comptime T: type,
@@ -195,13 +198,13 @@ fn findNeighbors(
     return lists;
 }
 
-/// Whether the squared Euclidean distance between `a` and `b` stays below `limit`. Every term is
-/// non-negative, so once the running sum passes `limit` the answer is settled and the scan bails
-/// out; the result matches summing all dimensions. The sum is checked after 16 elements, then
-/// after a block that doubles each time: a far pair is rejected almost at once, while a close
-/// pair in a wide embedding is not slowed by a horizontal reduce every 16 elements. Each block
-/// accumulates in `T` across four independent vectors (a single chain is latency-bound) and
-/// widens to f64 once.
+/// Whether the squared Euclidean distance between `a` and `b` is strictly less than `limit`.
+/// Every term is non-negative, so once the running sum passes `limit` the answer is settled and
+/// the scan bails out; the result matches summing all dimensions. The sum is checked after 16
+/// elements, then after a block that doubles each time: a far pair is rejected almost at once,
+/// while a close pair in a wide embedding is not slowed by a horizontal reduce every 16 elements.
+/// Each block accumulates in `T` across four independent vectors (a single chain is latency-bound)
+/// and widens to f64 once.
 fn withinDistance(comptime T: type, a: []const T, b: []const T, limit: f64) bool {
     const lanes = std.simd.suggestVectorLength(T) orelse 1;
     const V = @Vector(lanes, T);
@@ -293,6 +296,30 @@ test "chineseWhispers rejects malformed input" {
     const ragged: []const []const f64 = &.{ &.{ 0.0, 1.0 }, &.{2.0} };
     var two: [2]u32 = undefined;
     try expectError(error.DimensionMismatch, cluster(ragged, 1.0, &two));
+}
+
+test "chineseWhispers connects strictly closer than threshold" {
+    // Distance between (0, 0) and (1, 0) is exactly 1.0.
+    const pair: []const []const f64 = &.{ &.{ 0.0, 0.0 }, &.{ 1.0, 0.0 } };
+    var labels: [2]u32 = undefined;
+
+    // At threshold = 1.0, distance is not strictly less, so nodes stay in separate clusters.
+    try expectEqual(2, try cluster(pair, 1.0, &labels));
+    try expectEqualSlices(u32, &.{ 0, 1 }, &labels);
+
+    // At threshold = 1.001, distance < threshold, so they merge.
+    try expectEqual(1, try cluster(pair, 1.001, &labels));
+    try expectEqualSlices(u32, &.{ 0, 0 }, &labels);
+}
+
+test "chineseWhispers supports f16 embeddings" {
+    const p1 = [_]f16{ 0.0, 0.0 };
+    const p2 = [_]f16{ 0.1, 0.1 };
+    const embs: []const []const f16 = &.{ &p1, &p2 };
+    var labels: [2]u32 = undefined;
+    const k = try chineseWhispers(f16, parallel.inline_io, std.testing.allocator, embs, &labels, .{ .threshold = 1.0 });
+    try expectEqual(1, k);
+    try expectEqualSlices(u32, &.{ 0, 0 }, &labels);
 }
 
 test "chineseWhispers clusters f32 embeddings of realistic width" {
