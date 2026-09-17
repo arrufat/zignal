@@ -1,3 +1,5 @@
+//! Pixel-wise image differencing and difference visualization.
+
 const std = @import("std");
 const meta = @import("../meta.zig");
 const Image = @import("../image.zig").Image;
@@ -15,7 +17,7 @@ pub const DiffOptions = struct {
     force_opaque: bool = false,
 };
 
-/// Result of a difference operation.
+/// Summary statistics and differing pixel count from an image difference operation.
 pub const DiffResult = struct {
     stats: RunningStats(f64, .summary),
     diff_count: usize,

@@ -26,11 +26,12 @@ pub fn Result(comptime T: type) type {
     };
 }
 
-/// Eigendecomposition of the symmetric n×n matrix `a` via cyclic Jacobi rotations. Eigenvalues are
-/// returned ascending, with `vectors`' columns the matching unit eigenvectors. The caller owns the
-/// returned matrices. Returns `error.NotSymmetric` if `a` is not symmetric within a magnitude-relative
-/// tolerance (a general non-symmetric eigendecomposition, with its complex spectrum, is out of scope),
-/// `error.NotFinite` if any entry is NaN or infinite, or `error.NotConverged` after 100 sweeps.
+/// Eigendecomposition of the symmetric n×n matrix `a` via cyclic Jacobi rotations. Eigenvalues
+/// are returned ascending, with `vectors`' columns the matching unit eigenvectors. The caller
+/// owns the returned matrices. Returns `error.NotSymmetric` if `a` is not symmetric within a
+/// magnitude-relative tolerance (a general non-symmetric eigendecomposition, with its complex
+/// spectrum, is out of scope), `error.NotFinite` if any entry is NaN or infinite, or
+/// `error.NotConverged` after 100 sweeps.
 pub fn eigh(comptime T: type, allocator: std.mem.Allocator, a: Matrix(T)) !Result(T) {
     comptime assert(@typeInfo(T) == .float);
     if (a.rows != a.cols) return error.NotSquare;

@@ -1,49 +1,47 @@
-//! A keypoint represents a distinctive location in an image with associated
-//! properties like position, scale, orientation, and response strength.
-//! Used for feature detection algorithms like FAST, Harris, and ORB.
+//! 2D keypoint representation with scale, orientation, and response strength.
+//! Used in feature detection and description algorithms like FAST and ORB.
 
 const std = @import("std");
 const expectEqual = std.testing.expectEqual;
 const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
-/// X coordinate in the image
+/// X coordinate in the image.
 x: f32,
 
-/// Y coordinate in the image
+/// Y coordinate in the image.
 y: f32,
 
-/// Diameter of the meaningful keypoint neighborhood
+/// Diameter of the meaningful keypoint neighborhood.
 size: f32,
 
-/// Computed orientation of the keypoint in degrees (-180, 180]
+/// Computed orientation of the keypoint in degrees (-180, 180].
 angle: f32,
 
-/// The response by which the keypoint was detected (corner strength)
+/// The response by which the keypoint was detected (corner strength).
 response: f32,
 
-/// Pyramid octave (level) where the keypoint was detected
-/// 0 = original resolution, 1 = half resolution, etc.
+/// Pyramid octave (level) where the keypoint was detected (0 = original resolution).
 octave: i32,
 
-/// Object class ID (for grouped features, -1 if not used)
+/// Object class ID (for grouped features, -1 if unused).
 class_id: i32 = -1,
 
 const KeyPoint = @This();
 
-/// Compare keypoints by response strength (for sorting)
+/// Compares keypoints by response strength (higher response first).
 pub fn compareResponse(context: void, a: KeyPoint, b: KeyPoint) bool {
     _ = context;
     return a.response > b.response; // Higher response first
 }
 
-/// Compare keypoints by position (for spatial sorting)
+/// Compares keypoints by position for spatial sorting.
 pub fn comparePosition(context: void, a: KeyPoint, b: KeyPoint) bool {
     _ = context;
     if (a.y != b.y) return a.y < b.y;
     return a.x < b.x;
 }
 
-/// Convert keypoint to scale-space coordinates
+/// Converts keypoint to scale-space coordinates.
 pub fn toScaleSpace(self: KeyPoint, scale_factor: f32) KeyPoint {
     const scale = std.math.pow(f32, scale_factor, @as(f32, @floatFromInt(self.octave)));
     return .{
@@ -57,7 +55,7 @@ pub fn toScaleSpace(self: KeyPoint, scale_factor: f32) KeyPoint {
     };
 }
 
-/// Convert from scale-space to pyramid level coordinates
+/// Converts from scale-space to pyramid level coordinates.
 pub fn fromScaleSpace(self: KeyPoint, scale_factor: f32) KeyPoint {
     const scale = std.math.pow(f32, scale_factor, @as(f32, @floatFromInt(self.octave)));
     return .{
@@ -71,7 +69,7 @@ pub fn fromScaleSpace(self: KeyPoint, scale_factor: f32) KeyPoint {
     };
 }
 
-/// Check if keypoint is within image bounds with margin
+/// Checks if keypoint is within image bounds with margin.
 pub fn isInBounds(self: KeyPoint, width: usize, height: usize, margin: usize) bool {
     const m = @as(f32, @floatFromInt(margin));
     const w = @as(f32, @floatFromInt(width));
@@ -83,19 +81,19 @@ pub fn isInBounds(self: KeyPoint, width: usize, height: usize, margin: usize) bo
         self.y < h - m;
 }
 
-/// Compute Euclidean distance to another keypoint
+/// Computes Euclidean distance to another keypoint.
 pub fn distance(self: KeyPoint, other: KeyPoint) f32 {
     return @sqrt(self.distanceSquared(other));
 }
 
-/// Compute squared Euclidean distance — cheaper than `distance` when comparing magnitudes.
+/// Computes squared Euclidean distance (avoids square root when comparing magnitudes).
 pub fn distanceSquared(self: KeyPoint, other: KeyPoint) f32 {
     const dx = self.x - other.x;
     const dy = self.y - other.y;
     return dx * dx + dy * dy;
 }
 
-/// Check if two keypoints overlap based on their size
+/// Checks if two keypoints overlap based on their size and threshold.
 pub fn overlaps(self: KeyPoint, other: KeyPoint, overlap_threshold: f32) bool {
     const dist = self.distance(other);
     const min_size = @min(self.size, other.size);

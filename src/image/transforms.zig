@@ -1,7 +1,4 @@
-//! Image geometric transformation operations
-//!
-//! This module provides various geometric transformations for images including
-//! rotation, flipping, cropping, extraction, insertion, and letterboxing.
+//! Geometric image transformation operations: rotation, flipping, cropping, and letterboxing.
 
 const std = @import("std");
 const Io = std.Io;
@@ -18,7 +15,7 @@ const BorderMode = @import("border.zig").BorderMode;
 const computeCoords = @import("border.zig").computeCoords;
 const interpolate = @import("interpolation.zig").interpolate;
 const Interpolation = @import("interpolation.zig").Interpolation;
-/// Transform operations for Image(T)
+
 /// Output size that fits an image rotated by an angle.
 pub const RotateBounds = struct { rows: u32, cols: u32 };
 
@@ -698,7 +695,7 @@ pub fn Transform(comptime T: type) type {
         }
 
         /// Applies a geometric transform to the image using backward mapping.
-        /// For each pixel in the output, applies the transform to find the corresponding source pixel.
+        /// Evaluates the inverse transform per output pixel to sample the source.
         pub fn warp(self: Self, io: Io, out: Self, transform: anytype, method: Interpolation) void {
             const Ctx = struct {
                 sampler: interpolation.Sampler(T),

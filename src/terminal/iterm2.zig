@@ -1,12 +1,10 @@
-//! iTerm2 inline image protocol support for image rendering
+//! iTerm2 inline image protocol (`OSC 1337`) support for terminal rendering.
 //!
-//! This module converts images to the iTerm2 inline image protocol (`OSC 1337`),
-//! supported by iTerm2, WezTerm, and other compatible terminal emulators.
-//!
-//! The image is PNG-encoded and base64-wrapped in a single control sequence:
+//! Encodes images as base64-wrapped PNG payloads in a single control sequence:
 //! `ESC ] 1337 ; File = inline=1 ; size=<bytes> : <base64> BEL`.
-//! Unlike Kitty, there is no cache/placement lifecycle — each call emits one
-//! self-contained image at the cursor.
+//! Supported by iTerm2, WezTerm, and other compatible terminal emulators. Unlike Kitty,
+//! there is no cache/placement lifecycle: each call emits one self-contained image at the
+//! cursor.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -17,7 +15,7 @@ const Rgb = @import("../color.zig").Rgb(u8);
 const detect = @import("detect.zig");
 const payload = @import("payload.zig");
 
-/// Options for iTerm2 inline image encoding
+/// Options for iTerm2 inline image encoding.
 pub const Options = struct {
     /// Display width in pixels (null = image's natural width)
     width: ?u32 = null,

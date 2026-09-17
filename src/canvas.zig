@@ -1,15 +1,7 @@
-//! Canvas drawing module
+//! 2D canvas drawing system for raster images.
 //!
-//! This module provides a Canvas for drawing various shapes and lines on images.
-//! The Canvas supports:
-//! - Lines with configurable width and antialiasing
-//! - Circles and arcs (outline and filled)
-//! - Rectangles and polygons (even-odd or nonzero fills, multiple contours)
-//! - Text with bitmap or TrueType fonts
-//! - Bezier curves (quadratic and cubic)
-//! - Spline curves
-//!
-//! All drawing operations support both fast (aliased) and soft (antialiased) rendering modes.
+//! Supports antialiased (.soft) and aliased (.fast) rendering of primitives:
+//! lines, circles, arcs, rectangles, polygons, Bézier curves, splines, and text.
 
 // Re-export public types
 pub const Canvas = @import("canvas/Canvas.zig").Canvas;

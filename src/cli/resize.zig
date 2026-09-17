@@ -1,3 +1,5 @@
+//! Resize subcommand: resizes images using various interpolation filters.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;

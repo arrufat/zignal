@@ -1,3 +1,5 @@
+//! Command-line argument parsing and help text generation.
+
 const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
@@ -39,7 +41,7 @@ pub fn ParseResult(comptime T: type) type {
     };
 }
 
-/// Helper to get the underlying type of an optional or return the type itself.
+/// Returns the underlying payload type if `T` is an optional, otherwise returns `T`.
 fn PayloadType(comptime T: type) type {
     const info = @typeInfo(T);
     return if (info == .optional) info.optional.child else T;
@@ -123,10 +125,10 @@ pub fn parseLogLevel(arg: []const u8, args: *std.process.Args.Iterator) !bool {
     return true;
 }
 
-/// Parses command-line arguments into a struct of type T.
-/// T should be a struct where fields represent options (e.g., `width: ?u32`).
+/// Parses command-line arguments into a struct of type `T`.
+/// `T` is a struct whose fields represent options (e.g., `width: ?u32`).
 /// Boolean fields are treated as flags (no value required).
-/// Supported types: bool, integer types, and []const u8.
+/// Supported types: `bool`, integers, floats, enums, and `[]const u8`.
 pub fn parse(comptime T: type, allocator: Allocator, args: *std.process.Args.Iterator) !ParseResult(T) {
     std.log.debug("parsing arguments for type {s}...", .{@typeName(T)});
     var options: T = .{};

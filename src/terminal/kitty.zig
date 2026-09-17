@@ -1,10 +1,7 @@
-//! Kitty graphics protocol support for image rendering
+//! Kitty graphics protocol support for terminal image rendering.
 //!
-//! This module provides functionality to convert images to Kitty graphics protocol format,
-//! which is supported by Kitty terminal and other compatible terminal emulators.
-//!
-//! The Kitty graphics protocol allows displaying raster images directly in the terminal
-//! with features like alpha blending, positioning, and scaling.
+//! Converts images to the Kitty graphics protocol, displaying raster images directly
+//! in compatible terminals with chunked base64 transmission and optional placement control.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;

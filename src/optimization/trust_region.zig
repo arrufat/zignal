@@ -23,7 +23,7 @@ const norm = vec.norm;
 // Dense linear-algebra helpers (row-major n*n in []f64)
 // ---------------------------------------------------------------------------------------
 
-/// Solve L*y = b (forward substitution), L lower-triangular (only lower triangle of `l` read).
+/// Solves L*y = b via forward substitution, with L lower-triangular.
 fn solveLower(l: []const f64, b: []const f64, y: []f64) void {
     const n = y.len;
     for (0..n) |i| {
@@ -33,7 +33,7 @@ fn solveLower(l: []const f64, b: []const f64, y: []f64) void {
     }
 }
 
-/// Solve L^T*x = y (back substitution), L lower-triangular (L^T is upper). Safe in place (x = y).
+/// Solves L^T*x = y via back substitution, with L lower-triangular. Safe in place (`x == y`).
 fn solveLowerT(l: []const f64, y: []const f64, x: []f64) void {
     const n = x.len;
     var i: usize = n;

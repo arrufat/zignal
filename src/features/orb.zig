@@ -1,4 +1,4 @@
-//! ORB (Oriented FAST and Rotated BRIEF) feature detector and descriptor
+//! ORB (Oriented FAST and Rotated BRIEF) feature detector and descriptor.
 
 const std = @import("std");
 const Io = std.Io;
@@ -12,12 +12,11 @@ const BinaryDescriptor = @import("BinaryDescriptor.zig");
 const Fast = @import("Fast.zig");
 const KeyPoint = @import("KeyPoint.zig");
 
-/// Default patch size for BRIEF descriptor (industry standard)
+/// Default patch size for BRIEF descriptor (industry standard).
 pub const DEFAULT_PATCH_SIZE: u8 = 31;
 
-/// ORB pattern for BRIEF descriptor - learned pattern from ORB paper
-/// Each entry is [x1, y1, x2, y2] for the two points to compare
-/// These are pre-computed optimal sampling locations within a 31x31 patch
+/// ORB pattern for BRIEF descriptor (learned sampling pairs from the ORB paper).
+/// Each entry is `[x1, y1, x2, y2]` for the two points to compare within a 31x31 patch.
 const orb_pattern = [256][4]i8{
     .{ 8, -3, 9, 5 },       .{ 4, 2, 7, -12 },      .{ -11, 9, -8, 2 },     .{ 7, -12, 12, -13 },
     .{ 2, -13, 2, 12 },     .{ 1, -7, 1, 6 },       .{ -2, -10, -2, -4 },   .{ -13, -13, -11, -8 },
@@ -85,25 +84,25 @@ const orb_pattern = [256][4]i8{
     .{ 7, 3, 12, 4 },       .{ 9, -7, 10, -2 },     .{ 7, 0, 12, -2 },      .{ -1, -6, 0, -11 },
 };
 
-/// Maximum number of features to detect
+/// Maximum number of features to detect.
 n_features: usize = 500,
 
-/// Scale factor between pyramid levels
+/// Scale factor between adjacent pyramid levels.
 scale_factor: f32 = 1.2,
 
-/// Number of pyramid levels
+/// Number of pyramid levels.
 n_levels: u8 = 8,
 
-/// Border width where features are not detected
+/// Border margin in pixels where features are not detected.
 edge_threshold: u8 = DEFAULT_PATCH_SIZE / 2,
 
-/// First pyramid level to use (0 = original resolution)
+/// First pyramid level to use (0 = original resolution).
 first_level: u8 = 0,
 
-/// FAST threshold for corner detection
+/// FAST threshold for corner detection.
 fast_threshold: u8 = 20,
 
-/// Score type for keypoint response (HARRIS or FAST)
+/// Score type for keypoint response (HARRIS or FAST).
 score_type: ScoreType = .fast_score,
 
 const Orb = @This();
@@ -113,7 +112,7 @@ pub const ScoreType = enum {
     fast_score,
 };
 
-/// Detect keypoints in the image at multiple scales
+/// Detects keypoints in the image at multiple scales.
 pub fn detect(self: Orb, io: Io, allocator: Allocator, image: Image(u8)) ![]KeyPoint {
     var pyramid = try ImagePyramid(u8).init(io, allocator, image, .{
         .n_levels = self.n_levels,
@@ -124,7 +123,7 @@ pub fn detect(self: Orb, io: Io, allocator: Allocator, image: Image(u8)) ![]KeyP
     return self.detectWithPyramid(allocator, pyramid);
 }
 
-/// Compute descriptors for detected keypoints
+/// Computes descriptors for detected keypoints.
 pub fn compute(self: Orb, io: Io, allocator: Allocator, image: Image(u8), keypoints: []const KeyPoint) ![]BinaryDescriptor {
     var pyramid = try ImagePyramid(u8).init(io, allocator, image, .{
         .n_levels = self.n_levels,
@@ -135,7 +134,7 @@ pub fn compute(self: Orb, io: Io, allocator: Allocator, image: Image(u8), keypoi
     return computeWithPyramid(allocator, pyramid, keypoints);
 }
 
-/// Detect keypoints using a pre-built pyramid
+/// Detects keypoints using a pre-built image pyramid.
 fn detectWithPyramid(self: Orb, allocator: Allocator, pyramid: ImagePyramid(u8)) ![]KeyPoint {
     // Calculate how many features to detect per level
     const features_per_level = try self.computeFeaturesPerLevel(allocator);
@@ -212,7 +211,7 @@ fn detectWithPyramid(self: Orb, allocator: Allocator, pyramid: ImagePyramid(u8))
     return try all_keypoints.toOwnedSlice(allocator);
 }
 
-/// Compute descriptors using a pre-built pyramid
+/// Computes descriptors using a pre-built pyramid.
 fn computeWithPyramid(allocator: Allocator, pyramid: ImagePyramid(u8), keypoints: []const KeyPoint) ![]BinaryDescriptor {
     var descriptors = try allocator.alloc(BinaryDescriptor, keypoints.len);
 
@@ -238,7 +237,7 @@ fn computeWithPyramid(allocator: Allocator, pyramid: ImagePyramid(u8), keypoints
     return descriptors;
 }
 
-/// Detect keypoints and compute their descriptors
+/// Detects keypoints and computes their descriptors.
 pub fn detectAndCompute(
     self: Orb,
     io: Io,
@@ -265,7 +264,7 @@ pub fn detectAndCompute(
     };
 }
 
-/// Compute the distribution of features per pyramid level
+/// Computes the distribution of features per pyramid level.
 fn computeFeaturesPerLevel(self: Orb, allocator: Allocator) ![]usize {
     var n_features_per_level = try allocator.alloc(usize, self.n_levels);
 
@@ -366,7 +365,7 @@ const MomentComputer = struct {
     }
 };
 
-/// Compute keypoint orientation using intensity centroid with circular mask
+/// Computes keypoint orientation using intensity centroid with a circular mask.
 fn computeOrientation(image: Image(u8), kp: KeyPoint) f32 {
     const half_patch: isize = PATCH_SIZE / 2;
     const x: isize = @trunc(kp.x);
@@ -397,7 +396,7 @@ fn computeOrientation(image: Image(u8), kp: KeyPoint) f32 {
     return std.math.radiansToDegrees(angle_rad);
 }
 
-/// Compute BRIEF descriptor for a keypoint using the learned ORB pattern
+/// Computes BRIEF descriptor for a keypoint using the learned ORB pattern.
 fn computeBriefDescriptor(image: Image(u8), kp: KeyPoint) BinaryDescriptor {
     var descriptor = BinaryDescriptor.init();
 
@@ -428,7 +427,7 @@ fn computeBriefDescriptor(image: Image(u8), kp: KeyPoint) BinaryDescriptor {
     return descriptor;
 }
 
-/// Compute Harris corner response for a keypoint
+/// Computes Harris corner response for a keypoint.
 fn computeHarrisResponse(image: Image(u8), kp: KeyPoint) f32 {
     const window_size = 7;
     const half_window = window_size / 2;
@@ -479,7 +478,7 @@ fn computeHarrisResponse(image: Image(u8), kp: KeyPoint) f32 {
     return det - k * trace * trace;
 }
 
-/// Compute an adaptive FAST threshold for the given pyramid level (bounded to >= 5)
+/// Computes an adaptive FAST threshold for the given pyramid level (bounded to >= 5).
 fn computeAdaptiveThreshold(self: Orb, level: usize) u8 {
     const level_scale = std.math.pow(f32, self.scale_factor, @as(f32, @floatFromInt(level)));
     const attenuation = 1.0 / level_scale;

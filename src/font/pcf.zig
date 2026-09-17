@@ -1,12 +1,7 @@
-//! PCF (Portable Compiled Format) font parser
+//! PCF (Portable Compiled Format) font parser for X11 binary bitmap fonts.
 //!
-//! This module provides zero-dependency parsing of PCF font files,
-//! a binary format used by X11 for efficient bitmap font storage.
-//!
-//! PCF files contain bitmap font data in an optimized binary format
-//! with multiple tables containing metrics, bitmaps, encodings, and
-//! optional acceleration data. This parser supports both compressed
-//! and uncompressed metrics, as well as gzip-compressed PCF files.
+//! Supports compressed and uncompressed metrics, optional acceleration data,
+//! and gzip-compressed PCF files.
 
 const std = @import("std");
 const builtin = @import("builtin");

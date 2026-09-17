@@ -1,3 +1,5 @@
+//! 2D convex hull calculation using Graham's scan algorithm.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const expectEqual = std.testing.expectEqual;
@@ -6,7 +8,7 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 const Point = @import("Point.zig").Point;
 const Rectangle = @import("Rectangle.zig").Rectangle;
 
-/// Struct that encapsulates all logic for a Convex Hull computation.
+/// Computes and stores the 2D convex hull of a set of points.
 pub fn ConvexHull(comptime T: type) type {
     return struct {
         points: std.ArrayList(Point(2, T)),
@@ -16,6 +18,7 @@ pub fn ConvexHull(comptime T: type) type {
 
         pub const empty: Self = .{ .points = .empty, .hull = .empty };
 
+        /// Frees allocated memory associated with points and hull.
         pub fn deinit(self: *Self, allocator: Allocator) void {
             self.points.deinit(allocator);
             self.hull.deinit(allocator);

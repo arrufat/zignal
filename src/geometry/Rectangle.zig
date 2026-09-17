@@ -1,3 +1,5 @@
+//! Half-open axis-aligned rectangle type and 2D bounding box operations.
+
 const std = @import("std");
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
@@ -21,13 +23,13 @@ pub fn Rectangle(comptime T: type) type {
         r: T,
         b: T,
 
-        /// Initialize a rectangle by giving its four sides.
+        /// Initializes a rectangle by giving its four sides.
         pub fn init(l: T, t: T, r: T, b: T) Self {
             assert(r >= l and b >= t);
             return .{ .l = l, .t = t, .r = r, .b = b };
         }
 
-        /// Tightest rectangle containing `points` (must be non-empty).
+        /// Returns the tightest rectangle containing `points` (must be non-empty).
         pub fn fromPoints(points: []const Point(2, T)) Self {
             assert(points.len > 0);
             var lo = points[0];
@@ -39,7 +41,7 @@ pub fn Rectangle(comptime T: type) type {
             return .{ .l = lo.x(), .t = lo.y(), .r = hi.x(), .b = hi.y() };
         }
 
-        /// Initialize a rectangle at center x, y with the specified width and height.
+        /// Initializes a rectangle centered at `(x, y)` with the specified width and height.
         pub fn initCenter(x: T, y: T, w: T, h: T) Self {
             assert(w > 0 and h > 0);
             switch (@typeInfo(T)) {
@@ -117,7 +119,7 @@ pub fn Rectangle(comptime T: type) type {
             };
         }
 
-        /// Returns the area of the rectangle
+        /// Returns the area of the rectangle.
         pub fn area(self: Self) if (@typeInfo(T) == .int) usize else T {
             if (self.isEmpty()) return 0;
             const w = self.width();

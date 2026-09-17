@@ -1,3 +1,5 @@
+//! Display subcommand: renders images directly in the terminal using graphics protocols.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;

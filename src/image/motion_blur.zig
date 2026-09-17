@@ -1,4 +1,4 @@
-//! Motion blur effects for images
+//! Motion blur filters: linear directional, rotational, and radial zoom blurs.
 
 const std = @import("std");
 const Io = std.Io;
@@ -248,7 +248,7 @@ pub fn MotionBlurOps(comptime T: type) type {
             }
         }
 
-        /// Applies radial motion blur — `.zoom` radiates from the center, `.spin` rotates around it.
+        /// Applies radial blur: `.zoom` radiates from the center, `.spin` rotates around it.
         /// `center_x`/`center_y` are normalized [0, 1]; `strength` controls intensity [0, 1].
         pub fn radial(
             image: Image(T),

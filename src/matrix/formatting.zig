@@ -1,9 +1,9 @@
-//! Matrix formatting utilities for both static and dynamic matrices
+//! Matrix formatting utilities for terminal and string output.
 
 const std = @import("std");
 const Io = std.Io;
 
-/// Helper function to format numbers with fallback to scientific notation
+/// Formats numbers with fallback to scientific notation on overflow.
 fn formatNumber(comptime T: type, buf: []u8, comptime format_str: []const u8, value: T) []const u8 {
     return std.mem.print(buf, format_str, .{value}) catch {
         // If formatting fails (number too large), try scientific notation
@@ -14,7 +14,7 @@ fn formatNumber(comptime T: type, buf: []u8, comptime format_str: []const u8, va
     };
 }
 
-/// Generic matrix formatting function that works with both SMatrix and Matrix
+/// Formats both static (`SMatrix`) and dynamic (`Matrix`) matrices with column alignment.
 pub fn formatMatrix(matrix: anytype, comptime number_fmt: []const u8, writer: *Io.Writer) !void {
     const rows = matrix.rows;
     const cols = matrix.cols;

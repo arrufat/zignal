@@ -1,8 +1,4 @@
-//! Channel separation and combination operations for image processing
-//!
-//! This module provides utilities for separating multi-channel images into
-//! individual planes and recombining them. This enables optimized single-channel
-//! processing using SIMD and integer arithmetic.
+//! Channel separation and combination operations for planar image processing.
 
 const std = @import("std");
 const Io = std.Io;
@@ -68,7 +64,8 @@ pub fn allocPlanes(comptime P: type, comptime N: usize, allocator: std.mem.Alloc
     return planes;
 }
 
-/// Separate all channels from a struct image into individual planes while tracking uniform channels.
+/// Separates all channels from a struct image into individual planes while
+/// tracking uniform channels.
 pub fn splitChannelsWithUniform(comptime T: type, io: Io, image: Image(T), allocator: std.mem.Allocator) !struct {
     channels: [Image(T).channels()][]FieldTypeOf(T),
     uniforms: [Image(T).channels()]?FieldTypeOf(T),

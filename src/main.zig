@@ -1,3 +1,5 @@
+//! Zignal command-line interface entry point and subcommand dispatcher.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -49,6 +51,7 @@ pub fn main(init: std.process.Init) !void {
     try cli.run(init.gpa, init.io, &stdout.interface, &args);
 }
 
+/// CLI subcommand definition with execution handler and help text.
 pub const Command = struct {
     name: []const u8,
     run: *const fn (Io, *Io.Writer, Allocator, *std.process.Args.Iterator) anyerror!void,
@@ -56,6 +59,7 @@ pub const Command = struct {
     help: []const u8,
 };
 
+/// Command-line interface dispatcher that auto-discovers subcommands.
 pub const Cli = struct {
     commands: []const Command,
 

@@ -1,8 +1,7 @@
-//! Image interpolation and resizing algorithms
+//! Spatial interpolation and image resizing algorithms.
 //!
-//! This module provides various interpolation methods for image resizing and
-//! sampling, including nearest neighbor, bilinear, bicubic, Catmull-Rom,
-//! Lanczos, and Mitchell-Netravali filters.
+//! Provides nearest-neighbor, bilinear, bicubic, Catmull-Rom, Lanczos,
+//! and Mitchell-Netravali interpolation filters.
 //!
 //! ## Usage Examples
 //!
@@ -422,7 +421,7 @@ pub fn kernelWeight(method: Interpolation, x: f32) f32 {
     };
 }
 
-/// `kernelWeight` for the per-pixel path, where Lanczos reads its table instead of two sines per tap.
+/// `kernelWeight` for the per-pixel path; Lanczos reads a LUT instead of two sines per tap.
 fn kernelWeightFast(method: Interpolation, x: f32) f32 {
     return if (method == .lanczos) lanczos3KernelLut(x) else kernelWeight(method, x);
 }

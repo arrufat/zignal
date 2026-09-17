@@ -1,22 +1,19 @@
-//! Unified border handling utilities for image operations
-//!
-//! This module provides consistent border mode handling used by various
-//! image processing operations like convolution and order statistic filters.
+//! Border mode handling for out-of-bounds pixel queries.
 
 const std = @import("std");
 const clamp = std.math.clamp;
 
 const Image = @import("../image.zig").Image;
 
-/// Border handling modes for operations that access pixels outside image bounds
+/// Border handling modes for operations that access pixels outside image bounds.
 pub const BorderMode = enum {
-    /// Pad with zeros
+    /// Pad with zeros (or transparent black).
     zero,
-    /// Replicate edge pixels
+    /// Replicate edge pixels.
     replicate,
-    /// Mirror at edges
+    /// Mirror at edges.
     mirror,
-    /// Wrap around (circular)
+    /// Wrap around (circular).
     wrap,
 
     /// Whether this border mode preserves uniform regions (i.e. border pixels

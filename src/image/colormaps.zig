@@ -1,12 +1,4 @@
-//! Colormap implementations for visualization.
-//!
-//! This module provides various colormaps to map scalar values to RGB colors.
-//! Supported maps include:
-//! - Jet: The classic blue-cyan-yellow-red map (ported from dlib).
-//! - Heat: A black-red-yellow-white heatmap (ported from dlib).
-//! - Turbo: An improved rainbow colormap by Google (LUT based).
-//! - Viridis: A perceptually uniform colormap (matplotlib default, LUT based).
-//! - Inferno: A perceptually uniform black-purple-orange-yellow colormap (LUT based).
+//! Colormaps (Jet, Heat, Turbo, Viridis, Inferno) for false-color scalar visualization.
 
 const std = @import("std");
 const math = std.math;

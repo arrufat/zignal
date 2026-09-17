@@ -1,3 +1,5 @@
+//! Tile subcommand: arranges multiple input images into a grid layout.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;

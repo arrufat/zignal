@@ -13,20 +13,18 @@ const expectEqual = std.testing.expectEqual;
 const Image = @import("../image.zig").Image;
 const KeyPoint = @import("KeyPoint.zig");
 
-/// Intensity difference threshold for corner detection
+/// Intensity difference threshold for corner detection.
 threshold: u8 = 20,
 
-/// Apply non-maximal suppression to reduce redundant corners
+/// Whether to apply non-maximal suppression to reduce redundant corners.
 nonmax_suppression: bool = true,
 
-/// Minimum number of contiguous pixels that must be brighter/darker
-/// Standard FAST uses 9 (FAST-9) or 12 (FAST-12).
+/// Minimum number of contiguous pixels that must be brighter or darker (FAST-9 or FAST-12).
 min_contiguous: u8 = 9,
 
 const Fast = @This();
 
-/// Bresenham circle pattern: 16 pixels at radius 3
-/// Ordered clockwise starting from top (12 o'clock)
+/// Bresenham circle pattern: 16 pixels at radius 3, ordered clockwise from 12 o'clock.
 const circle_offsets = [16][2]i8{
     .{ 0, -3 }, .{ 1, -3 }, .{ 2, -2 }, .{ 3, -1 }, // Top-right quadrant
     .{ 3, 0 }, .{ 3, 1 }, .{ 2, 2 }, .{ 1, 3 }, // Bottom-right quadrant
@@ -34,7 +32,7 @@ const circle_offsets = [16][2]i8{
     .{ -3, 0 }, .{ -3, -1 }, .{ -2, -2 }, .{ -1, -3 }, // Top-left quadrant
 };
 
-/// Detect FAST corners in the image
+/// Detects FAST corners in the image.
 pub fn detect(self: Fast, allocator: Allocator, image: Image(u8)) ![]KeyPoint {
     assert(image.rows > 7 and image.cols > 7); // Need at least 7x7 for radius 3
 
@@ -71,7 +69,7 @@ pub fn detect(self: Fast, allocator: Allocator, image: Image(u8)) ![]KeyPoint {
     return try keypoints.toOwnedSlice(allocator);
 }
 
-/// Check if a pixel is a corner using the FAST criterion
+/// Checks if a pixel is a corner using the FAST criterion.
 fn isCorner(self: Fast, image: Image(u8), row: usize, col: usize) bool {
     const center = image.at(row, col).*;
     const threshold = self.threshold;
@@ -132,7 +130,7 @@ fn isCorner(self: Fast, image: Image(u8), row: usize, col: usize) bool {
     return max_bright_arc >= self.min_contiguous or max_dark_arc >= self.min_contiguous;
 }
 
-/// Compute corner score (sum of absolute differences for contiguous pixels)
+/// Computes corner score (sum of absolute differences for contiguous pixels).
 fn cornerScore(self: Fast, image: Image(u8), row: usize, col: usize) u32 {
     const center = image.at(row, col).*;
     var score: u32 = 0;
@@ -151,7 +149,7 @@ fn cornerScore(self: Fast, image: Image(u8), row: usize, col: usize) u32 {
     return score;
 }
 
-/// Apply non-maximal suppression to remove redundant corners
+/// Applies non-maximal suppression to remove redundant neighboring corners.
 fn suppressNonMaximal(self: Fast, allocator: Allocator, keypoints: []const KeyPoint) ![]KeyPoint {
     _ = self;
 

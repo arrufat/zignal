@@ -23,7 +23,8 @@
 //!
 //! var pca: Pca(f64) = try .init(allocator, 2);
 //! defer pca.deinit();
-//! try pca.fit(std.Io.Threaded.global_single_threaded.io(), data, null); // keep all possible components
+//! // keep all possible components
+//! try pca.fit(std.Io.Threaded.global_single_threaded.io(), data, null);
 //!
 //! // Project a single point (allocates a slice owned by caller)
 //! const test_point = [_]f64{2.0, 3.0};
@@ -314,23 +315,23 @@ pub fn Pca(
             return centered_matrix.gemm(io, false, self.components, false, 1.0, 0.0, null);
         }
 
-        /// Get the mean vector
+        /// Returns the mean vector.
         pub fn getMean(self: Self) []const T {
             return self.mean;
         }
 
-        /// Compute principal components using the covariance matrix approach.
+        /// Computes principal components using the covariance matrix approach.
         ///
-        /// This method is efficient when n_samples > dimensions because it computes
-        /// the covariance matrix C = X^T * X / (n-1), which is only dim × dim.
+        /// Efficient when `n_samples > dimensions` because it computes the covariance
+        /// matrix `C = X^T * X / (n - 1)`, which is only `dim × dim`.
         ///
         /// Mathematical basis:
         /// - The eigenvectors of the covariance matrix are the principal components
         /// - The eigenvalues represent the variance along each component
-        /// - We directly get the components without additional projection
+        /// - Components are obtained directly without additional projection
         ///
-        /// Example: For 1000 RGB images (1000×3 matrix), we compute a 3×3 covariance
-        /// matrix instead of a 1000×1000 Gram matrix, making it much more efficient.
+        /// Example: For 1000 RGB images (1000×3 matrix), computes a 3×3 covariance
+        /// matrix instead of a 1000×1000 Gram matrix.
         fn computeComponentsFromCovariance(self: *Self, io: Io, data_matrix: *Matrix(T), num_components: u32) !void {
             // Compute scaled covariance matrix (X^T * X) / (n-1) in single GEMM operation
             const n_samples = data_matrix.rows;
@@ -364,21 +365,18 @@ pub fn Pca(
             }
         }
 
-        /// Compute principal components using the Gram matrix approach.
+        /// Computes principal components using the Gram matrix approach.
         ///
-        /// This method is efficient when n_samples ≤ dimensions because it computes
-        /// the Gram matrix G = X * X^T / (n-1), which is only n_samples × n_samples.
+        /// Efficient when `n_samples <= dimensions` because it computes the Gram
+        /// matrix `G = X * X^T / (n - 1)`, which is only `n_samples × n_samples`.
         ///
         /// Mathematical basis:
         /// - The Gram matrix and covariance matrix share the same non-zero eigenvalues
         /// - The eigenvectors of G are related to the principal components through X
-        /// - We must project the eigenvectors back: PC_i = X^T * u_i / sqrt(λ_i * n)
+        /// - Project back: `PC_i = X^T * u_i / sqrt(λ_i * n)`, because the eigenvectors of G
+        ///   live in sample space, not feature space
         ///
-        /// Why the projection step?
-        /// - Eigenvectors of G live in sample space, not feature space
-        /// - We need to transform them back to get the actual principal components
-        ///
-        /// Example: For 10 high-dimensional vectors (10×1000 matrix), we compute a
+        /// Example: For 10 high-dimensional vectors (10×1000 matrix), computes a
         /// 10×10 Gram matrix instead of a 1000×1000 covariance matrix.
         fn computeComponentsFromGram(self: *Self, io: Io, data_matrix: *Matrix(T), num_components: u32) !void {
             // Compute scaled Gram matrix (X * X^T) / (n-1) in single GEMM operation

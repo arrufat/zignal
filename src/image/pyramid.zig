@@ -1,3 +1,5 @@
+//! Multi-scale Gaussian image pyramids for scale-space representation.
+
 const std = @import("std");
 const Io = std.Io;
 const assert = std.debug.assert;
@@ -17,11 +19,11 @@ pub fn ImagePyramid(comptime T: type) type {
         pub const Options = struct {
             /// Levels requested; the pyramid stops early once a level would fall below `min_size`.
             n_levels: u8 = 8,
-            /// Scale factor between adjacent levels
+            /// Scale factor between adjacent levels.
             scale_factor: f32 = 1.2,
-            /// Base sigma of the anti-aliasing blur applied before downsampling
+            /// Base sigma of the anti-aliasing blur applied before downsampling.
             blur_sigma: f32 = 1.6,
-            /// Smallest allowed level dimension in pixels
+            /// Smallest allowed level dimension in pixels.
             min_size: u32 = 8,
 
             pub const default: Options = .{};
@@ -30,13 +32,13 @@ pub fn ImagePyramid(comptime T: type) type {
         /// Level 0 aliases the caller's image and is never freed; the rest are owned.
         levels: []Image(T),
 
-        /// Scale factor between adjacent levels
+        /// Scale factor between adjacent levels.
         scale_factor: f32,
 
-        /// Number of levels actually built
+        /// Number of levels actually built.
         n_levels: u8,
 
-        /// Build an image pyramid from the source image
+        /// Builds an image pyramid from the source image.
         pub fn init(io: Io, allocator: Allocator, source: Image(T), options: Options) !Self {
             const n_levels = options.n_levels;
             const scale_factor = options.scale_factor;

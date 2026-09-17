@@ -82,7 +82,7 @@ pub const colormaps = @import("image/colormaps.zig");
 pub const quantize = @import("image/quantize.zig");
 pub const dither = @import("image/dither.zig");
 
-// Terminal graphics: detection + sixel/kitty/iterm2 encoders, all under `terminal.*`
+/// Terminal graphics detection and protocol encoders (Sixel, Kitty, iTerm2).
 pub const terminal = @import("terminal.zig");
 
 const codecs = @import("codecs.zig");
@@ -91,7 +91,7 @@ pub const jpeg = codecs.jpeg;
 pub const bmp = codecs.bmp;
 pub const gif = codecs.gif;
 
-// QR code encoding and decoding
+/// QR code encoding and decoding (ISO/IEC 18004).
 pub const qrcode = @import("qrcode.zig");
 
 const matrix = @import("matrix.zig");
@@ -109,7 +109,7 @@ pub const Point = @import("geometry/Point.zig").Point;
 
 pub const FeatureDistributionMatching = @import("fdm.zig").FeatureDistributionMatching;
 
-// Font system
+/// Font loading, text layout, and typography rendering.
 pub const font = @import("font.zig");
 pub const BitmapFont = font.BitmapFont;
 pub const VectorFont = font.VectorFont;
@@ -119,11 +119,11 @@ pub const TextAlign = font.TextAlign;
 pub const VerticalAlign = font.VerticalAlign;
 pub const Outline = font.Outline;
 
-// PCA (Principal Component Analysis) system
+// Principal Component Analysis (PCA) for dimensionality reduction.
 const pca = @import("pca.zig");
 pub const Pca = pca.Pca;
 
-// Feature detection and description
+// Feature detection, description, and matching.
 const features = @import("features.zig");
 pub const KeyPoint = features.KeyPoint;
 pub const BinaryDescriptor = features.BinaryDescriptor;
@@ -134,15 +134,15 @@ pub const BruteForceMatcher = features.BruteForceMatcher;
 pub const Match = features.Match;
 pub const MatchStats = features.MatchStats;
 
-// Clustering
+/// Unsupervised graph-based clustering (Chinese Whispers algorithm).
 pub const clustering = @import("clustering.zig");
 
-// Optimization algorithms
+/// Optimization algorithms (assignment problem, MaxLIPO global optimization).
 pub const optimization = @import("optimization.zig");
 pub const GlobalOptimizer = optimization.GlobalOptimizer;
 pub const findGlobalOptimum = optimization.findGlobalOptimum;
 
-// Statistics module
+// Running and covariance statistics for streaming data.
 const stats = @import("stats.zig");
 pub const RunningStats = stats.RunningStats;
 pub const RunningStatsConfig = stats.RunningStatsConfig;

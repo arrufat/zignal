@@ -11,16 +11,16 @@ const as = @import("../meta.zig").as;
 const Matrix = @import("../matrix.zig").Matrix;
 const OptimizationPolicy = @import("../optimization.zig").OptimizationPolicy;
 
-/// Result of the assignment problem
+/// Result of the assignment problem.
 pub const Assignment = struct {
-    /// assignments[i] = j means row i is assigned to column j
-    /// null means row i has no assignment
+    /// `assignments[i] = j` means row `i` is assigned to column `j` (`null` if unassigned).
     assignments: []?u32,
-    /// Total cost of the assignment
+    /// Total cost of the assignment.
     total_cost: f64,
-    /// Allocator used for assignments array
+    /// Allocator used for the assignments array.
     allocator: Allocator,
 
+    /// Frees the allocated assignments array.
     pub fn deinit(self: *Assignment) void {
         self.allocator.free(self.assignments);
     }

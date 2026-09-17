@@ -1,3 +1,5 @@
+//! Comptime reflection, type introspection, and conversion utilities.
+
 const std = @import("std");
 
 /// Converts between numeric types: .@"enum", .int and .float.

@@ -1,23 +1,21 @@
-//! A binary descriptor is a compact representation of an image patch
-//! using binary strings. Each bit encodes a simple intensity comparison.
-//! 256 bits (32 bytes) provides a good balance between discriminability and size.
+//! 256-bit binary feature descriptor for image patches.
+//! Compact binary representation encoding pairwise pixel intensity comparisons.
 
 const std = @import("std");
 const assert = std.debug.assert;
 const expectEqual = std.testing.expectEqual;
 
-/// 256 bits stored as 32 bytes
+/// 256 bits stored as 32 bytes.
 bits: [32]u8,
 
 const BinaryDescriptor = @This();
 
-/// Initialize with all zeros
+/// Initializes a descriptor with all zeros.
 pub fn init() BinaryDescriptor {
     return .{ .bits = @splat(0) };
 }
 
-/// Compute Hamming distance to another descriptor.
-/// This is the number of bits that differ between descriptors.
+/// Computes the Hamming distance to another descriptor (number of differing bits).
 pub fn hammingDistance(self: BinaryDescriptor, other: BinaryDescriptor) u32 {
     const vec_self: @Vector(32, u8) = self.bits;
     const vec_other: @Vector(32, u8) = other.bits;
@@ -29,7 +27,7 @@ pub fn hammingDistance(self: BinaryDescriptor, other: BinaryDescriptor) u32 {
     return sum;
 }
 
-/// Set a specific bit in the descriptor
+/// Sets a specific bit in the descriptor.
 pub fn setBit(self: *BinaryDescriptor, index: usize) void {
     assert(index < 256);
     const byte_idx = index / 8;
@@ -37,7 +35,7 @@ pub fn setBit(self: *BinaryDescriptor, index: usize) void {
     self.bits[byte_idx] |= @as(u8, 1) << bit_idx;
 }
 
-/// Clear a specific bit in the descriptor
+/// Clears a specific bit in the descriptor.
 pub fn clearBit(self: *BinaryDescriptor, index: usize) void {
     assert(index < 256);
     const byte_idx = index / 8;
@@ -45,7 +43,7 @@ pub fn clearBit(self: *BinaryDescriptor, index: usize) void {
     self.bits[byte_idx] &= ~(@as(u8, 1) << bit_idx);
 }
 
-/// Get a specific bit from the descriptor
+/// Returns the value of a specific bit in the descriptor.
 pub fn getBit(self: BinaryDescriptor, index: usize) bool {
     assert(index < 256);
     const byte_idx = index / 8;
@@ -53,12 +51,12 @@ pub fn getBit(self: BinaryDescriptor, index: usize) bool {
     return (self.bits[byte_idx] & (@as(u8, 1) << bit_idx)) != 0;
 }
 
-/// Check if two descriptors are identical
+/// Checks if two descriptors are bitwise identical.
 pub fn equals(self: BinaryDescriptor, other: BinaryDescriptor) bool {
     return std.mem.eql(u8, &self.bits, &other.bits);
 }
 
-/// Count the number of set bits (1s) in the descriptor
+/// Counts the number of set bits (1s) in the descriptor.
 pub fn popCount(self: BinaryDescriptor) u32 {
     const vec: @Vector(32, u8) = self.bits;
     const popcount = @popCount(vec);
@@ -69,7 +67,7 @@ pub fn popCount(self: BinaryDescriptor) u32 {
     return sum;
 }
 
-/// Create a random descriptor (useful for testing)
+/// Creates a random descriptor for testing.
 pub fn random(rng: std.Random) BinaryDescriptor {
     var desc = BinaryDescriptor.init();
     for (&desc.bits) |*byte| {
@@ -78,7 +76,7 @@ pub fn random(rng: std.Random) BinaryDescriptor {
     return desc;
 }
 
-/// Compute normalized Hamming distance (0.0 to 1.0)
+/// Computes the normalized Hamming distance in `[0.0, 1.0]`.
 pub fn normalizedDistance(self: BinaryDescriptor, other: BinaryDescriptor) f32 {
     const dist = self.hammingDistance(other);
     return @as(f32, @floatFromInt(dist)) / 256.0;

@@ -1,15 +1,14 @@
 //! # Color Module
 //!
-//! This module provides a unified and comprehensive interface for color manipulation, conversion,
-//! and management within the Zignal library. It supports a wide range of color spaces, from standard
-//! display formats to perceptually uniform and scientific models.
+//! Unified interface for color manipulation, conversion, and management within Zignal.
+//! Supports standard display formats, cylindrical spaces, and perceptual models.
 //!
 //! ## Key Features
 //!
-//! - **Generic Component Types**: All color structures are generic over their component type `T`
-//!   (e.g., `Rgb(u8)`, `Lab(f32)`), handling value scaling automatically (0-255 for `u8`, 0-1 for floats).
-//! - **Unified Conversion Architecture**: A "Hub & Spoke" system ensures accurate conversion between
-//!   any two color spaces, using CIE XYZ and sRGB as central hubs.
+//! - **Generic Component Types**: All color structures are generic over component type `T`
+//!   (e.g., `Rgb(u8)`, `Lab(f32)`), handling value scaling automatically (0-255 vs 0-1).
+//! - **Unified Conversion Architecture**: A "Hub & Spoke" system ensures accurate conversion
+//!   between any two color spaces, using CIE XYZ and sRGB as central hubs.
 //! - **Extensive Color Space Support**:
 //!   - **Display**: sRGB (`Rgb`), sRGB with Alpha (`Rgba`), Grayscale (`Gray`)
 //!   - **Cylindrical**: Hue-Saturation-Value (`Hsv`), Hue-Saturation-Lightness (`Hsl`)
@@ -92,7 +91,7 @@ const srgb_gamma_exponent = 2.4;
 ///
 /// This includes:
 /// - Color structs that declare `pub const space: ColorSpace`
-/// - Scalar grayscale values (`u8` in [0,255] and any float in [0,1])
+/// - Scalar grayscale values (`u8` in [0, 255] and any float in [0, 1])
 pub fn isColor(comptime T: type) bool {
     if (T == u8) return true;
     if (@typeInfo(T) == .float) return true;
@@ -248,8 +247,8 @@ pub const ColorSpace = enum {
     }
 };
 
-/// A tagged union capable of holding any color in the library with component type T.
-/// Useful for APIs that need to accept dynamic color types at runtime.
+/// Tagged union holding any supported color type with component type `T`.
+/// Useful for APIs that accept dynamic color spaces at runtime.
 pub fn Color(comptime T: type) type {
     return union(ColorSpace) {
         gray: Gray(T),
@@ -443,7 +442,7 @@ pub fn Rgba(comptime T: type) type {
             return .{ .r = max - self.r, .g = max - self.g, .b = max - self.b, .a = self.a };
         }
 
-        /// Returns a copy with alpha scaled by `alpha` in [0,1].
+        /// Returns a copy with alpha scaled by `alpha` in [0, 1].
         pub fn fade(self: Rgba(T), alpha: f32) Rgba(T) {
             const scale = clamp(alpha, 0, 1);
             if (T == u8) {
@@ -689,8 +688,8 @@ pub fn Xyz(comptime T: type) type {
     };
 }
 
-/// A color in the [CIELAB color space](https://en.wikipedia.org/wiki/CIELAB_color_space) (also known as L*a*b*).
-/// It expresses color as three values.
+/// A color in the [CIELAB color space](https://en.wikipedia.org/wiki/CIELAB_color_space).
+/// Perceptually uniform space: L is lightness, a is green-red, and b is blue-yellow.
 pub fn Lab(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
@@ -728,8 +727,8 @@ pub fn Lab(comptime T: type) type {
     };
 }
 
-/// A color in the [CIELCh color space](https://en.wikipedia.org/wiki/CIELAB_color_space#Cylindrical_model).
-/// LCh is the cylindrical representation of the CIELAB color space.
+/// A color in the [CIELCh color space](https://en.wikipedia.org/wiki/CIELAB_color_space#Cylindrical_model),
+/// the cylindrical representation of CIELAB: Lightness, Chroma, and Hue.
 pub fn Lch(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
@@ -767,8 +766,8 @@ pub fn Lch(comptime T: type) type {
 }
 
 /// A color in the [LMS color space](https://en.wikipedia.org/wiki/LMS_color_space).
-/// Represents the response of the three types of cones (Long, Medium, Short wavelength) in the human eye.
-/// Values are typically positive and represent the stimulus for each cone type.
+/// Represents the human eye cone responses: Long, Medium, and Short wavelengths.
+/// Values are typically positive and represent stimulus for each cone type.
 pub fn Lms(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {
@@ -810,9 +809,9 @@ pub fn Oklab(comptime T: type) type {
         pub const space: ColorSpace = .oklab;
         /// Perceived lightness (0 for black to approximately 1 for white).
         l: T,
-        /// Green-red axis (negative towards green, positive towards red, typically around -0.4 to 0.4).
+        /// Green-red axis (negative = green, positive = red, typically -0.4 to 0.4).
         a: T,
-        /// Blue-yellow axis (negative towards blue, positive towards yellow, typically around -0.4 to 0.4).
+        /// Blue-yellow axis (negative = blue, positive = yellow, typically -0.4 to 0.4).
         b: T,
 
         /// Formats the color for terminal output.
@@ -880,8 +879,7 @@ pub fn Oklch(comptime T: type) type {
 }
 
 /// A color in the [XYB color space](https://jpeg.org/jpegxl/documentation/xl-color-management.html#xyb)
-/// used in JPEG XL. It's derived from LMS and designed for efficient image compression.
-/// Ranges can vary based on transformations, but often centered around 0 for x and b, and positive for y.
+/// used in JPEG XL, derived from LMS. Often centered around 0 for x and b, and positive for y.
 pub fn Xyb(comptime T: type) type {
     if (@typeInfo(T) != .float) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space");
     return struct {

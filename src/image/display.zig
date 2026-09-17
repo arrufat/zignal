@@ -1,4 +1,4 @@
-//! Terminal display formatting for images
+//! Terminal display formatting for images using graphics protocols and ANSI text.
 
 const std = @import("std");
 const Io = std.Io;
@@ -12,48 +12,48 @@ const quantize = @import("quantize.zig");
 const sixel = @import("../terminal/sixel.zig");
 const terminal = @import("../terminal.zig");
 
-/// Display format options
+/// Display format options for terminal rendering.
 pub const DisplayFormat = union(enum) {
-    /// Automatically detect the best format (kitty -> iterm2 -> sixel -> sgr)
+    /// Automatically detects the best format (Kitty -> iTerm2 -> Sixel -> SGR).
     auto: struct {
-        /// Optional target width in pixels
+        /// Optional target width in pixels.
         width: ?u32 = null,
-        /// Optional target height in pixels
+        /// Optional target height in pixels.
         height: ?u32 = null,
-        /// Interpolation method for scaling
+        /// Interpolation method for scaling.
         interpolation: ?Interpolation = null,
         pub const default: @This() = .{};
     },
-    /// Kitty graphics protocol with options
+    /// Kitty graphics protocol with options.
     kitty: kitty.Options,
-    /// iTerm2 inline image protocol with options
+    /// iTerm2 inline image protocol with options.
     iterm2: iterm2.Options,
-    /// Force sixel output with specific options
+    /// Force sixel output with specific options.
     sixel: sixel.Options,
-    /// SGR (Select Graphic Rendition) with Unicode half-block characters for 2x vertical resolution
-    /// Requires a monospace font with Unicode block element support (U+2580)
+    /// SGR mode with Unicode half-block characters for 2x vertical resolution.
+    /// Requires a monospace font with Unicode block element support (U+2580).
     sgr: struct {
-        /// Optional target width in pixels
+        /// Optional target width in pixels.
         width: ?u32 = null,
-        /// Optional target height in pixels
+        /// Optional target height in pixels.
         height: ?u32 = null,
         pub const default: @This() = .{};
     },
-    /// Braille patterns for 2x4 resolution
-    /// Requires Unicode Braille pattern support (U+2800-U+28FF)
+    /// Braille patterns for 2x4 resolution.
+    /// Requires Unicode Braille pattern support (U+2800-U+28FF).
     /// Dot on/off is binarized with `threshold`; when `color` is set each cell
     /// is tinted with the average color of its lit dots. An optional `palette`
     /// snaps that tint to a fixed/adaptive palette (see `quantize.PaletteMode`).
     braille: struct {
-        /// Brightness threshold for on/off (0.0-1.0)
+        /// Brightness threshold for on/off (0.0-1.0).
         threshold: f32 = 0.5,
-        /// Tint each cell with the average color of its lit dots
+        /// Tint each cell with the average color of its lit dots.
         color: bool = true,
-        /// Snap each cell's tint to a quantized palette (null = 24-bit truecolor)
+        /// Snap each cell's tint to a quantized palette (null = 24-bit truecolor).
         palette: ?quantize.PaletteMode = .{ .adaptive = .{ .max_colors = 32 } },
-        /// Optional target width in pixels
+        /// Optional target width in pixels.
         width: ?u32 = null,
-        /// Optional target height in pixels
+        /// Optional target height in pixels.
         height: ?u32 = null,
         pub const default: @This() = .{};
     },

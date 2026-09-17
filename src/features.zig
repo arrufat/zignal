@@ -1,19 +1,15 @@
-//! Feature detection and description module for Zignal
+//! Feature detection, description, and matching.
 //!
-//! This module provides ORB (Oriented FAST and Rotated BRIEF) feature detection,
-//! which is a fast, patent-free alternative to SIFT and SURF suitable for
-//! real-time applications.
+//! Provides FAST corner detection, ORB (Oriented FAST and Rotated BRIEF) feature extraction,
+//! brute-force Hamming distance matching, and contour tracing.
 
-// Core data structures
 pub const KeyPoint = @import("features/KeyPoint.zig");
 pub const BinaryDescriptor = @import("features/BinaryDescriptor.zig");
 
-// Feature detection
 pub const Fast = @import("features/Fast.zig");
 pub const Orb = @import("features/orb.zig");
 pub const Tracer = @import("features/Tracer.zig").Tracer;
 
-// Feature matching
 pub const BruteForceMatcher = @import("features/matcher.zig").BruteForceMatcher;
 pub const Match = @import("features/matcher.zig").Match;
 pub const MatchStats = @import("features/matcher.zig").MatchStats;

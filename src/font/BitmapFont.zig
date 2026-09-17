@@ -49,7 +49,9 @@ pub const Entry = struct {
 /// defer font.deinit(allocator);
 ///
 /// // Load specific ranges:
-/// const font = try BitmapFont.load(io, allocator, "font.bdf", .{ .ranges = &unicode.ranges.japanese });
+/// const font = try BitmapFont.load(
+///     io, allocator, "font.bdf", .{ .ranges = &unicode.ranges.japanese },
+/// );
 /// ```
 pub fn load(io: Io, allocator: Allocator, file_path: []const u8, filter: LoadFilter) !BitmapFont {
     const font_format = try FontFormat.detectFromPath(io, file_path) orelse return error.UnsupportedFontFormat;
