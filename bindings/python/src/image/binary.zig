@@ -1,4 +1,4 @@
-//! Binary image utilities exposed to Python
+//! Binary image methods: thresholding and morphology.
 
 const std = @import("std");
 const zignal = @import("zignal");

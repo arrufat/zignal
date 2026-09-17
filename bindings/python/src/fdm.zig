@@ -1,3 +1,5 @@
+//! Python FeatureDistributionMatching type.
+
 const zignal = @import("zignal");
 const FeatureDistributionMatching = zignal.FeatureDistributionMatching;
 
@@ -9,14 +11,13 @@ const stub_metadata = @import("stub_metadata.zig");
 
 const Rgb = zignal.Rgb(u8);
 
-// FeatureDistributionMatching Python object
+/// FeatureDistributionMatching Python object.
 pub const FeatureDistributionMatchingObject = extern struct {
     ob_base: c.PyObject,
-    // Store a pointer to the heap-allocated FDM struct
+    /// Heap-allocated FDM state.
     fdm: ?*FeatureDistributionMatching(Rgb),
 };
 
-// Using genericNew helper for standard object creation
 const fdm_new = python.genericNew(FeatureDistributionMatchingObject);
 
 fn fdm_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
@@ -27,12 +28,11 @@ fn fdm_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) call
     return 0;
 }
 
-// Helper function for custom cleanup
+/// Cleanup hook for `genericDealloc`.
 fn fdmDeinit(self: *FeatureDistributionMatchingObject) void {
     python.destroyHeapObject(FeatureDistributionMatching(Rgb), self.fdm);
 }
 
-// Using genericDealloc helper
 const fdm_dealloc = python.genericDealloc(FeatureDistributionMatchingObject, fdmDeinit);
 
 fn fdm_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -45,7 +45,6 @@ fn fdm_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     return python.create("FeatureDistributionMatching()");
 }
 
-// set_target method
 const set_target_doc =
     \\Set the target image whose distribution will be matched.
     \\
@@ -111,7 +110,6 @@ fn fdm_set_target(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     return none;
 }
 
-// set_source method
 const set_source_doc =
     \\Set the source image to be transformed.
     \\
@@ -167,14 +165,12 @@ fn fdm_set_source(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         }
         return null;
     };
-    // Success
 
     const none = c.Py_None();
     c.Py_IncRef(none);
     return none;
 }
 
-// match method
 const match_doc =
     \\Set both source and target images and apply the transformation.
     \\
@@ -258,7 +254,6 @@ fn fdm_match(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) cal
     return none;
 }
 
-// update method
 const update_doc =
     \\Apply the feature distribution matching transformation.
     \\
@@ -305,7 +300,7 @@ fn fdm_update(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObj
     return none;
 }
 
-// Method definitions with metadata
+/// Method definitions with stub metadata.
 pub const fdm_methods_metadata = [_]python.MethodWithMetadata{
     .{
         .name = "set_target",
@@ -344,10 +339,10 @@ pub const fdm_methods_metadata = [_]python.MethodWithMetadata{
 // Generate PyMethodDef array from metadata
 var fdm_methods = python.toPyMethodDefArray(&fdm_methods_metadata);
 
-// Class documentation - keep it simple
+/// Class docstring.
 const fdm_class_doc = "Feature Distribution Matching for image style transfer.";
 
-// Init documentation - detailed explanation
+/// `__init__` docstring.
 pub const fdm_init_doc =
     \\Initialize a new FeatureDistributionMatching instance.
     \\
@@ -382,7 +377,7 @@ pub const fdm_init_doc =
     \\- See: https://facebookresearch.github.io/dino/blog/
 ;
 
-// Special methods metadata for stub generation
+/// Special methods metadata for stub generation.
 pub const fdm_special_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",
@@ -392,7 +387,6 @@ pub const fdm_special_methods_metadata = [_]stub_metadata.MethodInfo{
     },
 };
 
-// Using buildTypeObject helper for cleaner initialization
 pub var FeatureDistributionMatchingType = python.buildTypeObject(.{
     .name = "zignal.FeatureDistributionMatching",
     .basicsize = @sizeOf(FeatureDistributionMatchingObject),

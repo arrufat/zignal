@@ -1,4 +1,4 @@
-//! Color bindings using the automated registry-based approach
+//! Python color types, generated from `color_registry` through `color_factory`.
 
 const std = @import("std");
 
@@ -28,7 +28,7 @@ const Ycbcr = zignal.Ycbcr(u8);
 // GENERIC COLOR TYPE GENERATION
 // ============================================================================
 
-/// Helper to extract clean name like "Rgb" from "zignal.Rgb"
+/// Extracts the simple name, like "Rgb" from "zignal.Rgb".
 fn getTypeName(comptime ColorType: type) []const u8 {
     const full_name = @typeName(ColorType);
     var i = full_name.len;
@@ -42,9 +42,8 @@ fn getTypeName(comptime ColorType: type) []const u8 {
     return sliced;
 }
 
-/// Generic state container for a color type
-/// This holds the static data (methods, getsets) required for the Python type object.
-/// We use this to keep the backing arrays alive and stable in memory.
+/// Static storage (methods, getsets) behind one color type's PyTypeObject. A generic struct,
+/// so the backing arrays stay alive and stable in memory.
 fn ColorState(comptime ColorType: type) type {
     const Binding = color_factory.ColorBinding(ColorType);
     return struct {
@@ -60,7 +59,7 @@ fn ColorState(comptime ColorType: type) type {
     };
 }
 
-/// Generate PyTypeObject for a specific color type
+/// Generates the PyTypeObject for a color type.
 fn generateColorTypeObject(comptime ColorType: type, comptime Binding: type, getset_ptr: [*]c.PyGetSetDef, methods_ptr: [*]c.PyMethodDef) c.PyTypeObject {
     const type_name = getTypeName(ColorType);
     const module_name = comptime "zignal." ++ type_name;
@@ -86,8 +85,8 @@ fn generateColorTypeObject(comptime ColorType: type, comptime Binding: type, get
 // PUBLIC EXPORTS (Required by other modules)
 // ============================================================================
 
-// We explicity export the TypeObjects and Bindings for each color type.
-// Other modules (like pixel_proxy.zig) rely on these names (e.g. RgbType).
+// The TypeObjects and Bindings of each color type are exported explicitly:
+// other modules (like pixel_proxy.zig) rely on these names (e.g. RgbType).
 
 pub const GrayBinding = color_factory.ColorBinding(Gray);
 pub var gray = ColorState(Gray).createTypeObject();
@@ -132,7 +131,7 @@ pub var ycbcr = ColorState(Ycbcr).createTypeObject();
 // REGISTRATION HELPER
 // ============================================================================
 
-/// Register all color types from the registry in one go
+/// Registers every color type in the registry with the module.
 pub fn registerAllColorTypes(module: [*c]c.PyObject) !void {
     try python.register(@ptrCast(module), "Gray", @ptrCast(&gray));
     try python.register(@ptrCast(module), "Rgb", @ptrCast(&rgb));

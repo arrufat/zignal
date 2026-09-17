@@ -1,3 +1,5 @@
+//! Python SimilarityTransform, AffineTransform, and ProjectiveTransform types.
+
 const std = @import("std");
 
 const zignal = @import("zignal");
@@ -16,9 +18,9 @@ const stub_metadata = @import("stub_metadata.zig");
 
 pub const SimilarityTransformObject = extern struct {
     ob_base: c.PyObject,
-    // Store 2x2 matrix as array
+    /// 2x2 linear part.
     matrix: [2][2]f64,
-    // Store translation vector as array
+    /// Translation vector.
     bias: [2]f64,
 };
 
@@ -162,9 +164,9 @@ pub var SimilarityTransformType = python.buildTypeObject(.{
 
 pub const AffineTransformObject = extern struct {
     ob_base: c.PyObject,
-    // Store 2x2 matrix as array
+    /// 2x2 linear part.
     matrix: [2][2]f64,
-    // Store translation vector as array
+    /// Translation vector.
     bias: [2]f64,
 };
 
@@ -304,7 +306,7 @@ pub var AffineTransformType = python.buildTypeObject(.{
 
 pub const ProjectiveTransformObject = extern struct {
     ob_base: c.PyObject,
-    // Store 3x3 homogeneous matrix as array
+    /// 3x3 homogeneous matrix.
     matrix: [3][3]f64,
 };
 

@@ -1,4 +1,4 @@
-//! Image filtering and effects
+//! Image filtering and enhancement methods.
 
 const std = @import("std");
 
@@ -605,12 +605,12 @@ pub fn image_autocontrast(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.
 
     return self.py_image.?.dispatch(.{cutoff}, struct {
         fn apply(img: anytype, c_off: f32) ?*c.PyObject {
-            // Make a copy since autocontrast now works in-place
+            // autocontrast works in place, so operate on a copy.
             var out = img.dupe(allocator) catch {
                 python.setMemoryError("image operation");
                 return null;
             };
-            // we already checked for the cutoff value
+            // The cutoff was validated above.
             out.autocontrast(c_off) catch unreachable;
             return @ptrCast(moveImageToPython(out) orelse return null);
         }

@@ -1,3 +1,5 @@
+//! Python MotionBlur type: linear, zoom, and spin blur configurations.
+
 const std = @import("std");
 
 const python = @import("python.zig");
@@ -22,11 +24,11 @@ pub const MotionBlurObject = extern struct {
     ob_base: c.PyObject,
     blur_type: MotionBlurVariant,
 
-    // Linear parameters
+    // Linear parameters.
     angle: f64,
     distance: c_long,
 
-    // Radial parameters (shared by zoom and spin)
+    // Radial parameters, shared by zoom and spin.
     center_x: f64,
     center_y: f64,
     strength: f64,
@@ -290,7 +292,6 @@ var motion_blur_methods = [_]c.PyMethodDef{
 
 var motion_blur_getset = python.toPyGetSetDefArray(&motion_blur_properties_metadata);
 
-// Using buildTypeObject helper for cleaner initialization
 pub var MotionBlurType = python.buildTypeObject(.{
     .name = "zignal.MotionBlur",
     .basicsize = @sizeOf(MotionBlurObject),
@@ -375,14 +376,12 @@ pub const motion_blur_special_methods_metadata = [_]stub_metadata.MethodInfo{
     },
 };
 
-// Register the motion blur type
+/// Registers the MotionBlur type with the module.
 pub fn registerMotionBlur(module: *c.PyObject) !void {
-    // Initialize type
     if (c.PyType_Ready(&MotionBlurType) < 0) {
         return error.TypeInitFailed;
     }
 
-    // Add to module
     // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
     c.Py_IncRef(@as(?*c.PyObject, @ptrCast(&MotionBlurType)));
     if (c.PyModule_AddObject(module, "MotionBlur", @ptrCast(&MotionBlurType)) < 0) {

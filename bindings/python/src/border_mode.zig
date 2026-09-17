@@ -1,4 +1,4 @@
-//! Border mode enum documentation for Python bindings
+//! BorderMode enum documentation and stub metadata for Python bindings.
 
 const stub_metadata = @import("stub_metadata.zig");
 

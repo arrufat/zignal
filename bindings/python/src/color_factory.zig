@@ -1,3 +1,5 @@
+//! Comptime factory generating a Python type for each Zig color struct.
+
 const std = @import("std");
 
 const zignal = @import("zignal");
@@ -15,7 +17,7 @@ const validateColorComponent = @import("color_registry.zig").validateColorCompon
 
 const Rgba = zignal.Rgba(u8);
 
-/// Automatically generate documentation from type name for color conversion methods
+/// Builds the docstring of a `to_<space>` conversion method from the target type name.
 pub fn getConversionMethodDoc(comptime TargetColorType: type) []const u8 {
     const type_name = @typeName(TargetColorType);
     if (comptime std.mem.lastIndexOf(u8, type_name, ".")) |dot_index| {
@@ -26,7 +28,7 @@ pub fn getConversionMethodDoc(comptime TargetColorType: type) []const u8 {
     }
 }
 
-/// Generate a color binding with automatic property getters and validation
+/// Generates a Python type for a Zig color struct, with property getters, setters, and validation.
 pub fn ColorBinding(comptime ZigColorType: type) type {
     const name = comptime getSimpleTypeName(ZigColorType);
     const fields = zignal.meta.structFields(ZigColorType);
@@ -63,7 +65,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
         pub const PyObjectType = ObjectType;
         pub const ZigType = ZigColorType;
 
-        /// Create a Python object from a Zig color value
+        /// Creates a Python object from a Zig color value.
         pub fn createPyObject(zig_color: ZigType, type_obj: *c.PyTypeObject) ?*c.PyObject {
             const obj = c.PyType_GenericNew(type_obj, null, null);
             if (obj == null) return null;
@@ -71,7 +73,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return obj;
         }
 
-        /// Generate property getters and setters
+        /// Generates the property getters and setters.
         pub fn generateGetSet() [fields.len + 1]c.PyGetSetDef {
             var getset: [fields.len + 1]c.PyGetSetDef = undefined;
             inline for (fields, 0..) |field, i| {
@@ -87,7 +89,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return getset;
         }
 
-        /// Generate field getter for specific field index
+        /// Generates the getter for the field at `field_index`.
         fn generateFieldGetter(comptime field_index: usize) fn ([*c]c.PyObject, ?*anyopaque) callconv(.c) [*c]c.PyObject {
             return struct {
                 fn getter(self_obj: [*c]c.PyObject, closure: ?*anyopaque) callconv(.c) [*c]c.PyObject {
@@ -105,7 +107,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             }.getter;
         }
 
-        /// Generate field setter for specific field index
+        /// Generates the setter for the field at `field_index`.
         fn generateFieldSetter(comptime field_index: usize) fn ([*c]c.PyObject, [*c]c.PyObject, ?*anyopaque) callconv(.c) c_int {
             return struct {
                 fn setter(self_obj: [*c]c.PyObject, value_obj: [*c]c.PyObject, closure: ?*anyopaque) callconv(.c) c_int {
@@ -188,7 +190,8 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return count;
         }
 
-        /// Generate methods array - __format__, blend, to, invert, luma, hex, from_hex, with_alpha
+        /// Generates the methods array: `__format__`, `blend`, `to`, `invert`, `luma`, `hex`,
+        /// `from_hex`, and `with_alpha`.
         pub fn generateMethods() [countMethods()]c.PyMethodDef {
             const format_method = [_]c.PyMethodDef{
                 .{
@@ -298,7 +301,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return format_method ++ blend_method ++ to_method ++ invert_method ++ luma_method ++ hex_method ++ from_hex_method ++ with_alpha_method ++ sentinel;
         }
 
-        /// invert method implementation
+        /// `invert` method.
         pub fn invertMethod(self_obj: [*c]c.PyObject, _: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
             const self: *ObjectType = @ptrCast(self_obj);
             const inverted = objectToZigColor(self).invert();
@@ -306,21 +309,21 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return @ptrCast(result);
         }
 
-        /// luma method implementation
+        /// `luma` method.
         pub fn lumaMethod(self_obj: [*c]c.PyObject, _: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
             const self: *ObjectType = @ptrCast(self_obj);
             const luma_val = objectToZigColor(self).luma();
             return @ptrCast(python.create(luma_val));
         }
 
-        /// hex method implementation
+        /// `hex` method.
         pub fn hexMethod(self_obj: [*c]c.PyObject, _: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
             const self: *ObjectType = @ptrCast(self_obj);
             const hex_val = objectToZigColor(self).hex();
             return @ptrCast(python.create(hex_val));
         }
 
-        /// from_hex method implementation (static)
+        /// `from_hex` static method.
         pub fn fromHexMethod(_: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
             var hex_code: c_ulong = 0;
             if (c.PyArg_ParseTuple(args, "k", &hex_code) == 0) return null;
@@ -331,7 +334,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return @ptrCast(color_module.createColorPyObject(zig_color));
         }
 
-        /// with_alpha method implementation
+        /// `with_alpha` method.
         pub fn withAlphaMethod(self_obj: [*c]c.PyObject, args: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
             const self: *ObjectType = @ptrCast(self_obj);
             var alpha_obj: ?*c.PyObject = null;
@@ -392,7 +395,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return @ptrCast(result);
         }
 
-        /// Blend method implementation
+        /// `blend` method.
         pub fn blendMethod(self_obj: [*c]c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
             const self: *ObjectType = @ptrCast(self_obj);
 
@@ -462,7 +465,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return createPyObject(blended, type_obj);
         }
 
-        /// Map a Python color class object to the underlying ColorSpace
+        /// Maps a Python color class object to its ColorSpace.
         fn colorSpaceFromPyType(type_obj: *c.PyTypeObject) ?zignal.ColorSpace {
             const type_name_str = std.mem.span(type_obj.tp_name);
             inline for (color_types) |ColorType| {
@@ -476,7 +479,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return null;
         }
 
-        /// to(space) method implementation using Python color classes
+        /// `to(space)` method, taking a Python color class.
         pub fn toMethod(self_obj: [*c]c.PyObject, args: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
             const self: *ObjectType = @ptrCast(self_obj);
             var target_type_obj: ?*c.PyObject = null;
@@ -512,7 +515,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return @ptrCast(result_obj);
         }
 
-        /// Convert Python object to Zig color
+        /// Converts a Python object to a Zig color.
         fn objectToZigColor(obj: *ObjectType) ZigColorType {
             if (comptime is_packed) {
                 // For packed structs, create a temporary unpacked representation
@@ -558,7 +561,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             }
         }
 
-        /// Convert Zig color to Python object fields
+        /// Writes a Zig color into the fields of a Python object.
         pub fn zigColorToObject(zig_color: ZigColorType, obj: *ObjectType) void {
             if (comptime is_packed) {
                 // For packed structs, convert to byte array using @bitCast
@@ -599,7 +602,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             }
         }
 
-        /// Helper function to convert Python object to field type with color validation
+        /// Converts a Python object to a field's type, validating the component range.
         fn convertArgument(comptime T: type, py_obj: ?*c.PyObject, field_name: []const u8) !T {
             const validator = struct {
                 fn validate(field_name_inner: []const u8, value: anytype) bool {
@@ -611,7 +614,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return python.convertWithValidation(T, @ptrCast(py_obj), field_name, validator, error_msg);
         }
 
-        /// Custom init function with validation
+        /// `__init__` with component validation.
         pub fn init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
             _ = kwds;
 
@@ -720,7 +723,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return 0;
         }
 
-        /// Standard Python object methods
+        /// Standard Python object slots: dealloc, new, and repr.
         pub fn dealloc(self_obj: [*c]c.PyObject) callconv(.c) void {
             python.typeOf(self_obj).*.tp_free.?(self_obj);
         }
@@ -755,8 +758,8 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return @ptrCast(python.create(formatted));
         }
 
-        /// Rich comparison method implementing RGBA-based equality/inequality
-        /// Colors are compared by their RGBA representation for visual equivalence
+        /// Rich comparison implementing `==` and `!=`.
+        /// Colors are compared by their RGBA representation, for visual equivalence.
         pub fn richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_int) callconv(.c) [*c]c.PyObject {
             const color_utils = @import("color_utils.zig");
 
@@ -777,7 +780,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return python.create(result);
         }
 
-        /// __format__ method implementation
+        /// `__format__` method.
         pub fn formatMethod(self_obj: [*c]c.PyObject, args: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
             const self: *ObjectType = @ptrCast(self_obj);
 

@@ -1,3 +1,5 @@
+//! Parsing of Python color arguments (ints, tuples, color objects) into Zig colors.
+
 const python = @import("python.zig");
 const c = python.c;
 const zignal = @import("zignal");
@@ -130,10 +132,8 @@ fn tryParseViaToMethod(comptime T: type, color_obj: *c.PyObject) !?T {
     };
 }
 
-/// Extract color component attribute from a Python object.
-/// This is a helper function used internally.
-/// Returns null if the attribute doesn't exist or isn't a valid integer.
-/// Note: This function does NOT set Python exceptions.
+/// Extracts an integer color component attribute from a Python object.
+/// Returns null if the attribute is missing or not an integer; never sets a Python exception.
 fn extractColorAttribute(obj: *c.PyObject, name: [*c]const u8) ?c_long {
     const attr = c.PyObject_GetAttrString(obj, name);
     if (attr == null) return null;
@@ -142,11 +142,8 @@ fn extractColorAttribute(obj: *c.PyObject, name: [*c]const u8) ?c_long {
     return python.parse(c_long, attr) catch null;
 }
 
-/// Extract RGB values from a Python object with r,g,b attributes.
-/// This is a helper function used internally.
-/// Returns error.InvalidColor if the object doesn't have the required attributes
-/// or if the attribute values cannot be converted to integers.
-/// Returns error.OutOfRange if values are not in 0-255 range.
+/// Extracts the `r`, `g`, `b` attributes of a Python object. Returns error.InvalidColor if an
+/// attribute is missing or not an integer, error.OutOfRange if a value is outside 0-255.
 fn extractRgbFromObject(obj: *c.PyObject) !Rgb {
     const r_val = extractColorAttribute(obj, "r") orelse return error.InvalidColor;
     const g_val = extractColorAttribute(obj, "g") orelse return error.InvalidColor;
@@ -163,11 +160,8 @@ fn extractRgbFromObject(obj: *c.PyObject) !Rgb {
     };
 }
 
-/// Extract RGBA values from a Python object with r,g,b,a attributes.
-/// This is a helper function used internally.
-/// Returns error.InvalidColor if the object doesn't have the required attributes
-/// or if the attribute values cannot be converted to integers.
-/// Returns error.OutOfRange if values are not in 0-255 range.
+/// Extracts the `r`, `g`, `b`, `a` attributes of a Python object. Returns error.InvalidColor if
+/// an attribute is missing or not an integer, error.OutOfRange if a value is outside 0-255.
 fn extractRgbaFromObject(obj: *c.PyObject) !Rgba {
     const rgb = try extractRgbFromObject(obj);
     const a_val = extractColorAttribute(obj, "a") orelse return error.InvalidColor;
@@ -181,8 +175,7 @@ fn extractRgbaFromObject(obj: *c.PyObject) !Rgba {
     };
 }
 
-/// Generic color parsing function that converts Python color objects to the specified type.
-/// Supported target types: u8 (grayscale), Rgb, Rgba
+/// Parses a Python color object into `T`: `u8` (grayscale), `Rgb`, or `Rgba`.
 ///
 /// Supported input formats:
 /// - Integer (0-255): Interpreted as grayscale, converted to target type
@@ -307,9 +300,7 @@ pub fn parseColor(comptime T: type, color_obj: ?*c.PyObject) !T {
     return error.InvalidColor;
 }
 
-/// Parse a Python tuple representing a color (RGB or RGBA).
-/// Returns a Rgba color with values in range 0-255.
-/// This is a helper function used by parseColorTo.
+/// Parses a Python tuple of 3 or 4 ints into an `Rgba` with components in 0-255.
 ///
 /// Sets Python exception messages on error:
 /// - ValueError: If tuple size is not 3 or 4
@@ -326,21 +317,17 @@ pub fn parseColorTuple(color_obj: ?*c.PyObject) !Rgba {
         return error.InvalidColor;
     }
 
-    // Extract color components
     var r: c_long = 0;
     var g: c_long = 0;
     var b: c_long = 0;
     var a: c_long = 255;
 
-    // Get R
     const r_obj = c.PyTuple_GetItem(color_obj, 0);
     r = python.parse(c_long, r_obj) catch return error.InvalidColor;
 
-    // Get G
     const g_obj = c.PyTuple_GetItem(color_obj, 1);
     g = python.parse(c_long, g_obj) catch return error.InvalidColor;
 
-    // Get B
     const b_obj = c.PyTuple_GetItem(color_obj, 2);
     b = python.parse(c_long, b_obj) catch return error.InvalidColor;
 

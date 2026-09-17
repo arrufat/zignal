@@ -1,3 +1,5 @@
+//! Python Font type: bitmap and vector font loading plus text measurement.
+
 const std = @import("std");
 
 const zignal = @import("zignal");
@@ -12,7 +14,7 @@ pub const FontObject = extern struct {
     font: ?*Font,
 };
 
-// Cached singleton Python object for the built-in 8x8 font
+/// Cached singleton Python object for the built-in 8x8 font.
 var cached_font8x8: ?*c.PyObject = null;
 
 const font_new = python.genericNew(FontObject);
