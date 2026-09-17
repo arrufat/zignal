@@ -1,3 +1,5 @@
+//! Python RunningStats type wrapping `zignal.RunningStats`.
+
 const std = @import("std");
 
 const zignal = @import("zignal");

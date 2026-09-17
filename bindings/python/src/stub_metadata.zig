@@ -1,100 +1,98 @@
-//! Metadata types for automatic Python stub generation
-//! This file defines structures that describe Python bindings in a way
-//! that can be introspected at compile time for stub generation
+//! Metadata types describing Python bindings for compile-time stub generation.
 
 const python = @import("python.zig");
 
-/// Describes a Python method for stub generation
+/// Describes a Python method for stub generation.
 pub const MethodInfo = struct {
-    /// Method name as it appears in Python
+    /// Method name as it appears in Python.
     name: []const u8,
-    /// Method signature (parameters with type hints)
-    /// Examples: "self, path: str", "cls, array: np.ndarray"
+    /// Method signature (parameters with type hints).
+    /// Examples: "self, path: str", "cls, array: np.ndarray".
     params: []const u8,
-    /// Return type annotation
-    /// Examples: "None", "Image", "Tuple[int, int]"
+    /// Return type annotation.
+    /// Examples: "None", "Image", "Tuple[int, int]".
     returns: []const u8,
-    /// Method flags
+    /// Method flags.
     is_classmethod: bool = false,
     is_staticmethod: bool = false,
-    /// Documentation string (optional)
+    /// Documentation string (optional).
     doc: ?[]const u8 = null,
 };
 
-/// Describes a Python property for stub generation
+/// Describes a Python property for stub generation.
 pub const PropertyInfo = struct {
-    /// Property name
+    /// Property name.
     name: []const u8,
-    /// Property type annotation
-    /// Examples: "int", "str", "float"
+    /// Property type annotation.
+    /// Examples: "int", "str", "float".
     type: []const u8,
-    /// Whether the property is read-only
+    /// Whether the property is read-only.
     readonly: bool = true,
-    /// Documentation string (optional)
+    /// Documentation string (optional).
     doc: ?[]const u8 = null,
 };
 
-/// Describes a Python class for stub generation
+/// Describes a Python class for stub generation.
 pub const ClassInfo = struct {
-    /// Class name
+    /// Class name.
     name: []const u8,
-    /// Class docstring
+    /// Class docstring.
     doc: []const u8,
-    /// List of methods
+    /// List of methods.
     methods: []const MethodInfo,
-    /// List of properties
+    /// List of properties.
     properties: []const PropertyInfo,
-    /// Base classes (optional)
+    /// Base classes (optional).
     bases: []const []const u8 = &.{},
-    /// Special methods like __init__, __len__, __getitem__ (optional)
+    /// Special methods like __init__, __len__, __getitem__ (optional).
     special_methods: ?[]const MethodInfo = null,
 };
 
-/// Describes a module-level function
+/// Describes a module-level function.
 pub const FunctionInfo = struct {
-    /// Function name
+    /// Function name.
     name: []const u8,
-    /// Function signature (parameters with type hints)
+    /// Function signature (parameters with type hints).
     params: []const u8,
-    /// Return type annotation
+    /// Return type annotation.
     returns: []const u8,
-    /// Documentation string
+    /// Documentation string.
     doc: []const u8,
 };
 
-/// Documentation for a single enum value
+/// Documentation for a single enum value.
 pub const EnumValueDoc = struct {
-    /// Enum value name (e.g., "NORMAL", "MULTIPLY")
+    /// Enum value name (e.g., "NORMAL", "MULTIPLY").
     name: []const u8,
-    /// Short description for inline comment
+    /// Short description for inline comment.
     doc: []const u8,
 };
 
-/// Describes an enum for stub generation
+/// Describes an enum for stub generation.
 pub const EnumInfo = struct {
-    /// Enum name
+    /// Enum name.
     name: []const u8,
-    /// Base class (usually IntEnum)
+    /// Base class (usually IntEnum).
     base: []const u8 = "IntEnum",
-    /// Documentation string
+    /// Documentation string.
     doc: []const u8,
-    /// Zig type to extract values from
+    /// Zig type to extract values from.
     zig_type: type,
-    /// Optional documentation for each enum value
+    /// Optional documentation for each enum value.
     value_docs: ?[]const EnumValueDoc = null,
 };
 
-/// Complete module metadata
+/// Complete module metadata.
 pub const ModuleInfo = struct {
-    /// Module-level functions
+    /// Module-level functions.
     functions: []const FunctionInfo = &.{},
-    /// Classes defined in the module
+    /// Classes defined in the module.
     classes: []const ClassInfo = &.{},
-    /// Enums defined in the module
+    /// Enums defined in the module.
     enums: []const EnumInfo = &.{},
 };
 
-/// Extract MethodInfo array from MethodWithMetadata array for stub generation
+/// Extracts the MethodInfo array from a MethodWithMetadata array.
 pub fn extractMethodInfo(
     comptime methods: []const python.MethodWithMetadata,
 ) [methods.len]MethodInfo {
@@ -112,7 +110,7 @@ pub fn extractMethodInfo(
     return result;
 }
 
-/// Extract PropertyInfo array from PropertyWithMetadata array for stub generation
+/// Extracts the PropertyInfo array from a PropertyWithMetadata array.
 pub fn extractPropertyInfo(
     comptime props: []const python.PropertyWithMetadata,
 ) [props.len]PropertyInfo {
@@ -128,7 +126,7 @@ pub fn extractPropertyInfo(
     return result;
 }
 
-/// Extract FunctionInfo array from FunctionWithMetadata array for stub generation
+/// Extracts the FunctionInfo array from a FunctionWithMetadata array.
 pub fn extractFunctionInfo(
     comptime funcs: []const python.FunctionWithMetadata,
 ) [funcs.len]FunctionInfo {

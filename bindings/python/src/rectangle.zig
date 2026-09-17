@@ -1,3 +1,5 @@
+//! Python Rectangle type wrapping `zignal.Rectangle`.
+
 const std = @import("std");
 
 const zignal = @import("zignal");
@@ -16,7 +18,6 @@ pub const RectangleObject = extern struct {
     bottom: f64,
 };
 
-// Using genericNew helper for standard object creation
 const rectangle_new = python.genericNew(RectangleObject);
 
 fn rectangle_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
@@ -733,10 +734,10 @@ pub const rectangle_properties_metadata = [_]python.PropertyWithMetadata{
 
 var rectangle_getset = python.toPyGetSetDefArray(&rectangle_properties_metadata);
 
-// Class documentation - keep it simple
+/// Class docstring.
 const rectangle_class_doc = "A rectangle defined by its `left`, `top`, `right`, and `bottom` coordinates. Half-open like NumPy slices: `right` and `bottom` are exclusive, so `Rectangle(0, 0, 10, 10)` covers pixels 0..9.";
 
-// Init documentation - detailed explanation
+/// `__init__` docstring.
 pub const rectangle_init_doc =
     \\Initialize a Rectangle with specified coordinates.
     \\
@@ -771,7 +772,7 @@ pub const rectangle_init_doc =
     \\- The `right` and `bottom` bounds are exclusive
 ;
 
-// Special methods metadata for stub generation
+/// Special methods metadata for stub generation.
 pub const rectangle_special_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",
@@ -781,7 +782,6 @@ pub const rectangle_special_methods_metadata = [_]stub_metadata.MethodInfo{
     },
 };
 
-// Using buildTypeObject helper for cleaner initialization
 pub var RectangleType = python.buildTypeObject(.{
     .name = "zignal.Rectangle",
     .basicsize = @sizeOf(RectangleObject),

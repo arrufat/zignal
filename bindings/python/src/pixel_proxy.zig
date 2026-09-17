@@ -1,3 +1,5 @@
+//! Rgb and Rgba pixel proxy types: color-like views of a single Image pixel.
+
 const std = @import("std");
 
 const zignal = @import("zignal");
@@ -38,7 +40,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
             return if (self.parent) |p| @ptrCast(p) else null;
         }
 
-        // Helper function to delegate method calls to the underlying color object
+        // Delegates a method call to the underlying color object.
         fn delegateToColorMethod(self_obj: ?*c.PyObject, method_name: [*c]const u8, args: ?*c.PyObject) ?*c.PyObject {
             const color_raw = itemMethodImpl(self_obj) orelse return null;
             defer c.Py_DecRef(color_raw);
@@ -177,17 +179,17 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
             return arr;
         }
 
-        // __format__ method implementation - delegate to color object
+        // `__format__`: delegate to the color object.
         fn formatMethod(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
             return delegateToColorMethod(self_obj, "__format__", args);
         }
 
-        // to(space) method implementation - delegate to color object
+        // `to(space)`: delegate to the color object.
         fn toMethod(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?*c.PyObject {
             return delegateToColorMethod(self_obj, "to", args);
         }
 
-        // item method implementation - extract the pixel value as a color object
+        // `item`: extract the pixel value as a color object.
         fn itemMethodImpl(self_obj: ?*c.PyObject) ?*c.PyObject {
             const parent = Self.parentFromObj(self_obj) orelse {
                 c.PyErr_SetString(c.PyExc_RuntimeError, "Invalid pixel proxy");
@@ -213,7 +215,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
             return itemMethodImpl(self_obj);
         }
 
-        // blend method implementation
+        // `blend`: blend into the pixel and write it back.
         fn blendMethod(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
             const Params = struct {
                 overlay: ?*c.PyObject,
@@ -235,7 +237,7 @@ fn PixelProxyBinding(comptime ColorType: type, comptime ProxyObjectType: type) t
 
                 // Parse overlay color
                 const overlay = color_utils.parseColor(Rgba, overlay_obj) catch {
-                    // Error already set by parseColorTo
+                    // Error already set by parseColor.
                     return null;
                 };
 

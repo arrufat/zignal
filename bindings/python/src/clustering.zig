@@ -1,3 +1,5 @@
+//! Python bindings for the clustering module functions.
+
 const std = @import("std");
 const zignal = @import("zignal");
 const clustering = zignal.clustering;

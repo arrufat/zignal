@@ -1,3 +1,5 @@
+//! Python Canvas type; dispatches draw calls to `zignal.Canvas` over the PyImage variants.
+
 const std = @import("std");
 
 const zignal = @import("zignal");
@@ -19,7 +21,7 @@ const stub_metadata = @import("stub_metadata.zig");
 
 const Rgba = zignal.Rgba(u8);
 const Rgb = zignal.Rgb(u8);
-/// A variant canvas type that mirrors PyImage structure.
+/// A canvas variant over the PyImage pixel formats.
 pub const PyCanvas = struct {
     pub const Variant = union(PyImage.DType) {
         gray: Canvas(u8),
@@ -32,7 +34,7 @@ pub const PyCanvas = struct {
 
     const Self = @This();
 
-    /// Initialize a PyCanvas from a PyImage.
+    /// Initializes a PyCanvas from a PyImage.
     pub fn initFromPyImage(alloc: std.mem.Allocator, py_image: *PyImage) Self {
         return .{
             .data = switch (py_image.data) {
@@ -44,124 +46,124 @@ pub const PyCanvas = struct {
         };
     }
 
-    /// Get the dtype of this canvas.
+    /// Returns the dtype of this canvas.
     pub fn dtype(self: *const Self) PyImage.DType {
         return @as(PyImage.DType, self.data);
     }
 
-    /// Get the number of rows.
+    /// Returns the number of rows.
     pub fn rows(self: *const Self) usize {
         return switch (self.data) {
             inline else => |canvas| canvas.image.rows,
         };
     }
 
-    /// Get the number of columns.
+    /// Returns the number of columns.
     pub fn cols(self: *const Self) usize {
         return switch (self.data) {
             inline else => |canvas| canvas.image.cols,
         };
     }
 
-    /// Fill the entire canvas with a color.
+    /// Fills the entire canvas with a color.
     pub fn fill(self: *Self, color: Rgba) void {
         switch (self.data) {
             inline else => |*canvas| canvas.fill(color),
         }
     }
 
-    /// Draw a line.
+    /// Draws a line.
     pub fn drawLine(self: *Self, p1: anytype, p2: anytype, color: Rgba, width: u32, opts: DrawOptions) void {
         switch (self.data) {
             inline else => |*canvas| canvas.drawLine(p1, p2, color, width, opts),
         }
     }
 
-    /// Draw a rectangle.
+    /// Draws a rectangle.
     pub fn drawRectangle(self: *Self, rect: anytype, color: Rgba, width: u32, opts: DrawOptions) void {
         switch (self.data) {
             inline else => |*canvas| canvas.drawRectangle(rect, color, width, opts),
         }
     }
 
-    /// Fill a rectangle.
+    /// Fills a rectangle.
     pub fn fillRectangle(self: *Self, rect: anytype, color: Rgba, opts: DrawOptions) void {
         switch (self.data) {
             inline else => |*canvas| canvas.fillRectangle(rect, color, opts),
         }
     }
 
-    /// Draw a polygon.
+    /// Draws a polygon.
     pub fn drawPolygon(self: *Self, points: anytype, color: Rgba, width: u32, opts: DrawOptions) void {
         switch (self.data) {
             inline else => |*canvas| canvas.drawPolygon(points, color, width, opts),
         }
     }
 
-    /// Fill a polygon.
+    /// Fills a polygon.
     pub fn fillPolygon(self: *Self, points: anytype, color: Rgba, opts: DrawOptions) !void {
         switch (self.data) {
             inline else => |*canvas| try canvas.fillPolygon(points, color, opts),
         }
     }
 
-    /// Draw a circle.
+    /// Draws a circle.
     pub fn drawCircle(self: *Self, center: anytype, radius: anytype, color: Rgba, width: u32, opts: DrawOptions) void {
         switch (self.data) {
             inline else => |*canvas| canvas.drawCircle(center, radius, color, width, opts),
         }
     }
 
-    /// Fill a circle.
+    /// Fills a circle.
     pub fn fillCircle(self: *Self, center: anytype, radius: anytype, color: Rgba, opts: DrawOptions) void {
         switch (self.data) {
             inline else => |*canvas| canvas.fillCircle(center, radius, color, opts),
         }
     }
 
-    /// Draw a quadratic Bezier curve.
+    /// Draws a quadratic Bezier curve.
     pub fn drawQuadraticBezier(self: *Self, p0: anytype, p1: anytype, p2: anytype, color: Rgba, width: u32, opts: DrawOptions) void {
         switch (self.data) {
             inline else => |*canvas| canvas.drawQuadraticBezier(p0, p1, p2, color, width, opts),
         }
     }
 
-    /// Draw a cubic Bezier curve.
+    /// Draws a cubic Bezier curve.
     pub fn drawCubicBezier(self: *Self, p0: anytype, p1: anytype, p2: anytype, p3: anytype, color: Rgba, width: u32, opts: DrawOptions) void {
         switch (self.data) {
             inline else => |*canvas| canvas.drawCubicBezier(p0, p1, p2, p3, color, width, opts),
         }
     }
 
-    /// Draw a spline polygon.
+    /// Draws a spline polygon.
     pub fn drawSplinePolygon(self: *Self, points: anytype, color: Rgba, width: u32, tension: f32, opts: DrawOptions) void {
         switch (self.data) {
             inline else => |*canvas| canvas.drawSplinePolygon(points, color, width, tension, opts),
         }
     }
 
-    /// Fill a spline polygon.
+    /// Fills a spline polygon.
     pub fn fillSplinePolygon(self: *Self, points: anytype, color: Rgba, tension: f32, opts: DrawOptions) !void {
         switch (self.data) {
             inline else => |*canvas| try canvas.fillSplinePolygon(points, color, tension, opts),
         }
     }
 
-    /// Draw an arc.
+    /// Draws an arc.
     pub fn drawArc(self: *Self, center: anytype, radius: f32, start_angle: f32, end_angle: f32, color: Rgba, width: u32, opts: DrawOptions) !void {
         switch (self.data) {
             inline else => |*canvas| try canvas.drawArc(center, radius, start_angle, end_angle, color, width, opts),
         }
     }
 
-    /// Fill an arc.
+    /// Fills an arc.
     pub fn fillArc(self: *Self, center: anytype, radius: f32, start_angle: f32, end_angle: f32, color: Rgba, opts: DrawOptions) !void {
         switch (self.data) {
             inline else => |*canvas| try canvas.fillArc(center, radius, start_angle, end_angle, color, opts),
         }
     }
 
-    /// Draw text at `size` pixels, or the font's default size.
+    /// Draws text at `size` pixels, or the font's default size.
     pub fn drawText(self: *Self, text: []const u8, position: anytype, color: Rgba, font: Font, size: ?f32, opts: DrawOptions) !void {
         switch (self.data) {
             inline else => |*canvas| try canvas.drawText(text, position, color, font, size, opts),
@@ -186,7 +188,7 @@ pub const PyCanvas = struct {
         }
     }
 
-    /// Draw another image.
+    /// Draws another image.
     pub fn drawImage(self: *Self, source: *PyImage, position: anytype, source_rect: ?Rectangle(u32), blend_mode: Blending) void {
         switch (self.data) {
             inline else => |*canvas| switch (source.data) {
@@ -195,7 +197,7 @@ pub const PyCanvas = struct {
         }
     }
 
-    /// Dispatch an operation to the underlying canvas variant.
+    /// Dispatches an operation to the underlying canvas variant.
     pub fn dispatch(self: *Self, ctx: anytype, comptime func: anytype) @TypeOf(@call(.auto, func, .{@as(*Canvas(u8), undefined)} ++ ctx)) {
         return switch (self.data) {
             .gray => |*cv| @call(.auto, func, .{cv} ++ ctx),
@@ -205,7 +207,7 @@ pub const PyCanvas = struct {
     }
 };
 
-// Documentation for the DrawMode enum (used at runtime and for stub generation)
+/// Docstring for the DrawMode enum, used at runtime and for stub generation.
 pub const draw_mode_doc =
     \\Rendering quality mode for drawing operations.
     \\
@@ -219,7 +221,7 @@ pub const draw_mode_doc =
     \\- Default mode is SOFT; pass FAST for hard edges and maximum performance
 ;
 
-// Per-value documentation for stub generation
+/// Per-value documentation for stub generation.
 pub const draw_mode_values = [_]stub_metadata.EnumValueDoc{
     .{ .name = "FAST", .doc = "Fast rendering with hard edges" },
     .{ .name = "SOFT", .doc = "Antialiased rendering with smooth edges" },
@@ -274,9 +276,9 @@ fn parseDrawOptions(mode: c_long, blending: ?*c.PyObject) !DrawOptions {
 
 pub const CanvasObject = extern struct {
     ob_base: c.PyObject,
-    // Keep reference to parent Image to prevent garbage collection
+    /// Parent Image, kept alive for as long as the canvas.
     image_ref: ?*c.PyObject,
-    // Single variant canvas pointer
+    /// Heap-allocated canvas variant.
     py_canvas: ?*PyCanvas,
 };
 
@@ -295,7 +297,7 @@ fn canvas_new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 fn canvas_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
     const self = python.safeCast(CanvasObject, self_obj);
 
-    // Parse arguments - expect an Image object
+    // Parse arguments: expect an Image object.
     const Params = struct {
         image: ?*c.PyObject,
     };
@@ -1397,10 +1399,10 @@ pub const canvas_properties_metadata = [_]python.PropertyWithMetadata{
 
 var canvas_getset = python.toPyGetSetDefArray(&canvas_properties_metadata);
 
-// Canvas class documentation - keep it simple
+/// Class docstring.
 const canvas_class_doc = "Canvas for drawing operations on images.";
 
-// Canvas init documentation - detailed explanation
+/// `__init__` docstring.
 pub const canvas_init_doc =
     \\Create a Canvas for drawing operations on an Image.
     \\
@@ -1428,7 +1430,7 @@ pub const canvas_init_doc =
     \\- Use Image.canvas() method as a convenient way to create a Canvas
 ;
 
-// Special methods metadata for stub generation
+/// Special methods metadata for stub generation.
 pub const canvas_special_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",

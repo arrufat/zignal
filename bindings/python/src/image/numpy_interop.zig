@@ -1,4 +1,4 @@
-//! NumPy array conversion for Image objects
+//! NumPy array conversion for Image objects.
 
 const std = @import("std");
 const zignal = @import("zignal");
@@ -21,7 +21,7 @@ const BufferExtra = extern struct {
     strides: [3]c.Py_ssize_t,
 };
 
-/// Helper to convert a zignal.Image to a NumPy array
+/// Converts a zignal.Image to a NumPy array.
 fn imageToNumpyHelper(self_obj: ?*c.PyObject, img: anytype) ?*c.PyObject {
     const T = @TypeOf(img.data[0]);
     const channels = comptime if (T == u8) 1 else if (T == Rgb) 3 else if (T == Rgba) 4 else @compileError("unsupported type");
@@ -127,7 +127,7 @@ pub fn image_to_numpy(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv(.c) ?
 // IMAGE FROM NUMPY
 // ============================================================================
 
-/// Helper to create a zignal.Image from a NumPy buffer
+/// Creates a zignal.Image from a NumPy buffer.
 fn imageFromNumpyHelper(
     comptime T: type,
     self_opt: ?*ImageObject,

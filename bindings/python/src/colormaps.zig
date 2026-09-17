@@ -1,3 +1,5 @@
+//! Python Colormap type: factory methods, properties, and stub metadata.
+
 const std = @import("std");
 
 const python = @import("python.zig");
@@ -342,7 +344,7 @@ pub const colormap_special_methods_metadata = [_]stub_metadata.MethodInfo{
     },
 };
 
-// Register the colormap type
+/// Registers the Colormap type with the module.
 pub fn registerColormap(module: *c.PyObject) !void {
     if (c.PyType_Ready(&ColormapType) < 0) {
         return error.TypeInitFailed;

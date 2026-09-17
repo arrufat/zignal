@@ -1,3 +1,5 @@
+//! Shared CPython helpers: conversions, argument parsing, getters, errors, and type building.
+
 const std = @import("std");
 const Io = std.Io;
 
@@ -28,22 +30,22 @@ pub fn withoutGil(func: anytype, args: anytype) @TypeOf(@call(.auto, func, args)
 
 pub const c = @import("c");
 
-/// Clear the Python error indicator if one is set.
+/// Clears the Python error indicator if one is set.
 pub fn clearError() void {
     if (c.PyErr_Occurred() != null) {
         c.PyErr_Clear();
     }
 }
 
-/// Return Python NotImplemented constant with refcount incremented.
-/// Automatically clears any pending Python exception (useful when returning from a failed check/parse).
+/// Returns Python's NotImplemented (new reference), clearing any pending exception first
+/// (useful when returning from a failed check or parse).
 pub fn notImplemented() ?*c.PyObject {
     clearError();
     c.Py_IncRef(c.Py_NotImplemented());
     return c.Py_NotImplemented();
 }
 
-/// Helper to register a type with a module
+/// Registers a type with a module.
 pub fn register(module: [*c]c.PyObject, comptime name: []const u8, type_obj: *c.PyTypeObject) !void {
     if (c.PyType_Ready(type_obj) < 0) return error.TypeInitFailed;
 
@@ -55,19 +57,19 @@ pub fn register(module: [*c]c.PyObject, comptime name: []const u8, type_obj: *c.
     }
 }
 
-/// Get the Python type object for a Python object.
+/// Returns the Python type object of a Python object.
 pub fn typeOf(obj: ?*c.PyObject) callconv(.c) *c.PyTypeObject {
     return @ptrCast(obj.?.ob_type);
 }
 
-/// Helper to return Python None
+/// Returns Python None (new reference).
 pub fn none() ?*c.PyObject {
     const val = c.Py_None();
     c.Py_IncRef(val);
     return val;
 }
 
-/// Helper to create a Python Rectangle object from a Zig Rectangle
+/// Creates a Python Rectangle object from a Zig Rectangle.
 fn createRectangle(rect: zignal.Rectangle(f64)) ?*c.PyObject {
     const rectangle = @import("rectangle.zig");
     const new_args = c.Py_BuildValue("(dddd)", rect.l, rect.t, rect.r, rect.b) orelse return null;
@@ -75,7 +77,7 @@ fn createRectangle(rect: zignal.Rectangle(f64)) ?*c.PyObject {
     return c.PyObject_CallObject(@ptrCast(&rectangle.RectangleType), new_args);
 }
 
-/// Helper to create a Python Point tuple from a Zig Point
+/// Creates a Python `(x, y)` tuple from a Zig Point.
 fn createPoint(p: anytype) ?*c.PyObject {
     return c.Py_BuildValue("(dd)", @as(f64, p.x()), @as(f64, p.y()));
 }
@@ -209,8 +211,8 @@ const ArgsTupleHandle = struct {
     }
 };
 
-/// Ensure we always have a tuple for varargs-style APIs.
-/// Returns a handle describing whether the tuple is newly allocated (thus owned).
+/// Ensures there is always a tuple for varargs-style APIs.
+/// Returns a handle saying whether the tuple is newly allocated (thus owned).
 fn ensureArgs(args: ?*c.PyObject) ?ArgsTupleHandle {
     if (args) |existing| {
         return ArgsTupleHandle{ .tuple = existing, .owned = false };
@@ -221,7 +223,7 @@ fn ensureArgs(args: ?*c.PyObject) ?ArgsTupleHandle {
     return ArgsTupleHandle{ .tuple = empty, .owned = true };
 }
 
-/// Call an object's method borrowing the provided args tuple.
+/// Calls an object's method, borrowing the provided args tuple.
 pub fn callMethodBorrowingArgs(target: ?*c.PyObject, method_name: [*c]const u8, args: ?*c.PyObject) ?*c.PyObject {
     if (target == null or args == null) return null;
 
@@ -232,20 +234,20 @@ pub fn callMethodBorrowingArgs(target: ?*c.PyObject, method_name: [*c]const u8, 
     return c.PyObject_CallObject(method_ptr, args.?);
 }
 
-/// Call an object's method, automatically creating an empty args tuple when needed.
+/// Calls an object's method, creating an empty args tuple when needed.
 pub fn callMethod(target: ?*c.PyObject, method_name: [*c]const u8, args: ?*c.PyObject) ?*c.PyObject {
     const handle = ensureArgs(args) orelse return null;
     defer handle.deinit();
     return callMethodBorrowingArgs(target, method_name, handle.tuple);
 }
 
-/// Build a `(row, col, pixel)` tuple while consuming the pixel reference.
+/// Builds a `(row, col, pixel)` tuple while consuming the pixel reference.
 pub fn buildPixelTuple(row: usize, col: usize, pixel_obj: ?*c.PyObject) ?*c.PyObject {
     if (pixel_obj == null) return null;
     return c.Py_BuildValue("(nnN)", @as(c.Py_ssize_t, @intCast(row)), @as(c.Py_ssize_t, @intCast(col)), pixel_obj.?);
 }
 
-/// Build a field getter function pointer for a Python-exposed struct.
+/// Builds a field getter function pointer for a Python-exposed struct.
 /// The returned pointer matches Python's `getter` signature and uses
 /// `convertToPython` to return a new Python object for the field value.
 pub fn getterForField(comptime Obj: type, comptime field_name: []const u8) *const anyopaque {
@@ -260,7 +262,7 @@ pub fn getterForField(comptime Obj: type, comptime field_name: []const u8) *cons
     return @ptrCast(&Gen.get);
 }
 
-/// Auto-generate a PyGetSetDef array for simple field-backed properties.
+/// Generates a PyGetSetDef array for simple field-backed properties.
 /// - Obj: the Python object struct type (e.g., RectangleObject)
 /// - field_names: comptime list of field names to expose (e.g., &.{"left", "top"})
 /// Returns an array with a trailing sentinel entry.
@@ -284,8 +286,8 @@ pub fn autoGetSet(
     }
 }
 
-/// Create PyGetSetDef array with auto-generated field getters plus custom entries.
-/// This eliminates the need for manual array copying when combining autoGetSet with custom getters.
+/// Creates a PyGetSetDef array with auto-generated field getters plus custom entries.
+/// Avoids manual array copying when combining `autoGetSet` with custom getters.
 /// - Obj: the Python object struct type
 /// - field_names: comptime list of field names to auto-generate getters for
 /// - custom: comptime array of custom PyGetSetDef entries (without sentinel)
@@ -293,10 +295,19 @@ pub fn autoGetSet(
 ///
 /// Example usage:
 /// ```zig
-/// const getset = python.autoGetSetCustom(RectangleObject, &.{"left", "top", "right", "bottom"}, &[_]c.PyGetSetDef{
-///     .{ .name = "width", .get = @ptrCast(&rectangle_get_width), .set = null, .doc = "Width", .closure = null },
-///     .{ .name = "height", .get = @ptrCast(&rectangle_get_height), .set = null, .doc = "Height", .closure = null },
-/// });
+/// const getset = python.autoGetSetCustom(
+///     RectangleObject,
+///     &.{ "left", "top", "right", "bottom" },
+///     &[_]c.PyGetSetDef{
+///         .{
+///             .name = "width",
+///             .get = @ptrCast(&rectangle_get_width),
+///             .set = null,
+///             .doc = "Width",
+///             .closure = null,
+///         },
+///     },
+/// );
 /// ```
 pub fn autoGetSetCustom(
     comptime Obj: type,
@@ -329,7 +340,7 @@ pub fn autoGetSetCustom(
     }
 }
 
-/// Build a getter that returns an optional field: the field value if Predicate(self) is true,
+/// Builds a getter that returns an optional field: the field value if Predicate(self) is true,
 /// otherwise Python None. Useful when a field is only meaningful under certain modes.
 pub fn getterOptionalFieldWhere(
     comptime Obj: type,
@@ -347,7 +358,7 @@ pub fn getterOptionalFieldWhere(
     return @ptrCast(&Gen.get);
 }
 
-/// Build a getter for optional pointer fields, returning converter(value) or Python None.
+/// Builds a getter for optional pointer fields, returning converter(value) or Python None.
 pub fn getterOptionalPtr(
     comptime Obj: type,
     comptime field_name: []const u8,
@@ -377,7 +388,7 @@ pub fn getterOptionalPtr(
     return @ptrCast(&Gen.get);
 }
 
-/// Build a getter that packs two fields into a tuple when Predicate(self) is true,
+/// Builds a getter that packs two fields into a tuple when Predicate(self) is true,
 /// otherwise returns Python None. Uses Py_BuildValue with (NN) and steals references
 /// of the intermediate objects created via convertToPython.
 pub fn getterTuple2FieldsWhere(
@@ -402,7 +413,7 @@ pub fn getterTuple2FieldsWhere(
     return @ptrCast(&Gen.get);
 }
 
-/// Build a getter that returns a 2-tuple from an array field's two indices.
+/// Builds a getter that returns a 2-tuple from an array field's two indices.
 /// Example: struct { bias: [2]f64 } → returns (bias[0], bias[1]).
 pub fn getterTuple2FromArrayField(
     comptime Obj: type,
@@ -425,7 +436,7 @@ pub fn getterTuple2FromArrayField(
     return @ptrCast(&Gen.get);
 }
 
-/// Build a getter that returns a nested Python list from a fixed-size 2D array field.
+/// Builds a getter that returns a nested Python list from a fixed-size 2D array field.
 /// Example: struct { matrix: [2][2]f64 } → returns [[a,b],[c,d]].
 pub fn getterMatrixNested(
     comptime Obj: type,
@@ -471,7 +482,7 @@ pub fn getterMatrixNested(
     return @ptrCast(&Gen.get);
 }
 
-/// Build a getter that returns a constant string (new Python str on each call).
+/// Builds a getter that returns a constant string (new Python str on each call).
 pub fn getterStaticString(comptime text: []const u8) *const anyopaque {
     const Gen = struct {
         fn get(self_obj: ?*c.PyObject, _: ?*anyopaque) callconv(.c) ?*c.PyObject {
@@ -482,7 +493,7 @@ pub fn getterStaticString(comptime text: []const u8) *const anyopaque {
     return @ptrCast(&Gen.get);
 }
 
-/// Error set for conversion failures
+/// Error set for conversion failures.
 pub const ConversionError = error{
     not_python_object,
     not_integer,
@@ -492,7 +503,7 @@ pub const ConversionError = error{
     unsupported_type,
 };
 
-/// Convert a Python sequence (list/tuple) to a Zig ArrayList(T).
+/// Converts a Python sequence (list/tuple) to a Zig ArrayList(T).
 ///
 /// Arguments:
 /// - T: The target element type.
@@ -539,8 +550,7 @@ fn toArrayList(comptime T: type, seq_obj: ?*c.PyObject) !std.ArrayList(T) {
     return list;
 }
 
-/// Convert Python object to Zig type with optional custom validation
-/// This provides a flexible foundation for domain-specific argument parsing
+/// Converts a Python object to a Zig type, with optional custom validation.
 pub fn convertWithValidation(
     comptime T: type,
     py_obj: ?*c.PyObject,
@@ -593,8 +603,7 @@ pub fn convertWithValidation(
     return converted;
 }
 
-/// Parse a Python tuple representing a 2D point (x, y)
-/// Returns a Point(2, T) where T can be f32 or f64
+/// Parses a Python `(x, y)` tuple into a Point(2, T), with T f32 or f64.
 fn parsePointTuple(comptime T: type, point_obj: ?*c.PyObject) !Point(2, T) {
     if (point_obj == null) {
         return error.InvalidPoint;
@@ -630,8 +639,7 @@ fn parsePointTuple(comptime T: type, point_obj: ?*c.PyObject) !Point(2, T) {
     return .init(.{ @as(T, @floatCast(x)), @as(T, @floatCast(y)) });
 }
 
-/// Parse a Python tuple representing a rectangle (left, top, right, bottom)
-/// Returns a Rectangle(T) where T can be any numeric type
+/// Parses a Python `(left, top, right, bottom)` tuple into a Rectangle(T).
 fn parseRectangleTuple(comptime T: type, tuple_obj: ?*c.PyObject) !zignal.Rectangle(T) {
     if (tuple_obj == null) {
         c.PyErr_SetString(c.PyExc_TypeError, "Rectangle tuple is null");
@@ -695,8 +703,7 @@ fn parseRectangleTuple(comptime T: type, tuple_obj: ?*c.PyObject) !zignal.Rectan
     };
 }
 
-/// Parse a Rectangle object or tuple to Zignal Rectangle(T)
-/// Accepts either a Rectangle instance or a tuple of (left, top, right, bottom)
+/// Parses a Rectangle object or a `(left, top, right, bottom)` tuple into a Rectangle(T).
 fn parseRectangle(comptime T: type, rect_obj: ?*c.PyObject) !zignal.Rectangle(T) {
     const rectangle = @import("rectangle.zig");
 
@@ -736,7 +743,7 @@ fn parseRectangle(comptime T: type, rect_obj: ?*c.PyObject) !zignal.Rectangle(T)
     };
 }
 
-/// Parse a Python list of point tuples to an allocated slice of Point(2, T)
+/// Parses a Python list of point tuples into an allocated slice of Point(2, T).
 fn parsePointSlice(comptime T: type, list_obj: ?*c.PyObject) ![]Point(2, T) {
     if (list_obj == null) {
         c.PyErr_SetString(c.PyExc_TypeError, "Points list is null");
@@ -869,7 +876,7 @@ pub fn projectPoints2D(points_obj: ?*c.PyObject, point_ctx: anytype, comptime ap
     return null;
 }
 
-/// Set a Python exception with an error message that includes a file path.
+/// Sets a Python exception with an error message that includes a file path.
 /// Maps common errors to appropriate Python exception types.
 pub fn setErrorWithPath(err: anyerror, path: []const u8) void {
     // Map only the most important Zig errors to Python exception types
@@ -900,7 +907,7 @@ pub fn setErrorWithPath(err: anyerror, path: []const u8) void {
     c.PyErr_SetString(exc_type, msg.ptr);
 }
 
-/// Generic range validation that works with both integers and floats
+/// Range validation for both integer and float values.
 pub fn validateRange(comptime T: type, value: anytype, min: T, max: T, name: []const u8) !T {
     const ValueType = @TypeOf(value);
 
@@ -979,14 +986,14 @@ pub fn validateRange(comptime T: type, value: anytype, min: T, max: T, name: []c
     return converted;
 }
 
-/// Convenience function for non-negative values
+/// Validates a non-negative value.
 pub fn validateNonNegative(comptime T: type, value: anytype, name: []const u8) !T {
     const info = @typeInfo(T);
     const max = if (info == .float) std.math.inf(T) else std.math.maxInt(T);
     return validateRange(T, value, 0, max, name);
 }
 
-/// Convenience function for strictly positive values (> 0)
+/// Validates a strictly positive value (> 0).
 pub fn validatePositive(comptime T: type, value: anytype, name: []const u8) !T {
     const min: T, const max: T = switch (@typeInfo(T)) {
         .float => .{
@@ -1002,12 +1009,12 @@ pub fn validatePositive(comptime T: type, value: anytype, name: []const u8) !T {
     return validateRange(T, value, min, max, name);
 }
 
-/// Build a Python kwlist for PyArg_ParseTupleAndKeywords from a comptime list of names.
+/// Builds a Python kwlist for PyArg_ParseTupleAndKeywords from a comptime list of names.
 /// Usage: `const kw = python.kw(&.{ "size", "method" });`
 /// Pass to CPython with: `@ptrCast(@constCast(&kw))`.
 ///
 /// Notes on Python versions:
-/// - CPython < 3.13 expects a non-const kwlist pointer; we use `@constCast(&kw)` for compatibility.
+/// - CPython < 3.13 expects a non-const kwlist pointer, hence `@constCast(&kw)` at call sites.
 /// - Once the minimum supported Python is >= 3.13, we can drop the `@constCast` at call sites
 ///   and pass `&kw` directly.
 pub fn kw(comptime names: []const []const u8) [names.len + 1]?[*:0]const u8 {
@@ -1022,7 +1029,7 @@ pub fn kw(comptime names: []const []const u8) [names.len + 1]?[*:0]const u8 {
     }
 }
 
-/// Parse Python arguments into a struct using automatic type detection.
+/// Parses Python arguments into a struct using automatic type detection.
 /// The struct fields define both the parameter names and types.
 /// Optional fields (e.g., `?f64`) are automatically handled with a `|` separator.
 ///
@@ -1154,17 +1161,17 @@ pub fn parseArgs(comptime T: type, args: ?*c.PyObject, kwds: ?*c.PyObject, out: 
 }
 
 // ============================================================================
-// Essential Error Helpers - Keep it simple!
+// Error Helpers
 // ============================================================================
 
-/// Simple helper for memory errors with context
+/// Sets a MemoryError naming the failed operation.
 pub fn setMemoryError(context: []const u8) void {
     var buffer: [256]u8 = undefined;
     const msg = std.mem.printSentinel(&buffer, "Failed to allocate {s}", .{context}, 0) catch "Out of memory";
     c.PyErr_SetString(c.PyExc_MemoryError, msg.ptr);
 }
 
-/// Set a type error with expected type information
+/// Sets a TypeError naming the expected type.
 pub fn setTypeError(expected: []const u8, got: ?*c.PyObject) void {
     var buffer: [256]u8 = undefined;
 
@@ -1186,7 +1193,7 @@ pub fn setTypeError(expected: []const u8, got: ?*c.PyObject) void {
     c.PyErr_SetString(c.PyExc_TypeError, msg.ptr);
 }
 
-/// Set a value error with a custom message
+/// Sets an exception of `exc_type` with a formatted message.
 fn setFormattedError(
     exc_type: [*c]c.PyObject,
     comptime fallback: []const u8,
@@ -1198,13 +1205,13 @@ fn setFormattedError(
     c.PyErr_SetString(exc_type, msg.ptr);
 }
 
-/// Set a value error with a custom message
+/// Sets a ValueError with a formatted message.
 pub fn setValueError(comptime fmt: []const u8, args: anytype) void {
     setFormattedError(c.PyExc_ValueError, "Value error", fmt, args);
 }
 
-/// Helper to ensure a Python-wrapped object is initialized.
-/// Checks if the specified field is non-null. If null, sets a Python ValueError and returns error.NotInitialized.
+/// Ensures a Python-wrapped object is initialized: if the given field is null, sets a
+/// ValueError and returns error.NotInitialized.
 pub fn ensureInitialized(obj: anytype, comptime field_name: []const u8, comptime error_msg: []const u8) !void {
     if (@field(obj, field_name) == null) {
         setValueError(error_msg, .{});
@@ -1212,22 +1219,22 @@ pub fn ensureInitialized(obj: anytype, comptime field_name: []const u8, comptime
     }
 }
 
-/// Set a runtime error with a custom message
+/// Sets a RuntimeError with a formatted message.
 pub fn setRuntimeError(comptime fmt: []const u8, args: anytype) void {
     setFormattedError(c.PyExc_RuntimeError, "Runtime error", fmt, args);
 }
 
-/// Set an index error with a custom message
+/// Sets an IndexError with a formatted message.
 pub fn setIndexError(comptime fmt: []const u8, args: anytype) void {
     setFormattedError(c.PyExc_IndexError, "Index error", fmt, args);
 }
 
-/// Set an import error with a custom message
+/// Sets an ImportError with a formatted message.
 pub fn setImportError(comptime fmt: []const u8, args: anytype) void {
     setFormattedError(c.PyExc_ImportError, "Import error", fmt, args);
 }
 
-/// Simple error mapping for common Zig errors
+/// Maps common Zig errors to Python exceptions.
 pub fn setZigError(err: anyerror) void {
     const exc_type = switch (err) {
         error.OutOfMemory => c.PyExc_MemoryError,
@@ -1238,7 +1245,7 @@ pub fn setZigError(err: anyerror) void {
     c.PyErr_SetString(exc_type, msg.ptr);
 }
 
-/// Map Zig errors to Python exceptions with context
+/// Maps Zig errors to Python exceptions, with context.
 pub fn mapZigError(err: anyerror, context: []const u8) void {
     switch (err) {
         error.OutOfMemory => setMemoryError(context),
@@ -1259,8 +1266,7 @@ pub fn mapZigError(err: anyerror, context: []const u8) void {
     }
 }
 
-/// Unwrap an initialized object, setting a ValueError if it's not initialized.
-/// Checks if the specified optional pointer field is non-null.
+/// Unwraps an object's optional pointer field, setting a ValueError if it is null.
 pub fn unwrap(comptime ObjectType: type, comptime field_name: []const u8, self_obj: ?*c.PyObject, name: []const u8) ?std.meta.Child(@TypeOf(@field(@as(ObjectType, undefined), field_name))) {
     const self = safeCast(ObjectType, self_obj);
     if (@field(self, field_name)) |ptr| return ptr;
@@ -1276,14 +1282,13 @@ pub fn unwrap(comptime ObjectType: type, comptime field_name: []const u8, self_o
 // Safe Casting Helpers
 // ============================================================================
 
-/// Safely cast a Python object to a specific type without null checking
-/// Use when you're certain the object is not null (e.g., in methods where self is guaranteed)
+/// Casts a Python object to a specific type without a null check.
+/// Use when the object is known non-null (e.g. `self` in methods).
 pub fn safeCast(comptime T: type, obj: ?*c.PyObject) *T {
     return @ptrCast(@alignCast(obj.?));
 }
 
-/// Safely cast a Python object to a specific type with null checking.
-/// Returns error.NullPointer if the object is null.
+/// Casts a Python object to a specific type. Returns error.NullPointer if the object is null.
 pub fn safeCastChecked(comptime T: type, obj: ?*c.PyObject) !*T {
     if (obj) |o| {
         return @ptrCast(@alignCast(o));
@@ -1295,7 +1300,7 @@ pub fn safeCastChecked(comptime T: type, obj: ?*c.PyObject) !*T {
 // Object Lifecycle Management
 // ============================================================================
 
-/// Generic new function for Python objects
+/// Generic `tp_new` for Python objects; pointer fields start out null.
 pub fn genericNew(comptime T: type) fn (?*c.PyTypeObject, ?*c.PyObject, ?*c.PyObject) callconv(.c) ?*c.PyObject {
     return struct {
         fn new(type_obj: ?*c.PyTypeObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -1316,7 +1321,7 @@ pub fn genericNew(comptime T: type) fn (?*c.PyTypeObject, ?*c.PyObject, ?*c.PyOb
     }.new;
 }
 
-/// Generic dealloc function for objects with heap-allocated pointers
+/// Generic `tp_dealloc` for objects with heap-allocated pointers.
 pub fn genericDealloc(comptime T: type, comptime deinit_fn: ?fn (*T) void) fn (?*c.PyObject) callconv(.c) void {
     return struct {
         fn dealloc(self_obj: ?*c.PyObject) callconv(.c) void {
@@ -1362,7 +1367,7 @@ pub const TypeObjectConfig = struct {
     flags: c_ulong = c.Py_TPFLAGS_DEFAULT,
 };
 
-/// Build a PyTypeObject with the given configuration
+/// Builds a PyTypeObject from the given configuration.
 pub fn buildTypeObject(comptime config: TypeObjectConfig) c.PyTypeObject {
     const str_fn: ?*const anyopaque = config.str orelse config.repr;
 
@@ -1392,7 +1397,7 @@ pub fn buildTypeObject(comptime config: TypeObjectConfig) c.PyTypeObject {
     };
 }
 
-/// Create a heap-allocated object with automatic memory management
+/// Creates a heap-allocated object, setting a MemoryError on failure.
 pub fn allocate(comptime T: type, args: anytype) !*T {
     const obj = allocator.create(T) catch {
         setMemoryError(@typeName(T));
@@ -1413,7 +1418,7 @@ pub fn allocate(comptime T: type, args: anytype) !*T {
     return obj;
 }
 
-/// Destroy a heap-allocated object
+/// Destroys a heap-allocated object.
 pub fn destroyHeapObject(comptime T: type, ptr: ?*T) void {
     if (ptr) |p| {
         p.deinit();
@@ -1423,7 +1428,7 @@ pub fn destroyHeapObject(comptime T: type, ptr: ?*T) void {
 
 pub const TupleExpectError = error{InvalidTuple};
 
-/// Ensure object is a tuple of fixed length and return borrowed elements.
+/// Ensures the object is a tuple of fixed length and returns its borrowed elements.
 pub fn expectTupleLen(
     comptime len: usize,
     obj: ?*c.PyObject,
@@ -1450,7 +1455,7 @@ pub fn expectTupleLen(
     return result;
 }
 
-/// Build a Python list from a Zig slice using a custom element converter.
+/// Builds a Python list from a Zig slice using a custom element converter.
 /// The converter must return a new reference for each element or null to signal failure.
 pub fn listFromSliceCustom(
     comptime T: type,
@@ -1472,7 +1477,7 @@ pub fn listFromSliceCustom(
     return list;
 }
 
-/// Convert a slice of known type into a Python list using built-in converters.
+/// Converts a slice of known type into a Python list using built-in converters.
 /// Currently supports floating-point and integer slices; extend the switch to add more types.
 pub fn listFromSlice(comptime T: type, slice: []const T) ?*c.PyObject {
     return switch (@typeInfo(T)) {
@@ -1500,11 +1505,11 @@ pub fn listFromSlice(comptime T: type, slice: []const T) ?*c.PyObject {
 // Metadata for Binding Generation (Runtime)
 // ============================================================================
 
-// Python method flags constants
+// Python method flag constants.
 pub const METH_CLASS = c.METH_CLASS;
 pub const METH_STATIC = c.METH_STATIC;
 
-/// Enhanced method definition that includes both PyMethodDef fields and metadata
+/// Method definition combining PyMethodDef fields with stub metadata.
 pub const MethodWithMetadata = struct {
     name: []const u8,
     meth: *const anyopaque,
@@ -1514,7 +1519,7 @@ pub const MethodWithMetadata = struct {
     returns: []const u8,
 };
 
-/// Enhanced property definition with metadata
+/// Property definition with stub metadata.
 pub const PropertyWithMetadata = struct {
     name: []const u8,
     get: *const anyopaque,
@@ -1523,7 +1528,7 @@ pub const PropertyWithMetadata = struct {
     type: []const u8,
 };
 
-/// Enhanced function definition for module-level functions
+/// Module-level function definition with stub metadata.
 pub const FunctionWithMetadata = struct {
     name: []const u8,
     meth: *const anyopaque,
@@ -1533,7 +1538,7 @@ pub const FunctionWithMetadata = struct {
     returns: []const u8,
 };
 
-/// Convert an array of MethodWithMetadata to PyMethodDef array at compile time
+/// Converts an array of MethodWithMetadata to a PyMethodDef array at compile time.
 pub fn toPyMethodDefArray(
     comptime methods: []const MethodWithMetadata,
 ) [methods.len + 1]c.PyMethodDef {
@@ -1558,7 +1563,7 @@ pub fn toPyMethodDefArray(
     }
 }
 
-/// Convert an array of PropertyWithMetadata to PyGetSetDef array at compile time
+/// Converts an array of PropertyWithMetadata to a PyGetSetDef array at compile time.
 pub fn toPyGetSetDefArray(
     comptime props: []const PropertyWithMetadata,
 ) [props.len + 1]c.PyGetSetDef {
@@ -1585,7 +1590,7 @@ pub fn toPyGetSetDefArray(
     }
 }
 
-/// Convert an array of FunctionWithMetadata to PyMethodDef array at compile time
+/// Converts an array of FunctionWithMetadata to a PyMethodDef array at compile time.
 pub fn functionsToPyMethodDefArray(
     comptime funcs: []const FunctionWithMetadata,
 ) [funcs.len + 1]c.PyMethodDef {

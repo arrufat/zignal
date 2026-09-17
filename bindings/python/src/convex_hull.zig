@@ -1,3 +1,5 @@
+//! Python ConvexHull type wrapping `zignal.ConvexHull(f64)`.
+
 const zignal = @import("zignal");
 const ConvexHull = zignal.ConvexHull(f64);
 const Point2F = zignal.Point(2, f64);
@@ -12,7 +14,6 @@ pub const ConvexHullObject = extern struct {
     hull: ?*ConvexHull,
 };
 
-// Using genericNew helper for standard object creation
 const convex_hull_new = python.genericNew(ConvexHullObject);
 
 fn convex_hull_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
@@ -46,7 +47,7 @@ fn convex_hull_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     return 0;
 }
 
-// Helper function for custom cleanup
+/// Cleanup hook for `genericDealloc`.
 fn convexHullDeinit(self: *ConvexHullObject) void {
     if (self.hull) |hull| {
         hull.deinit(python.allocator);
@@ -54,7 +55,6 @@ fn convexHullDeinit(self: *ConvexHullObject) void {
     }
 }
 
-// Using genericDealloc helper
 const convex_hull_dealloc = python.genericDealloc(ConvexHullObject, convexHullDeinit);
 
 fn convex_hull_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -62,7 +62,7 @@ fn convex_hull_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     return python.create("ConvexHull()");
 }
 
-/// Helper to convert a slice of Point2F to a Python list of tuples.
+/// Converts a slice of Point2F to a Python list of tuples.
 fn convertHullToPython(points: []const Point2F) ?*c.PyObject {
     return python.listFromSliceCustom(Point2F, points, struct {
         fn toPythonTuple(point: Point2F, _: usize) ?*c.PyObject {
@@ -93,8 +93,6 @@ const convex_hull_find_doc =
 ;
 
 fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
-
-    // Using validateNonNull helper for null check with error message
     const hull = python.unwrap(ConvexHullObject, "hull", self_obj, "ConvexHull") orelse return null;
 
     // Parse points argument
@@ -112,7 +110,6 @@ fn convex_hull_find(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     };
     defer python.allocator.free(points);
 
-    // Find convex hull with improved error handling
     const hull_points = hull.find(python.allocator, points) catch |err| {
         python.setRuntimeError("Failed to compute convex hull: {s}", .{@errorName(err)});
         return null;
@@ -228,10 +225,10 @@ pub const convex_hull_properties_metadata = [_]python.PropertyWithMetadata{
 
 var convex_hull_getset = python.toPyGetSetDefArray(&convex_hull_properties_metadata);
 
-// Class documentation - keep it simple
+/// Class docstring.
 const convex_hull_class_doc = "Convex hull computation using Graham's scan algorithm.";
 
-// Init documentation - detailed explanation
+/// `__init__` docstring.
 pub const convex_hull_init_doc =
     \\Initialize a new ConvexHull instance.
     \\
@@ -262,7 +259,7 @@ pub const convex_hull_init_doc =
     \\- Requires at least 3 points for a valid hull
 ;
 
-// Special methods metadata for stub generation
+/// Special methods metadata for stub generation.
 pub const convex_hull_special_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",
@@ -272,7 +269,6 @@ pub const convex_hull_special_methods_metadata = [_]stub_metadata.MethodInfo{
     },
 };
 
-// Using buildTypeObject helper for cleaner initialization
 pub var ConvexHullType = python.buildTypeObject(.{
     .name = "zignal.ConvexHull",
     .basicsize = @sizeOf(ConvexHullObject),

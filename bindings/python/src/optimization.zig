@@ -1,3 +1,5 @@
+//! Python bindings for the assignment solver and the MaxLIPO+TR global optimizer.
+
 const std = @import("std");
 
 const zignal = @import("zignal");
@@ -47,7 +49,6 @@ pub const AssignmentObject = extern struct {
     assignment_ptr: ?*optimization.Assignment,
 };
 
-// Using genericNew helper for standard object creation
 const assignment_new = python.genericNew(AssignmentObject);
 
 fn assignment_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) c_int {
@@ -59,7 +60,7 @@ fn assignment_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     return -1;
 }
 
-// Helper function for custom cleanup
+/// Cleanup hook for `genericDealloc`.
 fn assignmentDeinit(self: *AssignmentObject) void {
     if (self.assignment_ptr) |ptr| {
         ptr.deinit();
@@ -67,7 +68,6 @@ fn assignmentDeinit(self: *AssignmentObject) void {
     }
 }
 
-// Using genericDealloc helper
 const assignment_dealloc = python.genericDealloc(AssignmentObject, assignmentDeinit);
 
 fn assignment_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -517,7 +517,7 @@ fn optimize(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv
     return result;
 }
 
-// Assignment metadata for stub generation
+/// Assignment metadata for stub generation.
 pub const assignment_properties_metadata = [_]python.PropertyWithMetadata{
     .{
         .name = "assignments",
@@ -535,7 +535,7 @@ pub const assignment_properties_metadata = [_]python.PropertyWithMetadata{
     },
 };
 
-// Module function definitions
+/// Module function definitions.
 pub const module_functions_metadata = [_]python.FunctionWithMetadata{
     .{
         .name = "solve_assignment_problem",
@@ -555,5 +555,5 @@ pub const module_functions_metadata = [_]python.FunctionWithMetadata{
     },
 };
 
-// Generate PyMethodDef array at compile time
+/// PyMethodDef array generated at compile time.
 pub var optimization_methods = python.functionsToPyMethodDefArray(&module_functions_metadata);

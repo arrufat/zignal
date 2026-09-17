@@ -1,5 +1,4 @@
-//! Python bindings for Zignal Image type
-//! This module aggregates functionality from sub-modules
+//! Python Image type; its methods live in the `image/` sub-modules and are aggregated here.
 
 const std = @import("std");
 
@@ -48,11 +47,11 @@ const image_class_doc =
 
 pub const ImageObject = extern struct {
     ob_base: c.PyObject,
-    /// Store dynamic image for non-RGBA formats (or future migration)
+    /// Wrapped image; null until the object is initialized.
     py_image: ?*PyImage,
-    /// Store reference to NumPy array if created from numpy (for zero-copy)
+    /// NumPy array whose buffer this image borrows, when created with `from_numpy`.
     numpy_ref: ?*c.PyObject,
-    /// Store reference to parent Image if this is a view (for memory management)
+    /// Parent Image this view borrows from, kept alive for as long as the view.
     parent_ref: ?*c.PyObject,
 };
 
@@ -142,7 +141,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
         return -1;
     };
 
-    // Validate dimensions - validateRange now properly handles negative values when converting to usize
+    // Validate dimensions; validateRange rejects negative values before converting to usize.
     const validated_rows = python.validateRange(u32, params.rows, 1, std.math.maxInt(u32), "Rows") catch return -1;
     const validated_cols = python.validateRange(u32, params.cols, 1, std.math.maxInt(u32), "Cols") catch return -1;
 
@@ -176,7 +175,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
 
     if (params.dtype) |fmt_obj| {
         // Explicit dtype specified
-        // TODO: Remove explicit cast after Python 3.10 is dropped
+        // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
         const is_type_obj = c.PyObject_TypeCheck(fmt_obj, @as([*c]c.PyTypeObject, @ptrCast(&c.PyType_Type))) != 0;
         if (is_type_obj) {
             // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
@@ -228,7 +227,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
             if (params.color != null and params.color != c.Py_None()) {
                 const gray = color_utils.parseColor(u8, params.color) catch {
                     gimg.deinit(allocator);
-                    // Error already set by parseColorTo
+                    // Error already set by parseColor.
                     return -1;
                 };
                 @memset(gimg.data, gray);
@@ -256,7 +255,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
             if (params.color != null and params.color != c.Py_None()) {
                 const rgb_color = color_utils.parseColor(Rgb, params.color) catch {
                     rimg.deinit(allocator);
-                    // Error already set by parseColorTo
+                    // Error already set by parseColor.
                     return -1;
                 };
                 @memset(rimg.data, rgb_color);
@@ -284,7 +283,7 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
             if (params.color != null and params.color != c.Py_None()) {
                 const rgba_color = color_utils.parseColor(Rgba, params.color) catch {
                     image.deinit(allocator);
-                    // Error already set by parseColorTo
+                    // Error already set by parseColor.
                     return -1;
                 };
                 @memset(image.data, rgba_color);
@@ -487,7 +486,7 @@ fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject)
         return -1;
     }
 
-    // Parse the color value using parseColorTo
+    // Parse the color value using parseColor.
     const color = color_utils.parseColor(Rgba, value) catch return -1;
 
     // Set the pixel value
@@ -565,8 +564,7 @@ fn image_richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_
     }
 }
 
-/// Parse dimension string like "800x600", "800x", or "x600"
-/// Returns struct with optional width and height
+/// Parses a dimension string like "800x600", "800x", or "x600" into optional width and height.
 fn parseDimensions(dims_str: []const u8) !struct { width: ?u32, height: ?u32 } {
     if (dims_str.len == 0) {
         return error.InvalidFormat;
@@ -902,7 +900,7 @@ pub const gaussian_method_values = [_]stub_metadata.EnumValueDoc{
     .{ .name = "AUTO", .doc = "FIR below sigma 4, IIR from there on" },
 };
 
-// Aggregate method metadata from all sub-modules
+/// Method metadata aggregated from all sub-modules.
 pub const image_methods_metadata = blk: {
     // ========================================================================
     // Core/Creation methods
@@ -1374,7 +1372,7 @@ pub const image_properties_metadata = [_]python.PropertyWithMetadata{
 
 var image_getset = python.toPyGetSetDefArray(&image_properties_metadata);
 
-// Special methods metadata for stub generation
+/// Special methods metadata for stub generation.
 pub const image_special_methods_metadata = [_]stub_metadata.MethodInfo{
     .{
         .name = "__init__",
@@ -1429,13 +1427,13 @@ var image_as_mapping = c.PyMappingMethods{
     .mp_ass_subscript = image_setitem,
 };
 
-// Function to get ImageType pointer for sub-modules
+/// Returns the ImageType pointer for sub-modules.
 pub fn getImageType() *c.PyTypeObject {
     return &ImageType;
 }
 
-/// Create a new Python Image object by moving ownership from a Zignal image.
-/// The input must be a fully-initialized, owned `zignal.Image(T)` where `T` is one of: `u8`, `Rgb`, or `Rgba`.
+/// Creates a Python Image object by moving ownership from a Zignal image.
+/// The input must be an initialized, owned `zignal.Image(T)` with `T` in `u8`, `Rgb`, `Rgba`.
 /// On success, returns the newly allocated Image instance; on failure, sets a Python exception,
 /// deinitializes the input image, and returns null.
 pub fn moveImageToPython(owned_img: anytype) ?*ImageObject {
@@ -1469,8 +1467,8 @@ pub fn moveImageToPython(owned_img: anytype) ?*ImageObject {
     return result;
 }
 
-/// Wrap an existing PyImage into a Python Image object.
-/// If parent is provided, the new object will hold a reference to it to keep it alive.
+/// Wraps an existing PyImage in a Python Image object.
+/// If `parent` is given, the new object holds a reference to it to keep it alive.
 pub fn wrapPyImage(pimg: *PyImage, parent: ?*c.PyObject) ?*c.PyObject {
     const new_obj = c.PyType_GenericAlloc(@ptrCast(&ImageType), 0) orelse {
         // Note: we don't deinit pimg here as it might be borrowed

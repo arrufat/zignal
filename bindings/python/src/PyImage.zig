@@ -1,6 +1,5 @@
-//! PyImage is a Python-facing dynamic image wrapper used only by the Python bindings.
-//! It abstracts over different image types (Gray, RGB, RGBA) to provide a uniform API to Python.
-//! Memory ownership can be either owned (managed by this struct) or borrowed (view into existing image).
+//! Dynamic image wrapper for the Python bindings: one API over Gray, RGB, and RGBA images.
+//! Memory is either owned by the struct or borrowed as a view into an existing image.
 
 const std = @import("std");
 const python = @import("python.zig");
@@ -12,7 +11,7 @@ const Rgba = zignal.Rgba(u8);
 
 pub const PyImage = @This();
 
-/// Data type enum with u8 backing for extern compatibility
+/// Pixel format, u8-backed for extern compatibility.
 pub const DType = enum(u8) { gray, rgb, rgba };
 
 pub const Variant = union(DType) {
@@ -37,8 +36,8 @@ pub fn deinit(self: *PyImage, allocator: std.mem.Allocator) void {
     }
 }
 
-/// Factory: allocate a PyImage from a concrete Image(T).
-/// Use Ownership.borrowed for views to avoid double-free.
+/// Allocates a PyImage from a concrete Image(T).
+/// Use `Ownership.borrowed` for views to avoid a double free.
 pub fn createFrom(allocator: std.mem.Allocator, image: anytype, ownership: Ownership) ?*PyImage {
     const p = allocator.create(PyImage) catch {
         python.setMemoryError("PyImage");
@@ -68,7 +67,7 @@ pub fn cols(self: *const PyImage) u32 {
     };
 }
 
-/// Return the pixel as Rgba regardless of underlying storage, for uniform Python API.
+/// Returns the pixel as Rgba regardless of the underlying storage.
 pub fn getPixelRgba(self: *const PyImage, row: u32, col: u32) Rgba {
     return switch (self.data) {
         .gray => |img| blk: {
@@ -83,7 +82,7 @@ pub fn getPixelRgba(self: *const PyImage, row: u32, col: u32) Rgba {
     };
 }
 
-/// Set a pixel from an Rgba value, converting as needed.
+/// Sets a pixel from an Rgba value, converting as needed.
 pub fn setPixelRgba(self: *PyImage, row: u32, col: u32, px: Rgba) void {
     switch (self.data) {
         .gray => |*img| img.at(row, col).* = px.to(.gray).y,
@@ -92,7 +91,7 @@ pub fn setPixelRgba(self: *PyImage, row: u32, col: u32, px: Rgba) void {
     }
 }
 
-/// Copy pixels from another PyImage to this one.
+/// Copies pixels from another PyImage into this one.
 /// Both images must have the same dimensions.
 pub fn copyFrom(self: *PyImage, src: PyImage) void {
     switch (self.data) {
@@ -111,9 +110,8 @@ pub fn copyFrom(self: *PyImage, src: PyImage) void {
     }
 }
 
-/// Dispatch an operation to the underlying image variant.
-/// func is a generic function that takes the underlying image pointer as its first argument,
-/// followed by any arguments in ctx.
+/// Dispatches an operation to the underlying image variant. `func` takes the underlying image
+/// pointer as its first argument, followed by the arguments in `ctx`.
 pub fn dispatch(self: *PyImage, ctx: anytype, comptime func: anytype) @TypeOf(@call(.auto, func, .{@as(*Image(u8), undefined)} ++ ctx)) {
     return switch (self.data) {
         inline else => |*img| @call(.auto, func, .{img} ++ ctx),

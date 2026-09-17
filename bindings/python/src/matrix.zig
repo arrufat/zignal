@@ -1,3 +1,5 @@
+//! Python Matrix type wrapping `zignal.Matrix(f64)`, with NumPy interop and operators.
+
 const std = @import("std");
 
 const zignal = @import("zignal");
@@ -42,7 +44,6 @@ pub const MatrixObject = extern struct {
     owns_memory: bool, // True if we allocated the matrix
 };
 
-// Using genericNew helper for standard object creation
 const matrix_new = python.genericNew(MatrixObject);
 
 const matrix_init_doc =
@@ -175,7 +176,7 @@ pub fn matrixFromSequence(obj: ?*c.PyObject) !*Matrix(f64) {
     return matrix;
 }
 
-// Helper function for custom cleanup
+/// Cleanup hook for `genericDealloc`.
 fn matrixDeinit(self: *MatrixObject) void {
     // Free the matrix if we own it
     if (self.matrix_ptr) |ptr| {
@@ -191,7 +192,6 @@ fn matrixDeinit(self: *MatrixObject) void {
     }
 }
 
-// Using genericDealloc helper
 const matrix_dealloc = python.genericDealloc(MatrixObject, matrixDeinit);
 
 fn matrix_repr(self_obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
@@ -574,7 +574,7 @@ var matrix_as_mapping = c.PyMappingMethods{
 
 // ===== Operator overloads for number protocol =====
 
-/// Generic dispatcher for binary matrix operations
+/// Generic dispatcher for binary matrix operations.
 fn dispatchMatrixOp(
     left: ?*c.PyObject,
     right: ?*c.PyObject,
@@ -698,7 +698,7 @@ fn matrix_negative(obj: ?*c.PyObject) callconv(.c) ?*c.PyObject {
     return matrixToObject(result_matrix);
 }
 
-/// Generic dispatcher for in-place matrix operations (e.g. +=)
+/// Generic dispatcher for in-place matrix operations (e.g. `+=`).
 fn dispatchInplaceMatrixOp(
     self_obj: ?*c.PyObject,
     other: ?*c.PyObject,
@@ -776,7 +776,7 @@ fn matrix_inplace_truediv(self_obj: ?*c.PyObject, other: ?*c.PyObject) callconv(
     return self_obj;
 }
 
-// Helper function to convert Zig Matrix to Python MatrixObject
+/// Converts a Zig Matrix (or its error) to a Python MatrixObject.
 fn matrixToObject(matrix_or_err: MatrixResult) ?*c.PyObject {
     const matrix = matrix_or_err catch |e| {
         python.mapZigError(e, "Matrix");
@@ -2030,7 +2030,7 @@ fn matrix_svd_method(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     return result_dict;
 }
 
-// Metadata for stub generation
+/// Metadata for stub generation.
 pub const matrix_methods_metadata = [_]python.MethodWithMetadata{
     .{
         .name = "full",
@@ -2496,7 +2496,6 @@ pub const matrix_special_methods_metadata = [_]stub_metadata.MethodInfo{
     },
 };
 
-// Using buildTypeObject helper for cleaner initialization
 pub var MatrixType = python.buildTypeObject(.{
     .name = "zignal.Matrix",
     .basicsize = @sizeOf(MatrixObject),

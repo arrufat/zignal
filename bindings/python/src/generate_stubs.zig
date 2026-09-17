@@ -1,5 +1,4 @@
-// Auto-generate Python type stub (.pyi) files from Zig source code
-// This leverages Zig's compile-time reflection to create accurate type information
+//! Generates the `.pyi` type stubs from the bindings' comptime metadata.
 
 const std = @import("std");
 const Io = std.Io;
@@ -53,7 +52,7 @@ const GeneratedStub = struct {
     }
 };
 
-/// Map Zig types to Python type hints
+/// Maps a Zig type to a Python type hint.
 fn getPythonType(comptime ZigType: type) []const u8 {
     return switch (ZigType) {
         u8, u16, u32, u64, i8, i16, i32, i64, c_int => "int",
@@ -64,21 +63,21 @@ fn getPythonType(comptime ZigType: type) []const u8 {
     };
 }
 
-/// Generate property getter for a field
+/// Writes the property getter for a field.
 fn generatePropertyGetter(stub: *GeneratedStub, field_name: []const u8, field_type: type) !void {
     const python_type = getPythonType(field_type);
     try stub.writef("    @property\n", .{});
     try stub.writef("    def {s}(self) -> {s}: ...\n", .{ field_name, python_type });
 }
 
-/// Generate property setter for a field
+/// Writes the property setter for a field.
 fn generatePropertySetter(stub: *GeneratedStub, field_name: []const u8, field_type: type) !void {
     const python_type = getPythonType(field_type);
     try stub.writef("    @{s}.setter\n", .{field_name});
     try stub.writef("    def {s}(self, value: {s}) -> None: ...\n", .{ field_name, python_type });
 }
 
-/// Generate conversion method signature with documentation
+/// Writes a conversion method signature with its docstring.
 fn generateConversionMethod(stub: *GeneratedStub, comptime SourceType: type, comptime TargetType: type) !void {
     // Skip self-conversion
     if (SourceType == TargetType) return;
@@ -110,7 +109,7 @@ fn generateConversionMethod(stub: *GeneratedStub, comptime SourceType: type, com
     try stub.write("        ...\n");
 }
 
-/// Convert color.Rgb or zignal.Rgb -> "Rgb"
+/// Extracts the simple class name: "color.Rgb" or "zignal.Rgb" becomes "Rgb".
 fn getClassNameFromType(comptime T: type) []const u8 {
     const type_name = @typeName(T);
 
@@ -127,7 +126,7 @@ fn getClassNameFromType(comptime T: type) []const u8 {
     return base;
 }
 
-/// Generate complete color class stub
+/// Writes a complete color class stub.
 fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
     const class_name = getClassNameFromType(ColorType);
     const doc_string = color_registry.getDocumentationString(ColorType);
@@ -232,7 +231,7 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
     try stub.write("    __hash__ = None\n");
 }
 
-/// Generate class from metadata
+/// Writes a class stub from its metadata.
 fn generateClassFromMetadata(stub: *GeneratedStub, class_info: stub_metadata.ClassInfo) !void {
     // Class declaration
     try stub.writef("\nclass {s}:\n", .{class_info.name});
@@ -300,7 +299,7 @@ fn generateClassFromMetadata(stub: *GeneratedStub, class_info: stub_metadata.Cla
     }
 }
 
-/// Generate enum from Zig type metadata
+/// Writes an IntEnum stub from Zig type metadata.
 fn generateEnumFromMetadata(stub: *GeneratedStub, enum_info: stub_metadata.EnumInfo) !void {
     const type_info = @typeInfo(enum_info.zig_type);
 
@@ -352,7 +351,7 @@ fn generateEnumFromMetadata(stub: *GeneratedStub, enum_info: stub_metadata.EnumI
     }
 }
 
-/// Generate module-level functions from metadata
+/// Writes module-level function stubs from metadata.
 fn generateModuleFunctionsFromMetadata(stub: *GeneratedStub, functions: []const stub_metadata.FunctionInfo) !void {
     for (functions) |func| {
         try stub.writef("\ndef {s}({s}) -> {s}:\n", .{ func.name, func.params, func.returns });
@@ -361,9 +360,8 @@ fn generateModuleFunctionsFromMetadata(stub: *GeneratedStub, functions: []const 
     }
 }
 
-/// Generate unified MotionBlur class from metadata
+/// Writes the unified MotionBlur class stub from metadata.
 fn generateMotionBlurClasses(stub: *GeneratedStub) !void {
-    // Generate unified MotionBlur class from metadata
     const properties = stub_metadata.extractPropertyInfo(&motion_blur_module.motion_blur_properties_metadata);
     const doc = std.mem.span(motion_blur_module.MotionBlurType.tp_doc);
     try generateClassFromMetadata(stub, .{
@@ -376,7 +374,7 @@ fn generateMotionBlurClasses(stub: *GeneratedStub) !void {
     });
 }
 
-/// Generate complete stub file
+/// Writes the complete `_zignal.pyi` stub file.
 fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
     var stub = GeneratedStub.init(gpa);
     defer stub.deinit();
@@ -652,7 +650,7 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
     return try stub.content.toOwnedSlice(gpa);
 }
 
-/// Generate __init__.pyi stub file for the main package
+/// Writes the `__init__.pyi` stub for the package.
 fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
     var stub = GeneratedStub.init(gpa);
     defer stub.deinit();
@@ -718,7 +716,7 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
     return try stub.content.toOwnedSlice(gpa);
 }
 
-/// Main function to generate and write all stub files
+/// Generates and writes both stub files.
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();

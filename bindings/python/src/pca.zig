@@ -1,3 +1,5 @@
+//! Python PCA type wrapping `zignal.Pca`.
+
 const std = @import("std");
 
 const zignal = @import("zignal");
@@ -43,13 +45,12 @@ const pca_class_doc =
     \\```
 ;
 
-// PCA Python object
+/// PCA Python object.
 pub const PCAObject = extern struct {
     ob_base: c.PyObject,
     pca_ptr: ?*Pca(f64),
 };
 
-// Using genericNew helper for standard object creation
 const pca_new = python.genericNew(PCAObject);
 
 const pca_init_doc =
@@ -83,7 +84,7 @@ fn pca_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) call
     return 0;
 }
 
-// Helper function for custom cleanup
+/// Cleanup hook for `genericDealloc`.
 fn pcaDeinit(self: *PCAObject) void {
     if (self.pca_ptr) |pca| {
         pca.deinit();
@@ -91,7 +92,6 @@ fn pcaDeinit(self: *PCAObject) void {
     }
 }
 
-// Using genericDealloc helper
 const pca_dealloc = python.genericDealloc(PCAObject, pcaDeinit);
 
 const pca_fit_doc =
@@ -476,7 +476,6 @@ fn pca_get_components(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c)
         return null;
     };
 
-    // Copy data
     // Copy data from components matrix
     for (0..pca.components.rows) |i| {
         for (0..pca.components.cols) |j| {
@@ -624,7 +623,6 @@ var PCAGetSet = [_]c.PyGetSetDef{
     c.PyGetSetDef{ .name = null, .get = null, .set = null, .doc = null, .closure = null },
 };
 
-// Using buildTypeObject helper for cleaner initialization
 pub var PCAType = python.buildTypeObject(.{
     .name = "zignal.PCA",
     .basicsize = @sizeOf(PCAObject),
@@ -637,7 +635,7 @@ pub var PCAType = python.buildTypeObject(.{
     .flags = c.Py_TPFLAGS_DEFAULT | c.Py_TPFLAGS_BASETYPE,
 });
 
-// Metadata for stub generation
+/// Metadata for stub generation.
 pub const pca_class_metadata = stub_metadata.ClassInfo{
     .name = "PCA",
     .doc = pca_class_doc,
