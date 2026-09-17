@@ -1,10 +1,7 @@
-//! Vectorization module for converting raster edge maps into geometric paths.
+//! Vectorization of raster edge maps into geometric paths and polylines.
 //!
-//! This module provides functionality to trace connected pixels in a binary image
-//! and convert them into ordered lists of points (polylines). It includes:
-//! - **Tracing**: Converting raster edges to vector paths using neighbor chaining.
-//! - **Simplification**: Reducing point count using the Ramer-Douglas-Peucker algorithm.
-//! - **Noise Filtering**: Removing paths that are too short to be significant.
+//! Traces connected pixels in a binary image, orders them into directed paths,
+//! and simplifies point counts using the Ramer-Douglas-Peucker algorithm.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;

@@ -117,7 +117,7 @@ pub fn Chain(comptime T: type) type {
             return self;
         }
 
-        /// Helper to delegate a method call to `Matrix(T)`.
+        /// Delegates a method call to `Matrix(T)`.
         fn dispatch(self: *Self, comptime name: []const u8, args: anytype) *Self {
             if (self.err != null) return self;
 

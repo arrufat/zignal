@@ -1,4 +1,4 @@
-//! Static matrix with compile-time dimensions
+//! Static matrix with compile-time dimensions and SIMD-accelerated linear algebra operations.
 
 const std = @import("std");
 const Io = std.Io;
@@ -631,8 +631,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
             return result;
         }
 
-        /// Returns a new matrix with dimensions `new_rows` x `new_cols`, containing the same elements
-        /// as `self` interpreted in row-major order.
+        /// Returns a `new_rows` × `new_cols` matrix with the same elements in row-major order.
         pub fn reshape(self: Self, comptime new_rows: u32, comptime new_cols: u32) SMatrix(T, new_rows, new_cols) {
             comptime assert(rows * cols == new_rows * new_cols);
             var result: SMatrix(T, new_rows, new_cols) = .{};

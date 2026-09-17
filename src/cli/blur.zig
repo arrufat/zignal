@@ -1,3 +1,5 @@
+//! Blur subcommand: applies box, Gaussian, motion, and rank-filter blurs.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;

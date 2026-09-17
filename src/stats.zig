@@ -1,9 +1,7 @@
-//! Statistics module for computing various statistical measures
+//! Streaming statistics computation using Welford's algorithm for numerical stability.
 //!
-//! This module provides RunningStats for streaming/online statistics computation
-//! using Welford's algorithm for numerical stability.
-//!
-//! Inspired by dlib's running_stats implementation.
+//! Provides single-variable `RunningStats` and multi-variable `CovarianceStats`,
+//! inspired by dlib's running_stats implementation.
 
 const std = @import("std");
 const assert = std.debug.assert;

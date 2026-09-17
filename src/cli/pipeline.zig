@@ -1,3 +1,5 @@
+//! Pipeline subcommand: executes chained image processing operations from JSON recipes.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;

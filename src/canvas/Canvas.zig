@@ -1,4 +1,4 @@
-//! This module provides a Canvas for drawing various shapes and lines on images.
+//! 2D rendering canvas for drawing primitives, shapes, text, and paths onto images.
 
 const std = @import("std");
 const assert = std.debug.assert;
@@ -22,11 +22,11 @@ const Image = @import("../image.zig").Image;
 const assignPixel = @import("../image.zig").assignPixel;
 const as = @import("../meta.zig").as;
 
-/// Rendering quality mode for drawing operations
+/// Rendering quality mode for drawing operations.
 pub const DrawMode = enum {
-    /// Fast rendering - hard edges, maximum performance
+    /// Fast rendering with hard, aliased edges.
     fast,
-    /// Soft rendering - antialiased edges, better quality
+    /// Soft rendering with antialiased edges.
     soft,
 };
 
@@ -63,7 +63,7 @@ const CoverageMax = struct {
     }
 };
 
-/// How text glyphs are painted.
+/// Checks whether point coordinates are finite.
 /// Non-finite coordinates draw nothing rather than trip a float→int conversion.
 fn finitePoint(p: Point(2, f32)) bool {
     return std.math.isFinite(p.x()) and std.math.isFinite(p.y());
@@ -128,25 +128,24 @@ pub fn Canvas(comptime T: type) type {
 
         const Self = @This();
 
-        // Drawing-related constants
-        /// Maximum number of line segments when tessellating Bézier curves for line drawing
+        /// Maximum number of line segments when tessellating Bézier curves for line drawing.
         const bezier_max_segments_count = 200;
-        /// Maximum number of line segments when tessellating spline polygons
+        /// Maximum number of line segments when tessellating spline polygons.
         const spline_max_segments_count = 50;
-        /// Minimum number of line segments for spline curves to ensure reasonable quality
+        /// Minimum number of line segments for spline curves to ensure reasonable quality.
         const spline_min_segments_count = 4;
-        /// Minimum number of line segments for quadratic Bézier curves
+        /// Minimum number of line segments for quadratic Bézier curves.
         const quadratic_min_segments_count = 3;
-        /// Target pixels per segment for smooth/antialiased rendering (higher quality, more segments)
+        /// Target pixels per segment for smooth antialiased rendering (higher quality).
         const pixels_per_segment_soft = 1.5;
-        /// Target pixels per segment for solid/fast rendering (lower quality, fewer segments)
+        /// Target pixels per segment for solid fast rendering (lower quality, fewer segments).
         const pixels_per_segment_fast = 3.0;
-        /// Target pixels per segment specifically for quadratic Bézier curves
+        /// Target pixels per segment specifically for quadratic Bézier curves.
         const pixels_per_segment_quadratic = 2.0;
         /// Offset for antialiasing edge calculations (0.5 = pixel center alignment). Soft paths
         /// treat pixel (r, c) as centered at (c, r); fast span writes are top-left inclusive.
         const antialias_edge_offset = 0.5;
-        /// Vertical samples per pixel row for antialiased polygon fills
+        /// Vertical samples per pixel row for antialiased polygon fills.
         const polygon_subscanlines = 8;
         /// Below this many edges the fast fill tests them all on every row; the sweep's
         /// setup only pays off above it.
@@ -162,9 +161,9 @@ pub fn Canvas(comptime T: type) type {
         /// vertices, 1024 sweep rows, a 1024-pixel coverage row and a 12k-cell area
         /// accumulator (a 110x110 shape); larger inputs spill to the heap.
         const polygon_scratch_size = 256 * (@sizeOf(Edge) + @sizeOf(Crossing) + 2 * @sizeOf(u32)) + 1024 * (@sizeOf(u32) + @sizeOf(CoverageCell)) + 12 * 1024 * (@sizeOf(f32) + 1);
-        /// Stack scratch (bytes) for flattening a glyph outline; spills to heap beyond
+        /// Stack scratch (bytes) for flattening a glyph outline; spills to heap beyond.
         const glyph_scratch_size = 1024 * @sizeOf(Point(2, f32)) + 64 * @sizeOf([]const Point(2, f32));
-        /// Stack scratch (points) for spline polygon tessellation; spills to heap beyond
+        /// Stack scratch (points) for spline polygon tessellation; spills to heap beyond.
         const spline_polygon_stack_buffer_size = 400;
 
         /// Creates a drawing canvas from an image.
@@ -223,8 +222,8 @@ pub fn Canvas(comptime T: type) type {
             return self.image.size();
         }
 
-        /// Returns true if and only if this canvas and `other` have the same number of rows and columns.
-        /// It does not compare pixel data or types.
+        /// Returns true if this canvas and `other` have the same number of rows and columns.
+        /// Does not compare pixel data or types.
         pub inline fn hasSameShape(self: Self, other: anytype) bool {
             return self.image.hasSameShape(other.image);
         }
@@ -638,7 +637,7 @@ pub fn Canvas(comptime T: type) type {
 
         /// Draws another image onto this canvas at the given top-left position.
         /// Supports alpha blending for RGBA images with the normal blend mode.
-        /// For rotation, scaling, or custom blend modes, users should access the canvas's image field directly.
+        /// For rotation, scaling, or custom blend modes, use the canvas image field directly.
         pub fn drawImage(self: Self, source: anytype, position: Point(2, f32), source_rect_opt: ?Rectangle(u32), blend_mode: Blending) void {
             if (!finitePoint(position)) return;
             const full_rect = source.getRectangle();
@@ -659,14 +658,14 @@ pub fn Canvas(comptime T: type) type {
 
         /// Returns the fractional part of a floating-point number.
         /// Used in Wu's anti-aliasing algorithm to calculate pixel coverage.
-        /// Example: fpart(3.7) = 0.7, fpart(-2.3) = 0.7
+        /// Example: `fpart(3.7) == 0.7`, `fpart(-2.3) == 0.7`.
         fn fpart(x: f32) f32 {
             return x - @floor(x);
         }
 
         /// Returns the reverse fractional part (1 - fractional part).
         /// Used in Wu's anti-aliasing algorithm for complementary pixel coverage.
-        /// Example: rfpart(3.7) = 0.3, rfpart(-2.3) = 0.3
+        /// Example: `rfpart(3.7) == 0.3`, `rfpart(-2.3) == 0.3`.
         fn rfpart(x: f32) f32 {
             return 1 - fpart(x);
         }
@@ -862,8 +861,8 @@ pub fn Canvas(comptime T: type) type {
         }
 
         /// Fills a rectangle on the given image.
-        /// The rectangle is defined using standard conventions where l,t are inclusive and r,b are exclusive.
-        /// This means a rectangle from (0,0) to (10,10) will fill pixels at positions 0-9 in both dimensions.
+        /// The rectangle covers `[l, r)` and `[t, b)`: `l` and `t` are inclusive, `r` and `b`
+        /// are exclusive. A rectangle from (0,0) to (10,10) fills pixels at positions 0-9.
         /// Fractional edges are truncated to whole pixels, so `opts.mode` has no effect here.
         pub fn fillRectangle(self: Self, rect: Rectangle(f32), color: anytype, opts: DrawOptions) void {
             comptime assert(isColor(@TypeOf(color)));
@@ -1563,7 +1562,7 @@ pub fn Canvas(comptime T: type) type {
             /// +1 when the edge runs down the screen, -1 up; the winding contribution.
             dir: i8,
 
-            /// x where the edge crosses the horizontal line at `y`, for y in [y_min, y_max).
+            /// X where the edge crosses the horizontal line at `y`, for `y` in `[y_min, y_max)`.
             inline fn xAt(e: Edge, y: f32) f32 {
                 return e.p1.x() + (y - e.p1.y()) * (e.p2.x() - e.p1.x()) / (e.p2.y() - e.p1.y());
             }
@@ -1817,7 +1816,9 @@ pub fn Canvas(comptime T: type) type {
         /// Example:
         /// ```zig
         /// // Green pie slice from π/4 to 3π/4
-        /// try canvas.fillArc(center, 60, std.math.pi / 4.0, 3.0 * std.math.pi / 4.0, Rgb.green, .soft);
+        /// try canvas.fillArc(
+        ///     center, 60, std.math.pi / 4.0, 0.75 * std.math.pi, Rgb.green, .soft,
+        /// );
         /// ```
         pub fn fillArc(self: Self, center: Point(2, f32), radius: f32, start_angle: f32, end_angle: f32, color: anytype, opts: DrawOptions) !void {
             comptime assert(isColor(@TypeOf(color)));
@@ -2129,8 +2130,8 @@ pub fn Canvas(comptime T: type) type {
             };
         }
 
-        /// Draws `text` with its top-left corner at `position`, at `font_size` pixels: the em height
-        /// for vector fonts, the character height for bitmap fonts. `null` draws at
+        /// Draws `text` with its top-left corner at `position`, at `font_size` pixels: the em
+        /// height for vector fonts, the character height for bitmap fonts. `null` draws at
         /// `font.defaultSize()`, a bitmap font's native size. `\n` starts a new line.
         pub fn drawText(self: Self, text: []const u8, position: Point(2, f32), color: anytype, font: Font, font_size: ?f32, opts: DrawOptions) !void {
             comptime assert(isColor(@TypeOf(color)));

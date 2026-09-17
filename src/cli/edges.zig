@@ -1,3 +1,5 @@
+//! Edges subcommand: detects image edges using Sobel or Shen-Castan filters.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;

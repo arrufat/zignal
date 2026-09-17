@@ -1,13 +1,13 @@
-//! font8x8 - 8x8 monospace bitmap font (public domain)
+//! 8x8 monospace bitmap font (public domain).
 //!
-//! Based on font8x8 by Daniel Hepper
-//! Each character is 8 bytes, with each byte representing a row
-//! Bits are left-to-right, LSB first (bit 0 = leftmost pixel)
+//! Based on font8x8 by Daniel Hepper.
+//! Each character is 8 bytes, with each byte representing a row.
+//! Bits are left-to-right, LSB first (bit 0 = leftmost pixel).
 //!
 //! Usage:
-//!   font8x8.basic - Static ASCII-only font (no allocation)
-//!   font8x8.extended() - Create extended Latin font (requires allocation)
-//!   font8x8.create(allocator, filter) - Create custom font with specific ranges
+//!   `font8x8.basic` - Static ASCII-only font (no allocation).
+//!   `font8x8.extended()` - Create extended Latin font (requires allocation).
+//!   `font8x8.create(allocator, filter)` - Create custom font with specific ranges.
 
 const std = @import("std");
 
@@ -16,8 +16,8 @@ const BitmapFont = @import("BitmapFont.zig");
 const font_data = @import("font8x8_data.zig");
 const unicode = @import("unicode.zig");
 
-/// Basic ASCII font (0x20-0x7E)
-/// This font is always available and requires no allocation
+/// Basic ASCII font (0x20-0x7E).
+/// This font is always available and requires no allocation.
 pub const basic: BitmapFont = .{
     .name = "8x8 Basic",
     .char_width = 8,

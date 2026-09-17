@@ -1,12 +1,7 @@
-//! Font system for zignal
+//! Font loading, text layout, and typography rendering.
 //!
-//! This module provides font rendering capabilities including:
-//! - Default 8x8 bitmap font
-//! - BDF and PCF bitmap font loading with Unicode support
-//! - TrueType (`.ttf`), CFF OpenType (`.otf`) and collection (`.ttc`) vector fonts with kerning
-//! - Variable-width font support
-//!
-//! The font system is organized into subdirectories for better modularity.
+//! Supports built-in 8x8 bitmap font, BDF and PCF bitmap fonts, and TrueType (`.ttf`),
+//! CFF OpenType (`.otf`), and OpenType collections (`.ttc`) with kerning and cache support.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;

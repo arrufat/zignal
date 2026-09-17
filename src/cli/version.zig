@@ -1,3 +1,5 @@
+//! Version subcommand: prints Zignal version and build details.
+
 const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;

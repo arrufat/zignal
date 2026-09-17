@@ -1,3 +1,25 @@
+//! Feature Distribution Matching (FDM) for image style transfer and domain adaptation.
+//!
+//! Transfers the color distribution (mean and covariance) from a target image to a source
+//! image, matching the style of the target while preserving the spatial structure of the source.
+//!
+//! ## Algorithm
+//! FDM matches first- and second-order statistics of pixel distributions:
+//! 1. **Accumulate**: Stream pixels to compute mean and covariance statistics (O(1) memory).
+//! 2. **Whiten**: Transform source to have identity covariance: `Cov(X_src) = I`.
+//! 3. **Color Transform**: Apply target covariance: `Cov(X_result) = Cov(X_target)`.
+//! 4. **Restore Mean**: Add target mean to the final result.
+//!
+//! ## Mathematical Foundation
+//! Given source `X_src` and target `X_target`, FDM computes:
+//! ```text
+//! X_result = (X_src - μ_src) * Σ_src^(-1/2) * U_src * Σ_target^(1/2) * U_target^T + μ_target
+//! ```
+//! where `μ` is mean, `Σ` is covariance eigenvalues, and `U` is covariance eigenvectors.
+//!
+//! Reference: "Keep it Simple: Image Statistics Matching for Domain Adaptation",
+//! A. Abramov et al. (2020), https://arxiv.org/abs/2005.12551.
+
 const std = @import("std");
 const parallel = @import("parallel.zig");
 const assert = std.debug.assert;
@@ -15,8 +37,23 @@ const RunningStats = @import("stats.zig").RunningStats;
 const Rgb = @import("color.zig").Rgb(u8);
 const Rgba = @import("color.zig").Rgba(u8);
 
-/// Feature Distribution Matching struct for stateful image style transfer.
-/// Allows efficient batch processing by reusing target distribution statistics.
+/// Feature Distribution Matching stateful transformer for image style transfer.
+/// Reuses target distribution statistics across multiple source images.
+///
+/// Example:
+/// ```zig
+/// // Single image: modifies source_img in place.
+/// var fdm: FeatureDistributionMatching(Rgb(u8)) = .init(allocator);
+/// defer fdm.deinit();
+/// try fdm.match(source_img, target_img);
+///
+/// // Batch: reuse one target's statistics for many sources.
+/// try fdm.setTarget(style_image);
+/// for (images_to_transform) |img| {
+///     try fdm.setSource(img);
+///     try fdm.update();
+/// }
+/// ```
 pub fn FeatureDistributionMatching(comptime T: type) type {
     comptime assert(T == Rgb or T == Rgba or T == u8);
 
@@ -275,46 +312,7 @@ pub fn FeatureDistributionMatching(comptime T: type) type {
     };
 }
 
-/// Feature Distribution Matching (FDM) for image style transfer and domain adaptation.
-///
-/// Transfers the color distribution (mean and covariance) from a target image to a source image,
-/// effectively matching the "style" or "look" of the target while preserving the structure of the source.
-///
-/// ## Algorithm
-/// FDM works by matching the first and second-order statistics of pixel distributions:
-/// 1. **Accumulate** - Stream pixels to compute mean and covariance statistics (O(1) memory)
-/// 2. **Whiten** - Transform source to have identity covariance: Cov(X_src) = I
-/// 3. **Color Transform** - Apply target covariance: Cov(X_result) = Cov(X_target)
-/// 4. **Restore Mean** - Add target mean to final result
-///
-/// ## Mathematical Foundation
-/// Given source X_src and target X_target, FDM computes:
-/// ```
-/// X_result = (X_src - μ_src) * Σ_src^(-1/2) * U_src * Σ_target^(1/2) * U_target^T + μ_target
-/// ```
-/// Where μ is mean, Σ is covariance eigenvalues, and U is covariance eigenvectors.
-///
-/// ## Paper Reference
-/// "Keep it Simple: Image Statistics Matching for Domain Adaptation"
-/// by A. Abramov, et al. (2020)
-/// https://arxiv.org/abs/2005.12551
-///
-/// ## Example Usage
-/// ```zig
-/// // Single image transformation
-/// var fdm: FeatureDistributionMatching(Rgb(u8)) = .init(allocator);
-/// defer fdm.deinit();
-/// try fdm.match(source_img, target_img); // Modifies source_img in-place
-///
-/// // Batch processing with same target style
-/// var fdm: FeatureDistributionMatching(Rgb(u8)) = .init(allocator);
-/// defer fdm.deinit();
-/// try fdm.setTarget(style_image);
-/// for (images_to_transform) |img| {
-///     try fdm.setSource(img);
-///     try fdm.update(); // Modifies img in-place
-/// }
-/// ```
+/// Undoes Bessel's correction, converting the sample variance to population variance.
 fn populationVariance(stats: RunningStats(f64, .variance)) f64 {
     const n_samples = stats.currentN();
     if (n_samples <= 1) return 0;

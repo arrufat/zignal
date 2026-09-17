@@ -1,11 +1,11 @@
-//! Font format detection and identification
+//! Font format detection and identification.
 
 const std = @import("std");
 const Io = std.Io;
 
 const isGzipPath = @import("../font.zig").isGzipPath;
 
-/// Supported font formats for automatic detection and loading
+/// Supported font formats for automatic detection and loading.
 pub const FontFormat = enum {
     bdf, // Bitmap Distribution Format
     pcf, // Portable Compiled Format (X11)
@@ -13,19 +13,19 @@ pub const FontFormat = enum {
     otf, // OpenType (sfnt with CFF outlines)
     ttc, // TrueType/OpenType collection (`ttcf`)
 
-    /// BDF format signature
+    /// BDF format signature.
     const bdf_signature = "STARTFONT";
 
-    /// PCF format signature
+    /// PCF format signature.
     const pcf_signature = "\x01fcp";
 
-    /// sfnt version tags
+    /// sfnt version tags.
     const ttf_signature = "\x00\x01\x00\x00";
     const ttf_apple_signature = "true";
     const otf_signature = "OTTO";
     const ttc_signature = "ttcf";
 
-    /// Detect font format from the first few bytes of data
+    /// Detects font format from the first few bytes of data.
     pub fn detectFromBytes(data: []const u8) ?FontFormat {
         if (std.mem.startsWith(u8, data, bdf_signature)) return .bdf;
         if (std.mem.startsWith(u8, data, pcf_signature)) return .pcf;

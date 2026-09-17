@@ -1,7 +1,7 @@
-//! Terminal capability detection and support utilities
+//! Terminal capability detection and graphics protocol probing.
 //!
-//! Provides cross-platform terminal detection for graphics protocols
-//! (sixel, kitty, iterm2) and other terminal features.
+//! Provides cross-platform terminal detection for graphics protocols (Sixel, Kitty, iTerm2),
+//! TTY status, and window dimensions.
 
 const std = @import("std");
 const Io = std.Io;

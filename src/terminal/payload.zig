@@ -10,8 +10,8 @@ const Interpolation = @import("../image/interpolation.zig").Interpolation;
 const png = @import("../codecs.zig").png;
 const detect = @import("detect.zig");
 
-/// Scale `image` to fit the optional `width`/`height` (via `detect.aspectScale`)
-/// and PNG-encode it. Caller owns the returned bytes (free with `gpa.free`).
+/// Scales `image` to fit optional `width`/`height` bounds (via `detect.aspectScale`)
+/// and PNG-encodes it. The caller owns the returned bytes (free with `gpa.free`).
 pub fn scaledPng(
     comptime T: type,
     io: Io,

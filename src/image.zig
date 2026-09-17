@@ -1,12 +1,7 @@
-//! Image processing module
+//! Core image types and image processing operations.
 //!
-//! This module provides a unified interface to image processing functionality.
-//! The main Image struct supports generic pixel types and provides operations for:
-//! - Loading and saving images (PNG, JPEG, BMP)
-//! - Terminal display with multiple formats (SGR, Braille, Sixel, Kitty)
-//! - Geometric transforms (resize, rotate, crop, flip)
-//! - Filters (blur, sharpen, edge detection)
-//! - Views for zero-copy sub-image operations
+//! The generic `Image(T)` container supports arbitrary pixel types, zero-copy sub-views,
+//! geometric transformations, convolution filters, color mapping, and terminal display.
 //!
 //! ## Aliasing contract
 //!
@@ -59,8 +54,10 @@ const box_blur = @import("image/box_blur.zig");
 pub const MotionBlur = @import("image/motion_blur.zig").MotionBlur;
 const iir_gaussian = @import("image/iir_gaussian.zig");
 
+/// Algorithm for Gaussian blur operations.
 pub const GaussianMethod = enum {
-    /// Exact separable kernel with radius `ceil(3·sigma)` and mirrored borders; cost grows with sigma.
+    /// Exact separable kernel with radius `ceil(3·sigma)` and mirrored borders;
+    /// cost grows with sigma.
     fir,
     /// Young–van Vliet recursive approximation with replicated borders: constant cost per pixel,
     /// within a few 8-bit units of `.fir`. Meant for large sigma; below `iir_gaussian.min_sigma`
@@ -70,6 +67,7 @@ pub const GaussianMethod = enum {
     auto,
 };
 
+/// Options configuring Gaussian blur execution.
 pub const GaussianBlurOptions = struct {
     method: GaussianMethod = .fir,
 
@@ -184,8 +182,8 @@ pub fn Image(comptime T: type) type {
             };
         }
 
-        /// Constructs an image of `rows` and `cols` size by reinterpreting the provided slice of `bytes` as a slice of `T`.
-        /// The length of the `bytes` slice must be exactly `rows * cols * @sizeOf(T)`.
+        /// Constructs a `rows` by `cols` image by reinterpreting `bytes` as `T` pixels.
+        /// The length of `bytes` must be exactly `rows * cols * @sizeOf(T)`.
         pub fn initFromBytes(rows: u32, cols: u32, bytes: []u8) Image(T) {
             const expected_len = std.math.mul(usize, rows, cols) catch @panic("Image.initFromBytes overflow");
             const expected_bytes = std.math.mul(usize, expected_len, @sizeOf(T)) catch @panic("Image.initFromBytes overflow");
@@ -407,7 +405,7 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Converts the image to a different pixel type, writing into a pre-allocated output image.
-        /// The output image `out` must have the same dimensions as `self`. Rows run in bands on `io`.
+        /// `out` must have the same dimensions as `self`. Rows run in parallel bands on `io`.
         pub fn convertInto(self: Self, io: Io, comptime TargetType: type, out: Image(TargetType)) void {
             assert(self.hasSameShape(out));
             if (comptime T == TargetType) {
@@ -430,8 +428,8 @@ pub fn Image(comptime T: type) type {
             }
         }
 
-        /// Converts the image to a different pixel type.
-        /// Allocates a new image with the target pixel type and converts each pixel using the color conversion system.
+        /// Converts the image to a different pixel type using the color conversion system.
+        /// Allocates a new image with the target pixel type.
         ///
         /// Example usage:
         /// ```zig
@@ -468,20 +466,19 @@ pub fn Image(comptime T: type) type {
         /// Provides fine-grained control over output format, palette modes, and dithering.
         ///
         /// Display modes:
-        /// - `.sgr`: Uses SGR (Select Graphic Rendition) with Unicode half-block characters (requires monospace font with U+2580 support)
-        /// - `.braille`: Uses Braille patterns for 2x4 resolution (requires Unicode Braille support U+2800-U+28FF; dots binarized by `threshold`, optionally tinted with truecolor or a quantized palette)
-        /// - `.sixel`: Uses the sixel graphics protocol if supported
-        /// - `.kitty`: Uses the kitty graphics protocol if supported
-        /// - `.iterm2`: Uses the iTerm2 inline image protocol if supported
-        /// - `.auto`: Automatically selects best available format: kitty -> iterm2 -> sixel -> sgr
+        /// - `.sgr`: Uses SGR Unicode half-block characters (needs a font with U+2580).
+        /// - `.braille`: Uses Braille patterns for 2x4 resolution (Unicode U+2800-U+28FF).
+        /// - `.sixel`: Uses the Sixel graphics protocol if supported.
+        /// - `.kitty`: Uses the Kitty graphics protocol if supported.
+        /// - `.iterm2`: Uses the iTerm2 inline image protocol if supported.
+        /// - `.auto`: Selects the best available format: Kitty -> iTerm2 -> Sixel -> SGR.
         ///
         /// Example:
         /// ```zig
         /// const img = try Image(Rgb).load(io, allocator, "test.png");
-        /// std.debug.print("{f}", .{img.display(io, .sgr)});           // SGR with unicode half blocks
-        /// std.debug.print("{f}", .{img.display(io, .{ .braille = .{ .threshold = 0.5 } })}); // 2x4 braille, truecolor tint
-        /// std.debug.print("{f}", .{img.display(io, .{ .sixel = .{ .palette_mode = .adaptive } })});
-        /// std.debug.print("{f}", .{img.display(io, .{ .kitty = .default })});  // Kitty graphics protocol
+        /// std.debug.print("{f}", .{img.display(io, .sgr)});
+        /// std.debug.print("{f}", .{img.display(io, .{ .sixel = .default })});
+        /// std.debug.print("{f}", .{img.display(io, .{ .kitty = .default })});
         /// ```
         pub fn display(self: *const Self, io: Io, display_format: DisplayFormat) DisplayFormatter(T) {
             return .{
@@ -580,12 +577,14 @@ pub fn Image(comptime T: type) type {
             return Transform(T).letterbox(self, io, out, allocator, method);
         }
 
-        /// Rotates the image by `angle` (radians) around its center. `.expand` sizes the result to
-        /// fit the rotated content, `.crop` keeps the input dimensions. Caller must `deinit` the result.
+        /// Rotates the image by `angle` (radians) around its center. `.expand` sizes the
+        /// result to fit the rotated content, `.crop` keeps the input size. Caller owns the result.
         ///
         /// Example:
         /// ```zig
-        /// var rotated = try image.rotate(io, allocator, std.math.pi / 4.0, .bilinear, .zero, .expand);
+        /// var rotated = try image.rotate(
+        ///     io, allocator, std.math.pi / 4.0, .bilinear, .zero, .expand,
+        /// );
         /// defer rotated.deinit(allocator);
         /// ```
         pub fn rotate(self: Self, io: Io, allocator: Allocator, angle: f32, method: Interpolation, border: BorderMode, output: RotateSize) !Self {
@@ -604,8 +603,8 @@ pub fn Image(comptime T: type) type {
             return Transform(T).rotateBounds(self, angle);
         }
 
-        /// Crops a rectangular region from the image. Coordinates are rounded; out-of-bounds areas
-        /// are filled with zeroed pixels (e.g., black/transparent). Caller must `deinit` the result.
+        /// Crops a rectangular region from the image. Coordinates are rounded; out-of-bounds
+        /// areas are filled with zeroed pixels (black/transparent). Caller owns the result.
         ///
         /// Example:
         /// ```zig
@@ -788,7 +787,7 @@ pub fn Image(comptime T: type) type {
             try OrderStatisticBlurOps(T).midpointBlur(self, io, out, allocator, radius, border);
         }
 
-        /// Applies an alpha-trimmed mean blur, discarding a fraction of the lowest and highest pixels.
+        /// Applies an alpha-trimmed mean blur, discarding a fraction of lowest/highest pixels.
         /// `trim_fraction` must be in [0, 0.5).
         ///
         /// This filter is useful when you want the smoothness of an average but need robustness to
@@ -838,13 +837,10 @@ pub fn Image(comptime T: type) type {
             return Enhancement(T).autocontrast(self, cutoff);
         }
 
-        /// Equalizes the histogram of an image to improve contrast.
+        /// Equalizes the histogram of an image in place to improve contrast.
         ///
-        /// This function redistributes pixel intensities to achieve a more uniform histogram,
-        /// which typically enhances contrast in images with poor contrast or uneven lighting.
-        /// The technique maps the cumulative distribution function (CDF) of pixel values to
-        /// create a more even spread of intensities across the full range.
-        ///
+        /// Redistributes pixel intensities to achieve a more uniform histogram by mapping
+        /// the cumulative distribution function (CDF) across the full intensity range.
         /// For color images (RGB/RGBA), each channel is equalized independently.
         ///
         /// Example usage:
@@ -1093,7 +1089,7 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Applies motion blur effect to the image.
-        /// Supports linear motion blur (camera/object movement) and radial blur (zoom/spin effects).
+        /// Supports linear blur (camera/object motion) and radial blur (zoom/spin effects).
         /// The output image must be pre-allocated with the same dimensions as the input.
         ///
         /// Example usage:
@@ -1102,7 +1098,9 @@ pub fn Image(comptime T: type) type {
         /// defer out.deinit(allocator);
         ///
         /// // Linear motion blur
-        /// try image.motionBlur( allocator,out, .{ .linear = .{ .angle = 0, .distance = 30 }});
+        /// try image.motionBlur(
+        ///     io, allocator, out, .{ .linear = .{ .angle = 0, .distance = 30 } },
+        /// );
         /// ```
         pub fn motionBlur(
             self: Self,
@@ -1144,8 +1142,8 @@ pub fn Image(comptime T: type) type {
         /// This is more perceptually meaningful than PSNR for image quality assessment.
         /// Uses an 11x11 Gaussian window with σ=1.5, as recommended in the original paper.
         ///
-        /// Reference: Wang et al., "Image Quality Assessment: From Error Visibility to Structural Similarity",
-        /// IEEE Transactions on Image Processing, 2004.
+        /// Reference: Wang et al., "Image Quality Assessment: From Error Visibility to
+        /// Structural Similarity", IEEE Transactions on Image Processing, 2004.
         ///
         /// ## Implementation Notes:
         /// - For RGB/RGBA pixels: converts to luminance using Rec. 709 weights (ignores alpha)
@@ -1232,7 +1230,7 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Applies a colormap to the image, converting it to an RGB image.
-        /// If min_val or max_val are null in the map configuration, they are computed from the image content.
+        /// If `min_val` or `max_val` are null, they are computed from the image content.
         /// Uses luminance for multi-channel input images.
         pub fn applyColormap(
             self: Self,

@@ -1,4 +1,4 @@
-//! Dynamic matrix with runtime dimensions
+//! Dynamic matrix with runtime dimensions and linear algebra operations.
 //!
 //! ## Single operations
 //!
@@ -1360,9 +1360,9 @@ pub fn Matrix(comptime T: type) type {
             }
         };
 
-        /// Compute QR decomposition with column pivoting using Modified Gram-Schmidt algorithm
-        /// Returns Q, R matrices and permutation such that A*P = Q*R where Q is orthogonal and R is upper triangular
-        /// Also computes the numerical rank of the matrix
+        /// Computes QR decomposition with column pivoting using Modified Gram-Schmidt.
+        /// Returns Q, R, and a permutation with A*P = Q*R (Q orthogonal, R upper triangular).
+        /// Also computes the numerical rank of the matrix.
         pub fn qr(self: Self) !QrResult {
             comptime assert(@typeInfo(T) == .float);
             const m = self.rows;
@@ -1543,7 +1543,7 @@ pub fn Matrix(comptime T: type) type {
             return svd_module.svd(T, allocator, self, options);
         }
 
-        /// Symmetric (Hermitian) eigendecomposition A = V · diag(λ) · Vᵀ via cyclic Jacobi rotations.
+        /// Symmetric eigendecomposition A = V · diag(λ) · Vᵀ via cyclic Jacobi rotations.
         /// Returns eigenvalues as an n×1 column in ascending order and `vectors` whose column j is
         /// the unit eigenvector corresponding to the j-th eigenvalue. Unlike `svd`, this recovers
         /// signed eigenvalues, so it handles indefinite matrices. The matrix must be square; it is
@@ -1555,7 +1555,7 @@ pub fn Matrix(comptime T: type) type {
             return eigen_module.eigh(T, allocator, self);
         }
 
-        /// Default formatting (scientific notation)
+        /// Formats matrix with scientific notation.
         pub fn format(self: Self, writer: *Io.Writer) !void {
             try formatting.formatMatrix(self, "{e}", writer);
         }

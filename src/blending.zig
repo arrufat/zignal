@@ -1,3 +1,5 @@
+//! Color blending modes and compositing operations.
+
 const std = @import("std");
 const assert = std.debug.assert;
 const expect = std.testing.expect;
@@ -5,6 +7,7 @@ const expectEqual = std.testing.expectEqual;
 
 const Rgba = @import("color.zig").Rgba;
 
+/// Color blending modes following standard compositing equations.
 pub const Blending = enum {
     none,
     normal,

@@ -1,7 +1,10 @@
+//! Flood fill segmentation algorithm supporting 4- and 8-connectivity.
+
 const std = @import("std");
 const Image = @import("../image.zig").Image;
 const meta = @import("../meta.zig");
 
+/// Options controlling flood fill thresholding, connectivity, and comparison mode.
 pub const FloodFillOptions = struct {
     pub const Connectivity = enum(u8) {
         four = 4,
