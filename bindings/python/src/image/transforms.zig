@@ -1,4 +1,4 @@
-//! Geometric transformations for Image objects
+//! Geometric transformation methods for Image objects.
 
 const std = @import("std");
 

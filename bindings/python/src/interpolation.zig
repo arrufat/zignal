@@ -1,8 +1,10 @@
+//! Interpolation enum documentation and stub metadata for Python bindings.
+
 const zignal = @import("zignal");
 
 const stub_metadata = @import("stub_metadata.zig");
 
-// Documentation for the Interpolation enum (used at runtime and for stub generation)
+/// Docstring for the Interpolation enum, used at runtime and for stub generation.
 pub const interpolation_doc =
     \\Interpolation methods for image resizing.
     \\
@@ -21,7 +23,7 @@ pub const interpolation_doc =
     \\which can cause ringing artifacts but may also enhance sharpness.
 ;
 
-// Per-value documentation for stub generation
+/// Per-value documentation for stub generation.
 pub const interpolation_values = [_]stub_metadata.EnumValueDoc{
     .{ .name = "NEAREST", .doc = "Fastest, pixelated, good for pixel art" },
     .{ .name = "BILINEAR", .doc = "Fast, smooth, good for real-time" },
@@ -31,7 +33,7 @@ pub const interpolation_values = [_]stub_metadata.EnumValueDoc{
     .{ .name = "LANCZOS", .doc = "Highest quality, slowest, for final output" },
 };
 
-// No runtime PyTypeObject; Interpolation is exposed via Python's IntEnum registration
+// No runtime PyTypeObject; Interpolation is exposed through the IntEnum registration.
 
 // ============================================================================
 // INTERPOLATION METHOD STUB GENERATION METADATA

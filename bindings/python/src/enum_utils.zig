@@ -1,3 +1,5 @@
+//! Registration of Zig enums as Python IntEnums, and conversion back to Zig values.
+
 const std = @import("std");
 const BuiltinEnum = std.builtin.Type.Enum;
 
@@ -6,7 +8,7 @@ const zignal = @import("zignal");
 const python = @import("python.zig");
 const c = python.c;
 
-/// Internal: extract enum type info from a Zig type that is either enum or union(enum)
+/// Extracts the enum type info from an enum or union(enum) type.
 fn getEnumInfo(comptime E: type) BuiltinEnum {
     const ti = @typeInfo(E);
     return switch (ti) {
@@ -22,7 +24,7 @@ fn getEnumInfo(comptime E: type) BuiltinEnum {
     };
 }
 
-/// Register a Python IntEnum for the given Zig enum or union(enum) type.
+/// Registers a Python IntEnum for the given Zig enum or union(enum) type.
 pub fn registerEnum(
     comptime E: type,
     module: *c.PyObject,
@@ -99,7 +101,7 @@ pub fn registerEnum(
     }
 }
 
-/// Convert a Python object (IntEnum or int) to a Zig enum value.
+/// Converts a Python object (IntEnum or int) to a Zig enum value.
 /// Sets a Python exception on failure and returns an error.
 pub fn pyToEnum(comptime E: type, obj: *c.PyObject) !E {
     // Try as int first
@@ -140,7 +142,7 @@ pub fn pyToEnum(comptime E: type, obj: *c.PyObject) !E {
     return out;
 }
 
-/// Return the tag enum type for a union(enum)
+/// Returns the tag enum type of a union(enum).
 fn TagOf(comptime U: type) type {
     const ti = @typeInfo(U);
     if (ti != .@"union" or ti.@"union".tag_type == null) {
@@ -149,7 +151,7 @@ fn TagOf(comptime U: type) type {
     return ti.@"union".tag_type.?;
 }
 
-/// Convert a Python object (IntEnum or int) to the tag of a union(enum)
+/// Converts a Python object (IntEnum or int) to the tag of a union(enum).
 pub fn pyToUnionTag(comptime U: type, obj: *c.PyObject) !TagOf(U) {
     var v = c.PyLong_AsLong(obj);
     if (v == -1 and c.PyErr_Occurred() != null) {
@@ -180,7 +182,7 @@ pub fn pyToUnionTag(comptime U: type, obj: *c.PyObject) !TagOf(U) {
     return error.InvalidValue;
 }
 
-/// Internal: resolve the underlying enum type for T (either T itself if enum, or its tag type if union)
+/// Resolves the underlying enum type of `T`: itself if an enum, its tag type if a union.
 fn ResolvedEnum(comptime T: type) type {
     return switch (@typeInfo(T)) {
         .@"enum" => T,
@@ -197,7 +199,7 @@ pub fn pyToEnumOpt(comptime E: type, obj: ?*c.PyObject, defaults: struct { missi
     return pyToEnum(E, o);
 }
 
-/// Convert a c_long integer to a Zig enum value (or union tag)
+/// Converts a c_long to a Zig enum value (or union tag).
 pub fn longToEnum(comptime T: type, value: c_long) !ResolvedEnum(T) {
     const EI = getEnumInfo(T);
     inline for (EI.field_values) |field_value| {

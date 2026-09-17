@@ -1,3 +1,5 @@
+//! Python bindings for QR code encoding and decoding.
+
 const std = @import("std");
 
 const zignal = @import("zignal");

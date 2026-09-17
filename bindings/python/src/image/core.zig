@@ -1,4 +1,4 @@
-//! Core image operations: I/O, memory management, type conversion
+//! Core Image methods: loading, saving, copying, views, conversion, and quality metrics.
 
 const std = @import("std");
 const Io = std.Io;
@@ -578,7 +578,7 @@ pub fn image_convert(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     var target_rgb = false;
     var target_rgba = false;
 
-    // TODO: Remove explicit cast after Python 3.10 is dropped
+    // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
     const is_type_obj = c.PyObject_TypeCheck(dtype_obj.?, @as([*c]c.PyTypeObject, @ptrCast(&c.PyType_Type))) != 0;
     // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
     if (is_type_obj) {

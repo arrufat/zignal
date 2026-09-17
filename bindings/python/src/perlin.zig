@@ -1,3 +1,5 @@
+//! Python `perlin` module function.
+
 const std = @import("std");
 
 const zignal = @import("zignal");

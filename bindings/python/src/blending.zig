@@ -1,8 +1,8 @@
-//! Blending enum for color blending operations
+//! Blending enum documentation and stub metadata for Python bindings.
 
 const stub_metadata = @import("stub_metadata.zig");
 
-// Documentation for the Blending enum (used at runtime and for stub generation)
+/// Docstring for the Blending enum, used at runtime and for stub generation.
 pub const blending_doc =
     \\Blending modes for color composition.
     \\
@@ -46,7 +46,7 @@ pub const blending_doc =
     \\- Overlay must be RGBA or convertible to RGBA
 ;
 
-// Per-value documentation for stub generation
+/// Per-value documentation for stub generation.
 pub const blending_values = [_]stub_metadata.EnumValueDoc{
     .{ .name = "NONE", .doc = "No blending; overlay replaces base pixel" },
     .{ .name = "NORMAL", .doc = "Standard alpha blending with transparency" },
@@ -63,4 +63,4 @@ pub const blending_values = [_]stub_metadata.EnumValueDoc{
     .{ .name = "EXCLUSION", .doc = "Like difference but with lower contrast" },
 };
 
-// No conversion wrapper; use enum_utils.pyToEnum(zignal.Blending, obj) where needed
+// No conversion wrapper; use `enum_utils.pyToEnum(zignal.Blending, obj)` where needed.

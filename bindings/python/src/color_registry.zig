@@ -1,5 +1,4 @@
-// Centralized registry for all color type bindings
-// This file defines which color types to expose to Python and their configurations
+//! Registry of the color types exposed to Python, with per-type validation and docstrings.
 
 const std = @import("std");
 
@@ -19,8 +18,7 @@ const Xyb = zignal.Xyb(f64);
 const Xyz = zignal.Xyz(f64);
 const Ycbcr = zignal.Ycbcr(u8);
 
-/// Complete list of all color types available in the system
-/// This serves as the single source of truth for auto-generation
+/// Every color type exposed to Python; the single source of truth for generation.
 pub const color_types = .{
     Gray,
     Rgb,
@@ -37,8 +35,7 @@ pub const color_types = .{
     Ycbcr,
 };
 
-/// Generic color component validation using type introspection
-/// This function determines validation rules based on the actual field types and semantics
+/// Validates a color component against the range of its field and color family.
 pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, value: anytype) bool {
     // Apply validation rules grouped by color type families
     return switch (ColorType) {
@@ -160,9 +157,8 @@ pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, 
     };
 }
 
-/// Get the validation error message for a specific color type
+/// Returns the validation error message for a color type.
 pub fn getValidationErrorMessage(comptime ColorType: type) []const u8 {
-    // Return appropriate error message based on color type
     return switch (ColorType) {
         Gray => "Gray values must be in range 0-255",
         Rgb, Rgba => "RGB values must be in range 0-255",
@@ -180,9 +176,8 @@ pub fn getValidationErrorMessage(comptime ColorType: type) []const u8 {
     };
 }
 
-/// Get the documentation string for a specific color type
+/// Returns the docstring for a color type.
 pub fn getDocumentationString(comptime ColorType: type) []const u8 {
-    // Return appropriate documentation based on color type
     return switch (ColorType) {
         Gray => "A grayscale color using sRGB Luminance (BT.709): Y = 0.2126 R + 0.7152 G + 0.0722 B.",
         Rgb => "A color in the sRGB colorspace, with all components within the range 0-255.",

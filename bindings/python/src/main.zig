@@ -1,3 +1,5 @@
+//! Entry point of the `_zignal` extension module: type, enum, and function registration.
+
 const std = @import("std");
 const zignal = @import("zignal");
 
@@ -40,7 +42,7 @@ var zignal_module = c.PyModuleDef{
     .m_free = null,
 };
 
-// Module function metadata - combines functions from various modules
+/// Module function metadata, combined from the sub-modules.
 pub const module_functions_metadata = clustering.module_functions_metadata ++ optimization.module_functions_metadata ++ perlin.perlin_functions_metadata ++ qrcode.qrcode_functions_metadata;
 
 // Generate PyMethodDef array at compile time

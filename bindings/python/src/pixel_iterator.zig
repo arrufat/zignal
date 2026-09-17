@@ -1,3 +1,5 @@
+//! Python iterator yielding `(row, col, pixel)` tuples over an Image.
+
 const color = @import("color.zig");
 const ImageObject = @import("image.zig").ImageObject;
 const python = @import("python.zig");
@@ -88,7 +90,7 @@ pub var PixelIteratorType = python.buildTypeObject(.{
     .iternext = pixel_iterator_next,
 });
 
-/// Create a new iterator bound to the given Image PyObject
+/// Creates a new iterator bound to the given Image object.
 pub fn new(image_obj: ?*c.PyObject) ?*c.PyObject {
     if (c.PyType_Ready(&PixelIteratorType) < 0) return null;
     const it_obj: ?*PixelIteratorObject = @ptrCast(c.PyType_GenericAlloc(&PixelIteratorType, 0));
@@ -99,7 +101,7 @@ pub fn new(image_obj: ?*c.PyObject) ?*c.PyObject {
     return @ptrCast(it_obj);
 }
 
-// Stub metadata for PixelIterator
+/// Stub metadata for PixelIterator.
 pub const pixel_iterator_special_methods_metadata = [_]@import("stub_metadata.zig").MethodInfo{
     .{
         .name = "__iter__",
