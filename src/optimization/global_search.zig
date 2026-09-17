@@ -1,7 +1,7 @@
 //! Derivative-free, bound-constrained global optimization: MaxLIPO + Trust Region.
 //!
-//! The MaxLIPO+TR method is due to Davis King (dlib's `find_min_global`/`find_max_global`; see his
-//! [A Global Optimization Algorithm Worth Using](https://blog.dlib.net/2017/12/a-global-optimization-algorithm-worth.html)),
+//! The MaxLIPO+TR method is due to Davis King (dlib's `find_min_global`/`find_max_global`; see
+//! https://blog.dlib.net/2017/12/a-global-optimization-algorithm-worth.html),
 //! combining the LIPO method of Malherbe & Vayatis (2017) with a trust-region quadratic refinement.
 //! This is a port of that dlib implementation; the optimizer alternates between two moves:
 //!   - **explore** (MaxLIPO): sample the point that maximizes a piecewise Lipschitz upper bound
@@ -91,8 +91,8 @@ pub const GlobalOptimizer = struct {
         }
     };
 
-    /// One optimization variable: its inclusive box bounds and whether it is integer-valued. Define
-    /// the search space by passing a `[]const Variable` (one per variable) to `init`/`findGlobalOptimum`.
+    /// One optimization variable: its inclusive box bounds and whether it is integer-valued.
+    /// Define search space by passing `[]const Variable` to `init`/`findGlobalOptimum`.
     pub const Variable = struct {
         lower: f64,
         upper: f64,
@@ -109,8 +109,9 @@ pub const GlobalOptimizer = struct {
         /// Minimum trust-region model-predicted improvement required to take an exploit step.
         trust_region_eps: f64 = 0.0,
         /// Maximum number of objective evaluations in flight at once. The default 1 is the plain
-        /// sequential algorithm; values > 1 enable a rolling worker pool in `optimize` (which needs a
-        /// pooled `Io` to actually run in parallel, and a thread-safe objective).
+        /// sequential algorithm and ignores `io`; values > 1 enable a rolling worker pool in
+        /// `optimize` (which needs a pooled `Io` to actually run in parallel, and a thread-safe
+        /// objective).
         max_concurrency: usize = 1,
 
         /// Minimize, with default search settings.
@@ -266,12 +267,11 @@ pub const GlobalOptimizer = struct {
         };
     }
 
-    /// Run the ask-tell loop until the budget is spent, a target is reached, or improvement stalls.
+    /// Run ask-tell loop until budget is spent, target is reached, or improvement stalls.
     ///
-    /// `io` runs the objective evaluations: single-threaded inline, or up to `Options.max_concurrency`
-    /// in parallel on a pooled `Io`. **With `max_concurrency > 1` the objective is called from several
-    /// threads at once (must be thread-safe) and runs are non-deterministic;** `max_concurrency == 1`
-    /// is the deterministic sequential path and ignores `io`.
+    /// `io` runs objective evaluations: single-threaded inline, or up to `max_concurrency`
+    /// in parallel on pooled `Io`. With `max_concurrency > 1` the objective is called from
+    /// several threads at once (must be thread-safe) and runs are non-deterministic.
     pub fn optimize(self: *GlobalOptimizer, io: Io, objective: anytype, stop: StopOptions) !Evaluation {
         if (self.max_concurrency <= 1) {
             var state: StopState = .{ .prev_best = self.best_y };
@@ -377,11 +377,11 @@ pub const GlobalOptimizer = struct {
         return state.since_improve >= pat;
     }
 
-    /// Choose the next point to evaluate, writing it into `x_out`. Port of `get_next_x`.
+    /// Chooses the next point to evaluate, writing it into `x_out`. Port of `get_next_x`.
     ///
-    /// In-flight ("pending") points from concurrent workers count towards the init budget and the
-    /// one-trust-region-at-a-time rule, and lower the surrogate near themselves so two asks don't pick
-    /// the same spot. With none in flight (the sequential path) this is the original behavior.
+    /// In-flight ("pending") points from concurrent workers count towards the init budget and
+    /// the one-trust-region-at-a-time rule, and lower the surrogate near themselves so two
+    /// asks don't pick the same spot. With none in flight this is the original behavior.
     fn ask(self: *GlobalOptimizer, x_out: []f64) !Ask {
         const dims = self.variables.len;
 
@@ -463,7 +463,7 @@ pub const GlobalOptimizer = struct {
     }
 
     /// Random search for the point maximizing the upper bound; writes the best into `x_out`.
-    /// Returns whether that point's bound exceeds the best observed value (i.e. it's worth exploring).
+    /// Returns true if that point's bound exceeds the best observed value (worth exploring).
     /// `pending_x`/`pending_y` are the in-flight points whose imputed values tighten the
     /// bound near themselves. Port of `pick_next_sample_as_max_upper_bound`.
     fn pickMaxUpperBound(self: *GlobalOptimizer, pending_x: []const f64, pending_y: []const f64, x_out: []f64) bool {
@@ -616,11 +616,11 @@ fn sampleInBox(buf: []f64, lower: []const f64, upper: []const f64, is_integer: [
 // One-shot convenience wrapper
 // ---------------------------------------------------------------------------------------
 
-/// Optimize `objective` over the given `variables` (one `Variable` per dimension) until `stop` is
-/// hit (e.g. `.{ .max_evals = 100 }`). `io` runs the evaluations (single-threaded inline, or parallel
-/// on a pooled `Io` when `options.max_concurrency > 1`). `options` is the same `GlobalOptimizer.Options`
-/// the struct API takes — pass `.min_default` or `.max_default` (or a full literal). The returned
-/// `Evaluation` owns its `x`; free it via `result.deinit(allocator)`.
+/// Optimizes `objective` over `variables` (one `Variable` per dimension) until `stop` is hit
+/// (e.g. `.{ .max_evals = 100 }`). `io` runs the evaluations: inline, or in parallel on a
+/// pooled `Io` when `options.max_concurrency > 1`. `options` is the same
+/// `GlobalOptimizer.Options` the struct API takes; pass `.min_default`, `.max_default`, or a
+/// full literal. The returned `Evaluation` owns its `x`; free it via `result.deinit(allocator)`.
 pub fn findGlobalOptimum(
     io: Io,
     allocator: Allocator,

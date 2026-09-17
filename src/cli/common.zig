@@ -1,14 +1,17 @@
+//! Shared utilities for CLI subcommands, file resolution, and output handling.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 const zignal = @import("zignal");
 
+/// Destination target for CLI output (single file or directory for batch processing).
 pub const OutputTarget = struct {
     path: []const u8,
     is_directory: bool,
 
-    /// Resolve the destination path for a given input file. When the target is a
+    /// Resolves the destination path for a given input file. When the target is a
     /// directory, the result is owned by the caller (free via `ResolvedPath.deinit`).
     pub fn resolveOutputPath(self: OutputTarget, allocator: Allocator, input_path: []const u8) !ResolvedPath {
         if (self.is_directory) {
@@ -20,6 +23,7 @@ pub const OutputTarget = struct {
     }
 };
 
+/// Resolved filesystem output path with ownership tracking.
 pub const ResolvedPath = struct {
     path: []const u8,
     owned: bool,
@@ -29,6 +33,7 @@ pub const ResolvedPath = struct {
     }
 };
 
+/// Resolves an output path argument and verifies batch directory requirements.
 pub fn resolveOutputTarget(
     io: Io,
     output_arg: []const u8,

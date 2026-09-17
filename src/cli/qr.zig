@@ -1,3 +1,5 @@
+//! QR subcommand: generates and decodes QR codes.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;

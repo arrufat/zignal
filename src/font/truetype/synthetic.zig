@@ -22,10 +22,10 @@
 //! | 0   | empty |
 //! | 1   | the square and hole of gid 1, through `hlineto`/`vlineto` |
 //! | 2   | the two squares of gid 2, with a leading width operand |
-//! | 3   | diamond of four cubics in one `hvcurveto`, control box (0,0)-(800,700), ending on its start |
+//! | 3   | diamond of 4 cubics in `hvcurveto`, box (0,0)-(800,700), ending on its start |
 //! | 4   | gid 1 again, drawn by a local subr |
 //! | 5   | triangle (100,0),(700,0),(400,600) behind a width, `hstemhm` and two `hintmask`s |
-//! | 6   | the same triangle from `rlineto`, closed by an explicit line back to the start (or a `seac`, see `Options`) |
+//! | 6   | triangle from `rlineto`, closed back to start (or `seac`, see `Options`) |
 //!
 //! The CFF charset names gids 1–6 `A`–`F` (SIDs 34–39).
 

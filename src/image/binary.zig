@@ -1,3 +1,5 @@
+//! Binary image processing and morphological operations.
+
 const std = @import("std");
 
 const Image = @import("../image.zig").Image;
@@ -34,7 +36,10 @@ pub const Kernel = struct {
 
 const Operation = enum { dilate, erode };
 
+/// Binary image algorithms including Otsu thresholding, adaptive thresholding, and morphology.
 pub const Binary = struct {
+    /// Applies Otsu's thresholding to separate foreground from background.
+    /// Returns the optimal computed threshold.
     pub fn thresholdOtsu(image: Image(u8), out: Image(u8), _: std.mem.Allocator) !u8 {
         if (image.rows == 0 or image.cols == 0) {
             return 0;
@@ -83,6 +88,7 @@ pub const Binary = struct {
         return threshold;
     }
 
+    /// Applies adaptive mean thresholding over a local neighborhood of size `radius`.
     pub fn thresholdAdaptiveMean(
         image: Image(u8),
         out: Image(u8),
@@ -118,6 +124,7 @@ pub const Binary = struct {
         }
     }
 
+    /// Dilates foreground regions using the specified structuring element.
     pub fn dilate(
         image: Image(u8),
         out: Image(u8),
@@ -128,6 +135,7 @@ pub const Binary = struct {
         try morph(image, out, allocator, kernel, iterations, .dilate);
     }
 
+    /// Erodes foreground regions using the specified structuring element.
     pub fn erode(
         image: Image(u8),
         out: Image(u8),
@@ -138,6 +146,7 @@ pub const Binary = struct {
         try morph(image, out, allocator, kernel, iterations, .erode);
     }
 
+    /// Performs morphological opening (erosion followed by dilation) to remove small noise.
     pub fn open(
         image: Image(u8),
         out: Image(u8),
@@ -148,6 +157,7 @@ pub const Binary = struct {
         try morphComposite(image, out, allocator, kernel, iterations, .erode, .dilate);
     }
 
+    /// Performs morphological closing (dilation followed by erosion) to bridge small gaps.
     pub fn close(
         image: Image(u8),
         out: Image(u8),

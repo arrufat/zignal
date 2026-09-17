@@ -1,7 +1,4 @@
-//! BDF (Bitmap Distribution Format) font parser for zignal
-//!
-//! This module provides zero-dependency parsing of BDF font files,
-//! enabling support for Unicode bitmap fonts like GNU Unifont.
+//! BDF (Bitmap Distribution Format) font parser for Unicode bitmap fonts.
 
 const std = @import("std");
 const testing = std.testing;
@@ -15,7 +12,7 @@ const writeFileMaybeGzip = @import("../font.zig").writeFileMaybeGzip;
 const BitmapFont = @import("BitmapFont.zig");
 const GlyphData = @import("GlyphData.zig");
 
-/// Errors that can occur during BDF parsing
+/// Errors that can occur during BDF font parsing.
 pub const BdfError = error{
     InvalidFormat,
     InvalidVersion,

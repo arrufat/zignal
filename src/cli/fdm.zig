@@ -1,3 +1,5 @@
+//! FDM subcommand: transfers color distribution statistics from a target image.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;

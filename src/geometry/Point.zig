@@ -1,3 +1,5 @@
+//! N-dimensional point type with vector arithmetic and geometric operations.
+
 const std = @import("std");
 const assert = std.debug.assert;
 const meta = @import("../meta.zig");
@@ -10,8 +12,8 @@ pub const Orientation = enum {
 };
 
 /// A unified point type supporting arbitrary dimensions.
-/// Common dimensions 2D, 3D, 4D have convenient x(), y(), z(), w() accessors.
-/// Direct access to components via .items[index].
+/// Common dimensions 2D, 3D, and 4D provide convenient x(), y(), z(), and w() accessors.
+/// Direct component access is available via `.items[index]`.
 pub fn Point(comptime dim: usize, comptime T: type) type {
     const type_info = @typeInfo(T);
     comptime assert(type_info == .float or type_info == .int);
@@ -21,41 +23,39 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
         const Self = @This();
         items: @Vector(dim, T),
 
-        // Constants
         pub const origin = Self{ .items = @splat(0) };
         pub const dimension = dim;
 
-        // Common accessors (with compile-time bounds checking)
-        /// Get X coordinate (first component)
+        /// Returns the X coordinate (first component).
         pub inline fn x(self: Self) T {
             comptime assert(dim >= 1);
             return self.items[0];
         }
 
-        /// Get Y coordinate (second component)
+        /// Returns the Y coordinate (second component).
         pub inline fn y(self: Self) T {
             comptime assert(dim >= 2);
             return self.items[1];
         }
 
-        /// Get Z coordinate (third component)
+        /// Returns the Z coordinate (third component).
         pub inline fn z(self: Self) T {
             comptime assert(dim >= 3);
             return self.items[2];
         }
 
-        /// Get W coordinate (fourth component)
+        /// Returns the W coordinate (fourth component).
         pub inline fn w(self: Self) T {
             comptime assert(dim >= 4);
             return self.items[3];
         }
 
-        // Construction methods
-        /// Create point from various input types: tuple literals, arrays, slices, or vectors
-        /// Examples:
-        ///   Point(2, f32).init(.{1.0, 2.0})     // tuple literal
-        ///   Point(2, f32).init([_]f32{1, 2})    // array
-        ///   Point(2, f32).init(slice)           // slice
+        /// Creates a point from tuple literals, arrays, slices, or vectors:
+        /// ```zig
+        /// Point(2, f32).init(.{1.0, 2.0});
+        /// Point(2, f32).init([_]f32{1, 2});
+        /// Point(2, f32).init(slice);
+        /// ```
         pub inline fn init(components: anytype) Self {
             const ComponentsType = @TypeOf(components);
             const info = @typeInfo(ComponentsType);
@@ -93,87 +93,86 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             };
         }
 
-        // All vector operations work for any dimension (SIMD-accelerated)
-        /// Add two points component-wise
+        /// Adds two points component-wise.
         pub fn add(self: Self, other: Self) Self {
             return .{ .items = self.items + other.items };
         }
 
-        /// Subtract two points component-wise
+        /// Subtracts two points component-wise.
         pub fn sub(self: Self, other: Self) Self {
             return .{ .items = self.items - other.items };
         }
 
-        /// Scale all components by same scalar value
+        /// Scales all components by the same scalar value.
         pub fn scale(self: Self, scalar: T) Self {
             return .{ .items = self.items * @as(@Vector(dim, T), @splat(scalar)) };
         }
 
-        /// Scale each component by different values
+        /// Scales each component by different values.
         pub fn scaleEach(self: Self, scales: [dim]T) Self {
             return .{ .items = self.items * @as(@Vector(dim, T), scales) };
         }
 
-        /// Compute dot product with another point
+        /// Computes the dot product with another point.
         pub fn dot(self: Self, other: Self) T {
             return @reduce(.Add, self.items * other.items);
         }
 
-        /// Compute Euclidean norm (length) of the point
+        /// Computes the Euclidean norm (length) of the point.
         pub fn norm(self: Self) T {
             comptime assert(@typeInfo(T) == .float);
             return @sqrt(self.normSquared());
         }
 
-        /// Compute squared norm (avoids sqrt for performance)
+        /// Computes the squared norm (avoids square root for performance).
         pub fn normSquared(self: Self) T {
             return self.dot(self);
         }
 
-        /// Normalize to unit length (requires float type)
+        /// Normalizes the point to unit length (requires float type).
         pub fn normalize(self: Self) Self {
             comptime assert(@typeInfo(T) == .float);
             const n = self.norm();
             return if (n == 0) self else self.scale(1.0 / n);
         }
 
-        /// Linear interpolation between two points
+        /// Performs linear interpolation between two points.
         pub fn lerp(self: Self, other: Self, t: T) Self {
             comptime assert(@typeInfo(T) == .float);
             return .{ .items = std.math.lerp(self.items, other.items, @as(@Vector(dim, T), @splat(t))) };
         }
 
-        /// Component-wise minimum with another point
+        /// Computes the component-wise minimum with another point.
         pub fn min(self: Self, other: Self) Self {
             return .{ .items = @min(self.items, other.items) };
         }
 
-        /// Component-wise maximum with another point
+        /// Computes the component-wise maximum with another point.
         pub fn max(self: Self, other: Self) Self {
             return .{ .items = @max(self.items, other.items) };
         }
 
-        /// Clamp each component to the range [min_point, max_point]
+        /// Clamps each component to the range `[min_point, max_point]`.
         pub fn clamp(self: Self, min_point: Self, max_point: Self) Self {
             return .{ .items = std.math.clamp(self.items, min_point.items, max_point.items) };
         }
 
-        /// Compute Euclidean distance to another point
+        /// Computes the Euclidean distance to another point.
         pub fn distance(self: Self, other: Self) T {
             comptime assert(@typeInfo(T) == .float);
             return self.sub(other).norm();
         }
 
-        /// Compute squared distance (avoids sqrt for performance)
+        /// Computes the squared distance (avoids square root for performance).
         pub fn distanceSquared(self: Self, other: Self) T {
             return self.sub(other).normSquared();
         }
 
-        /// Computes the shortest distance from this point to the line segment defined by endpoints `a` and `b`.
+        /// Computes the shortest distance from this point to the line segment
+        /// defined by `a` and `b`.
         ///
-        /// This function calculates the perpendicular distance if the projection of this point onto the line
-        /// containing the segment falls within the segment's boundaries. If the projection falls
-        /// outside, it returns the Euclidean distance to the nearest endpoint (`a` or `b`).
+        /// Calculates perpendicular distance if the projection falls within the segment;
+        /// otherwise returns the Euclidean distance to the nearest endpoint.
         pub fn distanceToSegment(self: Self, a: Self, b: Self) T {
             comptime assert(@typeInfo(T) == .float);
             const ab = b.sub(a);
@@ -213,9 +212,8 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             return if (swap == (u > 0)) .clockwise else .counter_clockwise;
         }
 
-        /// Returns true if, and only if, this point is inside the triangle defined by vertices `a`, `b`, and `c`.
-        /// Uses the barycentric coordinate method.
-        /// Only available for 2D points.
+        /// Returns true if this point is inside the triangle defined by `a`, `b`, and `c`.
+        /// Uses barycentric coordinates. Only available for 2D points.
         pub fn inTriangle(self: Self, a: Self, b: Self, c: Self) bool {
             comptime assert(dim == 2);
             const s = a.sub(c).cross(self.sub(c));
@@ -252,8 +250,7 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             } else true;
         }
 
-        // Dimension conversion/projection methods
-        /// Project to lower dimension by taking first N components
+        /// Projects to a lower dimension by taking the first `new_dim` components.
         pub fn project(self: Self, comptime new_dim: usize) Point(new_dim, T) {
             comptime assert(new_dim <= dim);
             var result: [new_dim]T = undefined;
@@ -263,7 +260,7 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             return .init(result);
         }
 
-        /// Extend to higher dimension by padding with fill_value
+        /// Extends to a higher dimension by padding trailing components with `fill_value`.
         pub fn extend(self: Self, comptime new_dim: usize, fill_value: T) Point(new_dim, T) {
             comptime assert(new_dim >= dim);
             var result: [new_dim]T = undefined;
@@ -276,27 +273,25 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             return .init(result);
         }
 
-        // Convenient aliases for common projections
-        /// Project to 2D by taking first 2 components
+        /// Projects to 2D by taking the first 2 components.
         pub fn to2d(self: Self) Point(2, T) {
             comptime assert(dim >= 2);
             return self.project(2);
         }
 
-        /// Project to 3D by taking first 3 components
+        /// Projects to 3D by taking the first 3 components.
         pub fn to3d(self: Self) Point(3, T) {
             comptime assert(dim >= 3);
             return self.project(3);
         }
 
-        /// Convert 2D point to 3D by adding Z coordinate
+        /// Converts a 2D point to 3D by appending the given Z coordinate.
         pub fn extendTo3d(self: Self, z_val: T) Point(3, T) {
             comptime assert(dim == 2);
             return self.extend(3, z_val);
         }
 
-        // Special methods for common dimensions
-        /// Rotate 2D point around center by given angle (radians)
+        /// Rotates a 2D point around `center` by the given `angle` in radians.
         pub fn rotate(self: Self, angle: T, center: Self) Self {
             comptime assert(@typeInfo(T) == .float);
             comptime assert(dim == 2);
@@ -306,7 +301,8 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             return .init(.{ cos_a * centered.x() - sin_a * centered.y(), sin_a * centered.x() + cos_a * centered.y() }).add(center);
         }
 
-        /// Compute the cross product. For 3D, returns a new Point(3, T). For 2D, returns the scalar (wedge) product.
+        /// Computes the cross product. For 3D, returns a new Point(3, T).
+        /// For 2D, returns the scalar (wedge) product.
         pub fn cross(self: Self, other: Self) switch (dim) {
             2 => T,
             3 => Self,
@@ -323,29 +319,27 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             };
         }
 
-        // Direct vector/array access
-        /// Get underlying SIMD vector
+        /// Returns the underlying SIMD vector.
         pub fn asVector(self: Self) @Vector(dim, T) {
             return self.items;
         }
 
-        /// Convert to array of components
+        /// Converts the point into an array of components.
         pub fn asArray(self: Self) [dim]T {
             return self.items;
         }
 
-        /// Get read-only slice view of components
+        /// Returns a read-only slice view of the components.
         pub fn asSlice(self: *const Self) []const T {
             return &self.items;
         }
 
-        /// Returns true if all components of the two points are equal
+        /// Returns true if all components of the two points are equal.
         pub fn eql(self: Self, other: Self) bool {
             return @reduce(.And, self.items == other.items);
         }
 
-        // Type conversion
-        /// Convert to point with different scalar type
+        /// Converts the point to a new point with scalar component type `U`.
         pub fn as(self: Self, comptime U: type) Point(dim, U) {
             var result: @Vector(dim, U) = undefined;
             inline for (0..dim) |i| {
@@ -354,8 +348,7 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
             return .{ .items = result };
         }
 
-        // Homogeneous coordinate conversion for 3D points
-        /// Convert 3D homogeneous point to 2D by dividing by Z
+        /// Converts a 3D homogeneous point to 2D by dividing by Z.
         pub fn to2dHomogeneous(self: Self) Point(2, T) {
             comptime assert(dim == 3);
             return if (self.z() == 0) self.to2d() else self.scale(1 / self.z()).to2d();

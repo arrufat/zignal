@@ -1,7 +1,7 @@
-//! Sixel graphics protocol support for image rendering
+//! Sixel graphics protocol support for terminal image rendering.
 //!
-//! This module provides functionality to convert images to sixel format,
-//! which is supported by various terminal emulators for displaying graphics.
+//! Encodes raster images to Sixel escape sequences with palette quantization
+//! and run-length encoding (RLE).
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;

@@ -1,3 +1,5 @@
+//! Integral image (summed-area table) computation for constant-time area queries.
+
 const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
@@ -36,8 +38,8 @@ pub fn Integral(comptime T: type) type {
         /// The integral image allows O(1) computation of rectangular region sums.
         ///
         /// After building the integral image:
-        /// - sat[r,c] = sum of all pixels in rectangle from (0,0) to (r,c) inclusive
-        /// - Rectangle sum from (r1,c1) to (r2,c2) = sat[r2,c2] - sat[r1-1,c2] - sat[r2,c1-1] + sat[r1-1,c1-1]
+        /// - `sat[r, c]` = sum of all pixels in rectangle from `(0, 0)` to `(r, c)` inclusive.
+        /// - Rectangle sum: `sat[r2,c2] - sat[r1-1,c2] - sat[r2,c1-1] + sat[r1-1,c1-1]`.
         pub fn plane(src_img: Image(T), dst_img: Image(f32)) void {
             assert(src_img.rows == dst_img.rows and src_img.cols == dst_img.cols);
 
@@ -77,11 +79,11 @@ pub fn Integral(comptime T: type) type {
             }
         }
 
-        /// Computes the sum of pixels in a rectangular region using the integral image.
-        /// The rectangle is defined by (r1, c1) as top-left and (r2, c2) as bottom-right, inclusive.
+        /// Computes pixel sum in a rectangular region using the integral image.
+        /// The rectangle is defined by `(r1, c1)` to `(r2, c2)` inclusive.
         ///
-        /// Formula: sum = sat[r2,c2] - sat[r1-1,c2] - sat[r2,c1-1] + sat[r1-1,c1-1]
-        /// Handles boundary conditions when r1=0 or c1=0.
+        /// Formula: `sum = sat[r2,c2] - sat[r1-1,c2] - sat[r2,c1-1] + sat[r1-1,c1-1]`.
+        /// Handles boundary conditions when `r1 == 0` or `c1 == 0`.
         pub fn sum(sat: Image(f32), r1: usize, c1: usize, r2: usize, c2: usize) f32 {
             return sat.data[r2 * sat.stride + c2] -
                 (if (c1 > 0) sat.data[r2 * sat.stride + (c1 - 1)] else 0) -

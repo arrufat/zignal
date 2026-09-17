@@ -1,3 +1,5 @@
+//! 3D Perlin noise generation with configurable octaves, persistence, and lacunarity.
+
 const std = @import("std");
 const assert = std.debug.assert;
 const lerp = std.math.lerp;
@@ -6,13 +8,13 @@ const expectEqual = std.testing.expectEqual;
 /// Controls how Perlin noise is generated.
 pub fn PerlinOptions(T: type) type {
     return struct {
-        /// The amplitude of the generated noise
+        /// The amplitude of the generated noise.
         amplitude: T = 1,
         /// The scaling in each dimension before noise is called.
         frequency: T = 1,
         /// How many times the function will be called.
         octaves: usize = 1,
-        /// Gain [0, 1], controls how quickly the octaves die out.  A value of 0.5 is a
+        /// Gain [0, 1], controls how quickly the octaves die out. A value of 0.5 is a
         /// conventional choice.
         persistence: T = 0.5,
         /// Determines how much finer a scale each subsequent octave should use.
@@ -42,7 +44,7 @@ pub fn PerlinOptions(T: type) type {
     };
 }
 
-/// Generates perlin noise using the specified options.
+/// Generates Perlin noise using the specified options.
 pub fn perlin(T: type, x: T, y: T, z: T, opts: PerlinOptions(T)) T {
     var total_noise: T = 0;
     var max_amplitude: T = 0.0;

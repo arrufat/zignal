@@ -1,3 +1,5 @@
+//! Diff subcommand: computes and visualizes pixel differences between two images.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;

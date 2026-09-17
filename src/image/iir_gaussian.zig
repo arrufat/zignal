@@ -24,7 +24,8 @@ const vec_len = std.simd.suggestVectorLength(f32) orelse 4;
 /// lanes keep two chains in flight.
 const lanes = 2 * vec_len;
 
-/// y[n] = b·x[n] + a1·y[n-1] + a2·y[n-2] + a3·y[n-3], one pass per direction.
+/// Recursive filter coefficients, one pass per direction:
+/// `y[n] = b·x[n] + a1·y[n-1] + a2·y[n-2] + a3·y[n-3]`.
 pub const Coefficients = struct {
     b: f32,
     a1: f32,

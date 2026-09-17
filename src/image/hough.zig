@@ -1,3 +1,5 @@
+//! Hough transform for detecting straight lines in binary or edge images.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
@@ -63,6 +65,7 @@ pub const HoughTransform = struct {
         };
     }
 
+    /// Frees lookup tables allocated for the Hough transform.
     pub fn deinit(self: *Self, allocator: Allocator) void {
         allocator.free(self.cos_table);
         allocator.free(self.sin_table);

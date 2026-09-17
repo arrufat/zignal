@@ -1,7 +1,5 @@
-//! Geometry module - All geometric types and utilities
-//!
-//! This module provides a unified interface to all geometric types in the system.
-//! Each geometric type is implemented as a separate file using Zig's file-as-struct pattern.
+//! Geometric primitives: N-dimensional points, axis-aligned rectangles,
+//! 2D coordinate transforms (similarity, affine, projective), and convex hulls.
 
 // Import points from geometry subdirectory
 const points = @import("geometry/Point.zig");

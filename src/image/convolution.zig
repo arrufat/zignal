@@ -1,3 +1,5 @@
+//! Spatial 2D and separable convolution filtering.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -904,14 +906,16 @@ fn SeparablePass(comptime SrcT: type, comptime DstT: type, comptime AccumIntT: t
             }
         }
 
-        /// Column-tiled 1D pass along rows (src -> dst); tiling keeps the working set cache-resident
-        /// and, unlike per-row bases, lets LLVM hoist the tap offsets (row-major measured 0.9x on f32).
+        /// Column-tiled 1D pass along rows (src -> dst); tiling keeps the working set
+        /// cache-resident and, unlike per-row bases, lets LLVM hoist the tap offsets
+        /// (row-major measured 0.9x on f32).
         fn vertical(io: Io, src: Image(SrcT), dst: Image(DstT), allocator: Allocator, kernel: []const KernelT, border_mode: BorderMode) !void {
             try verticalPass(io, src, dst, allocator, kernel, border_mode, false);
         }
 
         /// Bands cover every row; each band emits its border rows from the row table and its
-        /// interior rows through the tiled (or `box`) fast path, so no rows wait on the caller thread.
+        /// interior rows through the tiled (or `box`) fast path, so no rows wait on the caller
+        /// thread.
         fn verticalPass(io: Io, src: Image(SrcT), dst: Image(DstT), allocator: Allocator, kernel: []const KernelT, border_mode: BorderMode, box: bool) !void {
             const table: BorderIndexTable = try .init(allocator, src.rows, kernel.len, border_mode);
             defer table.deinit(allocator);

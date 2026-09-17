@@ -1,3 +1,5 @@
+//! Edge detection operators including Sobel and Shen-Castan.
+
 const std = @import("std");
 const Io = std.Io;
 const assert = std.debug.assert;
@@ -12,22 +14,21 @@ const convolvePair = @import("convolution.zig").convolvePair;
 const parallel = @import("../parallel.zig");
 const ShenCastan = @import("ShenCastan.zig");
 
-/// Sobel X gradient kernel (horizontal edges)
+/// Sobel X gradient kernel (horizontal edges).
 const sobel_x = [3][3]f32{
     .{ -1, 0, 1 },
     .{ -2, 0, 2 },
     .{ -1, 0, 1 },
 };
 
-/// Sobel Y gradient kernel (vertical edges)
+/// Sobel Y gradient kernel (vertical edges).
 const sobel_y = [3][3]f32{
     .{ -1, -2, -1 },
     .{ 0, 0, 0 },
     .{ 1, 2, 1 },
 };
 
-/// Edge detection operations.
-/// Provides Sobel and Shen-Castan edge detection algorithms.
+/// Edge detection operations providing Sobel and Shen-Castan algorithms.
 pub fn Edges(comptime T: type) type {
     return struct {
         /// Applies the Sobel filter, writing the per-pixel gradient magnitude into `out` as a
@@ -430,7 +431,8 @@ fn findZeroCrossings(bli: Image(u8), edges: *Image(u8), use_forward: bool) !void
     }
 }
 
-/// Computes adaptive gradient magnitudes using local window statistics with integral image acceleration
+/// Computes adaptive gradient magnitudes using local window statistics
+/// accelerated with integral images.
 fn computeAdaptiveGradients(
     gray: Image(f32),
     bli: Image(u8),
@@ -512,7 +514,7 @@ fn computeAdaptiveGradients(
 }
 
 /// Applies hysteresis thresholding for final edge linking using BFS for O(N) performance.
-/// Invariant: pixels are marked in `out` before being enqueued so each pixel is processed at most once.
+/// Invariant: pixels are marked in `out` before being enqueued, so each is processed once.
 fn applyHysteresis(
     edges: Image(u8),
     gradients: Image(f32),

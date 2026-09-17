@@ -1,3 +1,5 @@
+//! Feature descriptor matching including brute-force Hamming distance matcher.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
@@ -6,41 +8,41 @@ const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
 const BinaryDescriptor = @import("BinaryDescriptor.zig");
 
-/// A match between two feature descriptors
+/// A match between two feature descriptors.
 pub const Match = struct {
-    /// Index of the query descriptor
+    /// Index of the query descriptor.
     query_idx: usize,
 
-    /// Index of the train descriptor
+    /// Index of the train descriptor.
     train_idx: usize,
 
-    /// Distance between descriptors (Hamming distance for binary)
+    /// Distance between descriptors (Hamming distance for binary descriptors).
     distance: f32,
 
-    /// Compare matches by distance (for sorting)
+    /// Compares matches by distance for sorting.
     pub fn compareDistance(context: void, a: Match, b: Match) bool {
         _ = context;
         return a.distance < b.distance;
     }
 
-    /// Check if this is a good match based on distance threshold
+    /// Checks if this is a good match based on distance threshold.
     pub fn isGood(self: Match, threshold: f32) bool {
         return self.distance < threshold;
     }
 };
 
-/// Brute-force matcher for binary descriptors using Hamming distance
+/// Brute-force matcher for binary descriptors using Hamming distance.
 pub const BruteForceMatcher = struct {
-    /// Whether to cross-check matches (match must be mutual best match)
+    /// Whether to cross-check matches (match must be mutual best match).
     cross_check: bool = false,
 
-    /// Maximum allowed Hamming distance for a match
+    /// Maximum allowed Hamming distance for a match.
     max_distance: u32 = 64,
 
-    /// Lowe's ratio test threshold (0.7-0.8 typical)
+    /// Lowe's ratio test threshold (0.7-0.8 typical).
     ratio_threshold: f32 = 0.8,
 
-    /// Match descriptors from query set to train set
+    /// Matches descriptors from query set to train set.
     pub fn match(
         self: BruteForceMatcher,
         allocator: Allocator,
@@ -105,7 +107,7 @@ pub const BruteForceMatcher = struct {
         return try matches.toOwnedSlice(allocator);
     }
 
-    /// Find k nearest neighbors for each query descriptor
+    /// Finds the k nearest neighbors for each query descriptor.
     pub fn knnMatch(
         self: BruteForceMatcher,
         allocator: Allocator,
@@ -161,7 +163,7 @@ pub const BruteForceMatcher = struct {
         return all_matches;
     }
 
-    /// Find radius neighbors - all matches within a distance threshold
+    /// Finds radius neighbors: all matches within a distance threshold.
     pub fn radiusMatch(
         self: BruteForceMatcher,
         allocator: Allocator,
@@ -211,7 +213,7 @@ pub const BruteForceMatcher = struct {
         return all_matches;
     }
 
-    /// Helper: Find best match for a single descriptor
+    /// Finds the best match for a single descriptor.
     fn findBestMatch(
         self: BruteForceMatcher,
         query: BinaryDescriptor,
@@ -233,7 +235,7 @@ pub const BruteForceMatcher = struct {
     }
 };
 
-/// Compute match statistics
+/// Summary statistics of matched feature pairs.
 pub const MatchStats = struct {
     total_matches: usize,
     mean_distance: f32,

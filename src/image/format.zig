@@ -1,4 +1,4 @@
-//! Image format detection and identification
+//! Image format detection and identification.
 
 const std = @import("std");
 const Io = std.Io;
@@ -9,14 +9,14 @@ const gif = codecs.gif;
 const jpeg = codecs.jpeg;
 const png = codecs.png;
 
-/// Supported image formats for automatic detection and loading
+/// Supported image formats for automatic detection and loading.
 pub const ImageFormat = enum {
     png,
     jpeg,
     bmp,
     gif,
 
-    /// Detect image format from the first few bytes of data
+    /// Detects image format from the first few bytes of file data.
     pub fn detectFromBytes(data: []const u8) ?ImageFormat {
         // PNG signature
         if (data.len >= 8) {

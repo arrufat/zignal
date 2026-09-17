@@ -1,3 +1,5 @@
+//! Contrast adjustment, autocontrast, and histogram equalization operations.
+
 const std = @import("std");
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);

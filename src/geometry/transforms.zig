@@ -1,3 +1,5 @@
+//! 2D geometric coordinate transformations: similarity, affine, and projective.
+
 const std = @import("std");
 const parallel = @import("../parallel.zig");
 const assert = std.debug.assert;
@@ -6,8 +8,8 @@ const SMatrix = @import("../matrix.zig").SMatrix;
 const Matrix = @import("../matrix.zig").Matrix;
 const Point = @import("Point.zig").Point;
 
-/// Applies a similarity transform to a point.  By default, it will be initialized to the identity
-/// function.  Use the find method to update the transform to map between two sets of points.
+/// 2D similarity transformation representing uniform scale, rotation, and translation.
+/// Initialized to the identity transform by default.
 pub fn SimilarityTransform(comptime T: type) type {
     comptime assert(@typeInfo(T) == .float);
     return struct {

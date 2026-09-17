@@ -78,10 +78,10 @@ fn ensureArrayCapacityWithinLimit(list: *ArrayList(u8), allocator: Allocator, re
     try list.ensureTotalCapacityPrecise(allocator, target);
 }
 
-/// PNG signature: 8 bytes that identify a PNG file
+/// PNG signature: 8-byte magic header that identifies a PNG file.
 pub const signature = [_]u8{ 137, 80, 78, 71, 13, 10, 26, 10 };
 
-/// PNG color types
+/// Standard PNG color types.
 pub const ColorType = enum(u8) {
     grayscale = 0,
     rgb = 2,
@@ -107,7 +107,7 @@ pub const ColorType = enum(u8) {
     }
 };
 
-/// PNG filter types for row filtering
+/// PNG row filter types.
 pub const FilterType = enum(u8) {
     none = 0,
     sub = 1,
@@ -116,7 +116,7 @@ pub const FilterType = enum(u8) {
     paeth = 4,
 };
 
-/// sRGB rendering intent values
+/// Standard sRGB rendering intent values.
 pub const SrgbRenderingIntent = enum(u8) {
     perceptual = 0,
     relative_colorimetric = 1,
@@ -124,7 +124,7 @@ pub const SrgbRenderingIntent = enum(u8) {
     absolute_colorimetric = 3,
 };
 
-/// PNG chunk structure
+/// Low-level PNG chunk structure.
 pub const Chunk = struct {
     length: u32,
     type: [4]u8,
@@ -134,7 +134,7 @@ pub const Chunk = struct {
     truncated: bool = false,
 };
 
-/// PNG IHDR (header) chunk data and metadata
+/// Decoded PNG IHDR chunk header metadata.
 pub const Header = struct {
     width: u32,
     height: u32,
@@ -168,7 +168,8 @@ pub const Header = struct {
     }
 
     /// Returns true if the image format supports alpha transparency (RGBA or Grayscale+Alpha).
-    /// Note: Palette images may also have transparency via tRNS chunks, but this checks the color type definition.
+    /// Note: Palette images may also have transparency via tRNS chunks, but this checks
+    /// the color type definition.
     pub fn hasAlpha(self: Header) bool {
         return self.color_type.hasAlpha();
     }
@@ -184,7 +185,7 @@ pub const Header = struct {
     }
 };
 
-/// Adam7 interlacing constants
+/// Adam7 interlacing pass constants.
 const Adam7Pass = struct {
     x_start: u32,
     y_start: u32,
@@ -202,7 +203,7 @@ const adam7_passes = [7]Adam7Pass{
     .{ .x_start = 0, .y_start = 1, .x_step = 1, .y_step = 2 },
 };
 
-/// Calculate sub-image dimensions for Adam7 pass
+/// Calculates sub-image dimensions for an Adam7 interlacing pass.
 fn adam7PassDimensions(pass: u8, width: u32, height: u32) struct { width: u32, height: u32 } {
     if (pass >= 7) return .{ .width = 0, .height = 0 };
 
@@ -219,7 +220,7 @@ fn adam7PassDimensions(pass: u8, width: u32, height: u32) struct { width: u32, h
     return .{ .width = pass_width, .height = pass_height };
 }
 
-/// Calculate total scanline data size for interlaced image
+/// Calculates total scanline data size for an interlaced image.
 fn adam7TotalSize(header: Header) !usize {
     var total_size: usize = 0;
     const channels = header.channels();
@@ -284,7 +285,7 @@ fn enforceHeaderLimits(header: Header, limits: DecodeLimits) !void {
     }
 }
 
-/// PNG decoder/encoder state
+/// PNG decoder state.
 pub const PngState = struct {
     header: Header,
     palette: ?[][3]u8 = null,
@@ -292,7 +293,8 @@ pub const PngState = struct {
     idat_data: ArrayList(u8),
     scan_data_bytes: usize = 0,
 
-    /// Input was truncated; the decoded image may be partial (prefix rows, rest zeroed) or complete.
+    /// Input was truncated; the decoded image may be partial (prefix rows, rest zeroed) or
+    /// complete.
     truncated: bool = false,
 
     pub fn deinit(self: *PngState, gpa: Allocator) void {
@@ -560,7 +562,7 @@ pub const ChunkReader = struct {
     }
 };
 
-/// Parse IHDR chunk
+/// Parses the PNG IHDR header chunk.
 fn parseHeader(chunk: Chunk) !Header {
     if (!std.mem.eql(u8, &chunk.type, "IHDR")) {
         return error.InvalidHeader;
@@ -800,7 +802,7 @@ fn isZlibTruncation(decompressor: *const flate.Decompress) bool {
     return if (decompressor.err) |err| err == error.EndOfStream else false;
 }
 
-/// Convert PNG image data to its most natural Zignal Image type
+/// Converts PNG image data to its natural Zignal image type.
 pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !union(enum) {
     grayscale: Image(u8),
     rgb: Image(Rgb),
@@ -1243,7 +1245,7 @@ pub const ChunkWriter = struct {
     }
 };
 
-/// Create IHDR chunk data
+/// Creates IHDR chunk data.
 fn createIHDR(header: Header) ![13]u8 {
     var ihdr_data: [13]u8 = undefined;
 
@@ -1335,7 +1337,7 @@ pub const FilterMode = union(enum) {
     fixed: FilterType, // Use a specific filter type
 };
 
-/// Helper function to map pixel types to PNG ColorType
+/// Maps pixel types to their corresponding PNG ColorType.
 fn getColorType(comptime T: type) ColorType {
     return switch (T) {
         u8 => .grayscale,
@@ -1359,7 +1361,8 @@ fn chunkRows(header: Header) u32 {
     return @min(rows, @max(header.height, 1));
 }
 
-/// adler32 of `a ++ b` from the two checksums and `b`'s length (zlib's adler32_combine).
+/// Adler-32 checksum of `a ++ b` from the two checksums and `b`'s length
+/// (zlib's `adler32_combine`).
 fn adlerCombine(a: u32, b: u32, b_len: usize) u32 {
     const base: u64 = 65521;
     const rem: u64 = b_len % base;
@@ -1503,7 +1506,7 @@ fn encodeRaw(io: Io, gpa: Allocator, image_data: []const u8, width: u32, height:
     return writer.toOwnedSlice();
 }
 
-/// Generic PNG encoding function that works with any supported pixel type
+/// Generic PNG encoding function that works with any supported pixel type.
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
     const color_type = getColorType(T);
 
@@ -1728,7 +1731,7 @@ fn calculateFilterCost(filtered_data: []const u8) u32 {
     return cost;
 }
 
-/// Select the best filter type for a scanline
+/// Selects the best filter type for a scanline.
 fn selectBestFilter(
     src_row: []const u8,
     previous_row: ?[]const u8,

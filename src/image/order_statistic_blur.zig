@@ -1,3 +1,5 @@
+//! Order-statistic filtering: median, min, max, and arbitrary percentile blurs.
+
 const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
@@ -25,7 +27,7 @@ const Vec16 = @Vector(16, u16);
 /// [16b, 16b+15], fine[b][s] counts value 16b+s. u16 counts are safe because the
 /// two-level path only runs for window <= 255 (population <= 255^2 < 65536).
 const TwoLevelColumn = struct {
-    /// u16 counts hold up to window^2 samples, so the two-level path requires this.
+    /// `u16` counts hold up to `window^2` samples, so the two-level path requires this.
     const max_window = 255;
 
     coarse: [16]u16 align(32) = @splat(0),

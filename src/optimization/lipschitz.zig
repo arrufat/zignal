@@ -3,8 +3,8 @@
 //!
 //! For evaluated points (x_i, y_i) the surrogate is
 //!   ub(x) = min_i [ y_i + sqrt(offset_i + sum_k slopes_k*(x_k - x_i,k)^2) ].
-//! The per-dimension `slopes` (squared Lipschitz constants) and per-point `offsets` (noise terms)
-//! are fit so the surrogate is consistent with every observed pair while being as tight as possible.
+//! The per-dimension `slopes` (squared Lipschitz constants) and per-point `offsets`
+//! (noise terms) are fit so the surrogate is consistent with every observed pair.
 //!
 //! dlib fits them by reformulating a hard-margin linear SVM. That is exactly the convex QP
 //!   minimize ||u||^2  subject to  A u >= c   (u >= 0 falls out of the dual),
@@ -146,9 +146,9 @@ pub const UpperBound = struct {
         return ub;
     }
 
-    /// Nearest-neighbor `y` among the stored points (Euclidean over `x`). Used to impute a provisional
-    /// value for an in-flight ("pending") point so concurrent asks don't collapse onto it. Returns 0
-    /// when there are no points yet.
+    /// Nearest-neighbor `y` among the stored points (Euclidean over `x`). Used to impute a
+    /// provisional value for an in-flight ("pending") point so concurrent asks don't collapse
+    /// onto it. Returns 0 when there are no points yet.
     pub fn nearestY(self: *const UpperBound, x: []const f64) f64 {
         var best_d: f64 = std.math.inf(f64);
         var best_y: f64 = 0;
@@ -163,8 +163,8 @@ pub const UpperBound = struct {
     }
 
     /// Like `evaluate`, but also lowers the bound near in-flight points (point p at
-    /// `pending_xs[p*dims..][0..dims]`, provisional value `pending_ys[p]`), reusing the current slopes
-    /// with a zero offset (no refit). The cheap read-only analogue of dlib's
+    /// `pending_xs[p*dims..][0..dims]`, provisional value `pending_ys[p]`), reusing the current
+    /// slopes with a zero offset (no refit). The cheap read-only analogue of dlib's
     /// `build_upper_bound_with_all_function_evals`.
     pub fn evaluateWithPending(
         self: *const UpperBound,

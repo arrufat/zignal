@@ -1,7 +1,4 @@
-//! Histogram computation for images
-//!
-//! This module provides histogram functionality for grayscale and color images.
-//! Supports u8, Rgb, and Rgba pixel types.
+//! Histogram computation and analysis for grayscale and color images.
 
 const std = @import("std");
 const testing = std.testing;
@@ -12,10 +9,10 @@ const Image = @import("../image.zig").Image;
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
 
-/// Generic histogram type that adapts its structure based on the pixel type.
-/// For u8: single channel histogram
-/// For Rgb: three channel histogram (r, g, b)
-/// For Rgba: four channel histogram (r, g, b, a)
+/// Generic histogram type that adapts its structure based on the pixel type:
+/// - `u8`: single-channel histogram (`[256]u32`).
+/// - `Rgb`: three-channel histogram (`r`, `g`, `b`).
+/// - `Rgba`: four-channel histogram (`r`, `g`, `b`, `a`).
 pub fn Histogram(comptime T: type) type {
     return switch (T) {
         u8 => struct {

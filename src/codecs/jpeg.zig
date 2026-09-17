@@ -1,6 +1,7 @@
 //! Pure Zig JPEG state and baseline encoder implementation.
 //! Decoder supports baseline and progressive DCT JPEG images.
-//! Encoder implements baseline (SOF0) JPEG with 4:4:4, 4:2:2, or 4:2:0 chroma subsampling and adjustable quality.
+//! Encoder implements baseline (SOF0) JPEG with 4:4:4, 4:2:2, or 4:2:0 chroma subsampling
+//! and adjustable quality.
 
 const std = @import("std");
 const assert = std.debug.assert;
@@ -47,10 +48,10 @@ fn accumulateWithLimit(current: *usize, addend: usize, limit: usize, limit_error
     current.* = new_total;
 }
 
-// JPEG signature: 2 bytes that identify a JPEG file (SOI marker)
+/// JPEG signature: 2-byte magic header that identifies a JPEG file (SOI marker).
 pub const signature = [_]u8{ 0xFF, 0xD8 };
 
-/// Zigzag scan order for 8x8 DCT blocks
+/// Zigzag scan order for 8x8 DCT blocks.
 pub const zigzag = [64]u8{
     0,  1,  8,  16, 9,  2,  3,  10,
     17, 24, 32, 25, 18, 11, 4,  5,
@@ -62,7 +63,7 @@ pub const zigzag = [64]u8{
     53, 60, 61, 54, 47, 55, 62, 63,
 };
 
-/// JPEG Header information extracted from SOF marker
+/// JPEG header information extracted from the SOF marker.
 pub const Header = struct {
     width: u32,
     height: u32,

@@ -1,3 +1,5 @@
+//! Info subcommand: inspects and displays image metadata and format details.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;

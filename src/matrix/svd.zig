@@ -1,3 +1,5 @@
+//! Singular Value Decomposition (SVD) using the Golub-Reinsch algorithm.
+
 const std = @import("std");
 
 const Matrix = @import("Matrix.zig").Matrix;
@@ -19,13 +21,13 @@ pub const Mode = enum {
 /// Internal state machine for the SVD algorithm's iterative process.
 /// Based on the classical Golub-Reinsch algorithm.
 const State = enum {
-    /// Test if the superdiagonal element can be set to zero (decoupling test)
+    /// Test if the superdiagonal element can be set to zero (decoupling test).
     test_splitting,
-    /// Cancel the superdiagonal element using Givens rotations
+    /// Cancel the superdiagonal element using Givens rotations.
     cancellation,
-    /// Check if the algorithm has converged for the current singular value
+    /// Check if the algorithm has converged for the current singular value.
     test_convergence,
-    /// Final convergence check and sign correction
+    /// Final convergence check and sign correction.
     convergence_check,
 };
 
@@ -78,7 +80,7 @@ pub fn Result(comptime T: type) type {
 /// "Handbook for Automatic Computation, vol. II, Linear Algebra" (Springer-Verlag) into C.
 /// An iteration counter is added to prevent stalls.
 ///
-/// Sets `converged = 0` on success, or `k` if the algorithm fails to converge at the k-th singular value.
+/// Sets `converged = 0` on success, or `k` if it fails to converge at the k-th singular value.
 pub fn svd(
     comptime T: type,
     allocator: std.mem.Allocator,

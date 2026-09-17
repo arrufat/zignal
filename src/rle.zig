@@ -1,7 +1,4 @@
-//! Run-Length Encoding (RLE) utility
-//!
-//! Provides generic RLE compression and expansion logic suitable for various
-//! protocols, including Sixel graphics.
+//! Run-Length Encoding (RLE) utility for data compression and expansion.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -14,8 +11,8 @@ pub fn Entry(comptime T: type) type {
     };
 }
 
-/// Compress a slice using RLE, returning a list of Entries.
-/// Callers own the returned memory.
+/// Compresses a slice using RLE, returning a list of entries.
+/// The caller owns the returned memory.
 pub fn compress(comptime T: type, allocator: Allocator, data: []const T) ![]Entry(T) {
     if (data.len == 0) return &[_]Entry(T){};
 
@@ -39,8 +36,8 @@ pub fn compress(comptime T: type, allocator: Allocator, data: []const T) ![]Entr
     return result.toOwnedSlice(allocator);
 }
 
-/// Decompress a slice of RLE entries into a flat slice.
-/// Callers own the returned memory.
+/// Decompresses a slice of RLE entries into a flat slice.
+/// The caller owns the returned memory.
 pub fn decompress(comptime T: type, allocator: Allocator, entries: []const Entry(T)) ![]T {
     var total_count: usize = 0;
     for (entries) |entry| total_count = try std.math.add(usize, total_count, entry.count);
