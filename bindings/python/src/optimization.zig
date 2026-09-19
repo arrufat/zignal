@@ -471,6 +471,9 @@ fn optimize(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv
     // Initialize the optimizer.
     var opt = zignal.GlobalOptimizer.init(allocator, dims, .{
         .policy = policy,
+        .max_evals = max_evals,
+        .target = target_opt,
+        .patience = patience_opt,
         .seed = seed,
         .upper_bound = .{
             .relative_noise_magnitude = relative_noise_magnitude,
@@ -487,11 +490,10 @@ fn optimize(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv
 
     // Drive the ask-tell loop here (instead of opt.optimize) so a Python exception in the objective
     // aborts immediately — opt.optimize would keep running expensive search steps to the budget
-    // before surfacing the error. The target/patience decision reuses GlobalOptimizer.shouldStop.
+    // before surfacing the error. The stop decision reuses GlobalOptimizer.shouldStop.
     var ctx = PyObjective{ .callable = params.objective.? };
-    const stop: zignal.GlobalOptimizer.StopOptions = .{ .max_evals = max_evals, .target = target_opt, .patience = patience_opt };
-    var stop_state: zignal.GlobalOptimizer.StopState = .{ .prev_best = opt.best_y };
-    while (opt.evals < max_evals) {
+    var stop_state: zignal.GlobalOptimizer.StopState = .{};
+    while (!opt.shouldStop(&stop_state)) {
         const step_res = opt.step(&ctx);
         if (ctx.failed) {
             c.PyErr_Restore(ctx.err_type, ctx.err_value, ctx.err_tb);
@@ -501,7 +503,6 @@ fn optimize(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv
             mapGlobalError(err);
             return null;
         };
-        if (opt.shouldStop(stop, opt.best_y.?, &stop_state)) break;
     }
 
     // Return (best_x, best_y) as a plain tuple. PyTuple_Pack increfs its args, so drop our refs.
