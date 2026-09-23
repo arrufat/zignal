@@ -57,7 +57,7 @@ fn checkPair(io: std.Io, gpa: std.mem.Allocator, dir: []const u8, name: []const 
 fn checkAnimated(io: std.Io, gpa: std.mem.Allocator, dir: []const u8, failures: *usize) !void {
     const gif_path = try std.fmt.allocPrint(gpa, "{s}/gif_animated.gif", .{dir});
     defer gpa.free(gif_path);
-    var anim = zignal.gif.loadAnimated(Rgba, io, gpa, gif_path, .{}) catch |err| {
+    var anim = zignal.AnimatedImage(Rgba).load(io, gpa, gif_path) catch |err| {
         std.debug.print("FAIL gif_animated.gif: decode error {t}\n", .{err});
         failures.* += 1;
         return;

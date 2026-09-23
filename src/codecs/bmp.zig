@@ -29,7 +29,6 @@ const Rgba = @import("../color.zig").Rgba(u8);
 /// BMP file signature: "BM".
 pub const signature = [_]u8{ 'B', 'M' };
 
-const max_file_size_default: usize = 100 * 1024 * 1024;
 const max_dimensions_default: u32 = 8192;
 const max_pixels_default: u64 = 67_108_864; // 8K x 8K
 const max_palette_entries_default: u32 = 256;
@@ -38,7 +37,7 @@ const max_palette_entries_default: u32 = 256;
 /// corresponding limit.
 pub const DecodeLimits = struct {
     /// Maximum number of bytes accepted in the original BMP buffer.
-    max_bmp_bytes: usize = max_file_size_default,
+    max_bmp_bytes: usize = codecs.max_file_size,
     /// Maximum allowed width in pixels.
     max_width: u32 = max_dimensions_default,
     /// Maximum allowed height in pixels.
@@ -122,18 +121,16 @@ pub const Header = struct {
     }
 };
 
-inline fn exceeds(comptime T: type, limit: T, value: T) bool {
-    return limit != 0 and value > limit;
-}
+const exceeds = codecs.exceeds;
 
 fn enforceHeaderLimits(header: Header, limits: DecodeLimits) !void {
-    if (exceeds(u32, limits.max_width, header.width) or
-        exceeds(u32, limits.max_height, header.height))
+    if (exceeds(limits.max_width, header.width) or
+        exceeds(limits.max_height, header.height))
     {
         return error.ImageTooLarge;
     }
-    if (exceeds(u64, limits.max_pixels, header.totalPixels())) return error.ImageTooLarge;
-    if (exceeds(u32, limits.max_palette_entries, header.palette_entries)) return error.InvalidPaletteSize;
+    if (exceeds(limits.max_pixels, header.totalPixels())) return error.ImageTooLarge;
+    if (exceeds(limits.max_palette_entries, header.palette_entries)) return error.InvalidPaletteSize;
 }
 
 /// Maximum number of bytes accepted for a DIB header (cap on the leading size
@@ -164,7 +161,7 @@ fn readFileHeader(reader: *Io.Reader, limits: DecodeLimits) !FileHeader {
     if (!std.mem.eql(u8, sig, &signature)) return error.InvalidBmpSignature;
 
     const file_size = try reader.takeInt(u32, .little);
-    if (limits.max_bmp_bytes != 0 and file_size > limits.max_bmp_bytes) return error.BmpDataTooLarge;
+    if (exceeds(limits.max_bmp_bytes, file_size)) return error.BmpDataTooLarge;
     _ = try reader.takeInt(u16, .little); // reserved1
     _ = try reader.takeInt(u16, .little); // reserved2
     const pixel_offset = try reader.takeInt(u32, .little);
@@ -375,7 +372,7 @@ fn computePostDibOffset(file_header: FileHeader, header: Header) u32 {
 /// Decodes a BMP file from a byte buffer. The returned state borrows from `data`
 /// for pixel data — `data` must outlive the state.
 pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !BmpState {
-    if (limits.max_bmp_bytes != 0 and data.len > limits.max_bmp_bytes) return error.BmpDataTooLarge;
+    if (exceeds(limits.max_bmp_bytes, data.len)) return error.BmpDataTooLarge;
 
     var reader = Io.Reader.fixed(data);
     const file_header = try readFileHeader(&reader, limits);
