@@ -21,7 +21,8 @@
 - **`ConvexHull` is unmanaged**: start from `.empty` and pass the allocator to `find` and `deinit`. ([#477](https://github.com/arrufat/zignal/pull/477))
 - **`jpeg.JpegState` is unmanaged**: `deinit`, `parseSOF` and `parseSOS` take the allocator. ([#478](https://github.com/arrufat/zignal/pull/478))
 - **`Image.rotate` takes a trailing `RotateSize`**: `.expand` keeps the old output bounds and `.crop` keeps the input size, exposed in Python as `expand=True`. ([#484](https://github.com/arrufat/zignal/pull/484))
-- **Minimum Zig version is 0.17.0-dev.1970.**
+- **`ImageFormat.detectFromPath` is removed**: `Image.load` reads the file once, and `detectFromBytes` on the first `ImageFormat.signature_len` bytes replaces it. ([#489](https://github.com/arrufat/zignal/pull/489))
+- **Minimum Zig version is 0.17.0-dev.2163.**
 
 ### Features
 - **Chinese Whispers clustering**: `clustering.chineseWhispers` groups embeddings without a fixed cluster count, also in Python as `chinese_whispers_clustering`. ([#485](https://github.com/arrufat/zignal/pull/485))
@@ -39,6 +40,8 @@
 - **Round joins**: thick polygons, Bezier curves and spline polygons stroke as one joined path with round joins and caps. ([#407](https://github.com/arrufat/zignal/pull/407))
 - **BMP codec**: native reader and writer covering all header versions, 1 to 32 bpp and RLE. ([#348](https://github.com/arrufat/zignal/pull/348))
 - **GIF codec**: native reader and animated writer, with `gif.loadAnimated` returning composed frames. ([#349](https://github.com/arrufat/zignal/pull/349))
+- **JPEG XL and WebP**: `jxl` and `webp` codecs load the system libjxl and libwebp at runtime whenever libc is linked, so Python gets both and the CLI does with `-Dlibc`. ([#488](https://github.com/arrufat/zignal/pull/488))
+- **Animated images**: `AnimatedImage.load` reads GIF, WebP and JPEG XL animations (and any still image as one frame) with per-frame `durations_ms`. ([#489](https://github.com/arrufat/zignal/pull/489))
 - **Quantization and dithering modules**: `image/quantize.zig` and `image/dither.zig` are shared by sixel, braille and GIF.
 - **Terminal output**: iTerm2 inline images and color braille rendering. ([#365](https://github.com/arrufat/zignal/pull/365), [#380](https://github.com/arrufat/zignal/pull/380))
 - **Inferno colormap** in `Image.applyColormap` and Python. ([#378](https://github.com/arrufat/zignal/pull/378))
