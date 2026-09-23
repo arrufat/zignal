@@ -7,14 +7,23 @@ const codecs = @import("../codecs.zig");
 const bmp = codecs.bmp;
 const gif = codecs.gif;
 const jpeg = codecs.jpeg;
+const jxl = codecs.jxl;
+const webp = codecs.webp;
 const png = codecs.png;
 
-/// Supported image formats for automatic detection and loading.
+/// Supported image formats for automatic detection and loading. Each tag names its module in
+/// `codecs.zig`.
 pub const ImageFormat = enum {
     png,
     jpeg,
     bmp,
     gif,
+    jxl,
+    webp,
+
+    /// Bytes `detectFromBytes` needs to tell every format apart (the JPEG XL container and
+    /// `RIFF....WEBP` headers are the longest).
+    pub const signature_len = 12;
 
     /// Detects image format from the first few bytes of file data.
     pub fn detectFromBytes(data: []const u8) ?ImageFormat {
@@ -46,6 +55,9 @@ pub const ImageFormat = enum {
             }
         }
 
+        if (jxl.hasSignature(data)) return .jxl;
+        if (webp.hasSignature(data)) return .webp;
+
         return null;
     }
 
@@ -54,7 +66,7 @@ pub const ImageFormat = enum {
         const file = try Io.Dir.cwd().openFile(io, file_path, .{});
         defer file.close(io);
 
-        var header: [8]u8 = undefined;
+        var header: [signature_len]u8 = undefined;
         var iov = [_][]u8{header[0..]};
         const bytes_read = try file.readStreaming(io, &iov);
 
@@ -70,6 +82,18 @@ pub const ImageFormat = enum {
         if (matches(file_path, ".jpg") or matches(file_path, ".jpeg")) return .jpeg;
         if (matches(file_path, ".bmp")) return .bmp;
         if (matches(file_path, ".gif")) return .gif;
+        if (matches(file_path, ".jxl")) return .jxl;
+        if (matches(file_path, ".webp")) return .webp;
         return null;
+    }
+
+    /// The system library a runtime-loaded codec needs (see `codecs/dynlib.zig`), or null
+    /// for the native codecs.
+    pub fn runtimeLibrary(self: ImageFormat) ?[]const u8 {
+        return switch (self) {
+            .png, .jpeg, .bmp, .gif => null,
+            .jxl => "libjxl",
+            .webp => "libwebp",
+        };
     }
 };
