@@ -823,95 +823,60 @@ pub const EncodeOptions = struct {
     pub const default: EncodeOptions = .{};
 };
 
-fn writeLe(comptime T: type, out: *ArrayList(u8), gpa: Allocator, value: T) !void {
-    var buf: [@sizeOf(T)]u8 = undefined;
-    std.mem.writeInt(T, &buf, value, .little);
-    try out.appendSlice(gpa, &buf);
-}
-
-const HeaderArgs = struct {
-    width: u32,
-    height: u32,
-    bit_depth: u16,
-    compression: Compression,
-    palette_entries: u32 = 0,
+/// Sizes and offsets of an encoded BMP, known before any pixel is written.
+const Layout = struct {
+    bit_depth: u8,
+    row_bytes: usize,
     pixel_bytes: u32,
-    extra_header_bytes: u32 = 0,
-    top_down: bool = false,
-};
+    palette_entries: u32,
+    /// Bytes of the v3 RGBA mask trailer after the info header.
+    mask_bytes: u32,
 
-/// Writes the 14-byte BITMAPFILEHEADER + 40-byte BITMAPINFOHEADER prelude.
-/// `extra_header_bytes` accounts for any v3 mask trailer the caller will write
-/// next; it shifts the pixel data offset accordingly.
-fn writeHeaders(out: *ArrayList(u8), gpa: Allocator, args: HeaderArgs) !void {
-    const palette_bytes = args.palette_entries * 4;
-    const pixel_offset: u32 = 14 + 40 + args.extra_header_bytes + palette_bytes;
-    const file_size: u32 = pixel_offset + args.pixel_bytes;
-
-    // BITMAPFILEHEADER (14 bytes)
-    try out.appendSlice(gpa, &signature);
-    try writeLe(u32, out, gpa, file_size);
-    try writeLe(u16, out, gpa, 0); // reserved1
-    try writeLe(u16, out, gpa, 0); // reserved2
-    try writeLe(u32, out, gpa, pixel_offset);
-
-    // BITMAPINFOHEADER (40 bytes)
-    try writeLe(u32, out, gpa, 40);
-    const h_signed: i32 = if (args.top_down) -@as(i32, @intCast(args.height)) else @intCast(args.height);
-    try writeLe(i32, out, gpa, @intCast(args.width));
-    try writeLe(i32, out, gpa, h_signed);
-    try writeLe(u16, out, gpa, 1); // planes
-    try writeLe(u16, out, gpa, args.bit_depth);
-    try writeLe(u32, out, gpa, @backingInt(args.compression));
-    try writeLe(u32, out, gpa, args.pixel_bytes);
-    try writeLe(i32, out, gpa, 2835); // ~72 DPI
-    try writeLe(i32, out, gpa, 2835);
-    try writeLe(u32, out, gpa, args.palette_entries);
-    try writeLe(u32, out, gpa, 0); // colors_important
-}
-
-/// Encodes a 24bpp BI_RGB BMP from arbitrary input by converting each pixel to Rgb.
-fn encode24Bpp(comptime T: type, allocator: Allocator, image: Image(T), top_down: bool) ![]u8 {
-    const w = image.cols;
-    const h = image.rows;
-    if (w == 0 or h == 0) return error.InvalidDimensions;
-
-    const stride: u32 = @intCast(paddedRowBytes(w, 24));
-    const pixel_bytes: u32 = stride * h;
-
-    var out: ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-
-    try out.ensureTotalCapacity(allocator, 14 + 40 + pixel_bytes);
-    try writeHeaders(&out, allocator, .{
-        .width = w,
-        .height = h,
-        .bit_depth = 24,
-        .compression = .rgb,
-        .pixel_bytes = pixel_bytes,
-        .top_down = top_down,
-    });
-
-    const pixel_start = out.items.len;
-    try out.appendNTimes(allocator, 0, pixel_bytes);
-    const pixels = out.items[pixel_start .. pixel_start + pixel_bytes];
-
-    var src_y: u32 = 0;
-    while (src_y < h) : (src_y += 1) {
-        const file_y = if (top_down) src_y else h - 1 - src_y;
-        const row_off = file_y * stride;
-        var x: u32 = 0;
-        while (x < w) : (x += 1) {
-            const src = image.at(src_y, x).*;
-            const rgb = if (T == Rgb) src else convertColor(Rgb, src);
-            const off = row_off + x * 3;
-            pixels[off + 0] = rgb.b;
-            pixels[off + 1] = rgb.g;
-            pixels[off + 2] = rgb.r;
-        }
+    fn init(comptime T: type, image: Image(T), options: EncodeOptions) !Layout {
+        if (image.cols == 0 or image.rows == 0) return error.InvalidDimensions;
+        const bit_depth: u8 = if (T == Rgba) 32 else if (T == u8 and options.use_palette_for_grayscale) 8 else 24;
+        const row_bytes = paddedRowBytes(image.cols, bit_depth);
+        return .{
+            .bit_depth = bit_depth,
+            .row_bytes = row_bytes,
+            .pixel_bytes = @intCast(row_bytes * image.rows),
+            .palette_entries = if (bit_depth == 8) 256 else 0,
+            .mask_bytes = if (bit_depth == 32) 16 else 0,
+        };
     }
 
-    return out.toOwnedSlice(allocator);
+    fn pixelOffset(self: Layout) u32 {
+        return 14 + 40 + self.mask_bytes + self.palette_entries * 4;
+    }
+
+    fn fileSize(self: Layout) u32 {
+        return self.pixelOffset() + self.pixel_bytes;
+    }
+};
+
+/// Writes the 14-byte BITMAPFILEHEADER and the 40-byte BITMAPINFOHEADER.
+fn writeHeaders(writer: *Io.Writer, layout: Layout, width: u32, height: u32, top_down: bool) !void {
+    // BITMAPFILEHEADER (14 bytes)
+    try writer.writeAll(&signature);
+    try writer.writeInt(u32, layout.fileSize(), .little);
+    try writer.writeInt(u16, 0, .little); // reserved1
+    try writer.writeInt(u16, 0, .little); // reserved2
+    try writer.writeInt(u32, layout.pixelOffset(), .little);
+
+    // BITMAPINFOHEADER (40 bytes)
+    try writer.writeInt(u32, 40, .little);
+    const h_signed: i32 = if (top_down) -@as(i32, @intCast(height)) else @intCast(height);
+    try writer.writeInt(i32, @intCast(width), .little);
+    try writer.writeInt(i32, h_signed, .little);
+    try writer.writeInt(u16, 1, .little); // planes
+    try writer.writeInt(u16, layout.bit_depth, .little);
+    const compression: Compression = if (layout.bit_depth == 32) .bitfields else .rgb;
+    try writer.writeInt(u32, @backingInt(compression), .little);
+    try writer.writeInt(u32, layout.pixel_bytes, .little);
+    try writer.writeInt(i32, 2835, .little); // ~72 DPI
+    try writer.writeInt(i32, 2835, .little);
+    try writer.writeInt(u32, layout.palette_entries, .little);
+    try writer.writeInt(u32, 0, .little); // colors_important
 }
 
 /// Canonical RGBA masks used when encoding 32bpp BI_BITFIELDS:
@@ -923,110 +888,53 @@ const canonical_rgba_masks: Masks = .{
     .a = 0xFF000000,
 };
 
-/// Encodes an `Image(Rgba)` as 32bpp BI_BITFIELDS with a 16-byte RGBA mask
-/// trailer, matching the GDI+ convention.
-fn encode32BppBitfields(allocator: Allocator, image: Image(Rgba), top_down: bool) ![]u8 {
-    const w = image.cols;
-    const h = image.rows;
-    if (w == 0 or h == 0) return error.InvalidDimensions;
+/// Writes `image` as a BMP to `writer`: `Rgba` as 32bpp BI_BITFIELDS (the GDI+ convention),
+/// `u8` as 8bpp with a linear gray palette when `use_palette_for_grayscale`, anything else as
+/// 24bpp. Rows go out one at a time.
+pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(T), options: EncodeOptions) !void {
+    // Serial encoder; `io` keeps the codec entry points uniform.
+    _ = io;
+    const layout: Layout = try .init(T, image, options);
+    try writeHeaders(writer, layout, image.cols, image.rows, options.top_down);
+    switch (layout.bit_depth) {
+        32 => for ([_]u32{ canonical_rgba_masks.r, canonical_rgba_masks.g, canonical_rgba_masks.b, canonical_rgba_masks.a }) |mask| {
+            try writer.writeInt(u32, mask, .little);
+        },
+        8 => for (linear_gray_256) |c| try writer.writeAll(&.{ c.b, c.g, c.r, 0 }),
+        else => {},
+    }
 
-    const stride: u32 = @intCast(paddedRowBytes(w, 32)); // always w*4, 4-aligned
-    const pixel_bytes: u32 = stride * h;
-    const extra_header_bytes: u32 = 16; // 4 RGBA masks
-
-    var out: ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-    try out.ensureTotalCapacity(allocator, 14 + 40 + extra_header_bytes + pixel_bytes);
-
-    try writeHeaders(&out, allocator, .{
-        .width = w,
-        .height = h,
-        .bit_depth = 32,
-        .compression = .bitfields,
-        .pixel_bytes = pixel_bytes,
-        .extra_header_bytes = extra_header_bytes,
-        .top_down = top_down,
-    });
-    // RGBA mask trailer (R, G, B, A — little-endian DWORDs).
-    try writeLe(u32, &out, allocator, canonical_rgba_masks.r);
-    try writeLe(u32, &out, allocator, canonical_rgba_masks.g);
-    try writeLe(u32, &out, allocator, canonical_rgba_masks.b);
-    try writeLe(u32, &out, allocator, canonical_rgba_masks.a);
-
-    const pixel_start = out.items.len;
-    try out.appendNTimes(allocator, 0, pixel_bytes);
-    const pixels = out.items[pixel_start .. pixel_start + pixel_bytes];
-
-    var src_y: u32 = 0;
-    while (src_y < h) : (src_y += 1) {
-        const file_y = if (top_down) src_y else h - 1 - src_y;
-        const row_off = file_y * stride;
-        var x: u32 = 0;
-        while (x < w) : (x += 1) {
-            const px = image.at(src_y, x).*;
-            const off = row_off + x * 4;
-            pixels[off + 0] = px.b;
-            pixels[off + 1] = px.g;
-            pixels[off + 2] = px.r;
-            pixels[off + 3] = px.a;
+    // Row padding stays zero.
+    const row = try allocator.alloc(u8, layout.row_bytes);
+    defer allocator.free(row);
+    @memset(row, 0);
+    for (0..image.rows) |i| {
+        const y = if (options.top_down) i else image.rows - 1 - i;
+        for (0..image.cols) |x| {
+            const px = image.at(y, x).*;
+            if (T == Rgba) {
+                row[x * 4 ..][0..4].* = .{ px.b, px.g, px.r, px.a };
+            } else if (T == u8 and layout.bit_depth == 8) {
+                row[x] = px;
+            } else {
+                const rgb = if (T == Rgb) px else convertColor(Rgb, px);
+                row[x * 3 ..][0..3].* = .{ rgb.b, rgb.g, rgb.r };
+            }
         }
+        try writer.writeAll(row);
     }
-
-    return out.toOwnedSlice(allocator);
-}
-
-/// Encodes an `Image(u8)` as 8bpp indexed BMP with a 256-entry linear gray palette.
-fn encode8BppGray(allocator: Allocator, image: Image(u8), top_down: bool) ![]u8 {
-    const w = image.cols;
-    const h = image.rows;
-    if (w == 0 or h == 0) return error.InvalidDimensions;
-
-    const stride: u32 = @intCast(paddedRowBytes(w, 8));
-    const pixel_bytes: u32 = stride * h;
-    const palette_entries: u32 = 256;
-
-    var out: ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-    try out.ensureTotalCapacity(allocator, 14 + 40 + palette_entries * 4 + pixel_bytes);
-
-    try writeHeaders(&out, allocator, .{
-        .width = w,
-        .height = h,
-        .bit_depth = 8,
-        .compression = .rgb,
-        .palette_entries = palette_entries,
-        .pixel_bytes = pixel_bytes,
-        .top_down = top_down,
-    });
-
-    for (linear_gray_256) |c| {
-        try out.appendSlice(allocator, &.{ c.b, c.g, c.r, 0 });
-    }
-
-    const pixel_start = out.items.len;
-    try out.appendNTimes(allocator, 0, pixel_bytes);
-    const pixels = out.items[pixel_start .. pixel_start + pixel_bytes];
-
-    var src_y: u32 = 0;
-    while (src_y < h) : (src_y += 1) {
-        const file_y = if (top_down) src_y else h - 1 - src_y;
-        const row_off = file_y * stride;
-        var x: u32 = 0;
-        while (x < w) : (x += 1) {
-            pixels[row_off + x] = image.at(src_y, x).*;
-        }
-    }
-
-    return out.toOwnedSlice(allocator);
 }
 
 /// Encodes an image as a BMP byte buffer. Caller owns the returned slice.
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
-    // Serial encoder; `io` keeps the codec entry points uniform.
-    _ = io;
-    if (T == Rgba) return encode32BppBitfields(allocator, image, options.top_down);
-    if (T == u8 and options.use_palette_for_grayscale) return encode8BppGray(allocator, image, options.top_down);
-    return encode24Bpp(T, allocator, image, options.top_down);
+    var aw: Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    try aw.ensureTotalCapacity((try Layout.init(T, image, options)).fileSize());
+    write(T, io, allocator, &aw.writer, image, options) catch |err| return switch (err) {
+        error.WriteFailed => error.OutOfMemory,
+        else => |e| e,
+    };
+    return aw.toOwnedSlice();
 }
 
 /// Encodes the image and writes it to `file_path`.
@@ -1040,68 +948,67 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
 // Tests
 // ---------------------------------------------------------------------------
 
-const ArrayList = std.ArrayList;
-
 const TestFileHeaderOpts = struct {
     file_size: u32 = 0,
     pixel_offset: u32 = 0,
 };
 
-fn appendFileHeader(list: *ArrayList(u8), gpa: Allocator, opts: TestFileHeaderOpts) !void {
-    try list.appendSlice(gpa, &signature);
-    try writeLe(u32, list, gpa, opts.file_size);
-    try writeLe(u16, list, gpa, 0); // reserved1
-    try writeLe(u16, list, gpa, 0); // reserved2
-    try writeLe(u32, list, gpa, opts.pixel_offset);
+fn writeFileHeader(fixture: *Io.Writer, opts: TestFileHeaderOpts) !void {
+    try fixture.writeAll(&signature);
+    try fixture.writeInt(u32, opts.file_size, .little);
+    try fixture.writeInt(u16, 0, .little); // reserved1
+    try fixture.writeInt(u16, 0, .little); // reserved2
+    try fixture.writeInt(u32, opts.pixel_offset, .little);
 }
 
 const TestInfoHeaderOpts = struct {
     width: i32,
     height: i32,
-    bit_depth: u16,
+    bit_depth: u8,
     compression: Compression = .rgb,
     size_image: u32 = 0,
     colors_used: u32 = 0,
 };
 
-fn appendInfoHeader(list: *ArrayList(u8), gpa: Allocator, opts: TestInfoHeaderOpts) !void {
-    try writeLe(u32, list, gpa, 40);
-    try writeLe(i32, list, gpa, opts.width);
-    try writeLe(i32, list, gpa, opts.height);
-    try writeLe(u16, list, gpa, 1); // planes
-    try writeLe(u16, list, gpa, opts.bit_depth);
-    try writeLe(u32, list, gpa, @backingInt(opts.compression));
-    try writeLe(u32, list, gpa, opts.size_image);
-    try writeLe(i32, list, gpa, 2835); // x_pels_per_meter (~72 DPI)
-    try writeLe(i32, list, gpa, 2835); // y_pels_per_meter
-    try writeLe(u32, list, gpa, opts.colors_used);
-    try writeLe(u32, list, gpa, 0); // colors_important
+fn writeInfoHeader(fixture: *Io.Writer, opts: TestInfoHeaderOpts) !void {
+    try fixture.writeInt(u32, 40, .little);
+    try fixture.writeInt(i32, opts.width, .little);
+    try fixture.writeInt(i32, opts.height, .little);
+    try fixture.writeInt(u16, 1, .little); // planes
+    try fixture.writeInt(u16, opts.bit_depth, .little);
+    try fixture.writeInt(u32, @backingInt(opts.compression), .little);
+    try fixture.writeInt(u32, opts.size_image, .little);
+    try fixture.writeInt(i32, 2835, .little); // x_pels_per_meter (~72 DPI)
+    try fixture.writeInt(i32, 2835, .little); // y_pels_per_meter
+    try fixture.writeInt(u32, opts.colors_used, .little);
+    try fixture.writeInt(u32, 0, .little); // colors_important
 }
 
 const TestCoreHeaderOpts = struct {
     width: u16,
     height: u16,
-    bit_depth: u16,
+    bit_depth: u8,
 };
 
-fn appendCoreHeader(list: *ArrayList(u8), gpa: Allocator, opts: TestCoreHeaderOpts) !void {
-    try writeLe(u32, list, gpa, 12);
-    try writeLe(u16, list, gpa, opts.width);
-    try writeLe(u16, list, gpa, opts.height);
-    try writeLe(u16, list, gpa, 1); // planes
-    try writeLe(u16, list, gpa, opts.bit_depth);
+fn writeCoreHeader(fixture: *Io.Writer, opts: TestCoreHeaderOpts) !void {
+    try fixture.writeInt(u32, 12, .little);
+    try fixture.writeInt(u16, opts.width, .little);
+    try fixture.writeInt(u16, opts.height, .little);
+    try fixture.writeInt(u16, 1, .little); // planes
+    try fixture.writeInt(u16, opts.bit_depth, .little);
 }
 
 test "BMP getInfo: 24bpp BITMAPINFOHEADER" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     const pixel_offset: u32 = 14 + 40;
-    try appendFileHeader(&data, gpa, .{ .file_size = pixel_offset + 100, .pixel_offset = pixel_offset });
-    try appendInfoHeader(&data, gpa, .{ .width = 100, .height = 50, .bit_depth = 24 });
+    try writeFileHeader(fixture, .{ .file_size = pixel_offset + 100, .pixel_offset = pixel_offset });
+    try writeInfoHeader(fixture, .{ .width = 100, .height = 50, .bit_depth = 24 });
 
-    var reader = Io.Reader.fixed(data.items);
+    var reader = Io.Reader.fixed(aw.written());
     const header = try getInfo(&reader, .{});
 
     try std.testing.expectEqual(@as(u32, 100), header.width);
@@ -1117,14 +1024,15 @@ test "BMP getInfo: 24bpp BITMAPINFOHEADER" {
 
 test "BMP getInfo: top-down (negative biHeight)" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     const pixel_offset: u32 = 14 + 40;
-    try appendFileHeader(&data, gpa, .{ .file_size = pixel_offset + 100, .pixel_offset = pixel_offset });
-    try appendInfoHeader(&data, gpa, .{ .width = 4, .height = -3, .bit_depth = 32 });
+    try writeFileHeader(fixture, .{ .file_size = pixel_offset + 100, .pixel_offset = pixel_offset });
+    try writeInfoHeader(fixture, .{ .width = 4, .height = -3, .bit_depth = 32 });
 
-    var reader = Io.Reader.fixed(data.items);
+    var reader = Io.Reader.fixed(aw.written());
     const header = try getInfo(&reader, .{});
 
     try std.testing.expectEqual(@as(u32, 4), header.width);
@@ -1134,14 +1042,15 @@ test "BMP getInfo: top-down (negative biHeight)" {
 
 test "BMP getInfo: BITMAPCOREHEADER (OS/2 v1)" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     const pixel_offset: u32 = 14 + 12 + 256 * 3; // CORE palette is 3 bytes per entry
-    try appendFileHeader(&data, gpa, .{ .file_size = pixel_offset + 100, .pixel_offset = pixel_offset });
-    try appendCoreHeader(&data, gpa, .{ .width = 64, .height = 64, .bit_depth = 8 });
+    try writeFileHeader(fixture, .{ .file_size = pixel_offset + 100, .pixel_offset = pixel_offset });
+    try writeCoreHeader(fixture, .{ .width = 64, .height = 64, .bit_depth = 8 });
 
-    var reader = Io.Reader.fixed(data.items);
+    var reader = Io.Reader.fixed(aw.written());
     const header = try getInfo(&reader, .{});
 
     try std.testing.expectEqual(@as(u32, 64), header.width);
@@ -1153,18 +1062,19 @@ test "BMP getInfo: BITMAPCOREHEADER (OS/2 v1)" {
 
 test "BMP getInfo: 32bpp BI_BITFIELDS reads masks" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     const pixel_offset: u32 = 14 + 40 + 12;
-    try appendFileHeader(&data, gpa, .{ .file_size = pixel_offset + 64, .pixel_offset = pixel_offset });
-    try appendInfoHeader(&data, gpa, .{ .width = 4, .height = 4, .bit_depth = 32, .compression = .bitfields });
+    try writeFileHeader(fixture, .{ .file_size = pixel_offset + 64, .pixel_offset = pixel_offset });
+    try writeInfoHeader(fixture, .{ .width = 4, .height = 4, .bit_depth = 32, .compression = .bitfields });
     // RGB masks (no alpha for plain BI_BITFIELDS)
-    try writeLe(u32, &data, gpa, 0x00FF0000);
-    try writeLe(u32, &data, gpa, 0x0000FF00);
-    try writeLe(u32, &data, gpa, 0x000000FF);
+    try fixture.writeInt(u32, 0x00FF0000, .little);
+    try fixture.writeInt(u32, 0x0000FF00, .little);
+    try fixture.writeInt(u32, 0x000000FF, .little);
 
-    var reader = Io.Reader.fixed(data.items);
+    var reader = Io.Reader.fixed(aw.written());
     const header = try getInfo(&reader, .{});
 
     try std.testing.expectEqual(Compression.bitfields, header.compression);
@@ -1179,18 +1089,19 @@ test "BMP getInfo: 32bpp BI_BITFIELDS reads masks" {
 
 test "BMP getInfo: BI_ALPHABITFIELDS reads RGBA masks" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     const pixel_offset: u32 = 14 + 40 + 16;
-    try appendFileHeader(&data, gpa, .{ .file_size = pixel_offset + 64, .pixel_offset = pixel_offset });
-    try appendInfoHeader(&data, gpa, .{ .width = 4, .height = 4, .bit_depth = 32, .compression = .alphabitfields });
-    try writeLe(u32, &data, gpa, 0x00FF0000);
-    try writeLe(u32, &data, gpa, 0x0000FF00);
-    try writeLe(u32, &data, gpa, 0x000000FF);
-    try writeLe(u32, &data, gpa, 0xFF000000);
+    try writeFileHeader(fixture, .{ .file_size = pixel_offset + 64, .pixel_offset = pixel_offset });
+    try writeInfoHeader(fixture, .{ .width = 4, .height = 4, .bit_depth = 32, .compression = .alphabitfields });
+    try fixture.writeInt(u32, 0x00FF0000, .little);
+    try fixture.writeInt(u32, 0x0000FF00, .little);
+    try fixture.writeInt(u32, 0x000000FF, .little);
+    try fixture.writeInt(u32, 0xFF000000, .little);
 
-    var reader = Io.Reader.fixed(data.items);
+    var reader = Io.Reader.fixed(aw.written());
     const header = try getInfo(&reader, .{});
 
     try std.testing.expect(header.masks != null);
@@ -1200,36 +1111,37 @@ test "BMP getInfo: BI_ALPHABITFIELDS reads RGBA masks" {
 
 test "BMP getInfo: BITMAPV4HEADER" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     const pixel_offset: u32 = 14 + 108;
-    try appendFileHeader(&data, gpa, .{ .file_size = pixel_offset + 64, .pixel_offset = pixel_offset });
+    try writeFileHeader(fixture, .{ .file_size = pixel_offset + 64, .pixel_offset = pixel_offset });
     // V4 header = 108 bytes total. Reuse the INFOHEADER shape for the first 40
     // bytes but bump the size field to 108.
     var v4_size_buf: [4]u8 = undefined;
     std.mem.writeInt(u32, &v4_size_buf, 108, .little);
-    try data.appendSlice(gpa, &v4_size_buf);
-    try writeLe(i32, &data, gpa, 8); // width
-    try writeLe(i32, &data, gpa, 8); // height
-    try writeLe(u16, &data, gpa, 1); // planes
-    try writeLe(u16, &data, gpa, 32); // bit_depth
-    try writeLe(u32, &data, gpa, @backingInt(Compression.bitfields));
-    try writeLe(u32, &data, gpa, 0); // size_image
-    try writeLe(i32, &data, gpa, 2835);
-    try writeLe(i32, &data, gpa, 2835);
-    try writeLe(u32, &data, gpa, 0); // colors_used
-    try writeLe(u32, &data, gpa, 0); // colors_important
+    try fixture.writeAll(&v4_size_buf);
+    try fixture.writeInt(i32, 8, .little); // width
+    try fixture.writeInt(i32, 8, .little); // height
+    try fixture.writeInt(u16, 1, .little); // planes
+    try fixture.writeInt(u16, 32, .little); // bit_depth
+    try fixture.writeInt(u32, @backingInt(Compression.bitfields), .little);
+    try fixture.writeInt(u32, 0, .little); // size_image
+    try fixture.writeInt(i32, 2835, .little);
+    try fixture.writeInt(i32, 2835, .little);
+    try fixture.writeInt(u32, 0, .little); // colors_used
+    try fixture.writeInt(u32, 0, .little); // colors_important
     // V4 extension: 16 bytes RGBA masks + 4 bytes color space + 36 bytes endpoints + 12 bytes gamma
-    try writeLe(u32, &data, gpa, 0x00FF0000); // R
-    try writeLe(u32, &data, gpa, 0x0000FF00); // G
-    try writeLe(u32, &data, gpa, 0x000000FF); // B
-    try writeLe(u32, &data, gpa, 0xFF000000); // A
-    try writeLe(u32, &data, gpa, 0x73524742); // 'sRGB' color space
+    try fixture.writeInt(u32, 0x00FF0000, .little); // R
+    try fixture.writeInt(u32, 0x0000FF00, .little); // G
+    try fixture.writeInt(u32, 0x000000FF, .little); // B
+    try fixture.writeInt(u32, 0xFF000000, .little); // A
+    try fixture.writeInt(u32, 0x73524742, .little); // 'sRGB' color space
     // 36 bytes endpoints + 12 bytes gamma = 48 bytes of zeros
-    try data.appendNTimes(gpa, 0, 48);
+    try fixture.splatByteAll(0, 48);
 
-    var reader = Io.Reader.fixed(data.items);
+    var reader = Io.Reader.fixed(aw.written());
     const header = try getInfo(&reader, .{});
 
     try std.testing.expectEqual(DibHeaderKind.v4, header.dib_kind);
@@ -1241,96 +1153,103 @@ test "BMP getInfo: BITMAPV4HEADER" {
 
 test "BMP getInfo rejects bad signature" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
-    try data.appendSlice(gpa, "XX");
-    try writeLe(u32, &data, gpa, 100);
-    try writeLe(u16, &data, gpa, 0);
-    try writeLe(u16, &data, gpa, 0);
-    try writeLe(u32, &data, gpa, 54);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
+    try fixture.writeAll("XX");
+    try fixture.writeInt(u32, 100, .little);
+    try fixture.writeInt(u16, 0, .little);
+    try fixture.writeInt(u16, 0, .little);
+    try fixture.writeInt(u32, 54, .little);
 
-    var reader = Io.Reader.fixed(data.items);
+    var reader = Io.Reader.fixed(aw.written());
     try std.testing.expectError(error.InvalidBmpSignature, getInfo(&reader, .{}));
 }
 
 test "BMP getInfo rejects BI_JPEG / BI_PNG" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
-    try appendFileHeader(&data, gpa, .{ .file_size = 100, .pixel_offset = 54 });
-    try appendInfoHeader(&data, gpa, .{ .width = 8, .height = 8, .bit_depth = 24, .compression = .jpeg });
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
+    try writeFileHeader(fixture, .{ .file_size = 100, .pixel_offset = 54 });
+    try writeInfoHeader(fixture, .{ .width = 8, .height = 8, .bit_depth = 24, .compression = .jpeg });
 
-    var reader = Io.Reader.fixed(data.items);
+    var reader = Io.Reader.fixed(aw.written());
     try std.testing.expectError(error.UnsupportedCompression, getInfo(&reader, .{}));
 }
 
 test "BMP getInfo rejects unsupported bit depth" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
-    try appendFileHeader(&data, gpa, .{ .file_size = 100, .pixel_offset = 54 });
-    try appendInfoHeader(&data, gpa, .{ .width = 8, .height = 8, .bit_depth = 7 });
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
+    try writeFileHeader(fixture, .{ .file_size = 100, .pixel_offset = 54 });
+    try writeInfoHeader(fixture, .{ .width = 8, .height = 8, .bit_depth = 7 });
 
-    var reader = Io.Reader.fixed(data.items);
+    var reader = Io.Reader.fixed(aw.written());
     try std.testing.expectError(error.UnsupportedBitDepth, getInfo(&reader, .{}));
 }
 
 test "BMP getInfo enforces max_bmp_bytes" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
-    try appendFileHeader(&data, gpa, .{ .file_size = 10_000_000, .pixel_offset = 54 });
-    try appendInfoHeader(&data, gpa, .{ .width = 8, .height = 8, .bit_depth = 24 });
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
+    try writeFileHeader(fixture, .{ .file_size = 10_000_000, .pixel_offset = 54 });
+    try writeInfoHeader(fixture, .{ .width = 8, .height = 8, .bit_depth = 24 });
 
-    var reader = Io.Reader.fixed(data.items);
+    var reader = Io.Reader.fixed(aw.written());
     try std.testing.expectError(error.BmpDataTooLarge, getInfo(&reader, .{ .max_bmp_bytes = 1024 }));
 }
 
 test "BMP getInfo enforces max_pixels" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
-    try appendFileHeader(&data, gpa, .{ .file_size = 1000, .pixel_offset = 54 });
-    try appendInfoHeader(&data, gpa, .{ .width = 100, .height = 100, .bit_depth = 24 });
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
+    try writeFileHeader(fixture, .{ .file_size = 1000, .pixel_offset = 54 });
+    try writeInfoHeader(fixture, .{ .width = 100, .height = 100, .bit_depth = 24 });
 
-    var reader = Io.Reader.fixed(data.items);
+    var reader = Io.Reader.fixed(aw.written());
     try std.testing.expectError(error.ImageTooLarge, getInfo(&reader, .{ .max_pixels = 1000 }));
 }
 
 test "BMP getInfo rejects pixel_offset before header end" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
-    try appendFileHeader(&data, gpa, .{ .file_size = 100, .pixel_offset = 20 }); // < 14+40
-    try appendInfoHeader(&data, gpa, .{ .width = 8, .height = 8, .bit_depth = 24 });
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
+    try writeFileHeader(fixture, .{ .file_size = 100, .pixel_offset = 20 }); // < 14+40
+    try writeInfoHeader(fixture, .{ .width = 8, .height = 8, .bit_depth = 24 });
 
-    var reader = Io.Reader.fixed(data.items);
+    var reader = Io.Reader.fixed(aw.written());
     try std.testing.expectError(error.InvalidPixelDataOffset, getInfo(&reader, .{}));
 }
 
 test "BMP decode 24bpp BI_RGB bottom-up" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     const w: u32 = 4;
     const h: u32 = 3;
     const stride: u32 = 12; // 4*3 = 12, already 4-aligned
     const pixel_offset: u32 = 14 + 40;
     const file_size: u32 = pixel_offset + stride * h;
-    try appendFileHeader(&data, gpa, .{ .file_size = file_size, .pixel_offset = pixel_offset });
-    try appendInfoHeader(&data, gpa, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 24 });
+    try writeFileHeader(fixture, .{ .file_size = file_size, .pixel_offset = pixel_offset });
+    try writeInfoHeader(fixture, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 24 });
 
     // Three rows of distinct colors (red, green, blue) — written bottom-up,
     // so file order is blue-row, green-row, red-row.
     const blue_row = [_]u8{ 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00 };
     const green_row = [_]u8{ 0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00 };
     const red_row = [_]u8{ 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF };
-    try data.appendSlice(gpa, &blue_row);
-    try data.appendSlice(gpa, &green_row);
-    try data.appendSlice(gpa, &red_row);
+    try fixture.writeAll(&blue_row);
+    try fixture.writeAll(&green_row);
+    try fixture.writeAll(&red_row);
 
-    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(@as(u32, w), image.cols);
@@ -1345,26 +1264,27 @@ test "BMP decode 24bpp BI_RGB bottom-up" {
 
 test "BMP decode 24bpp BI_RGB top-down" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     const w: u32 = 4;
     const h: u32 = 3;
     const stride: u32 = 12;
     const pixel_offset: u32 = 14 + 40;
     const file_size: u32 = pixel_offset + stride * h;
-    try appendFileHeader(&data, gpa, .{ .file_size = file_size, .pixel_offset = pixel_offset });
-    try appendInfoHeader(&data, gpa, .{ .width = @intCast(w), .height = -@as(i32, @intCast(h)), .bit_depth = 24 });
+    try writeFileHeader(fixture, .{ .file_size = file_size, .pixel_offset = pixel_offset });
+    try writeInfoHeader(fixture, .{ .width = @intCast(w), .height = -@as(i32, @intCast(h)), .bit_depth = 24 });
 
     // Top-down: file order matches Image storage order (top → bottom).
     const red_row = [_]u8{ 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF };
     const green_row = [_]u8{ 0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00 };
     const blue_row = [_]u8{ 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00, 0xFF, 0x00, 0x00 };
-    try data.appendSlice(gpa, &red_row);
-    try data.appendSlice(gpa, &green_row);
-    try data.appendSlice(gpa, &blue_row);
+    try fixture.writeAll(&red_row);
+    try fixture.writeAll(&green_row);
+    try fixture.writeAll(&blue_row);
 
-    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(Rgb{ .r = 255, .g = 0, .b = 0 }, image.data[0]);
@@ -1374,28 +1294,29 @@ test "BMP decode 24bpp BI_RGB top-down" {
 
 test "BMP decode 24bpp BI_RGB respects row padding" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     // width=3 → 9 bytes/row, padded to 12 (3 trailing pad bytes per row).
     const w: u32 = 3;
     const h: u32 = 2;
     const stride: u32 = 12;
     const pixel_offset: u32 = 14 + 40;
-    try appendFileHeader(&data, gpa, .{ .file_size = pixel_offset + stride * h, .pixel_offset = pixel_offset });
-    try appendInfoHeader(&data, gpa, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 24 });
+    try writeFileHeader(fixture, .{ .file_size = pixel_offset + stride * h, .pixel_offset = pixel_offset });
+    try writeInfoHeader(fixture, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 24 });
 
     // Bottom-up: row 1 first, then row 0.
     // Row 1 (top of image): RGB = (10,20,30), (40,50,60), (70,80,90)
     // Row 0 (bottom of image): RGB = (1,2,3), (4,5,6), (7,8,9)
     // Stored as BGR with 3 bytes of padding.
     const padding = [_]u8{ 0xAA, 0xAA, 0xAA }; // garbage in padding bytes
-    try data.appendSlice(gpa, &.{ 3, 2, 1, 6, 5, 4, 9, 8, 7 });
-    try data.appendSlice(gpa, &padding);
-    try data.appendSlice(gpa, &.{ 30, 20, 10, 60, 50, 40, 90, 80, 70 });
-    try data.appendSlice(gpa, &padding);
+    try fixture.writeAll(&.{ 3, 2, 1, 6, 5, 4, 9, 8, 7 });
+    try fixture.writeAll(&padding);
+    try fixture.writeAll(&.{ 30, 20, 10, 60, 50, 40, 90, 80, 70 });
+    try fixture.writeAll(&padding);
 
-    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(Rgb{ .r = 10, .g = 20, .b = 30 }, image.data[0]);
@@ -1408,16 +1329,17 @@ test "BMP decode 24bpp BI_RGB respects row padding" {
 
 test "BMP decode 24bpp rejects truncated pixel data" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     const pixel_offset: u32 = 14 + 40;
-    try appendFileHeader(&data, gpa, .{ .file_size = pixel_offset + 10, .pixel_offset = pixel_offset });
-    try appendInfoHeader(&data, gpa, .{ .width = 4, .height = 4, .bit_depth = 24 });
+    try writeFileHeader(fixture, .{ .file_size = pixel_offset + 10, .pixel_offset = pixel_offset });
+    try writeInfoHeader(fixture, .{ .width = 4, .height = 4, .bit_depth = 24 });
     // Required: 4*3 = 12 bytes/row * 4 rows = 48 bytes. Provide only 24.
-    try data.appendNTimes(gpa, 0, 24);
+    try fixture.splatByteAll(0, 24);
 
-    try std.testing.expectError(error.MissingPixelData, loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{}));
+    try std.testing.expectError(error.MissingPixelData, loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{}));
 }
 
 test "BMP round-trip Rgb 24bpp gradient" {
@@ -1537,27 +1459,28 @@ test "BMP round-trip Rgba 32bpp BI_BITFIELDS preserves alpha" {
 
 test "BMP decode 16bpp BI_BITFIELDS 5-6-5" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     const w: u32 = 4;
     const h: u32 = 1;
     const stride: u32 = 8; // 4 px * 2 bytes = 8, already aligned
     const pixel_offset: u32 = 14 + 40 + 12;
-    try appendFileHeader(&data, gpa, .{ .file_size = pixel_offset + stride * h, .pixel_offset = pixel_offset });
-    try appendInfoHeader(&data, gpa, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 16, .compression = .bitfields });
+    try writeFileHeader(fixture, .{ .file_size = pixel_offset + stride * h, .pixel_offset = pixel_offset });
+    try writeInfoHeader(fixture, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 16, .compression = .bitfields });
     // 5-6-5 masks (RGB565)
-    try writeLe(u32, &data, gpa, 0xF800); // R: 5 bits in [15..11]
-    try writeLe(u32, &data, gpa, 0x07E0); // G: 6 bits in [10..5]
-    try writeLe(u32, &data, gpa, 0x001F); // B: 5 bits in [4..0]
+    try fixture.writeInt(u32, 0xF800, .little); // R: 5 bits in [15..11]
+    try fixture.writeInt(u32, 0x07E0, .little); // G: 6 bits in [10..5]
+    try fixture.writeInt(u32, 0x001F, .little); // B: 5 bits in [4..0]
 
     // 4 pixels: pure red, pure green, pure blue, white
-    try writeLe(u16, &data, gpa, 0xF800); // r=31,g=0,b=0
-    try writeLe(u16, &data, gpa, 0x07E0); // r=0,g=63,b=0
-    try writeLe(u16, &data, gpa, 0x001F); // r=0,g=0,b=31
-    try writeLe(u16, &data, gpa, 0xFFFF); // r=31,g=63,b=31 → white
+    try fixture.writeInt(u16, 0xF800, .little); // r=31,g=0,b=0
+    try fixture.writeInt(u16, 0x07E0, .little); // r=0,g=63,b=0
+    try fixture.writeInt(u16, 0x001F, .little); // r=0,g=0,b=31
+    try fixture.writeInt(u16, 0xFFFF, .little); // r=31,g=63,b=31 → white
 
-    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(@as(u8, 255), image.data[0].r);
@@ -1579,21 +1502,22 @@ test "BMP decode 16bpp BI_BITFIELDS 5-6-5" {
 
 test "BMP decode 32bpp BI_RGB heuristic: all-zero alpha → opaque Rgb" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     const w: u32 = 2;
     const h: u32 = 1;
     const stride: u32 = w * 4;
     const pixel_offset: u32 = 14 + 40;
-    try appendFileHeader(&data, gpa, .{ .file_size = pixel_offset + stride, .pixel_offset = pixel_offset });
-    try appendInfoHeader(&data, gpa, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 32, .compression = .rgb });
+    try writeFileHeader(fixture, .{ .file_size = pixel_offset + stride, .pixel_offset = pixel_offset });
+    try writeInfoHeader(fixture, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 32, .compression = .rgb });
     // BGRX: red and green pixels with alpha byte = 0
-    try data.appendSlice(gpa, &.{ 0, 0, 0xFF, 0 }); // red
-    try data.appendSlice(gpa, &.{ 0, 0xFF, 0, 0 }); // green
+    try fixture.writeAll(&.{ 0, 0, 0xFF, 0 }); // red
+    try fixture.writeAll(&.{ 0, 0xFF, 0, 0 }); // green
 
     // Should decode as Rgb (heuristic kicks in).
-    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(Rgb{ .r = 255, .g = 0, .b = 0 }, image.data[0]);
@@ -1602,19 +1526,20 @@ test "BMP decode 32bpp BI_RGB heuristic: all-zero alpha → opaque Rgb" {
 
 test "BMP decode 32bpp BI_RGB: nonzero alpha is honoured as Rgba" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     const w: u32 = 2;
     const h: u32 = 1;
     const stride: u32 = w * 4;
     const pixel_offset: u32 = 14 + 40;
-    try appendFileHeader(&data, gpa, .{ .file_size = pixel_offset + stride, .pixel_offset = pixel_offset });
-    try appendInfoHeader(&data, gpa, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 32, .compression = .rgb });
-    try data.appendSlice(gpa, &.{ 0, 0, 0xFF, 0x80 }); // red, semi-transparent
-    try data.appendSlice(gpa, &.{ 0, 0xFF, 0, 0xFF }); // green, opaque
+    try writeFileHeader(fixture, .{ .file_size = pixel_offset + stride, .pixel_offset = pixel_offset });
+    try writeInfoHeader(fixture, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 32, .compression = .rgb });
+    try fixture.writeAll(&.{ 0, 0, 0xFF, 0x80 }); // red, semi-transparent
+    try fixture.writeAll(&.{ 0, 0xFF, 0, 0xFF }); // green, opaque
 
-    var image = try loadFromBytes(Rgba, parallel.inline_io, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgba, parallel.inline_io, gpa, aw.written(), .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(@as(u8, 0x80), image.data[0].a);
@@ -1623,26 +1548,27 @@ test "BMP decode 32bpp BI_RGB: nonzero alpha is honoured as Rgba" {
 
 test "BMP decode 8bpp indexed (gradient palette)" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     const w: u32 = 4;
     const h: u32 = 1;
     const stride: u32 = 4; // already 4-aligned
     const palette_bytes: u32 = 256 * 4;
     const pixel_offset: u32 = 14 + 40 + palette_bytes;
-    try appendFileHeader(&data, gpa, .{ .file_size = pixel_offset + stride, .pixel_offset = pixel_offset });
-    try appendInfoHeader(&data, gpa, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 8 });
+    try writeFileHeader(fixture, .{ .file_size = pixel_offset + stride, .pixel_offset = pixel_offset });
+    try writeInfoHeader(fixture, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 8 });
     // 256-entry grayscale palette (BGRA, A reserved=0)
     var i: u16 = 0;
     while (i < 256) : (i += 1) {
         const v: u8 = @intCast(i);
-        try data.appendSlice(gpa, &.{ v, v, v, 0 });
+        try fixture.writeAll(&.{ v, v, v, 0 });
     }
     // Pixel indices
-    try data.appendSlice(gpa, &.{ 0, 64, 128, 255 });
+    try fixture.writeAll(&.{ 0, 64, 128, 255 });
 
-    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(Rgb{ .r = 0, .g = 0, .b = 0 }, image.data[0]);
@@ -1653,26 +1579,27 @@ test "BMP decode 8bpp indexed (gradient palette)" {
 
 test "BMP decode 1bpp indexed (checkerboard)" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     const w: u32 = 8;
     const h: u32 = 2;
     const stride: u32 = 4; // ceil(8/8) = 1, padded to 4
     const palette_bytes: u32 = 2 * 4;
     const pixel_offset: u32 = 14 + 40 + palette_bytes;
-    try appendFileHeader(&data, gpa, .{ .file_size = pixel_offset + stride * h, .pixel_offset = pixel_offset });
-    try appendInfoHeader(&data, gpa, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 1 });
+    try writeFileHeader(fixture, .{ .file_size = pixel_offset + stride * h, .pixel_offset = pixel_offset });
+    try writeInfoHeader(fixture, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 1 });
     // Palette: 0 = black, 1 = white
-    try data.appendSlice(gpa, &.{ 0, 0, 0, 0 });
-    try data.appendSlice(gpa, &.{ 0xFF, 0xFF, 0xFF, 0 });
+    try fixture.writeAll(&.{ 0, 0, 0, 0 });
+    try fixture.writeAll(&.{ 0xFF, 0xFF, 0xFF, 0 });
 
     // Bottom row first (bottom-up): 10101010 → AA
-    try data.appendSlice(gpa, &.{ 0xAA, 0, 0, 0 });
+    try fixture.writeAll(&.{ 0xAA, 0, 0, 0 });
     // Top row: 01010101 → 55
-    try data.appendSlice(gpa, &.{ 0x55, 0, 0, 0 });
+    try fixture.writeAll(&.{ 0x55, 0, 0, 0 });
 
-    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{});
     defer image.deinit(gpa);
 
     // Top row should alternate starting with black (0x55 = 0b01010101 MSB-first)
@@ -1686,26 +1613,27 @@ test "BMP decode 1bpp indexed (checkerboard)" {
 
 test "BMP decode 4bpp indexed" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     const w: u32 = 4;
     const h: u32 = 1;
     const stride: u32 = 4; // ceil(4*4/8)=2, padded to 4
     const palette_bytes: u32 = 16 * 4;
     const pixel_offset: u32 = 14 + 40 + palette_bytes;
-    try appendFileHeader(&data, gpa, .{ .file_size = pixel_offset + stride, .pixel_offset = pixel_offset });
-    try appendInfoHeader(&data, gpa, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 4 });
+    try writeFileHeader(fixture, .{ .file_size = pixel_offset + stride, .pixel_offset = pixel_offset });
+    try writeInfoHeader(fixture, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 4 });
     // 16-entry palette: index i → gray value i*17 (so 0..15 maps to 0..255)
     var idx: u8 = 0;
     while (idx < 16) : (idx += 1) {
         const v: u8 = @intCast(@as(u16, idx) * 17);
-        try data.appendSlice(gpa, &.{ v, v, v, 0 });
+        try fixture.writeAll(&.{ v, v, v, 0 });
     }
     // Pixels: indices 0, 5, 10, 15 packed as 0x05, 0xAF (high nibble first)
-    try data.appendSlice(gpa, &.{ 0x05, 0xAF, 0, 0 });
+    try fixture.writeAll(&.{ 0x05, 0xAF, 0, 0 });
 
-    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(@as(u8, 0), image.data[0].r);
@@ -1716,24 +1644,25 @@ test "BMP decode 4bpp indexed" {
 
 test "BMP decode 8bpp BITMAPCOREHEADER (3-byte palette entries)" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     const w: u32 = 4;
     const h: u32 = 1;
     const stride: u32 = 4;
     const palette_bytes: u32 = 256 * 3; // CORE: 3 bytes per entry
     const pixel_offset: u32 = 14 + 12 + palette_bytes;
-    try appendFileHeader(&data, gpa, .{ .file_size = pixel_offset + stride, .pixel_offset = pixel_offset });
-    try appendCoreHeader(&data, gpa, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 8 });
+    try writeFileHeader(fixture, .{ .file_size = pixel_offset + stride, .pixel_offset = pixel_offset });
+    try writeCoreHeader(fixture, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 8 });
     var i: u16 = 0;
     while (i < 256) : (i += 1) {
         const v: u8 = @intCast(i);
-        try data.appendSlice(gpa, &.{ v, v, v }); // BGR (no reserved byte)
+        try fixture.writeAll(&.{ v, v, v }); // BGR (no reserved byte)
     }
-    try data.appendSlice(gpa, &.{ 10, 20, 30, 40 });
+    try fixture.writeAll(&.{ 10, 20, 30, 40 });
 
-    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(@as(u8, 10), image.data[0].r);
@@ -1745,22 +1674,21 @@ test "BMP decode 8bpp BITMAPCOREHEADER (3-byte palette entries)" {
 // Helper that builds a 4-entry indexed BMP wrapping the supplied RLE byte
 // stream, then decodes it. Used by the RLE tests.
 fn buildRleBmp(
-    gpa: Allocator,
-    out: *ArrayList(u8),
+    fixture: *Io.Writer,
     width: u32,
     height: u32,
-    bit_depth: u16,
+    bit_depth: u8,
     rle_stream: []const u8,
 ) !void {
     const compression: Compression = if (bit_depth == 8) .rle8 else .rle4;
     const palette_entries: u32 = if (bit_depth == 8) 256 else 16;
     const palette_bytes: u32 = palette_entries * 4;
     const pixel_offset: u32 = 14 + 40 + palette_bytes;
-    try appendFileHeader(out, gpa, .{
+    try writeFileHeader(fixture, .{
         .file_size = pixel_offset + @as(u32, @intCast(rle_stream.len)),
         .pixel_offset = pixel_offset,
     });
-    try appendInfoHeader(out, gpa, .{
+    try writeInfoHeader(fixture, .{
         .width = @intCast(width),
         .height = @intCast(height),
         .bit_depth = bit_depth,
@@ -1772,15 +1700,16 @@ fn buildRleBmp(
     var i: u32 = 0;
     while (i < palette_entries) : (i += 1) {
         const v: u8 = @intCast(@min(i * 16, 255));
-        try out.appendSlice(gpa, &.{ v, v, v, 0 });
+        try fixture.writeAll(&.{ v, v, v, 0 });
     }
-    try out.appendSlice(gpa, rle_stream);
+    try fixture.writeAll(rle_stream);
 }
 
 test "BMP decode RLE8 with encoded + literal + EOL + EOI" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     // 4x2 image. Row 0 (top of image, second in file order):
     //   indices: 1, 1, 1, 1  (encoded run of 4 1s)
@@ -1793,9 +1722,9 @@ test "BMP decode RLE8 with encoded + literal + EOL + EOI" {
         0x04, 0x01, // encoded: 4 copies of index 1
         0x00, 0x01, // EOI
     };
-    try buildRleBmp(gpa, &data, 4, 2, 8, &stream);
+    try buildRleBmp(fixture, 4, 2, 8, &stream);
 
-    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{});
     defer image.deinit(gpa);
 
     // Top row (row 0): all index 1 → gray 16
@@ -1810,17 +1739,18 @@ test "BMP decode RLE8 with encoded + literal + EOL + EOI" {
 
 test "BMP decode RLE8 absolute mode pads to 16-bit boundary" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     // 5x1 image. Absolute run of 5 indices (5 bytes) needs 1 padding byte.
     const stream = [_]u8{
         0x00, 0x05, 1, 2, 3, 4, 5, 0x00, // pad byte
         0x00, 0x01, // EOI
     };
-    try buildRleBmp(gpa, &data, 5, 1, 8, &stream);
+    try buildRleBmp(fixture, 5, 1, 8, &stream);
 
-    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(@as(u8, 16), image.at(0, 0).*.r);
@@ -1832,17 +1762,18 @@ test "BMP decode RLE8 absolute mode pads to 16-bit boundary" {
 
 test "BMP decode RLE4 alternating nibbles" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     // 4x1 image. Encoded run: 4 copies of value 0x12 → indices 1, 2, 1, 2.
     const stream = [_]u8{
         0x04, 0x12,
         0x00, 0x01, // EOI
     };
-    try buildRleBmp(gpa, &data, 4, 1, 4, &stream);
+    try buildRleBmp(fixture, 4, 1, 4, &stream);
 
-    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{});
     defer image.deinit(gpa);
 
     try std.testing.expectEqual(@as(u8, 16), image.at(0, 0).*.r);
@@ -1853,23 +1784,25 @@ test "BMP decode RLE4 alternating nibbles" {
 
 test "BMP decode RLE8 rejects overflow" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     // 2x1 image but the encoded run claims to write 200 pixels.
     const stream = [_]u8{
         0xC8, 0x01, // encoded: 200 copies of index 1 — would blow past width=2
         0x00, 0x01,
     };
-    try buildRleBmp(gpa, &data, 2, 1, 8, &stream);
+    try buildRleBmp(fixture, 2, 1, 8, &stream);
 
-    try std.testing.expectError(error.RleOverflow, loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{}));
+    try std.testing.expectError(error.RleOverflow, loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{}));
 }
 
 test "BMP decode RLE delta escape" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
 
     // 4x2 image (bottom-up). After encoded run x advances by `count`, so:
     //   start at (x=0, y=0) [bottom-left], write index 1, x → 1
@@ -1882,9 +1815,9 @@ test "BMP decode RLE delta escape" {
         0x01, 0x02, // encoded: 1 copy of index 2
         0x00, 0x01, // EOI
     };
-    try buildRleBmp(gpa, &data, 4, 2, 8, &stream);
+    try buildRleBmp(fixture, 4, 2, 8, &stream);
 
-    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
+    var image = try loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{});
     defer image.deinit(gpa);
 
     // Bottom row x=0 should be index 1 (gray 16).
@@ -1956,13 +1889,14 @@ test "BMP round-trip Image(u8) without flag → 24bpp BGR" {
 
 test "BMP getInfo: 8bpp uses default 256 palette entries when colors_used=0" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var aw: Io.Writer.Allocating = .init(gpa);
+    defer aw.deinit();
+    const fixture = &aw.writer;
     const pixel_offset: u32 = 14 + 40 + 256 * 4;
-    try appendFileHeader(&data, gpa, .{ .file_size = pixel_offset + 64, .pixel_offset = pixel_offset });
-    try appendInfoHeader(&data, gpa, .{ .width = 8, .height = 8, .bit_depth = 8 });
+    try writeFileHeader(fixture, .{ .file_size = pixel_offset + 64, .pixel_offset = pixel_offset });
+    try writeInfoHeader(fixture, .{ .width = 8, .height = 8, .bit_depth = 8 });
 
-    var reader = Io.Reader.fixed(data.items);
+    var reader = Io.Reader.fixed(aw.written());
     const header = try getInfo(&reader, .{});
     try std.testing.expectEqual(@as(u32, 256), header.palette_entries);
 }
