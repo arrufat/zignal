@@ -91,7 +91,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
                     try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
                     try writer.print("Bit Depth:   {d}\n", .{info.bit_depth});
                     try writer.print("Compression: {s}\n", .{@tagName(info.compression)});
-                    try writer.print("DIB Header:  {s}\n", .{@tagName(info.dib_kind)});
+                    try writer.print("DIB Header:  {s}\n", .{@tagName(info.dib_header)});
                     try writer.print("Top-down:    {s}\n", .{if (info.top_down) "yes" else "no"});
                     if (info.palette_entries > 0) {
                         try writer.print("Palette:     {d} entries\n", .{info.palette_entries});

@@ -48,7 +48,7 @@ pub const DecodeLimits = struct {
 };
 
 /// DIB header variants, discriminated by the leading 4-byte size field.
-pub const DibHeaderKind = enum(u32) {
+pub const DibHeader = enum(u32) {
     core = 12, // BITMAPCOREHEADER (OS/2 v1)
     info = 40, // BITMAPINFOHEADER (Windows 3.x, the canonical case)
     v2 = 52,
@@ -95,7 +95,7 @@ pub const Header = struct {
     height: u32,
     bit_depth: u8,
     compression: Compression,
-    dib_kind: DibHeaderKind,
+    dib_header: DibHeader,
     /// True when biHeight was negative (rows stored top-to-bottom on disk).
     top_down: bool,
     /// Number of palette entries actually present. 0 for non-indexed images.
@@ -177,7 +177,7 @@ fn readDibHeader(reader: *Io.Reader) !Header {
         .height = 0,
         .bit_depth = 0,
         .compression = .rgb,
-        .dib_kind = @fromBackingInt(dib_size),
+        .dib_header = @fromBackingInt(dib_size),
         .top_down = false,
         .palette_entries = 0,
         .masks = null,
@@ -282,7 +282,7 @@ fn readDibHeader(reader: *Io.Reader) !Header {
 /// bytes (RGBA) at 32bpp; when `read_alpha_mask` is set the extra mask is read.
 /// No-op for any other case.
 fn consumeBitfieldMasks(reader: *Io.Reader, header: *Header, read_alpha_mask: bool) !void {
-    if (header.dib_kind != .info) return; // v4/v5 already absorbed masks
+    if (header.dib_header != .info) return; // v4/v5 already absorbed masks
     switch (header.compression) {
         .bitfields => {
             const r = try reader.takeInt(u32, .little);
@@ -306,7 +306,7 @@ fn consumeBitfieldMasks(reader: *Io.Reader, header: *Header, read_alpha_mask: bo
 /// True when the declared pixel data offset leaves room for it AND the bit
 /// depth supports alpha (32bpp).
 fn shouldReadAlphaMask(file_header: FileHeader, header: Header) bool {
-    if (header.dib_kind != .info) return false;
+    if (header.dib_header != .info) return false;
     if (header.compression != .bitfields) return false;
     if (header.bit_depth != 32) return false;
     const min_offset_with_alpha: u32 = 14 + 40 + 16;
@@ -322,8 +322,8 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
 
     // Headers (file + DIB + optional v3 BI_BITFIELDS masks) cannot be larger
     // than the declared pixel data offset.
-    var min_offset: u32 = 14 + @backingInt(header.dib_kind);
-    if (header.dib_kind == .info) {
+    var min_offset: u32 = 14 + @backingInt(header.dib_header);
+    if (header.dib_header == .info) {
         if (header.compression == .bitfields) {
             min_offset += if (shouldReadAlphaMask(file_header, header)) 16 else 12;
         }
@@ -354,8 +354,8 @@ pub const BmpState = struct {
 /// Computes the byte offset where the palette begins, relative to the start of
 /// the file. Accounts for any v3 BI_BITFIELDS / BI_ALPHABITFIELDS mask trailer.
 fn computePostDibOffset(file_header: FileHeader, header: Header) u32 {
-    var off: u32 = 14 + @backingInt(header.dib_kind);
-    if (header.dib_kind == .info) {
+    var off: u32 = 14 + @backingInt(header.dib_header);
+    if (header.dib_header == .info) {
         if (header.compression == .bitfields) {
             off += if (shouldReadAlphaMask(file_header, header)) 16 else 12;
         }
@@ -382,7 +382,7 @@ fn readPrelude(gpa: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Prelud
     try enforceHeaderLimits(header, limits);
 
     const palette_offset = computePostDibOffset(file_header, header);
-    const palette_entry_size: u32 = if (header.dib_kind == .core) 3 else 4;
+    const palette_entry_size: u32 = if (header.dib_header == .core) 3 else 4;
     const palette_bytes: u32 = header.palette_entries * palette_entry_size;
 
     var palette: ?[]Rgba = null;
@@ -897,7 +897,7 @@ test "BMP getInfo: 24bpp BITMAPINFOHEADER" {
     try std.testing.expectEqual(@as(u32, 50), header.height);
     try std.testing.expectEqual(@as(u8, 24), header.bit_depth);
     try std.testing.expectEqual(Compression.rgb, header.compression);
-    try std.testing.expectEqual(DibHeaderKind.info, header.dib_kind);
+    try std.testing.expectEqual(DibHeader.info, header.dib_header);
     try std.testing.expect(!header.top_down);
     try std.testing.expectEqual(@as(u32, 0), header.palette_entries);
     try std.testing.expect(!header.hasAlpha());
@@ -938,7 +938,7 @@ test "BMP getInfo: BITMAPCOREHEADER (OS/2 v1)" {
     try std.testing.expectEqual(@as(u32, 64), header.width);
     try std.testing.expectEqual(@as(u32, 64), header.height);
     try std.testing.expectEqual(@as(u8, 8), header.bit_depth);
-    try std.testing.expectEqual(DibHeaderKind.core, header.dib_kind);
+    try std.testing.expectEqual(DibHeader.core, header.dib_header);
     try std.testing.expectEqual(@as(u32, 256), header.palette_entries);
 }
 
@@ -1026,7 +1026,7 @@ test "BMP getInfo: BITMAPV4HEADER" {
     var reader = Io.Reader.fixed(aw.written());
     const header = try getInfo(&reader, .{});
 
-    try std.testing.expectEqual(DibHeaderKind.v4, header.dib_kind);
+    try std.testing.expectEqual(DibHeader.v4, header.dib_header);
     try std.testing.expectEqual(@as(u8, 32), header.bit_depth);
     try std.testing.expect(header.masks != null);
     try std.testing.expectEqual(@as(u32, 0xFF000000), header.masks.?.a);
