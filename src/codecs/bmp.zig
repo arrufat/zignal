@@ -122,18 +122,16 @@ pub const Header = struct {
     }
 };
 
-inline fn exceeds(comptime T: type, limit: T, value: T) bool {
-    return limit != 0 and value > limit;
-}
+const exceeds = codecs.exceeds;
 
 fn enforceHeaderLimits(header: Header, limits: DecodeLimits) !void {
-    if (exceeds(u32, limits.max_width, header.width) or
-        exceeds(u32, limits.max_height, header.height))
+    if (exceeds(limits.max_width, header.width) or
+        exceeds(limits.max_height, header.height))
     {
         return error.ImageTooLarge;
     }
-    if (exceeds(u64, limits.max_pixels, header.totalPixels())) return error.ImageTooLarge;
-    if (exceeds(u32, limits.max_palette_entries, header.palette_entries)) return error.InvalidPaletteSize;
+    if (exceeds(limits.max_pixels, header.totalPixels())) return error.ImageTooLarge;
+    if (exceeds(limits.max_palette_entries, header.palette_entries)) return error.InvalidPaletteSize;
 }
 
 /// Maximum number of bytes accepted for a DIB header (cap on the leading size
@@ -164,7 +162,7 @@ fn readFileHeader(reader: *Io.Reader, limits: DecodeLimits) !FileHeader {
     if (!std.mem.eql(u8, sig, &signature)) return error.InvalidBmpSignature;
 
     const file_size = try reader.takeInt(u32, .little);
-    if (limits.max_bmp_bytes != 0 and file_size > limits.max_bmp_bytes) return error.BmpDataTooLarge;
+    if (exceeds(limits.max_bmp_bytes, file_size)) return error.BmpDataTooLarge;
     _ = try reader.takeInt(u16, .little); // reserved1
     _ = try reader.takeInt(u16, .little); // reserved2
     const pixel_offset = try reader.takeInt(u32, .little);
@@ -375,7 +373,7 @@ fn computePostDibOffset(file_header: FileHeader, header: Header) u32 {
 /// Decodes a BMP file from a byte buffer. The returned state borrows from `data`
 /// for pixel data — `data` must outlive the state.
 pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !BmpState {
-    if (limits.max_bmp_bytes != 0 and data.len > limits.max_bmp_bytes) return error.BmpDataTooLarge;
+    if (exceeds(limits.max_bmp_bytes, data.len)) return error.BmpDataTooLarge;
 
     var reader = Io.Reader.fixed(data);
     const file_header = try readFileHeader(&reader, limits);

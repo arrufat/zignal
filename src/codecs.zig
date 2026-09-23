@@ -44,6 +44,19 @@ pub const NativeImage = union(enum) {
     }
 };
 
+/// Whether `value` is over `limit`; a zero limit disables the check.
+pub inline fn exceeds(limit: u64, value: u64) bool {
+    return limit != 0 and value > limit;
+}
+
+/// Adds `addend` to a running total, failing with `limit_error` on overflow or past `limit`
+/// (0 disables the cap).
+pub fn accumulateWithLimit(current: *usize, addend: usize, limit: usize, limit_error: anyerror) !void {
+    const new_total = std.math.add(usize, current.*, addend) catch return limit_error;
+    if (exceeds(limit, new_total)) return limit_error;
+    current.* = new_total;
+}
+
 /// Reads a whole file for decoding; `max_bytes == 0` means no cap.
 pub fn readFile(io: Io, allocator: Allocator, file_path: []const u8, max_bytes: usize) ![]u8 {
     const limit: Io.Limit = if (max_bytes == 0) .unlimited else .limited(max_bytes);

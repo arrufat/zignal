@@ -39,15 +39,9 @@ pub const DecodeLimits = struct {
     pub const default: DecodeLimits = .{};
 };
 
-inline fn exceeds(limit: u64, value: u64) bool {
-    return limit != 0 and value > limit;
-}
+const exceeds = codecs.exceeds;
 
-fn accumulateWithLimit(current: *usize, addend: usize, limit: usize, limit_error: anyerror) !void {
-    const new_total = std.math.add(usize, current.*, addend) catch return limit_error;
-    if (limit != 0 and new_total > limit) return limit_error;
-    current.* = new_total;
-}
+const accumulateWithLimit = codecs.accumulateWithLimit;
 
 /// JPEG signature: 2-byte magic header that identifies a JPEG file (SOI marker).
 pub const signature = [_]u8{ 0xFF, 0xD8 };

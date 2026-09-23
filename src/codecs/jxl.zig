@@ -6,6 +6,8 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
+const animated = @import("../image/animated.zig");
+const AnimatedImage = animated.AnimatedImage;
 const Image = @import("../image.zig").Image;
 const codecs = @import("../codecs.zig");
 const NativeImage = codecs.NativeImage;
@@ -32,8 +34,12 @@ pub fn hasSignature(data: []const u8) bool {
 pub const DecodeLimits = struct {
     /// Maximum encoded size read by `load`; 0 disables the cap.
     max_jxl_bytes: usize = max_file_size,
-    /// Maximum decoded pixel count; 0 disables the cap.
+    /// Maximum decoded pixel count (per frame); 0 disables the cap.
     max_pixels: u64 = 1 << 28,
+    /// Maximum animation frames; 0 disables the cap.
+    max_frames: u32 = 4096,
+    /// Maximum pixels across all frames; 0 disables the cap.
+    max_total_pixels: u64 = 1 << 30,
 
     pub const default: DecodeLimits = .{};
 };
@@ -58,6 +64,21 @@ pub const Header = struct {
     has_alpha: bool,
     has_animation: bool,
     uses_original_profile: bool,
+
+    fn fromBasicInfo(info: BasicInfo) Header {
+        // The decoder applies orientation, so 5-8 (transposed) swap the output dimensions.
+        const transposed = info.orientation >= 5;
+        return .{
+            .width = if (transposed) info.ysize else info.xsize,
+            .height = if (transposed) info.xsize else info.ysize,
+            .bits_per_sample = info.bits_per_sample,
+            .exponent_bits_per_sample = info.exponent_bits_per_sample,
+            .num_color_channels = info.num_color_channels,
+            .has_alpha = info.alpha_bits > 0,
+            .has_animation = info.have_animation != 0,
+            .uses_original_profile = info.uses_original_profile != 0,
+        };
+    }
 };
 
 /// Reads just enough of `reader` to parse the header.
@@ -76,7 +97,7 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
         const unconsumed = jxl.JxlDecoderReleaseInput(dec);
         reader.toss(available.len - unconsumed);
         switch (status) {
-            dec_basic_info => return header(jxl, dec),
+            dec_basic_info => return .fromBasicInfo(try basicInfo(jxl, dec)),
             dec_need_more_input => {
                 if (unconsumed == reader.buffer.len) return error.JxlHeaderTooLarge;
                 reader.fillMore() catch |err| return switch (err) {
@@ -93,55 +114,126 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
 /// codestream allows it (XYB-encoded images). libjxl's worker tasks run on `io`.
 pub fn decode(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !NativeImage {
     if (!enabled) return error.CodecNotEnabled;
-    if (!hasSignature(data)) return error.InvalidJxl;
-    const jxl = try Libjxl.get();
+    var reader: FrameReader = undefined;
+    try reader.init(io, data, limits);
+    defer reader.deinit();
+    const frame = try reader.next(allocator) orelse return error.InvalidJxl;
+    return frame.image;
+}
 
-    const dec = jxl.JxlDecoderCreate(null) orelse return error.OutOfMemory;
-    defer jxl.JxlDecoderDestroy(dec);
-    var runner: Runner = .{ .io = io };
-    try decCheck(jxl.JxlDecoderSetParallelRunner(dec, Runner.run, &runner));
-    try decCheck(jxl.JxlDecoderSubscribeEvents(dec, dec_basic_info | dec_full_image));
-    try decCheck(jxl.JxlDecoderSetInput(dec, data.ptr, data.len));
-    jxl.JxlDecoderCloseInput(dec);
+/// Loads every displayed frame; a still JPEG XL gives one frame.
+pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
+    if (!enabled) return error.CodecNotEnabled;
+    var reader: FrameReader = undefined;
+    try reader.init(io, data, limits);
+    defer reader.deinit();
+    var builder: animated.Builder(T) = .{};
+    defer builder.deinit(allocator);
+    const frame_pixels = @as(u64, reader.header.width) * reader.header.height;
+    while (try reader.next(allocator)) |frame| {
+        var image = frame.image;
+        const count = builder.frames.items.len + 1;
+        if (codecs.exceeds(limits.max_frames, count) or codecs.exceeds(limits.max_total_pixels, count * frame_pixels)) {
+            image.deinit(allocator);
+            return error.TooManyFrames;
+        }
+        try builder.append(allocator, try image.into(T, io, allocator), frame.duration_ms);
+    }
+    return builder.finish(allocator, reader.animation.num_loops);
+}
 
-    var native: ?NativeImage = null;
-    errdefer if (native) |*img| img.deinit(allocator);
+pub fn loadAnimated(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
+    if (!enabled) return error.CodecNotEnabled;
+    const data = try codecs.readFile(io, allocator, file_path, limits.max_jxl_bytes);
+    defer allocator.free(data);
+    return loadAnimatedFromBytes(T, io, allocator, data, limits);
+}
 
-    while (true) {
+/// Walks the displayed frames of a codestream. Pinned in place once `init` hands libjxl a
+/// pointer to `runner`.
+const FrameReader = struct {
+    jxl: *const Api,
+    dec: *Decoder,
+    runner: Runner,
+    header: Header,
+    animation: @FieldType(BasicInfo, "animation"),
+
+    fn init(self: *FrameReader, io: Io, data: []const u8, limits: DecodeLimits) !void {
+        if (!hasSignature(data)) return error.InvalidJxl;
+        const jxl = try Libjxl.get();
+        const dec = jxl.JxlDecoderCreate(null) orelse return error.OutOfMemory;
+        errdefer jxl.JxlDecoderDestroy(dec);
+        self.* = .{ .jxl = jxl, .dec = dec, .runner = .{ .io = io }, .header = undefined, .animation = undefined };
+        try decCheck(jxl.JxlDecoderSetParallelRunner(dec, Runner.run, &self.runner));
+        try decCheck(jxl.JxlDecoderSubscribeEvents(dec, dec_basic_info | dec_frame | dec_full_image));
+        try decCheck(jxl.JxlDecoderSetInput(dec, data.ptr, data.len));
+        jxl.JxlDecoderCloseInput(dec);
+
         switch (jxl.JxlDecoderProcessInput(dec)) {
-            dec_basic_info => {
-                const info = try header(jxl, dec);
-                if (limits.max_pixels != 0 and @as(u64, info.width) * info.height > limits.max_pixels) return error.ImageTooLarge;
-                // Only honored for XYB images; others decode in their stored color space.
-                const srgb: ColorEncoding = .srgb(info.num_color_channels == 1);
-                _ = jxl.JxlDecoderSetPreferredColorProfile(dec, &srgb);
-                // Gray with alpha widens to RGBA; libjxl replicates gray into color output.
-                native = if (info.has_alpha)
-                    .{ .rgba = try .init(allocator, info.height, info.width) }
-                else if (info.num_color_channels == 1)
-                    .{ .grayscale = try .init(allocator, info.height, info.width) }
-                else
-                    .{ .rgb = try .init(allocator, info.height, info.width) };
-            },
-            dec_need_image_out_buffer => {
-                const img = if (native) |*img| img else return error.InvalidJxl;
-                const bytes, const channels: u32 = switch (img.*) {
-                    .grayscale => |i| .{ i.asBytes(), 1 },
-                    .rgb => |i| .{ i.asBytes(), 3 },
-                    .rgba => |i| .{ i.asBytes(), 4 },
-                };
-                const format: PixelFormat = .{ .num_channels = channels };
-                var size: usize = undefined;
-                try decCheck(jxl.JxlDecoderImageOutBufferSize(dec, &format, &size));
-                if (size != bytes.len) return error.InvalidJxl;
-                try decCheck(jxl.JxlDecoderSetImageOutBuffer(dec, &format, bytes.ptr, bytes.len));
-            },
-            // First frame only: animations stop here.
-            dec_full_image => return native orelse error.InvalidJxl,
+            dec_basic_info => {},
             dec_need_more_input => return error.TruncatedData,
             else => return error.InvalidJxl,
         }
+        const info = try basicInfo(jxl, dec);
+        self.header = .fromBasicInfo(info);
+        self.animation = info.animation;
+        if (codecs.exceeds(limits.max_pixels, @as(u64, self.header.width) * self.header.height)) return error.ImageTooLarge;
+        // Only honored for XYB images; others decode in their stored color space.
+        const srgb: ColorEncoding = .srgb(self.header.num_color_channels == 1);
+        _ = jxl.JxlDecoderSetPreferredColorProfile(dec, &srgb);
     }
+
+    fn deinit(self: *FrameReader) void {
+        self.jxl.JxlDecoderDestroy(self.dec);
+    }
+
+    /// The next displayed frame in its natural pixel type, or null after the last one.
+    fn next(self: *FrameReader, allocator: Allocator) !?struct { image: NativeImage, duration_ms: u32 } {
+        const jxl = self.jxl;
+        var native: ?NativeImage = null;
+        errdefer if (native) |*img| img.deinit(allocator);
+        var duration_ms: u32 = 0;
+        while (true) {
+            switch (jxl.JxlDecoderProcessInput(self.dec)) {
+                dec_frame => {
+                    var frame: FrameHeader = undefined;
+                    try decCheck(jxl.JxlDecoderGetFrameHeader(self.dec, &frame));
+                    duration_ms = ticksToMs(frame.duration, self.animation.tps_numerator, self.animation.tps_denominator);
+                },
+                dec_need_image_out_buffer => {
+                    const h = self.header;
+                    // Gray with alpha widens to RGBA; libjxl replicates gray into color output.
+                    native = if (h.has_alpha)
+                        .{ .rgba = try .init(allocator, h.height, h.width) }
+                    else if (h.num_color_channels == 1)
+                        .{ .grayscale = try .init(allocator, h.height, h.width) }
+                    else
+                        .{ .rgb = try .init(allocator, h.height, h.width) };
+                    const bytes, const channels: u32 = switch (native.?) {
+                        .grayscale => |i| .{ i.asBytes(), 1 },
+                        .rgb => |i| .{ i.asBytes(), 3 },
+                        .rgba => |i| .{ i.asBytes(), 4 },
+                    };
+                    const format: PixelFormat = .{ .num_channels = channels };
+                    var size: usize = undefined;
+                    try decCheck(jxl.JxlDecoderImageOutBufferSize(self.dec, &format, &size));
+                    if (size != bytes.len) return error.InvalidJxl;
+                    try decCheck(jxl.JxlDecoderSetImageOutBuffer(self.dec, &format, bytes.ptr, bytes.len));
+                },
+                dec_full_image => return .{ .image = native orelse return error.InvalidJxl, .duration_ms = duration_ms },
+                dec_success => return null,
+                dec_need_more_input => return error.TruncatedData,
+                else => return error.InvalidJxl,
+            }
+        }
+    }
+};
+
+/// Converts animation ticks to milliseconds, saturating.
+fn ticksToMs(ticks: u32, tps_numerator: u32, tps_denominator: u32) u32 {
+    if (tps_numerator == 0) return 0;
+    const ms = @as(u64, ticks) * 1000 * tps_denominator / tps_numerator;
+    return @min(ms, std.math.maxInt(u32));
 }
 
 /// Decodes a JPEG XL byte stream into `Image(T)`, converting from the natural pixel type as needed.
@@ -243,21 +335,10 @@ fn distanceFromQuality(quality: u8) f32 {
     return 53.0 / 3000.0 * q * q - 23.0 / 20.0 * q + 25.0;
 }
 
-fn header(jxl: *const Api, dec: *Decoder) !Header {
+fn basicInfo(jxl: *const Api, dec: *Decoder) !BasicInfo {
     var info: BasicInfo = undefined;
     try decCheck(jxl.JxlDecoderGetBasicInfo(dec, &info));
-    // The decoder applies orientation, so 5-8 (transposed) swap the output dimensions.
-    const transposed = info.orientation >= 5;
-    return .{
-        .width = if (transposed) info.ysize else info.xsize,
-        .height = if (transposed) info.xsize else info.ysize,
-        .bits_per_sample = info.bits_per_sample,
-        .exponent_bits_per_sample = info.exponent_bits_per_sample,
-        .num_color_channels = info.num_color_channels,
-        .has_alpha = info.alpha_bits > 0,
-        .has_animation = info.have_animation != 0,
-        .uses_original_profile = info.uses_original_profile != 0,
-    };
+    return info;
 }
 
 fn decCheck(status: c_int) !void {
@@ -315,6 +396,7 @@ const dec_success = 0;
 const dec_need_more_input = 2;
 const dec_need_image_out_buffer = 5;
 const dec_basic_info = 0x40;
+const dec_frame = 0x400;
 const dec_full_image = 0x1000;
 const enc_success = 0;
 const enc_need_more_output = 2;
@@ -353,6 +435,23 @@ const BasicInfo = extern struct {
     padding: [100]u8,
 };
 
+const FrameHeader = extern struct {
+    /// In animation ticks (`BasicInfo.animation`).
+    duration: u32,
+    timecode: u32,
+    name_length: u32,
+    is_last: Bool,
+    layer_info: extern struct {
+        have_crop: Bool,
+        crop_x0: i32,
+        crop_y0: i32,
+        xsize: u32,
+        ysize: u32,
+        blend_info: extern struct { blendmode: c_int, source: u32, alpha: u32, clamp: Bool },
+        save_as_reference: u32,
+    },
+};
+
 const ColorEncoding = extern struct {
     color_space: c_int,
     white_point: c_int,
@@ -388,6 +487,7 @@ const Api = struct {
     JxlDecoderCloseInput: *const fn (dec: *Decoder) callconv(.c) void,
     JxlDecoderProcessInput: *const fn (dec: *Decoder) callconv(.c) c_int,
     JxlDecoderGetBasicInfo: *const fn (dec: *const Decoder, info: *BasicInfo) callconv(.c) c_int,
+    JxlDecoderGetFrameHeader: *const fn (dec: *const Decoder, header: *FrameHeader) callconv(.c) c_int,
     JxlDecoderSetPreferredColorProfile: *const fn (dec: *Decoder, color_encoding: *const ColorEncoding) callconv(.c) c_int,
     JxlDecoderImageOutBufferSize: *const fn (dec: *const Decoder, format: *const PixelFormat, size: *usize) callconv(.c) c_int,
     JxlDecoderSetImageOutBuffer: *const fn (dec: *Decoder, format: *const PixelFormat, buffer: [*]u8, size: usize) callconv(.c) c_int,
@@ -430,8 +530,33 @@ test "ABI layout matches libjxl" {
     try std.testing.expectEqual(204, @sizeOf(BasicInfo));
     try std.testing.expectEqual(104, @sizeOf(ColorEncoding));
     try std.testing.expectEqual(24, @sizeOf(PixelFormat));
+    try std.testing.expectEqual(56, @sizeOf(FrameHeader));
+    try std.testing.expectEqual(80, @offsetOf(BasicInfo, "animation"));
     try std.testing.expectEqual(48, @offsetOf(BasicInfo, "orientation"));
     try std.testing.expectEqual(96, @offsetOf(ColorEncoding, "rendering_intent"));
+}
+
+test "animation ticks convert to milliseconds" {
+    try std.testing.expectEqual(100, ticksToMs(10, 100, 1));
+    try std.testing.expectEqual(40, ticksToMs(1, 25, 1));
+    try std.testing.expectEqual(1001, ticksToMs(30, 30000, 1001));
+    try std.testing.expectEqual(0, ticksToMs(5, 0, 1));
+    try std.testing.expectEqual(std.math.maxInt(u32), ticksToMs(std.math.maxInt(u32), 1, 1000));
+}
+
+test "a still loads as a one-frame animation" {
+    if (!enabled or !Libjxl.available()) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var img = try testImage(Rgb, allocator);
+    defer img.deinit(allocator);
+    const bytes = try encode(Rgb, io, allocator, img, .lossless);
+    defer allocator.free(bytes);
+    var anim = try loadAnimatedFromBytes(Rgb, io, allocator, bytes, .default);
+    defer anim.deinit(allocator);
+    try std.testing.expectEqual(1, anim.frameCount());
+    try std.testing.expectEqual(0, anim.durations_ms[0]);
+    try std.testing.expectEqualSlices(u8, img.asBytes(), anim.frame(0).asBytes());
 }
 
 test "quality maps to libjxl distances" {
