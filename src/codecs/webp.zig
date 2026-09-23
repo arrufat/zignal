@@ -211,15 +211,28 @@ pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u
 /// Lossless keeps every visible pixel; the RGB of fully transparent ones may change.
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
     if (!enabled) return error.CodecNotEnabled;
+    try checkSize(image.cols, image.rows);
+    const webp = try Libwebp.get();
+    const config = try encoderConfig(webp, options);
+    // Lossless takes ARGB input and lossy YUV, as in libwebp's simple `WebPEncode*` calls.
+    var picture = try initPicture(webp, image.cols, image.rows, config.lossless != 0);
+    defer webp.WebPPictureFree(&picture);
     switch (T) {
-        // libwebp takes a row stride, so views encode without a copy.
-        Rgb, Rgba => return encodeRaw(allocator, @ptrCast(image.data.ptr), image.cols, image.rows, image.stride * @sizeOf(T), T == Rgba, options),
+        // libwebp takes a row stride, so views import without a copy.
+        Rgb, Rgba => try importPixels(webp, &picture, T, image),
         else => {
             var rgb = try image.convert(io, allocator, Rgb);
             defer rgb.deinit(allocator);
-            return encodeRaw(allocator, @ptrCast(rgb.data.ptr), rgb.cols, rgb.rows, rgb.stride * 3, false, options);
+            try importPixels(webp, &picture, Rgb, rgb);
         },
     }
+
+    var writer: Writer = .{ .allocator = allocator };
+    errdefer writer.out.deinit(allocator);
+    picture.writer = Writer.write;
+    picture.custom_ptr = &writer;
+    if (webp.WebPEncode(&config, &picture) == 0) return if (writer.out_of_memory) error.OutOfMemory else error.WebpEncodeFailed;
+    return writer.out.toOwnedSlice(allocator);
 }
 
 pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
@@ -228,24 +241,104 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
     try codecs.writeFile(io, file_path, bytes);
 }
 
-fn encodeRaw(allocator: Allocator, pixels: [*]const u8, width: u32, height: u32, stride: usize, alpha: bool, options: EncodeOptions) ![]u8 {
+/// Encodes every frame of `anim` through libwebpmux, which stores only the region that changed
+/// since the previous frame. Pixel types map as in `encode`, and a one-frame animation is
+/// written as a still. libwebp folds identical consecutive frames into one longer frame, so
+/// loading the result back can give fewer frames over the same total duration.
+pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
+    if (!enabled) return error.CodecNotEnabled;
+    try anim.validate();
+    if (anim.frames.len == 1) return encode(T, io, allocator, anim.frames[0], options);
+    const width = anim.frames[0].cols;
+    const height = anim.frames[0].rows;
+    try checkSize(width, height);
+    const total_ms = std.math.cast(c_int, anim.totalDurationMs()) orelse return error.AnimationTooLong;
+    const webp = try Libwebp.get();
+    const mux = try LibwebpMux.get();
+
+    var enc_options: AnimEncoderOptions = undefined;
+    if (mux.WebPAnimEncoderOptionsInitInternal(&enc_options, mux_abi) == 0) return error.CodecUnavailable;
+    enc_options.anim_params.loop_count = @min(anim.loop_count, std.math.maxInt(u16));
+    const enc = mux.WebPAnimEncoderNewInternal(@intCast(width), @intCast(height), &enc_options, mux_abi) orelse return error.OutOfMemory;
+    defer mux.WebPAnimEncoderDelete(enc);
+
+    const config = try encoderConfig(webp, options);
+    // The pixel type handed to libwebp.
+    const E = if (T == Rgba) Rgba else Rgb;
+    var scratch = if (T == E) {} else try Image(E).init(allocator, height, width);
+    defer if (T != E) scratch.deinit(allocator);
+
+    // ARGB input skips the animation encoder's lossy YUV→ARGB conversion. Each import replaces
+    // the previous frame's pixels.
+    var picture = try initPicture(webp, width, height, true);
+    defer webp.WebPPictureFree(&picture);
+
+    var start_ms: c_int = 0;
+    for (anim.frames, anim.durations_ms) |frame, ms| {
+        const pixels: Image(E) = if (T == E) frame else blk: {
+            frame.convertInto(io, E, scratch);
+            break :blk scratch;
+        };
+        try importPixels(webp, &picture, E, pixels);
+        if (mux.WebPAnimEncoderAdd(enc, &picture, start_ms, &config) == 0) return error.WebpEncodeFailed;
+        // Fits: every start is at most `total_ms`.
+        start_ms += @intCast(ms);
+    }
+    if (mux.WebPAnimEncoderAdd(enc, null, total_ms, null) == 0) return error.WebpEncodeFailed;
+
+    var data: WebPData = .{ .bytes = undefined, .size = 0 };
+    if (mux.WebPAnimEncoderAssemble(enc, &data) == 0) return error.WebpEncodeFailed;
+    defer webp.WebPFree(@constCast(data.bytes));
+    return allocator.dupe(u8, data.bytes[0..data.size]);
+}
+
+/// WebP caps each side at 16383 pixels.
+fn checkSize(width: u32, height: u32) !void {
     const max_side = 16383;
     if (width == 0 or height == 0 or width > max_side or height > max_side) return error.ImageTooLarge;
-    const webp = try Libwebp.get();
-    const w: c_int = @intCast(width);
-    const h: c_int = @intCast(height);
-    const row_bytes: c_int = @intCast(stride);
-    const quality: f32 = options.quality;
-    var out: ?[*]u8 = null;
-    const size = if (options.quality >= 100)
-        (if (alpha) webp.WebPEncodeLosslessRGBA else webp.WebPEncodeLosslessRGB)(pixels, w, h, row_bytes, &out)
-    else
-        (if (alpha) webp.WebPEncodeRGBA else webp.WebPEncodeRGB)(pixels, w, h, row_bytes, quality, &out);
-    const bytes = out orelse return error.WebpEncodeFailed;
-    defer webp.WebPFree(bytes);
-    if (size == 0) return error.WebpEncodeFailed;
-    return allocator.dupe(u8, bytes[0..size]);
 }
+
+/// The settings behind libwebp's simple `WebPEncode*` calls, plus its worker threads (~1.5x on
+/// lossy images, bytes unchanged).
+fn encoderConfig(webp: *const Api, options: EncodeOptions) !Config {
+    const lossless = options.quality >= 100;
+    var config: Config = undefined;
+    if (webp.WebPConfigInitInternal(&config, preset_default, if (lossless) 70 else options.quality, encoder_abi) == 0) return error.CodecUnavailable;
+    config.lossless = @intFromBool(lossless);
+    config.thread_level = 1;
+    return config;
+}
+
+fn initPicture(webp: *const Api, width: u32, height: u32, use_argb: bool) !Picture {
+    var picture: Picture = undefined;
+    if (webp.WebPPictureInitInternal(&picture, encoder_abi) == 0) return error.CodecUnavailable;
+    picture.use_argb = @intFromBool(use_argb);
+    picture.width = @intCast(width);
+    picture.height = @intCast(height);
+    return picture;
+}
+
+/// Copies `pixels` into `picture`, replacing whatever it held.
+fn importPixels(webp: *const Api, picture: *Picture, comptime T: type, pixels: Image(T)) !void {
+    const import = if (T == Rgba) webp.WebPPictureImportRGBA else webp.WebPPictureImportRGB;
+    if (import(picture, @ptrCast(pixels.data.ptr), @intCast(pixels.stride * @sizeOf(T))) == 0) return error.OutOfMemory;
+}
+
+/// A `WebPWriterFunction` target that collects the output in an allocator-owned buffer.
+const Writer = struct {
+    allocator: Allocator,
+    out: std.ArrayList(u8) = .empty,
+    out_of_memory: bool = false,
+
+    fn write(data: [*]const u8, size: usize, picture: *const Picture) callconv(.c) c_int {
+        const self: *Writer = @ptrCast(@alignCast(picture.custom_ptr));
+        self.out.appendSlice(self.allocator, data[0..size]) catch {
+            self.out_of_memory = true;
+            return 0;
+        };
+        return 1;
+    }
+};
 
 fn header(features: Features) !Header {
     return .{
@@ -277,8 +370,53 @@ const Features = extern struct {
     pad: [5]u32,
 };
 
-const EncodeFn = *const fn (pixels: [*]const u8, width: c_int, height: c_int, stride: c_int, quality: f32, output: *?[*]u8) callconv(.c) usize;
-const EncodeLosslessFn = *const fn (pixels: [*]const u8, width: c_int, height: c_int, stride: c_int, output: *?[*]u8) callconv(.c) usize;
+/// Only the major byte must match the library's `WEBP_ENCODER_ABI_VERSION` (0x02xx since 0.5).
+const encoder_abi = 0x0200;
+const preset_default = 0;
+
+/// `WebPConfig`; the skipped fields are all 4-byte ints.
+const Config = extern struct {
+    lossless: c_int,
+    quality: f32,
+    method: c_int,
+    skipped0: [18]c_int,
+    thread_level: c_int,
+    skipped1: [7]c_int,
+};
+
+const Picture = extern struct {
+    use_argb: c_int,
+    colorspace: c_int,
+    width: c_int,
+    height: c_int,
+    y: ?[*]u8,
+    u: ?[*]u8,
+    v: ?[*]u8,
+    y_stride: c_int,
+    uv_stride: c_int,
+    a: ?[*]u8,
+    a_stride: c_int,
+    pad1: [2]u32,
+    argb: ?[*]u32,
+    argb_stride: c_int,
+    pad2: [3]u32,
+    writer: ?*const fn (data: [*]const u8, size: usize, picture: *const Picture) callconv(.c) c_int,
+    custom_ptr: ?*anyopaque,
+    extra_info_type: c_int,
+    extra_info: ?[*]u8,
+    stats: ?*anyopaque,
+    error_code: c_int,
+    progress_hook: ?*const anyopaque,
+    user_data: ?*anyopaque,
+    pad3: [3]u32,
+    pad4: ?[*]u8,
+    pad5: ?[*]u8,
+    pad6: [8]u32,
+    memory_: ?*anyopaque,
+    memory_argb_: ?*anyopaque,
+    pad7: [2]?*anyopaque,
+};
+
 const DecodeIntoFn = *const fn (data: [*]const u8, size: usize, output: [*]u8, output_size: usize, stride: c_int) callconv(.c) ?[*]u8;
 
 /// The libwebp entry points used here; field names are the exported symbols.
@@ -286,11 +424,13 @@ const Api = struct {
     WebPGetFeaturesInternal: *const fn (data: [*]const u8, size: usize, features: *Features, version: c_int) callconv(.c) c_int,
     WebPDecodeRGBInto: DecodeIntoFn,
     WebPDecodeRGBAInto: DecodeIntoFn,
-    WebPEncodeRGB: EncodeFn,
-    WebPEncodeRGBA: EncodeFn,
-    WebPEncodeLosslessRGB: EncodeLosslessFn,
-    WebPEncodeLosslessRGBA: EncodeLosslessFn,
     WebPFree: *const fn (ptr: ?*anyopaque) callconv(.c) void,
+    WebPConfigInitInternal: *const fn (config: *Config, preset: c_int, quality: f32, abi: c_int) callconv(.c) c_int,
+    WebPPictureInitInternal: *const fn (picture: *Picture, abi: c_int) callconv(.c) c_int,
+    WebPPictureImportRGB: *const fn (picture: *Picture, rgb: [*]const u8, stride: c_int) callconv(.c) c_int,
+    WebPPictureImportRGBA: *const fn (picture: *Picture, rgba: [*]const u8, stride: c_int) callconv(.c) c_int,
+    WebPPictureFree: *const fn (picture: *Picture) callconv(.c) void,
+    WebPEncode: *const fn (config: *const Config, picture: *Picture) callconv(.c) c_int,
 };
 
 const Libwebp = dynlib.Library(Api, switch (builtin.os.tag) {
@@ -334,6 +474,34 @@ const LibwebpDemux = dynlib.Library(DemuxApi, switch (builtin.os.tag) {
     else => &.{ "libwebpdemux.so.2", "libwebpdemux.so" },
 });
 
+// libwebpmux, for encoding animations. Only the major byte of `WEBP_MUX_ABI_VERSION` must match.
+const mux_abi = 0x0100;
+
+const AnimEncoderOptions = extern struct {
+    anim_params: extern struct { bgcolor: u32, loop_count: c_int },
+    minimize_size: c_int,
+    kmin: c_int,
+    kmax: c_int,
+    allow_mixed: c_int,
+    verbose: c_int,
+    padding: [4]u32,
+};
+
+const AnimEncoder = opaque {};
+
+const MuxApi = struct {
+    WebPAnimEncoderOptionsInitInternal: *const fn (options: *AnimEncoderOptions, abi: c_int) callconv(.c) c_int,
+    WebPAnimEncoderNewInternal: *const fn (width: c_int, height: c_int, options: *const AnimEncoderOptions, abi: c_int) callconv(.c) ?*AnimEncoder,
+    WebPAnimEncoderAdd: *const fn (enc: *AnimEncoder, frame: ?*Picture, timestamp_ms: c_int, config: ?*const Config) callconv(.c) c_int,
+    WebPAnimEncoderAssemble: *const fn (enc: *AnimEncoder, data: *WebPData) callconv(.c) c_int,
+    WebPAnimEncoderDelete: *const fn (enc: *AnimEncoder) callconv(.c) void,
+};
+
+const LibwebpMux = dynlib.Library(MuxApi, switch (builtin.os.tag) {
+    .macos => dynlib.macosNames("libwebpmux.dylib"),
+    else => &.{ "libwebpmux.so.3", "libwebpmux.so" },
+});
+
 test "signature detection" {
     try std.testing.expect(hasSignature("RIFF\x24\x00\x00\x00WEBPVP8 "));
     try std.testing.expect(!hasSignature("RIFF\x24\x00\x00\x00WAVEfmt "));
@@ -349,7 +517,13 @@ test "ABI layout matches libwebp" {
     try std.testing.expectEqual(40, @sizeOf(Features));
     try std.testing.expectEqual(36, @sizeOf(AnimDecoderOptions));
     try std.testing.expectEqual(36, @sizeOf(AnimInfo));
-    if (@sizeOf(usize) == 8) try std.testing.expectEqual(16, @sizeOf(WebPData));
+    try std.testing.expectEqual(116, @sizeOf(Config));
+    try std.testing.expectEqual(84, @offsetOf(Config, "thread_level"));
+    try std.testing.expectEqual(44, @sizeOf(AnimEncoderOptions));
+    if (@sizeOf(usize) == 8) {
+        try std.testing.expectEqual(16, @sizeOf(WebPData));
+        try std.testing.expectEqual(256, @sizeOf(Picture));
+    }
 }
 
 /// Smooth gradients (lossy WebP subsamples chroma) and no fully transparent pixels, whose RGB
@@ -433,4 +607,74 @@ test "lossy round trip stays close" {
     var back = try loadFromBytes(Rgb, io, allocator, bytes, .default);
     defer back.deinit(allocator);
     try std.testing.expect(try img.psnr(back) > 30);
+}
+
+fn testAnimation(comptime T: type, allocator: Allocator, durations: []const u32, loop_count: u32) !AnimatedImage(T) {
+    var builder: animated.Builder(T) = .{};
+    defer builder.deinit(allocator);
+    for (durations, 0..) |ms, i| {
+        var img = try testImage(T, allocator);
+        errdefer img.deinit(allocator);
+        // Distinct frames: libwebp folds identical consecutive ones.
+        const shift: u8 = @intCast(i * 40);
+        for (img.data) |*p| switch (T) {
+            u8 => p.* +%= shift,
+            else => p.r +%= shift,
+        };
+        try builder.append(allocator, img, ms);
+    }
+    return builder.finish(allocator, loop_count);
+}
+
+fn animationAvailable() bool {
+    return enabled and Libwebp.available() and LibwebpMux.available() and LibwebpDemux.available();
+}
+
+test "animated lossless round trip" {
+    if (!animationAvailable()) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    inline for (.{ Rgb, Rgba }) |T| {
+        var anim = try testAnimation(T, allocator, &.{ 40, 100, 60 }, 3);
+        defer anim.deinit(allocator);
+        const bytes = try encodeAnimated(T, io, allocator, anim, .lossless);
+        defer allocator.free(bytes);
+
+        var reader: Io.Reader = .fixed(bytes);
+        try std.testing.expect((try getInfo(&reader, .default)).has_animation);
+
+        var back = try loadAnimatedFromBytes(T, io, allocator, bytes, .default);
+        defer back.deinit(allocator);
+        try std.testing.expectEqual(3, back.frameCount());
+        try std.testing.expectEqual(3, back.loop_count);
+        try std.testing.expectEqualSlices(u32, anim.durations_ms, back.durations_ms);
+        for (anim.frames, back.frames) |a, b| try std.testing.expectEqualSlices(u8, a.asBytes(), b.asBytes());
+    }
+}
+
+test "animated encode converts other pixel types" {
+    if (!animationAvailable()) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var anim = try testAnimation(u8, allocator, &.{ 50, 50 }, 0);
+    defer anim.deinit(allocator);
+    const bytes = try encodeAnimated(u8, io, allocator, anim, .default);
+    defer allocator.free(bytes);
+    var back = try loadAnimatedFromBytes(u8, io, allocator, bytes, .default);
+    defer back.deinit(allocator);
+    try std.testing.expectEqual(2, back.frameCount());
+    try std.testing.expectEqual(0, back.loop_count);
+}
+
+test "a one-frame animation encodes as a still" {
+    if (!enabled or !Libwebp.available()) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var anim = try testAnimation(Rgb, allocator, &.{50}, 0);
+    defer anim.deinit(allocator);
+    const animated_bytes = try encodeAnimated(Rgb, io, allocator, anim, .lossless);
+    defer allocator.free(animated_bytes);
+    const still_bytes = try encode(Rgb, io, allocator, anim.frames[0], .lossless);
+    defer allocator.free(still_bytes);
+    try std.testing.expectEqualSlices(u8, still_bytes, animated_bytes);
 }
