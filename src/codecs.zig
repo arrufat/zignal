@@ -45,22 +45,16 @@ pub const NativeImage = union(enum) {
     }
 };
 
-/// Whether `value` is over `limit`; a zero limit disables the check.
-pub inline fn exceeds(limit: u64, value: u64) bool {
-    return limit != 0 and value > limit;
+/// Whether `value` is over `limit`.
+pub inline fn exceeds(limit: Io.Limit, value: u64) bool {
+    return if (limit.toInt()) |max| value > max else false;
 }
 
-/// Adds `addend` to a running total, failing with `limit_error` on overflow or past `limit`
-/// (0 disables the cap).
-pub fn accumulateWithLimit(current: *usize, addend: usize, limit: usize, limit_error: anyerror) !void {
+/// Adds `addend` to a running total, failing with `limit_error` on overflow or past `limit`.
+pub fn accumulateWithLimit(current: *usize, addend: usize, limit: Io.Limit, limit_error: anyerror) !void {
     const new_total = std.math.add(usize, current.*, addend) catch return limit_error;
     if (exceeds(limit, new_total)) return limit_error;
     current.* = new_total;
-}
-
-/// A `DecodeLimits` byte cap as a read limit; 0 means no cap.
-pub fn readLimit(max_bytes: usize) Io.Limit {
-    return if (max_bytes == 0) .unlimited else .limited(max_bytes);
 }
 
 /// The format named by the signature at the start of `reader`, without consuming it.

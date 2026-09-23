@@ -20,19 +20,19 @@ const meta = @import("../meta.zig");
 
 /// User-configurable resource limits for JPEG decoding. Zero disables a limit.
 pub const DecodeLimits = struct {
-    /// Maximum encoded size `read` buffers; 0 disables the cap.
-    max_jpeg_bytes: usize = 100 * 1024 * 1024,
+    /// Maximum encoded size `read` buffers.
+    max_jpeg_bytes: Io.Limit = .limited(100 * 1024 * 1024),
     /// Cap on total marker payload bytes (length-prefixed segments plus entropy data).
-    max_marker_bytes: usize = 100 * 1024 * 1024,
+    max_marker_bytes: Io.Limit = .limited(100 * 1024 * 1024),
     /// Maximum declared image width/height in pixels.
-    max_width: u32 = 8192,
-    max_height: u32 = 8192,
+    max_width: Io.Limit = .limited(8192),
+    max_height: Io.Limit = .limited(8192),
     /// Maximum width * height before allocations.
-    max_pixels: u64 = 67_108_864, // 8K square
+    max_pixels: Io.Limit = .limited(67_108_864), // 8K square
     /// Maximum number of 8x8 blocks allocated across all components.
-    max_blocks: usize = 1_048_576,
+    max_blocks: Io.Limit = .limited(1_048_576),
     /// Maximum number of scans (progressive JPEGs may have dozens).
-    max_scans: usize = 64,
+    max_scans: Io.Limit = .limited(64),
 
     pub const default: DecodeLimits = .{};
 };
@@ -135,7 +135,7 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
             if (payload_len < 6) return error.InvalidSOF;
 
             // Check if reading payload would exceed limit
-            if (bytes_read + payload_len > limits.max_jpeg_bytes) return error.ImageTooLarge;
+            if (exceeds(limits.max_jpeg_bytes, bytes_read + payload_len)) return error.ImageTooLarge;
 
             const precision = try reader.takeByte();
             const height = try reader.takeInt(u16, .big);
@@ -172,7 +172,7 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
         const skip = length - 2;
         // Check if skipping would exceed limit (approximate, as discard might not read all if seeking)
         // But for safety, we count it against the limit.
-        if (bytes_read + skip > limits.max_jpeg_bytes) return error.ImageTooLarge;
+        if (exceeds(limits.max_jpeg_bytes, bytes_read + skip)) return error.ImageTooLarge;
 
         bytes_read += try reader.discard(.limited(skip));
     }
@@ -3109,7 +3109,7 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []con
 
 /// Reads a JPEG image from `reader`, buffering at most the `DecodeLimits` byte cap.
 pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
-    const jpeg_data = try reader.allocRemaining(allocator, codecs.readLimit(limits.max_jpeg_bytes));
+    const jpeg_data = try reader.allocRemaining(allocator, limits.max_jpeg_bytes);
     defer allocator.free(jpeg_data);
     return loadFromBytes(T, io, allocator, jpeg_data, limits);
 }
@@ -3306,14 +3306,14 @@ test "JPEG 4:2:0 odd-size roundtrip (non-multiple-of-MCU)" {
 
 test "JPEG max_jpeg_bytes limit" {
     const data = [_]u8{ 0xFF, 0xD8 };
-    const limits: DecodeLimits = .{ .max_jpeg_bytes = 1 };
+    const limits: DecodeLimits = .{ .max_jpeg_bytes = .limited(1) };
     const result = decode(std.testing.allocator, &data, limits);
     try std.testing.expectError(error.JpegDataTooLarge, result);
 }
 
 test "JPEG marker byte limit" {
     const jpeg = [_]u8{ 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0x00, 0x00, 0xFF, 0xD9 };
-    const limits: DecodeLimits = .{ .max_jpeg_bytes = 0, .max_marker_bytes = 2 };
+    const limits: DecodeLimits = .{ .max_jpeg_bytes = .unlimited, .max_marker_bytes = .limited(2) };
     const result = decode(std.testing.allocator, &jpeg, limits);
     try std.testing.expectError(error.MarkerDataLimitExceeded, result);
 }
@@ -3323,7 +3323,7 @@ test "JPEG block limit prevents excessive allocation" {
     defer state.deinit(std.testing.allocator);
 
     const sof_data = [_]u8{ 0x08, 0x00, 0x10, 0x00, 0x10, 0x01, 0x01, 0x11, 0x00 };
-    const limits: DecodeLimits = .{ .max_blocks = 1 };
+    const limits: DecodeLimits = .{ .max_blocks = .limited(1) };
     const result = state.parseSOF(std.testing.allocator, &sof_data, .baseline, limits);
     try std.testing.expectError(error.BlockMemoryLimitExceeded, result);
 }
@@ -3355,11 +3355,11 @@ test "JPEG progressive full decode of hand-built stream" {
 
 test "JPEG progressive scan limit returns partial image" {
     // Only the first two of three DC scans are decoded: DC = 14 -> pixel 142.
-    var img = try loadFromBytes(u8, parallel.inline_io, std.testing.allocator, &test_progressive_jpeg, .{ .max_scans = 2 });
+    var img = try loadFromBytes(u8, parallel.inline_io, std.testing.allocator, &test_progressive_jpeg, .{ .max_scans = .limited(2) });
     defer img.deinit(std.testing.allocator);
     for (img.data) |px| try std.testing.expectEqual(142, px);
 
-    var state = try decode(std.testing.allocator, &test_progressive_jpeg, .{ .max_scans = 2 });
+    var state = try decode(std.testing.allocator, &test_progressive_jpeg, .{ .max_scans = .limited(2) });
     defer state.deinit(std.testing.allocator);
     try std.testing.expect(state.scan_limit_reached);
 }

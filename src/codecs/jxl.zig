@@ -30,14 +30,14 @@ pub fn hasSignature(data: []const u8) bool {
 }
 
 pub const DecodeLimits = struct {
-    /// Maximum encoded size `read` buffers; 0 disables the cap.
-    max_jxl_bytes: usize = 100 * 1024 * 1024,
-    /// Maximum decoded pixel count (per frame); 0 disables the cap.
-    max_pixels: u64 = 1 << 28,
-    /// Maximum animation frames; 0 disables the cap.
-    max_frames: u32 = 4096,
-    /// Maximum pixels across all frames; 0 disables the cap.
-    max_total_pixels: u64 = 1 << 30,
+    /// Maximum encoded size `read` buffers.
+    max_jxl_bytes: Io.Limit = .limited(100 * 1024 * 1024),
+    /// Maximum decoded pixel count (per frame).
+    max_pixels: Io.Limit = .limited(1 << 28),
+    /// Maximum animation frames.
+    max_frames: Io.Limit = .limited(4096),
+    /// Maximum pixels across all frames.
+    max_total_pixels: Io.Limit = .limited(1 << 30),
 
     pub const default: DecodeLimits = .{};
 };
@@ -143,7 +143,7 @@ pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, dat
 /// Reads every frame of a JPEG XL image from `reader`, buffering at most the `DecodeLimits` byte cap.
 pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnimatedImage(T) {
     if (!enabled) return error.CodecNotEnabled;
-    const data = try reader.allocRemaining(allocator, codecs.readLimit(limits.max_jxl_bytes));
+    const data = try reader.allocRemaining(allocator, limits.max_jxl_bytes);
     defer allocator.free(data);
     return loadAnimatedFromBytes(T, io, allocator, data, limits);
 }
@@ -244,7 +244,7 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []con
 /// Reads a JPEG XL image from `reader`, buffering at most the `DecodeLimits` byte cap.
 pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
     if (!enabled) return error.CodecNotEnabled;
-    const data = try reader.allocRemaining(allocator, codecs.readLimit(limits.max_jxl_bytes));
+    const data = try reader.allocRemaining(allocator, limits.max_jxl_bytes);
     defer allocator.free(data);
     return loadFromBytes(T, io, allocator, data, limits);
 }

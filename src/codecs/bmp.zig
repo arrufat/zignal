@@ -33,17 +33,16 @@ const max_dimensions_default: u32 = 8192;
 const max_pixels_default: u64 = 67_108_864; // 8K x 8K
 const max_palette_entries_default: u32 = 256;
 
-/// Resource limits applied while decoding BMP data. A zero value disables the
-/// corresponding limit.
+/// Resource limits applied while decoding BMP data; `.unlimited` disables one.
 pub const DecodeLimits = struct {
     /// Maximum allowed width in pixels.
-    max_width: u32 = max_dimensions_default,
+    max_width: Io.Limit = .limited(max_dimensions_default),
     /// Maximum allowed height in pixels.
-    max_height: u32 = max_dimensions_default,
+    max_height: Io.Limit = .limited(max_dimensions_default),
     /// Maximum allowed pixel count (width * height).
-    max_pixels: u64 = max_pixels_default,
+    max_pixels: Io.Limit = .limited(max_pixels_default),
     /// Maximum number of palette entries.
-    max_palette_entries: u32 = max_palette_entries_default,
+    max_palette_entries: Io.Limit = .limited(max_palette_entries_default),
 
     pub const default: DecodeLimits = .{};
 };
@@ -1082,7 +1081,7 @@ test "BMP getInfo enforces max_pixels" {
     try writeInfoHeader(fixture, .{ .width = 100, .height = 100, .bit_depth = 24 });
 
     var reader = Io.Reader.fixed(aw.written());
-    try std.testing.expectError(error.ImageTooLarge, getInfo(&reader, .{ .max_pixels = 1000 }));
+    try std.testing.expectError(error.ImageTooLarge, getInfo(&reader, .{ .max_pixels = .limited(1000) }));
 }
 
 test "BMP getInfo rejects pixel_offset before header end" {

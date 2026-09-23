@@ -45,16 +45,15 @@ const max_pixels_default: u64 = 67_108_864; // per frame
 const max_frames_default: u32 = 4096;
 const max_total_pixels_default: u64 = 1_073_741_824; // sum across frames (LZW bomb guard)
 
-/// Resource limits applied while decoding GIF data. Zero disables the
-/// corresponding limit.
+/// Resource limits applied while decoding GIF data; `.unlimited` disables one.
 pub const DecodeLimits = struct {
-    max_width: u32 = max_dimensions_default,
-    max_height: u32 = max_dimensions_default,
+    max_width: Io.Limit = .limited(max_dimensions_default),
+    max_height: Io.Limit = .limited(max_dimensions_default),
     /// Per-frame pixel count cap.
-    max_pixels: u64 = max_pixels_default,
-    max_frames: u32 = max_frames_default,
+    max_pixels: Io.Limit = .limited(max_pixels_default),
+    max_frames: Io.Limit = .limited(max_frames_default),
     /// Total composed pixels across all frames (decoder-bomb guard).
-    max_total_pixels: u64 = max_total_pixels_default,
+    max_total_pixels: Io.Limit = .limited(max_total_pixels_default),
 
     pub const default: DecodeLimits = .{};
 };
@@ -1364,7 +1363,7 @@ test "getInfo — width exceeds limit" {
     try b.appendTrailer();
 
     var reader = buildReader(b.written());
-    try expectError(error.ImageTooLarge, getInfo(&reader, .{ .max_width = 1024 }));
+    try expectError(error.ImageTooLarge, getInfo(&reader, .{ .max_width = .limited(1024) }));
 }
 
 test "getInfo — frame count exceeds limit" {
@@ -1379,7 +1378,7 @@ test "getInfo — frame count exceeds limit" {
     try b.appendTrailer();
 
     var reader = buildReader(b.written());
-    try expectError(error.TooManyFrames, getInfo(&reader, .{ .max_frames = 2 }));
+    try expectError(error.TooManyFrames, getInfo(&reader, .{ .max_frames = .limited(2) }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1474,7 +1473,7 @@ test "loadFromBytes — frame outside screen rejected via descriptor checks" {
     try b.appendImageWithLzw(.{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
     try b.appendTrailer();
 
-    try expectError(error.ImageTooLarge, loadFromBytes(Rgb, parallel.inline_io, gpa, b.written(), .{ .max_width = 2 }));
+    try expectError(error.ImageTooLarge, loadFromBytes(Rgb, parallel.inline_io, gpa, b.written(), .{ .max_width = .limited(2) }));
 }
 
 // ---------------------------------------------------------------------------

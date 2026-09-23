@@ -20,21 +20,20 @@ const max_dimensions_default: u32 = 8192;
 const max_pixels_default: u64 = 67_108_864; // 8K square
 const max_decompressed_default: usize = 536_886_272; // 8K×8K RGBA 16-bit Adam7 worst case
 
-/// User-configurable resource limits applied while decoding PNG data.
-/// A zero value disables the corresponding limit.
+/// User-configurable resource limits applied while decoding PNG data; `.unlimited` disables one.
 pub const DecodeLimits = struct {
     /// Maximum number of chunks accepted in a single PNG. Helps prevent zip bombs
     /// that add thousands of tiny ancillary entries.
-    max_chunks: usize = 8192,
+    max_chunks: Io.Limit = .limited(8192),
     /// Maximum allowed width in pixels.
-    max_width: u32 = max_dimensions_default,
+    max_width: Io.Limit = .limited(max_dimensions_default),
     /// Maximum allowed height in pixels.
-    max_height: u32 = max_dimensions_default,
+    max_height: Io.Limit = .limited(max_dimensions_default),
     /// Maximum allowed pixel count (width * height). Default ~8K square.
-    max_pixels: u64 = max_pixels_default,
+    max_pixels: Io.Limit = .limited(max_pixels_default),
     /// Maximum number of bytes produced by zlib inflate (including filter bytes,
     /// across all Adam7 passes when applicable).
-    max_decompressed_bytes: usize = max_decompressed_default,
+    max_decompressed_bytes: Io.Limit = .limited(max_decompressed_default),
 
     pub const default: DecodeLimits = .{};
 };
@@ -472,7 +471,7 @@ fn crc(buf: []const u8) u32 {
 /// consumes its payload and CRC with `body` or, for IDAT, an `IdatReader`.
 const ChunkStream = struct {
     reader: *Io.Reader,
-    max_chunks: usize,
+    max_chunks: Io.Limit,
     count: usize = 0,
 
     const Head = struct { length: u32, type: [4]u8 };
@@ -2477,7 +2476,7 @@ test "PNG enforces chunk count limit" {
     try writeChunk(data, "IEND".*, &[_]u8{});
 
     const limits: DecodeLimits = .{
-        .max_chunks = 1,
+        .max_chunks = .limited(1),
     };
     try std.testing.expectError(error.TooManyChunks, decode(gpa, data_out.written(), limits));
 }
@@ -2496,8 +2495,8 @@ test "PNG enforces decompressed byte limit" {
     try writeChunk(data, "IEND".*, &[_]u8{});
 
     const limits: DecodeLimits = .{
-        .max_chunks = 16,
-        .max_decompressed_bytes = 1,
+        .max_chunks = .limited(16),
+        .max_decompressed_bytes = .limited(1),
     };
     try std.testing.expectError(error.ImageTooLarge, decode(gpa, data_out.written(), limits));
 }
@@ -2514,7 +2513,7 @@ test "PNG default decompressed limit covers 8K RGBA 16-bit" {
     };
     const inflated = try adam7TotalSize(header);
     const limits = DecodeLimits{};
-    try std.testing.expect(inflated <= limits.max_decompressed_bytes);
+    try std.testing.expect(!exceeds(limits.max_decompressed_bytes, inflated));
 }
 
 test "CRC calculation" {
