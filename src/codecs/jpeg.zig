@@ -317,10 +317,21 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
     try codecs.writeFile(io, file_path, bytes);
 }
 
-/// Encode an image into baseline JPEG bytes (SOF0, 8-bit, Huffman). Supports grayscale (u8)
+/// Encodes `image` as baseline JPEG bytes; see `write`. Caller owns the returned slice.
+pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
+    var aw: Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    write(T, io, allocator, &aw.writer, image, options) catch |err| return switch (err) {
+        error.WriteFailed => error.OutOfMemory,
+        else => |e| e,
+    };
+    return aw.toOwnedSlice();
+}
+
+/// Writes `image` as baseline JPEG (SOF0, 8-bit, Huffman) to `writer`. Supports grayscale (u8)
 /// and RGB (Rgb); other types are converted to RGB. With restart intervals the scan is
 /// encoded in bands on `io`, one restart segment run per band.
-pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
+pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(T), options: EncodeOptions) !void {
     // Validate image dimensions
     if (image.rows == 0 or image.cols == 0) {
         return error.InvalidImageDimensions;
@@ -330,12 +341,12 @@ pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), o
     }
 
     switch (T) {
-        u8 => return encodeGrayscale(io, allocator, image, options),
-        Rgb => return encodeRgb(io, allocator, image, options),
+        u8 => return writeGrayscale(io, allocator, writer, image, options),
+        Rgb => return writeRgb(io, allocator, writer, image, options),
         else => {
             var converted = try image.convert(io, allocator, Rgb);
             defer converted.deinit(allocator);
-            return encodeRgb(io, allocator, converted, options);
+            return writeRgb(io, allocator, writer, converted, options);
         },
     }
 }
@@ -436,20 +447,18 @@ fn buildHuffmanEncoder(bits: []const u8, vals: []const u8) HuffmanEncoder {
     return enc;
 }
 
-fn writeMarker(dst: *std.ArrayList(u8), gpa: Allocator, marker: u16) !void {
-    try dst.append(gpa, 0xFF);
-    try dst.append(gpa, @intCast(marker & 0xFF));
+fn writeMarker(writer: *Io.Writer, marker: u16) !void {
+    try writer.writeAll(&.{ 0xFF, @intCast(marker & 0xFF) });
 }
 
-fn writeDRI(dst: *std.ArrayList(u8), gpa: Allocator, interval: u16) !void {
-    try writeSegment(dst, gpa, 0xFFDD, &std.mem.toBytes(std.mem.nativeTo(u16, interval, .big)));
+fn writeDRI(writer: *Io.Writer, interval: u16) !void {
+    try writeSegment(writer, 0xFFDD, &std.mem.toBytes(std.mem.nativeTo(u16, interval, .big)));
 }
 
-fn writeSegment(dst: *std.ArrayList(u8), gpa: Allocator, marker: u16, payload: []const u8) !void {
-    try writeMarker(dst, gpa, marker);
-    const len: u16 = @intCast(payload.len + 2);
-    try dst.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, len, .big)));
-    try dst.appendSlice(gpa, payload);
+fn writeSegment(writer: *Io.Writer, marker: u16, payload: []const u8) !void {
+    try writeMarker(writer, marker);
+    try writer.writeInt(u16, @intCast(payload.len + 2), .big);
+    try writer.writeAll(payload);
 }
 
 fn scaleQuantTables(quality: u8, ql: *[64]u8, qc: *[64]u8) void {
@@ -466,115 +475,118 @@ fn scaleQuantTables(quality: u8, ql: *[64]u8, qc: *[64]u8) void {
     }
 }
 
-fn writeDQT(dst: *std.ArrayList(u8), gpa: Allocator, ql: *const [64]u8, qc: *const [64]u8) !void {
-    var tmp = std.ArrayList(u8).empty;
-    defer tmp.deinit(gpa);
+/// The quantization tables: luma, then chroma unless it is null (grayscale).
+fn writeDQT(writer: *Io.Writer, ql: *const [64]u8, qc: ?*const [64]u8) !void {
+    var buf: [2 * 65]u8 = undefined;
+    var tmp: Io.Writer = .fixed(&buf);
 
     // Luma table (8-bit precision, id 0)
-    try tmp.append(gpa, 0x00);
-    for (0..64) |i| try tmp.append(gpa, ql[zigzag[i]]);
+    try tmp.writeByte(0x00);
+    for (0..64) |i| try tmp.writeByte(ql[zigzag[i]]);
 
     // Chroma table (8-bit precision, id 1)
-    try tmp.append(gpa, 0x01);
-    for (0..64) |i| try tmp.append(gpa, qc[zigzag[i]]);
-
-    try writeSegment(dst, gpa, 0xFFDB, tmp.items);
-}
-
-fn writeSOF0(dst: *std.ArrayList(u8), gpa: Allocator, width: u16, height: u16, grayscale: bool, subsampling: Subsampling) !void {
-    var tmp = std.ArrayList(u8).empty;
-    defer tmp.deinit(gpa);
-    try tmp.append(gpa, 8); // precision
-    try tmp.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, height, .big)));
-    try tmp.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, width, .big)));
-    if (grayscale) {
-        try tmp.append(gpa, 1);
-        try tmp.append(gpa, 1); // comp id
-        try tmp.append(gpa, 0x11); // sampling 1x1
-        try tmp.append(gpa, 0); // quant table id 0
-    } else {
-        try tmp.append(gpa, 3);
-        // Y
-        try tmp.append(gpa, 1);
-        try tmp.append(gpa, subsampling.lumaFactors());
-        try tmp.append(gpa, 0);
-        // Cb
-        try tmp.append(gpa, 2);
-        try tmp.append(gpa, 0x11);
-        try tmp.append(gpa, 1);
-        // Cr
-        try tmp.append(gpa, 3);
-        try tmp.append(gpa, 0x11);
-        try tmp.append(gpa, 1);
+    if (qc) |c| {
+        try tmp.writeByte(0x01);
+        for (0..64) |i| try tmp.writeByte(c[zigzag[i]]);
     }
-    try writeSegment(dst, gpa, 0xFFC0, tmp.items);
+
+    try writeSegment(writer, 0xFFDB, tmp.buffered());
 }
 
-fn writeAPP0_JFIF(dst: *std.ArrayList(u8), gpa: Allocator, density_dpi: u16) !void {
-    var tmp = std.ArrayList(u8).empty;
-    defer tmp.deinit(gpa);
-    try tmp.appendSlice(gpa, "JFIF\x00");
-    try tmp.append(gpa, 1); // version major
-    try tmp.append(gpa, 1); // version minor
-    try tmp.append(gpa, 1); // units: dots per inch
-    try tmp.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, density_dpi, .big)));
-    try tmp.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u16, density_dpi, .big)));
-    try tmp.append(gpa, 0); // x thumbnail
-    try tmp.append(gpa, 0); // y thumbnail
-    try writeSegment(dst, gpa, 0xFFE0, tmp.items);
+fn writeSOF0(writer: *Io.Writer, width: u16, height: u16, grayscale: bool, subsampling: Subsampling) !void {
+    var buf: [16]u8 = undefined;
+    var tmp: Io.Writer = .fixed(&buf);
+    try tmp.writeByte(8); // precision
+    try tmp.writeAll(std.mem.asBytes(&std.mem.nativeTo(u16, height, .big)));
+    try tmp.writeAll(std.mem.asBytes(&std.mem.nativeTo(u16, width, .big)));
+    if (grayscale) {
+        try tmp.writeByte(1);
+        try tmp.writeByte(1); // comp id
+        try tmp.writeByte(0x11); // sampling 1x1
+        try tmp.writeByte(0); // quant table id 0
+    } else {
+        try tmp.writeByte(3);
+        // Y
+        try tmp.writeByte(1);
+        try tmp.writeByte(subsampling.lumaFactors());
+        try tmp.writeByte(0);
+        // Cb
+        try tmp.writeByte(2);
+        try tmp.writeByte(0x11);
+        try tmp.writeByte(1);
+        // Cr
+        try tmp.writeByte(3);
+        try tmp.writeByte(0x11);
+        try tmp.writeByte(1);
+    }
+    try writeSegment(writer, 0xFFC0, tmp.buffered());
 }
 
-fn writeCOM(dst: *std.ArrayList(u8), gpa: Allocator, comment: []const u8) !void {
-    try writeSegment(dst, gpa, 0xFFFE, comment);
+fn writeAPP0_JFIF(writer: *Io.Writer, density_dpi: u16) !void {
+    var buf: [16]u8 = undefined;
+    var tmp: Io.Writer = .fixed(&buf);
+    try tmp.writeAll("JFIF\x00");
+    try tmp.writeByte(1); // version major
+    try tmp.writeByte(1); // version minor
+    try tmp.writeByte(1); // units: dots per inch
+    try tmp.writeAll(std.mem.asBytes(&std.mem.nativeTo(u16, density_dpi, .big)));
+    try tmp.writeAll(std.mem.asBytes(&std.mem.nativeTo(u16, density_dpi, .big)));
+    try tmp.writeByte(0); // x thumbnail
+    try tmp.writeByte(0); // y thumbnail
+    try writeSegment(writer, 0xFFE0, tmp.buffered());
 }
 
-fn writeDHT(dst: *std.ArrayList(u8), gpa: Allocator, grayscale: bool) !void {
-    var tmp = std.ArrayList(u8).empty;
-    defer tmp.deinit(gpa);
+fn writeCOM(writer: *Io.Writer, comment: []const u8) !void {
+    try writeSegment(writer, 0xFFFE, comment);
+}
+
+fn writeDHT(writer: *Io.Writer, grayscale: bool) !void {
+    var buf: [448]u8 = undefined;
+    var tmp: Io.Writer = .fixed(&buf);
 
     // DC Luma (class 0, id 0)
-    try tmp.append(gpa, 0x00);
-    try tmp.appendSlice(gpa, &StdTables.bits_dc_luma);
-    try tmp.appendSlice(gpa, &StdTables.val_dc_luma);
+    try tmp.writeByte(0x00);
+    try tmp.writeAll(&StdTables.bits_dc_luma);
+    try tmp.writeAll(&StdTables.val_dc_luma);
     // AC Luma (class 1, id 0)
-    try tmp.append(gpa, 0x10);
-    try tmp.appendSlice(gpa, &StdTables.bits_ac_luma);
-    try tmp.appendSlice(gpa, &StdTables.val_ac_luma);
+    try tmp.writeByte(0x10);
+    try tmp.writeAll(&StdTables.bits_ac_luma);
+    try tmp.writeAll(&StdTables.val_ac_luma);
 
     if (!grayscale) {
         // DC Chroma (class 0, id 1)
-        try tmp.append(gpa, 0x01);
-        try tmp.appendSlice(gpa, &StdTables.bits_dc_chroma);
-        try tmp.appendSlice(gpa, &StdTables.val_dc_chroma);
+        try tmp.writeByte(0x01);
+        try tmp.writeAll(&StdTables.bits_dc_chroma);
+        try tmp.writeAll(&StdTables.val_dc_chroma);
         // AC Chroma (class 1, id 1)
-        try tmp.append(gpa, 0x11);
-        try tmp.appendSlice(gpa, &StdTables.bits_ac_chroma);
-        try tmp.appendSlice(gpa, &StdTables.val_ac_chroma);
+        try tmp.writeByte(0x11);
+        try tmp.writeAll(&StdTables.bits_ac_chroma);
+        try tmp.writeAll(&StdTables.val_ac_chroma);
     }
 
-    try writeSegment(dst, gpa, 0xFFC4, tmp.items);
+    try writeSegment(writer, 0xFFC4, tmp.buffered());
 }
 
-fn writeSOS(dst: *std.ArrayList(u8), gpa: Allocator, grayscale: bool) !void {
-    var tmp = std.ArrayList(u8).empty;
-    defer tmp.deinit(gpa);
+fn writeSOS(writer: *Io.Writer, grayscale: bool) !void {
+    var buf: [16]u8 = undefined;
+    var tmp: Io.Writer = .fixed(&buf);
     if (grayscale) {
-        try tmp.append(gpa, 1);
-        try tmp.append(gpa, 1); // component id
-        try tmp.append(gpa, 0x00); // DC 0, AC 0
+        try tmp.writeByte(1);
+        try tmp.writeByte(1); // component id
+        try tmp.writeByte(0x00); // DC 0, AC 0
     } else {
-        try tmp.append(gpa, 3);
-        try tmp.append(gpa, 1); // Y
-        try tmp.append(gpa, 0x00);
-        try tmp.append(gpa, 2); // Cb
-        try tmp.append(gpa, 0x11);
-        try tmp.append(gpa, 3); // Cr
-        try tmp.append(gpa, 0x11);
+        try tmp.writeByte(3);
+        try tmp.writeByte(1); // Y
+        try tmp.writeByte(0x00);
+        try tmp.writeByte(2); // Cb
+        try tmp.writeByte(0x11);
+        try tmp.writeByte(3); // Cr
+        try tmp.writeByte(0x11);
     }
-    try tmp.append(gpa, 0); // Ss
-    try tmp.append(gpa, 63); // Se
-    try tmp.append(gpa, 0); // Ah/Al
-    try writeSegment(dst, gpa, 0xFFDA, tmp.items);
+    try tmp.writeByte(0); // Ss
+    try tmp.writeByte(63); // Se
+    try tmp.writeByte(0); // Ah/Al
+    try writeSegment(writer, 0xFFDA, tmp.buffered());
 }
 
 // -----------------------------
@@ -1133,39 +1145,33 @@ fn scanTables(ql: *const [64]u8, qc: *const [64]u8) ScanTables {
     };
 }
 
-fn encodeRgb(io: Io, allocator: Allocator, image: Image(Rgb), options: EncodeOptions) ![]u8 {
-    var out = std.ArrayList(u8).empty;
-    defer out.deinit(allocator);
+fn writeRgb(io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(Rgb), options: EncodeOptions) !void {
 
     // SOI
-    try out.append(allocator, 0xFF);
-    try out.append(allocator, 0xD8);
+    try writer.writeAll(&.{ 0xFF, 0xD8 });
 
-    try writeAPP0_JFIF(&out, allocator, options.density_dpi);
-    if (options.comment) |c| try writeCOM(&out, allocator, c);
+    try writeAPP0_JFIF(writer, options.density_dpi);
+    if (options.comment) |c| try writeCOM(writer, c);
 
     var ql: [64]u8 = undefined;
     var qc: [64]u8 = undefined;
     scaleQuantTables(options.quality, &ql, &qc);
-    try writeDQT(&out, allocator, &ql, &qc);
-    try writeSOF0(&out, allocator, @intCast(image.cols), @intCast(image.rows), false, options.subsampling);
-    try writeDHT(&out, allocator, false);
+    try writeDQT(writer, &ql, &qc);
+    try writeSOF0(writer, @intCast(image.cols), @intCast(image.rows), false, options.subsampling);
+    try writeDHT(writer, false);
     const factors = options.subsampling.lumaFactors();
     const h_max: usize = factors >> 4;
     const v_max: usize = factors & 0xF;
     const mcu_width = 8 * h_max;
     const restart_interval = options.restart_interval.mcusFor((image.cols + mcu_width - 1) / mcu_width);
-    if (restart_interval != 0) try writeDRI(&out, allocator, restart_interval);
-    try writeSOS(&out, allocator, false);
+    if (restart_interval != 0) try writeDRI(writer, restart_interval);
+    try writeSOS(writer, false);
 
     const tables = scanTables(&ql, &qc);
-    try encodeScan(io, allocator, &out, .{ .rgb = image }, &tables, image.cols, image.rows, h_max, v_max, true, restart_interval);
+    try encodeScan(io, allocator, writer, .{ .rgb = image }, &tables, image.cols, image.rows, h_max, v_max, true, restart_interval);
 
     // EOI
-    try out.append(allocator, 0xFF);
-    try out.append(allocator, 0xD9);
-
-    return out.toOwnedSlice(allocator);
+    try writer.writeAll(&.{ 0xFF, 0xD9 });
 }
 
 /// Pixel source of an encode; a band fills its planes from it one MCU row at a time.
@@ -1186,7 +1192,7 @@ const EncodeSource = union(enum) {
 /// fresh DC predictors (re-filling at most the row shared at a boundary); appended in order
 /// with the RSTn markers between them, the result is byte-identical to a single sweep.
 /// Without restart markers there is one band.
-fn encodeScan(io: Io, allocator: Allocator, out: *std.ArrayList(u8), source: EncodeSource, tables: *const ScanTables, cols: usize, rows: usize, h_max: usize, v_max: usize, chroma: bool, restart_interval: u16) !void {
+fn encodeScan(io: Io, allocator: Allocator, writer: *Io.Writer, source: EncodeSource, tables: *const ScanTables, cols: usize, rows: usize, h_max: usize, v_max: usize, chroma: bool, restart_interval: u16) !void {
     const mcu_cols = (cols + 8 * h_max - 1) / (8 * h_max);
     const mcu_rows = (rows + 8 * v_max - 1) / (8 * v_max);
     const total = mcu_cols * mcu_rows;
@@ -1258,47 +1264,33 @@ fn encodeScan(io: Io, allocator: Allocator, out: *std.ArrayList(u8), source: Enc
         .writers = writers,
     };
     try parallel.forRowBandsTry(io, segments, bands, &ctx, Ctx.run);
-    var bytes: usize = 0;
-    for (writers) |w| bytes += w.list.items.len;
-    try out.ensureUnusedCapacity(allocator, bytes);
-    for (writers) |w| out.appendSliceAssumeCapacity(w.list.items);
+    for (writers) |w| try writer.writeAll(w.list.items);
 }
 
-fn encodeGrayscale(io: Io, allocator: Allocator, image: Image(u8), options: EncodeOptions) ![]u8 {
-    var out = std.ArrayList(u8).empty;
-    defer out.deinit(allocator);
+fn writeGrayscale(io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(u8), options: EncodeOptions) !void {
 
     // SOI
-    try out.append(allocator, 0xFF);
-    try out.append(allocator, 0xD8);
+    try writer.writeAll(&.{ 0xFF, 0xD8 });
 
-    try writeAPP0_JFIF(&out, allocator, options.density_dpi);
-    if (options.comment) |c| try writeCOM(&out, allocator, c);
+    try writeAPP0_JFIF(writer, options.density_dpi);
+    if (options.comment) |c| try writeCOM(writer, c);
 
     var ql: [64]u8 = undefined;
     var qc: [64]u8 = undefined;
     scaleQuantTables(options.quality, &ql, &qc);
-    // Only luma table used
-    var tmp_dqt = std.ArrayList(u8).empty;
-    defer tmp_dqt.deinit(allocator);
-    try tmp_dqt.append(allocator, 0x00);
-    for (0..64) |i| try tmp_dqt.append(allocator, ql[zigzag[i]]);
-    try writeSegment(&out, allocator, 0xFFDB, tmp_dqt.items);
+    try writeDQT(writer, &ql, null);
 
-    try writeSOF0(&out, allocator, @intCast(image.cols), @intCast(image.rows), true, .yuv444);
-    try writeDHT(&out, allocator, true);
+    try writeSOF0(writer, @intCast(image.cols), @intCast(image.rows), true, .yuv444);
+    try writeDHT(writer, true);
     const restart_interval = options.restart_interval.mcusFor((image.cols + 7) / 8);
-    if (restart_interval != 0) try writeDRI(&out, allocator, restart_interval);
-    try writeSOS(&out, allocator, true);
+    if (restart_interval != 0) try writeDRI(writer, restart_interval);
+    try writeSOS(writer, true);
 
     const tables = scanTables(&ql, &qc);
-    try encodeScan(io, allocator, &out, .{ .gray = image }, &tables, image.cols, image.rows, 1, 1, false, restart_interval);
+    try encodeScan(io, allocator, writer, .{ .gray = image }, &tables, image.cols, image.rows, 1, 1, false, restart_interval);
 
     // EOI
-    try out.append(allocator, 0xFF);
-    try out.append(allocator, 0xD9);
-
-    return out.toOwnedSlice(allocator);
+    try writer.writeAll(&.{ 0xFF, 0xD9 });
 }
 
 // JPEG markers
