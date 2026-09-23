@@ -32,7 +32,7 @@ pub fn AnimatedImage(comptime T: type) type {
                 allocator: Allocator,
 
                 pub fn read(source: @This(), reader: *Io.Reader) !Self {
-                    switch (try codecs.peekFormat(reader)) {
+                    switch (try ImageFormat.peek(reader)) {
                         inline else => |f| {
                             const codec = @field(codecs, @tagName(f));
                             if (@hasDecl(codec, "readAnimated")) return codec.readAnimated(T, source.io, source.allocator, reader, .{});

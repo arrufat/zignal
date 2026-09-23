@@ -9,7 +9,6 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 const Image = @import("image.zig").Image;
-const ImageFormat = @import("image/format.zig").ImageFormat;
 const Rgb = @import("color.zig").Rgb(u8);
 const Rgba = @import("color.zig").Rgba(u8);
 
@@ -57,16 +56,6 @@ pub fn accumulateWithLimit(current: *usize, addend: usize, limit: Io.Limit, limi
     current.* = new_total;
 }
 
-/// The format named by the signature at the start of `reader`, without consuming it.
-pub fn peekFormat(reader: *Io.Reader) !ImageFormat {
-    // Files shorter than a signature can still match a shorter one.
-    const head = reader.peekGreedy(ImageFormat.signature_len) catch |err| switch (err) {
-        error.EndOfStream => reader.buffered(),
-        else => |e| return e,
-    };
-    return ImageFormat.detectFromBytes(head) orelse error.UnsupportedImageFormat;
-}
-
 /// Opens `file_path` and returns `source.read(reader)`. A failed file read returns the file's
 /// own error rather than `error.ReadFailed`.
 pub fn readFile(io: Io, file_path: []const u8, source: anytype) !ReadResult(@TypeOf(source)) {
@@ -93,7 +82,7 @@ pub fn allocatingError(err: anytype) (@TypeOf(err) || error{OutOfMemory}) {
 pub fn writeFile(io: Io, file_path: []const u8, source: anytype) !void {
     const file = try Io.Dir.cwd().createFile(io, file_path, .{});
     defer file.close(io);
-    var buffer: [4096]u8 = undefined;
+    var buffer: [32 * 1024]u8 = undefined;
     var file_writer = file.writer(io, &buffer);
     source.write(&file_writer.interface) catch |err| return file_writer.err orelse err;
     file_writer.interface.flush() catch return file_writer.err.?;

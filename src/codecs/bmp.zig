@@ -151,8 +151,7 @@ fn isValidBitDepth(bit_depth: u8, compression: Compression) bool {
     };
 }
 
-/// Parses just the BITMAPFILEHEADER. Used by both `getInfo` and `decode` so
-/// the two share signature/size validation.
+/// Parses the BITMAPFILEHEADER; shared by `getInfo` and `readPrelude`.
 fn readFileHeader(reader: *Io.Reader) !FileHeader {
     const sig = try reader.takeArray(2);
     if (!std.mem.eql(u8, sig, &signature)) return error.InvalidBmpSignature;
@@ -391,7 +390,7 @@ fn readPrelude(gpa: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Prelud
     if (header.palette_entries > 0) {
         palette = try gpa.alloc(Rgba, header.palette_entries);
         for (palette.?) |*entry| {
-            const bgr = reader.take(palette_entry_size) catch |err| return missingOnEnd(err);
+            const bgr = reader.take(palette_entry_size) catch |err| return endAs(err, error.MissingPixelData);
             // Palette alpha byte (INFO+) is reserved per the spec; treat as opaque.
             entry.* = .{ .r = bgr[2], .g = bgr[1], .b = bgr[0], .a = 255 };
         }
@@ -415,9 +414,9 @@ fn readPrelude(gpa: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Prelud
     };
 }
 
-/// A stream that ends early means the file is missing pixel data.
-fn missingOnEnd(err: anytype) (@TypeOf(err) || error{MissingPixelData}) {
-    return if (@as(anyerror, err) == error.EndOfStream) error.MissingPixelData else err;
+/// `err`, with `EndOfStream` replaced by `replacement`.
+fn endAs(err: anytype, comptime replacement: anyerror) (@TypeOf(err) || @TypeOf(replacement)) {
+    return if (@as(anyerror, err) == error.EndOfStream) replacement else err;
 }
 
 /// Decodes a BMP file from a byte buffer. The returned state borrows from `data`
@@ -487,7 +486,7 @@ fn readRows(comptime P: type, allocator: Allocator, h: Header, reader: *Io.Reade
     var image = try Image(P).init(allocator, h.height, h.width);
     errdefer image.deinit(allocator);
     for (0..h.height) |i| {
-        reader.readSliceAll(row) catch |err| return missingOnEnd(err);
+        reader.readSliceAll(row) catch |err| return endAs(err, error.MissingPixelData);
         const y = if (h.top_down) i else h.height - 1 - i;
         for (image.data[y * h.width ..][0..h.width], 0..) |*px, x| px.* = try format.pixel(row, x);
     }
@@ -643,14 +642,14 @@ fn readRle(allocator: Allocator, h: Header, palette: []const Rgba, reader: *Io.R
                 },
                 0x01 => return image, // End of bitmap
                 0x02 => { // Delta
-                    const delta = reader.takeArray(2) catch |err| return invalidEscapeOnEnd(err);
+                    const delta = reader.takeArray(2) catch |err| return endAs(err, error.InvalidRleEscape);
                     x += delta[0];
                     y += delta[1];
                 },
                 else => { // Absolute mode: b1 = N (3..255) raw indices
                     const n: u32 = b1;
                     const byte_count: usize = if (is_rle4) (n + 1) / 2 else n;
-                    const bytes = reader.take(byte_count) catch |err| return invalidEscapeOnEnd(err);
+                    const bytes = reader.take(byte_count) catch |err| return endAs(err, error.InvalidRleEscape);
                     var i: u32 = 0;
                     while (i < n) : (i += 1) {
                         const value: u8 = if (is_rle4)
@@ -679,15 +678,11 @@ fn readRle(allocator: Allocator, h: Header, palette: []const Rgba, reader: *Io.R
     }
 }
 
-fn invalidEscapeOnEnd(err: anytype) (@TypeOf(err) || error{InvalidRleEscape}) {
-    return if (@as(anyerror, err) == error.EndOfStream) error.InvalidRleEscape else err;
-}
-
 /// Reads a BMP from `reader`, one row at a time, converting to the requested pixel type.
 pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
     const prelude = try readPrelude(allocator, reader, limits);
     defer if (prelude.palette) |p| allocator.free(p);
-    reader.discardAll(prelude.pixel_offset - prelude.consumed) catch |err| return missingOnEnd(err);
+    reader.discardAll(prelude.pixel_offset - prelude.consumed) catch |err| return endAs(err, error.MissingPixelData);
     var native = try readPixels(allocator, prelude.header, prelude.palette, reader);
     return native.into(T, io, allocator);
 }

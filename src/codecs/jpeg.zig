@@ -18,7 +18,7 @@ const Rgb = @import("../color.zig").Rgb(u8);
 const Ycbcr = @import("../color.zig").Ycbcr(u8);
 const meta = @import("../meta.zig");
 
-/// User-configurable resource limits for JPEG decoding. Zero disables a limit.
+/// User-configurable resource limits for JPEG decoding; `.unlimited` disables one.
 pub const DecodeLimits = struct {
     /// Maximum encoded size `read` buffers.
     max_jpeg_bytes: Io.Limit = .limited(100 * 1024 * 1024),
@@ -442,7 +442,9 @@ fn writeMarker(writer: *Io.Writer, marker: u16) !void {
 }
 
 fn writeDRI(writer: *Io.Writer, interval: u16) !void {
-    try writeSegment(writer, 0xFFDD, &std.mem.toBytes(std.mem.nativeTo(u16, interval, .big)));
+    var payload: [2]u8 = undefined;
+    std.mem.writeInt(u16, &payload, interval, .big);
+    try writeSegment(writer, 0xFFDD, &payload);
 }
 
 fn writeSegment(writer: *Io.Writer, marker: u16, payload: []const u8) !void {
@@ -487,8 +489,8 @@ fn writeSOF0(writer: *Io.Writer, width: u16, height: u16, grayscale: bool, subsa
     var buf: [16]u8 = undefined;
     var tmp: Io.Writer = .fixed(&buf);
     try tmp.writeByte(8); // precision
-    try tmp.writeAll(std.mem.asBytes(&std.mem.nativeTo(u16, height, .big)));
-    try tmp.writeAll(std.mem.asBytes(&std.mem.nativeTo(u16, width, .big)));
+    try tmp.writeInt(u16, height, .big);
+    try tmp.writeInt(u16, width, .big);
     if (grayscale) {
         try tmp.writeByte(1);
         try tmp.writeByte(1); // comp id
@@ -519,8 +521,8 @@ fn writeAPP0_JFIF(writer: *Io.Writer, density_dpi: u16) !void {
     try tmp.writeByte(1); // version major
     try tmp.writeByte(1); // version minor
     try tmp.writeByte(1); // units: dots per inch
-    try tmp.writeAll(std.mem.asBytes(&std.mem.nativeTo(u16, density_dpi, .big)));
-    try tmp.writeAll(std.mem.asBytes(&std.mem.nativeTo(u16, density_dpi, .big)));
+    try tmp.writeInt(u16, density_dpi, .big);
+    try tmp.writeInt(u16, density_dpi, .big);
     try tmp.writeByte(0); // x thumbnail
     try tmp.writeByte(0); // y thumbnail
     try writeSegment(writer, 0xFFE0, tmp.buffered());
@@ -1136,7 +1138,6 @@ fn scanTables(ql: *const [64]u8, qc: *const [64]u8) ScanTables {
 }
 
 fn writeRgb(io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(Rgb), options: EncodeOptions) !void {
-
     // SOI
     try writer.writeAll(&.{ 0xFF, 0xD8 });
 
@@ -1258,7 +1259,6 @@ fn encodeScan(io: Io, allocator: Allocator, writer: *Io.Writer, source: EncodeSo
 }
 
 fn writeGrayscale(io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(u8), options: EncodeOptions) !void {
-
     // SOI
     try writer.writeAll(&.{ 0xFF, 0xD8 });
 

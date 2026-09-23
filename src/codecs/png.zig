@@ -101,7 +101,6 @@ pub const Chunk = struct {
     length: u32,
     type: [4]u8,
     data: []const u8,
-    crc: u32 = 0,
 };
 
 /// Decoded PNG IHDR chunk header metadata.
@@ -2960,7 +2959,6 @@ test "PNG bounds checking - malformed palette" {
         .length = 10, // Should be multiple of 3
         .type = "PLTE".*,
         .data = &[_]u8{ 255, 0, 0, 0, 255, 0, 0, 0 }, // Only 8 bytes, but length claims 10
-        .crc = 0,
     };
 
     var png_state = PngState{
@@ -3234,7 +3232,6 @@ test "PNG transparency error cases" {
         .length = 2,
         .type = [4]u8{ 't', 'R', 'N', 'S' },
         .data = &[_]u8{ 0x00, 0x80 },
-        .crc = 0,
     };
 
     // This should fail during chunk parsing (tested in integration tests)
@@ -3269,7 +3266,6 @@ test "PNG gAMA chunk parsing" {
         .length = 4,
         .type = [4]u8{ 'g', 'A', 'M', 'A' },
         .data = &[_]u8{ 0x00, 0x00, 0xB1, 0x8F }, // 45455 in big endian
-        .crc = 0,
     };
 
     var png_state = PngState{
@@ -3302,7 +3298,6 @@ test "PNG sRGB chunk parsing" {
         .length = 1,
         .type = [4]u8{ 's', 'R', 'G', 'B' },
         .data = &[_]u8{0}, // perceptual intent
-        .crc = 0,
     };
 
     var png_state = PngState{

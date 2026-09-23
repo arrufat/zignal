@@ -584,9 +584,8 @@ pub fn toNativeImage(io: Io, allocator: Allocator, state: GifState) !NativeImage
 /// Loads a GIF from in-memory bytes. Returns frame 0 only — see
 /// `loadAnimatedFromBytes` for full multi-frame access.
 pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
-    var state = try decode(allocator, data, limits);
-    defer state.deinit(allocator);
-    return composeFirstFrame(T, io, allocator, state);
+    var reader: Io.Reader = .fixed(data);
+    return read(T, io, allocator, &reader, limits);
 }
 
 // ---------------------------------------------------------------------------
@@ -681,9 +680,8 @@ fn compositeFrameOntoCanvas(canvas: *Image(Rgba), frame: FrameRecord) !void {
 /// Disposal and transparency are absorbed by the decoder — every output frame
 /// is fully composed.
 pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
-    var state = try decode(allocator, data, limits);
-    defer state.deinit(allocator);
-    return composeAnimated(T, io, allocator, state);
+    var reader: Io.Reader = .fixed(data);
+    return readAnimated(T, io, allocator, &reader, limits);
 }
 
 /// Reads a GIF from `reader`, returning frame 0 only; see `readAnimated`.
@@ -1201,8 +1199,7 @@ const TestBuilder = struct {
         try self.appendByte(packed_byte);
         try self.appendByte(0); // bg
         try self.appendByte(0); // aspect
-        for (gct) |c| try self.appendBytes(&.{ c.r, c.g, c.b });
-        try self.aw.writer.splatByteAll(0, 3 * (declared - gct.len));
+        try writeColorTable(&self.aw.writer, gct, declared);
     }
 
     const GceOpts = struct {

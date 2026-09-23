@@ -54,12 +54,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
             defer file.close(io);
 
             var reader = file.reader(io, &read_buffer);
-            // Short files still get sniffed.
-            const peek = reader.interface.peekGreedy(zignal.ImageFormat.signature_len) catch |err| switch (err) {
-                error.EndOfStream => reader.interface.buffered(),
-                else => break :blk err,
-            };
-            const image_format = zignal.ImageFormat.detectFromBytes(peek) orelse break :blk error.UnsupportedImageFormat;
+            const image_format = zignal.ImageFormat.peek(&reader.interface) catch |err| break :blk err;
             std.log.debug("format detected: {s}", .{@tagName(image_format)});
 
             switch (image_format) {

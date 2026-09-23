@@ -33,8 +33,6 @@ const default_gif_limits: zignal.gif.DecodeLimits = .{};
 const jxl_limits: zignal.jxl.DecodeLimits = .default;
 const webp_limits: zignal.webp.DecodeLimits = .default;
 
-// Import the ImageObject type from parent
-
 fn setDecodeError(kind: []const u8, err: anyerror) void {
     switch (err) {
         error.OutOfMemory => python.setMemoryError(kind),
@@ -172,13 +170,8 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     const path_slice = std.mem.span(params.path);
 
-    // Read with the most generous per-format cap (`.unlimited` is the largest value);
-    // per-format limits enforced by the decoders below.
-    const read_cap: Io.Limit = @fromBackingInt(@intCast(std.mem.max(usize, &.{
-        @backingInt(file_jpeg_limits.max_jpeg_bytes),
-        @backingInt(jxl_limits.max_jxl_bytes),
-        @backingInt(webp_limits.max_webp_bytes),
-    })));
+    // Read with the most generous per-format cap; the decoders enforce their own below.
+    const read_cap = file_jpeg_limits.max_jpeg_bytes.max(jxl_limits.max_jxl_bytes).max(webp_limits.max_webp_bytes);
     const data = Io.Dir.cwd().readFileAlloc(python.io, path_slice, allocator, read_cap) catch |err| {
         python.setErrorWithPath(err, path_slice);
         return null;

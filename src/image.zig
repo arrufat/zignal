@@ -259,7 +259,7 @@ pub fn Image(comptime T: type) type {
                 allocator: Allocator,
 
                 pub fn read(source: @This(), reader: *Io.Reader) !Self {
-                    return switch (try codecs.peekFormat(reader)) {
+                    return switch (try ImageFormat.peek(reader)) {
                         inline else => |f| @field(codecs, @tagName(f)).read(T, source.io, source.allocator, reader, .{}),
                     };
                 }

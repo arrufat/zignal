@@ -334,7 +334,7 @@ fn importPixels(webp: *const Api, picture: *Picture, comptime T: type, pixels: I
     if (import(picture, @ptrCast(pixels.data.ptr), @intCast(pixels.stride * @sizeOf(T))) == 0) return error.OutOfMemory;
 }
 
-/// A `WebPWriterFunction` target that collects the output in an allocator-owned buffer.
+/// A `WebPWriterFunction` target that forwards the output to `writer`.
 const Sink = struct {
     writer: *Io.Writer,
     failed: bool = false,
