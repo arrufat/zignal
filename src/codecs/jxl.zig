@@ -9,6 +9,7 @@ const Io = std.Io;
 const animated = @import("../image/animated.zig");
 const AnimatedImage = animated.AnimatedImage;
 const Image = @import("../image.zig").Image;
+const Rectangle = @import("../geometry.zig").Rectangle;
 const codecs = @import("../codecs.zig");
 const NativeImage = codecs.NativeImage;
 const dynlib = @import("dynlib.zig");
@@ -315,17 +316,42 @@ pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: Anim
     defer if (scratch) |*img| img.deinit(allocator);
 
     const format: PixelFormat = .{ .num_channels = channels };
+    // Frames store only their changed region, replacing it over the previous frame.
+    var template: FrameHeader = undefined;
+    if (is_animation) {
+        jxl.JxlEncoderInitFrameHeader(&template);
+        template.layer_info.blend_info.blendmode = blend_replace;
+        template.layer_info.blend_info.source = previous_frame_slot;
+        template.layer_info.save_as_reference = previous_frame_slot;
+        // libjxl treats a full-size crop as no crop.
+        template.layer_info.have_crop = 1;
+        if (has_alpha) {
+            var alpha_blend: BlendInfo = undefined;
+            jxl.JxlEncoderInitBlendInfo(&alpha_blend);
+            alpha_blend.blendmode = blend_replace;
+            alpha_blend.source = previous_frame_slot;
+            try encCheck(jxl.JxlEncoderSetExtraChannelBlendInfo(settings, 0, &alpha_blend));
+        }
+    }
+
     for (frames, 0..) |frame, i| {
+        // An identical frame keeps one pixel so its duration survives.
+        const region: Rectangle(u32) = if (is_animation and i > 0) frame.diffBounds(frames[i - 1]) orelse .init(0, 0, 1, 1) else frame.getRectangle();
         if (is_animation) {
-            var header: FrameHeader = undefined;
-            jxl.JxlEncoderInitFrameHeader(&header);
+            var header = template;
             header.duration = anim.durations_ms[i];
+            header.layer_info.crop_x0 = @intCast(region.l);
+            header.layer_info.crop_y0 = @intCast(region.t);
+            header.layer_info.xsize = region.width();
+            header.layer_info.ysize = region.height();
             try encCheck(jxl.JxlEncoderSetFrameHeader(settings, &header));
         }
-        const pixels: Image(E) = if (T == E and frame.isContiguous()) frame else blk: {
+        const part = frame.view(region);
+        const pixels: Image(E) = if (T == E and part.isContiguous()) part else blk: {
             if (scratch == null) scratch = try .init(allocator, frame.rows, frame.cols);
-            frame.convertInto(io, E, scratch.?);
-            break :blk scratch.?;
+            const packed_part: Image(E) = .initFromSlice(part.rows, part.cols, scratch.?.data[0 .. part.rows * part.cols]);
+            part.convertInto(io, E, packed_part);
+            break :blk packed_part;
         };
         const bytes = pixels.asBytes();
         try encCheck(jxl.JxlEncoderAddImageFrame(settings, &format, bytes.ptr, bytes.len));
@@ -462,6 +488,11 @@ const BasicInfo = extern struct {
     padding: [100]u8,
 };
 
+const BlendInfo = extern struct { blendmode: c_int, source: u32, alpha: u32, clamp: Bool };
+const blend_replace = 0;
+/// Slot 3 is reserved for the encoder.
+const previous_frame_slot = 1;
+
 const FrameHeader = extern struct {
     /// In animation ticks (`BasicInfo.animation`).
     duration: u32,
@@ -474,7 +505,7 @@ const FrameHeader = extern struct {
         crop_y0: i32,
         xsize: u32,
         ysize: u32,
-        blend_info: extern struct { blendmode: c_int, source: u32, alpha: u32, clamp: Bool },
+        blend_info: BlendInfo,
         save_as_reference: u32,
     },
 };
@@ -531,6 +562,8 @@ const Api = struct {
     JxlEncoderFrameSettingsSetOption: *const fn (settings: *FrameSettings, option: c_int, value: i64) callconv(.c) c_int,
     JxlEncoderInitFrameHeader: *const fn (header: *FrameHeader) callconv(.c) void,
     JxlEncoderSetFrameHeader: *const fn (settings: *FrameSettings, header: *const FrameHeader) callconv(.c) c_int,
+    JxlEncoderInitBlendInfo: *const fn (blend_info: *BlendInfo) callconv(.c) void,
+    JxlEncoderSetExtraChannelBlendInfo: *const fn (settings: *FrameSettings, index: usize, blend_info: *const BlendInfo) callconv(.c) c_int,
     JxlEncoderAddImageFrame: *const fn (settings: *const FrameSettings, format: *const PixelFormat, buffer: *const anyopaque, size: usize) callconv(.c) c_int,
     JxlEncoderCloseInput: *const fn (enc: *Encoder) callconv(.c) void,
     JxlEncoderProcessOutput: *const fn (enc: *Encoder, next_out: *[*]u8, avail_out: *usize) callconv(.c) c_int,
@@ -713,4 +746,28 @@ test "animated encode rejects bad input" {
     var durations = [_]u32{ 10, 10 };
     const mismatched: AnimatedImage(Rgb) = .{ .frames = &frames, .durations_ms = &durations, .loop_count = 0 };
     try std.testing.expectError(error.InconsistentFrameDimensions, encodeAnimated(Rgb, io, allocator, mismatched, .default));
+}
+
+test "changed-region frames decode to the full frames" {
+    if (!enabled or !Libjxl.available()) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    // A moving square, a repeated frame, then a change everywhere.
+    var anim = try testAnimation(Rgba, allocator, &.{ 30, 30, 30, 30, 30 }, 0);
+    defer anim.deinit(allocator);
+    for (anim.frames[1..], 1..) |frame, i| {
+        frame.copy(anim.frames[0]);
+        if (i < 3) for (10..20) |r| for (5 + i * 4..15 + i * 4) |c| {
+            frame.at(r, c).* = .{ .r = 255, .g = 0, .b = 0, .a = 255 };
+        };
+    }
+    anim.frames[3].copy(anim.frames[2]);
+    for (anim.frames[4].data) |*p| p.g +%= 1;
+
+    const bytes = try encodeAnimated(Rgba, io, allocator, anim, .lossless);
+    defer allocator.free(bytes);
+    var back = try loadAnimatedFromBytes(Rgba, io, allocator, bytes, .default);
+    defer back.deinit(allocator);
+    try std.testing.expectEqual(anim.frameCount(), back.frameCount());
+    for (anim.frames, back.frames) |a, b| try std.testing.expectEqualSlices(u8, a.asBytes(), b.asBytes());
 }
