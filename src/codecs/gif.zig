@@ -40,7 +40,6 @@ pub const signature = [_]u8{ 'G', 'I', 'F' };
 /// GIF version (87a or 89a).
 pub const Version = enum { gif87a, gif89a };
 
-const max_file_size_default: usize = 100 * 1024 * 1024;
 const max_dimensions_default: u32 = 8192;
 const max_pixels_default: u64 = 67_108_864; // per frame
 const max_frames_default: u32 = 4096;
@@ -49,7 +48,7 @@ const max_total_pixels_default: u64 = 1_073_741_824; // sum across frames (LZW b
 /// Resource limits applied while decoding GIF data. Zero disables the
 /// corresponding limit.
 pub const DecodeLimits = struct {
-    max_gif_bytes: usize = max_file_size_default,
+    max_gif_bytes: usize = codecs.max_file_size,
     max_width: u32 = max_dimensions_default,
     max_height: u32 = max_dimensions_default,
     /// Per-frame pixel count cap.

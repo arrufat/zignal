@@ -19,8 +19,6 @@ const Rgba = @import("../color.zig").Rgba(u8);
 /// Whether this build can load libjxl; otherwise every call returns `error.CodecNotEnabled`.
 pub const enabled = dynlib.supported;
 
-const max_file_size: usize = 100 * 1024 * 1024;
-
 /// Bare codestream signature.
 pub const signature = [_]u8{ 0xFF, 0x0A };
 /// ISOBMFF container signature (`JXL ` box).
@@ -33,7 +31,7 @@ pub fn hasSignature(data: []const u8) bool {
 
 pub const DecodeLimits = struct {
     /// Maximum encoded size read by `load`; 0 disables the cap.
-    max_jxl_bytes: usize = max_file_size,
+    max_jxl_bytes: usize = codecs.max_file_size,
     /// Maximum decoded pixel count (per frame); 0 disables the cap.
     max_pixels: u64 = 1 << 28,
     /// Maximum animation frames; 0 disables the cap.

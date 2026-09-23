@@ -245,8 +245,8 @@ pub fn Image(comptime T: type) type {
             return @as([*]u8, @ptrCast(@alignCast(self.data.ptr)))[0 .. self.data.len * @sizeOf(T)];
         }
 
-        /// Loads an image from a file with automatic format detection.
-        /// Detects format based on file header signatures and calls the appropriate loader.
+        /// Loads an image from a file with automatic format detection: reads it (up to
+        /// `codecs.max_file_size`) and hands the bytes to `loadFromBytes`.
         ///
         /// Example usage:
         /// ```zig
@@ -254,10 +254,9 @@ pub fn Image(comptime T: type) type {
         /// defer img.deinit(allocator);
         /// ```
         pub fn load(io: Io, allocator: Allocator, file_path: []const u8) !Self {
-            const image_format = try ImageFormat.detectFromPath(io, file_path) orelse return error.UnsupportedImageFormat;
-            return switch (image_format) {
-                inline else => |f| @field(codecs, @tagName(f)).load(T, io, allocator, file_path, .{}),
-            };
+            const data = try codecs.readFile(io, allocator, file_path, codecs.max_file_size);
+            defer allocator.free(data);
+            return loadFromBytes(io, allocator, data);
         }
 
         /// Loads an image from an in-memory byte buffer with automatic format detection.

@@ -16,7 +16,6 @@ const NativeImage = codecs.NativeImage;
 
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
-const max_file_size: usize = 100 * 1024 * 1024;
 const max_dimensions_default: u32 = 8192;
 const max_pixels_default: u64 = 67_108_864; // 8K square
 const max_decompressed_default: usize = 536_886_272; // 8K×8K RGBA 16-bit Adam7 worst case
@@ -25,11 +24,11 @@ const max_decompressed_default: usize = 536_886_272; // 8K×8K RGBA 16-bit Adam7
 /// A zero value disables the corresponding limit.
 pub const DecodeLimits = struct {
     /// Maximum number of bytes accepted in the original PNG buffer (signature + chunks).
-    max_png_bytes: usize = max_file_size,
+    max_png_bytes: usize = codecs.max_file_size,
     /// Maximum cumulative size (in bytes) across all chunk payloads.
-    max_chunk_bytes: usize = max_file_size,
+    max_chunk_bytes: usize = codecs.max_file_size,
     /// Maximum cumulative size of IDAT chunk payloads (compressed image stream).
-    max_idat_bytes: usize = max_file_size,
+    max_idat_bytes: usize = codecs.max_file_size,
     /// Maximum number of chunks accepted in a single PNG. Helps prevent zip bombs
     /// that add thousands of tiny ancillary entries.
     max_chunks: usize = 8192,

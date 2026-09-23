@@ -19,8 +19,6 @@ const Rgba = @import("../color.zig").Rgba(u8);
 /// Whether this build can load libwebp; otherwise every call returns `error.CodecNotEnabled`.
 pub const enabled = dynlib.supported;
 
-const max_file_size: usize = 100 * 1024 * 1024;
-
 /// `RIFF` then the little-endian file size, then `WEBP`.
 pub fn hasSignature(data: []const u8) bool {
     return data.len >= 12 and std.mem.eql(u8, data[0..4], "RIFF") and std.mem.eql(u8, data[8..12], "WEBP");
@@ -28,7 +26,7 @@ pub fn hasSignature(data: []const u8) bool {
 
 pub const DecodeLimits = struct {
     /// Maximum encoded size read by `load`; 0 disables the cap.
-    max_webp_bytes: usize = max_file_size,
+    max_webp_bytes: usize = codecs.max_file_size,
     /// Maximum decoded pixel count (per frame); 0 disables the cap.
     max_pixels: u64 = 1 << 28,
     /// Maximum animation frames; 0 disables the cap.

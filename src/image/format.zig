@@ -1,7 +1,6 @@
 //! Image format detection and identification.
 
 const std = @import("std");
-const Io = std.Io;
 
 const codecs = @import("../codecs.zig");
 const bmp = codecs.bmp;
@@ -59,18 +58,6 @@ pub const ImageFormat = enum {
         if (webp.hasSignature(data)) return .webp;
 
         return null;
-    }
-
-    /// Detect image format from file path by reading the first few bytes
-    pub fn detectFromPath(io: Io, file_path: []const u8) !?ImageFormat {
-        const file = try Io.Dir.cwd().openFile(io, file_path, .{});
-        defer file.close(io);
-
-        var header: [signature_len]u8 = undefined;
-        var iov = [_][]u8{header[0..]};
-        const bytes_read = try file.readStreaming(io, &iov);
-
-        return detectFromBytes(header[0..bytes_read]);
     }
 
     /// Map a file path's extension to a format. Used by `save`, where the file

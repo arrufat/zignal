@@ -29,7 +29,6 @@ const Rgba = @import("../color.zig").Rgba(u8);
 /// BMP file signature: "BM".
 pub const signature = [_]u8{ 'B', 'M' };
 
-const max_file_size_default: usize = 100 * 1024 * 1024;
 const max_dimensions_default: u32 = 8192;
 const max_pixels_default: u64 = 67_108_864; // 8K x 8K
 const max_palette_entries_default: u32 = 256;
@@ -38,7 +37,7 @@ const max_palette_entries_default: u32 = 256;
 /// corresponding limit.
 pub const DecodeLimits = struct {
     /// Maximum number of bytes accepted in the original BMP buffer.
-    max_bmp_bytes: usize = max_file_size_default,
+    max_bmp_bytes: usize = codecs.max_file_size,
     /// Maximum allowed width in pixels.
     max_width: u32 = max_dimensions_default,
     /// Maximum allowed height in pixels.

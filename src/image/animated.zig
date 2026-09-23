@@ -26,14 +26,9 @@ pub fn AnimatedImage(comptime T: type) type {
         /// Loads every frame of `file_path`, detecting the format from its signature.
         /// Still formats give one frame with a zero duration.
         pub fn load(io: Io, allocator: Allocator, file_path: []const u8) !Self {
-            const format = try ImageFormat.detectFromPath(io, file_path) orelse return error.UnsupportedImageFormat;
-            switch (format) {
-                inline else => |f| {
-                    const codec = @field(codecs, @tagName(f));
-                    if (@hasDecl(codec, "loadAnimated")) return codec.loadAnimated(T, io, allocator, file_path, .{});
-                    return fromStill(allocator, try codec.load(T, io, allocator, file_path, .{}));
-                },
-            }
+            const data = try codecs.readFile(io, allocator, file_path, codecs.max_file_size);
+            defer allocator.free(data);
+            return loadFromBytes(io, allocator, data);
         }
 
         /// `load` for an in-memory encoded image.

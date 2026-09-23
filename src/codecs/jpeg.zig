@@ -18,14 +18,12 @@ const Rgb = @import("../color.zig").Rgb(u8);
 const Ycbcr = @import("../color.zig").Ycbcr(u8);
 const meta = @import("../meta.zig");
 
-const max_file_size: usize = 100 * 1024 * 1024;
-
 /// User-configurable resource limits for JPEG decoding. Zero disables a limit.
 pub const DecodeLimits = struct {
     /// Maximum number of bytes accepted for the original JPEG buffer.
-    max_jpeg_bytes: usize = max_file_size,
+    max_jpeg_bytes: usize = codecs.max_file_size,
     /// Cap on total marker payload bytes (length-prefixed segments plus entropy data).
-    max_marker_bytes: usize = max_file_size,
+    max_marker_bytes: usize = codecs.max_file_size,
     /// Maximum declared image width/height in pixels.
     max_width: u32 = 8192,
     max_height: u32 = 8192,
