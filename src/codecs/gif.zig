@@ -744,18 +744,7 @@ fn writeLzwImageData(allocator: Allocator, writer: *Io.Writer, indices: []const 
 
     var encoder = try lzw.Encoder.init(allocator, min_code_size);
     defer encoder.deinit(allocator);
-
-    var lzw_bytes: std.ArrayList(u8) = .empty;
-    defer lzw_bytes.deinit(allocator);
-    try encoder.encodeAll(allocator, indices, &lzw_bytes);
-
-    var idx: usize = 0;
-    while (idx < lzw_bytes.items.len) {
-        const chunk_len = @min(lzw_bytes.items.len - idx, 255);
-        try writer.writeByte(@intCast(chunk_len));
-        try writer.writeAll(lzw_bytes.items[idx .. idx + chunk_len]);
-        idx += chunk_len;
-    }
+    try encoder.encodeAll(writer, indices);
     try writer.writeByte(0);
 }
 
@@ -1136,95 +1125,103 @@ fn emitAnimatedFrame(
 // ---------------------------------------------------------------------------
 
 const TestBuilder = struct {
-    list: std.ArrayList(u8) = .empty,
+    aw: Io.Writer.Allocating,
 
-    fn deinit(self: *TestBuilder, gpa: Allocator) void {
-        self.list.deinit(gpa);
+    fn init(gpa: Allocator) TestBuilder {
+        return .{ .aw = .init(gpa) };
     }
 
-    fn appendByte(self: *TestBuilder, gpa: Allocator, b: u8) !void {
-        try self.list.append(gpa, b);
+    fn deinit(self: *TestBuilder) void {
+        self.aw.deinit();
     }
 
-    fn appendBytes(self: *TestBuilder, gpa: Allocator, bs: []const u8) !void {
-        try self.list.appendSlice(gpa, bs);
+    fn written(self: *TestBuilder) []u8 {
+        return self.aw.written();
     }
 
-    fn appendU16(self: *TestBuilder, gpa: Allocator, v: u16) !void {
-        try self.list.appendSlice(gpa, &std.mem.toBytes(std.mem.nativeTo(u16, v, .little)));
+    fn appendByte(self: *TestBuilder, b: u8) !void {
+        try self.aw.writer.writeByte(b);
     }
 
-    fn appendHeader(self: *TestBuilder, gpa: Allocator, opts: HeaderOpts) !void {
-        try self.appendBytes(gpa, opts.signature);
-        try self.appendU16(gpa, opts.width);
-        try self.appendU16(gpa, opts.height);
+    fn appendBytes(self: *TestBuilder, bs: []const u8) !void {
+        try self.aw.writer.writeAll(bs);
+    }
+
+    fn appendU16(self: *TestBuilder, v: u16) !void {
+        try self.aw.writer.writeInt(u16, v, .little);
+    }
+
+    fn appendHeader(self: *TestBuilder, opts: HeaderOpts) !void {
+        try self.appendBytes(opts.signature);
+        try self.appendU16(opts.width);
+        try self.appendU16(opts.height);
         var packed_byte: u8 = 0;
         if (opts.gct_size_log) |s| {
             packed_byte |= lsd_flag_global_color_table;
             packed_byte |= lsd_color_resolution_default;
             packed_byte |= s;
         }
-        try self.appendByte(gpa, packed_byte);
-        try self.appendByte(gpa, opts.bg_index);
-        try self.appendByte(gpa, 0); // pixel aspect ratio
+        try self.appendByte(packed_byte);
+        try self.appendByte(opts.bg_index);
+        try self.appendByte(0); // pixel aspect ratio
         if (opts.gct_size_log) |s| {
             const entries: u32 = @as(u32, 2) << @intCast(s);
             // Fill with zeros — content doesn't affect getInfo.
-            try self.list.appendNTimes(gpa, 0, @as(usize, entries) * 3);
+            try self.aw.writer.splatByteAll(0, @as(usize, entries) * 3);
         }
     }
 
-    fn appendImageDescriptor(self: *TestBuilder, gpa: Allocator, opts: ImageDescOpts) !void {
-        try self.appendByte(gpa, block_image_descriptor);
-        try self.appendU16(gpa, opts.left);
-        try self.appendU16(gpa, opts.top);
-        try self.appendU16(gpa, opts.width);
-        try self.appendU16(gpa, opts.height);
-        try self.appendByte(gpa, opts.packed_byte);
+    fn appendImageDescriptor(self: *TestBuilder, opts: ImageDescOpts) !void {
+        try self.appendByte(block_image_descriptor);
+        try self.appendU16(opts.left);
+        try self.appendU16(opts.top);
+        try self.appendU16(opts.width);
+        try self.appendU16(opts.height);
+        try self.appendByte(opts.packed_byte);
         if (opts.lct_size_log) |s| {
             const entries: u32 = @as(u32, 2) << @intCast(s);
-            try self.list.appendNTimes(gpa, 0, @as(usize, entries) * 3);
+            try self.aw.writer.splatByteAll(0, @as(usize, entries) * 3);
         }
-        try self.appendByte(gpa, opts.lzw_min_code_size);
+        try self.appendByte(opts.lzw_min_code_size);
         // Empty data: just the terminator sub-block.
-        try self.appendByte(gpa, 0);
+        try self.appendByte(0);
     }
 
-    fn appendImageWithLzw(self: *TestBuilder, gpa: Allocator, opts: ImageDescOpts, lct: ?[]const Rgb, lzw_data: []const u8) !void {
-        try self.appendByte(gpa, block_image_descriptor);
-        try self.appendU16(gpa, opts.left);
-        try self.appendU16(gpa, opts.top);
-        try self.appendU16(gpa, opts.width);
-        try self.appendU16(gpa, opts.height);
-        try self.appendByte(gpa, opts.packed_byte);
+    fn appendImageWithLzw(self: *TestBuilder, opts: ImageDescOpts, lct: ?[]const Rgb, lzw_data: []const u8) !void {
+        try self.appendByte(block_image_descriptor);
+        try self.appendU16(opts.left);
+        try self.appendU16(opts.top);
+        try self.appendU16(opts.width);
+        try self.appendU16(opts.height);
+        try self.appendByte(opts.packed_byte);
         if (lct) |entries| {
             for (entries) |e| {
-                try self.appendBytes(gpa, &.{ e.r, e.g, e.b });
+                try self.appendBytes(&.{ e.r, e.g, e.b });
             }
         }
-        try self.appendByte(gpa, opts.lzw_min_code_size);
+        try self.appendByte(opts.lzw_min_code_size);
         var idx: usize = 0;
         while (idx < lzw_data.len) {
             const chunk_len = @min(lzw_data.len - idx, 255);
-            try self.appendByte(gpa, @intCast(chunk_len));
-            try self.appendBytes(gpa, lzw_data[idx .. idx + chunk_len]);
+            try self.appendByte(@intCast(chunk_len));
+            try self.appendBytes(lzw_data[idx .. idx + chunk_len]);
             idx += chunk_len;
         }
-        try self.appendByte(gpa, 0);
+        try self.appendByte(0);
     }
 
-    fn appendHeaderWithGct(self: *TestBuilder, gpa: Allocator, w: u16, h: u16, gct: []const Rgb) !void {
-        try self.appendBytes(gpa, "GIF89a");
-        try self.appendU16(gpa, w);
-        try self.appendU16(gpa, h);
+    fn appendHeaderWithGct(self: *TestBuilder, w: u16, h: u16, gct: []const Rgb) !void {
+        try self.appendBytes("GIF89a");
+        try self.appendU16(w);
+        try self.appendU16(h);
         const s = declaredSizeLog(gct.len);
         const declared: u16 = @as(u16, 2) << s;
         const packed_byte: u8 = lsd_flag_global_color_table | lsd_color_resolution_default | @as(u8, s);
-        try self.appendByte(gpa, packed_byte);
-        try self.appendByte(gpa, 0); // bg
-        try self.appendByte(gpa, 0); // aspect
-        for (gct) |c| try self.appendBytes(gpa, &.{ c.r, c.g, c.b });
-        try self.list.appendNTimes(gpa, 0, 3 * (declared - gct.len));
+        try self.appendByte(packed_byte);
+        try self.appendByte(0); // bg
+        try self.appendByte(0); // aspect
+        for (gct) |c| try self.appendBytes(&.{ c.r, c.g, c.b });
+        try self.aw.writer.splatByteAll(0, 3 * (declared - gct.len));
     }
 
     const GceOpts = struct {
@@ -1234,39 +1231,39 @@ const TestBuilder = struct {
         transparent_index: u8 = 0,
     };
 
-    fn appendGce(self: *TestBuilder, gpa: Allocator, opts: GceOpts) !void {
-        try self.appendByte(gpa, block_extension_introducer);
-        try self.appendByte(gpa, ext_label_graphic_control);
-        try self.appendByte(gpa, 0x04); // block size (always 4)
+    fn appendGce(self: *TestBuilder, opts: GceOpts) !void {
+        try self.appendByte(block_extension_introducer);
+        try self.appendByte(ext_label_graphic_control);
+        try self.appendByte(0x04); // block size (always 4)
         const trans_flag: u8 = if (opts.has_transparent) gce_flag_transparent else 0;
         const packed_byte: u8 = (@as(u8, opts.disposal) << 2) | trans_flag;
-        try self.appendByte(gpa, packed_byte);
-        try self.appendU16(gpa, opts.delay_cs);
-        try self.appendByte(gpa, opts.transparent_index);
-        try self.appendByte(gpa, 0); // sub-block terminator
+        try self.appendByte(packed_byte);
+        try self.appendU16(opts.delay_cs);
+        try self.appendByte(opts.transparent_index);
+        try self.appendByte(0); // sub-block terminator
     }
 
-    fn appendNetscape2(self: *TestBuilder, gpa: Allocator, loop_count: u16) !void {
-        try self.appendByte(gpa, block_extension_introducer);
-        try self.appendByte(gpa, ext_label_application);
-        try self.appendByte(gpa, 0x0B); // block size = 11
-        try self.appendBytes(gpa, "NETSCAPE2.0");
-        try self.appendByte(gpa, 0x03); // sub-block size = 3
-        try self.appendByte(gpa, 0x01); // sub-block id
-        try self.appendU16(gpa, loop_count);
-        try self.appendByte(gpa, 0); // terminator
+    fn appendNetscape2(self: *TestBuilder, loop_count: u16) !void {
+        try self.appendByte(block_extension_introducer);
+        try self.appendByte(ext_label_application);
+        try self.appendByte(0x0B); // block size = 11
+        try self.appendBytes("NETSCAPE2.0");
+        try self.appendByte(0x03); // sub-block size = 3
+        try self.appendByte(0x01); // sub-block id
+        try self.appendU16(loop_count);
+        try self.appendByte(0); // terminator
     }
 
-    fn appendComment(self: *TestBuilder, gpa: Allocator, text: []const u8) !void {
-        try self.appendByte(gpa, block_extension_introducer);
-        try self.appendByte(gpa, ext_label_comment);
-        try self.appendByte(gpa, @intCast(text.len));
-        try self.appendBytes(gpa, text);
-        try self.appendByte(gpa, 0);
+    fn appendComment(self: *TestBuilder, text: []const u8) !void {
+        try self.appendByte(block_extension_introducer);
+        try self.appendByte(ext_label_comment);
+        try self.appendByte(@intCast(text.len));
+        try self.appendBytes(text);
+        try self.appendByte(0);
     }
 
-    fn appendTrailer(self: *TestBuilder, gpa: Allocator) !void {
-        try self.appendByte(gpa, block_trailer);
+    fn appendTrailer(self: *TestBuilder) !void {
+        try self.appendByte(block_trailer);
     }
 
     const HeaderOpts = struct {
@@ -1294,13 +1291,13 @@ fn buildReader(data: []const u8) Io.Reader {
 
 test "getInfo — minimal GIF87a, no frames" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeader(gpa, .{ .signature = "GIF87a", .width = 16, .height = 8 });
-    try b.appendTrailer(gpa);
+    try b.appendHeader(.{ .signature = "GIF87a", .width = 16, .height = 8 });
+    try b.appendTrailer();
 
-    var reader = buildReader(b.list.items);
+    var reader = buildReader(b.written());
     const info = try getInfo(&reader, .{});
 
     try expectEqual(Version.gif87a, info.version);
@@ -1313,15 +1310,15 @@ test "getInfo — minimal GIF87a, no frames" {
 
 test "getInfo — GIF89a with 1 frame and GCE" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeader(gpa, .{ .gct_size_log = 1 }); // 4-entry GCT
-    try b.appendGce(gpa, .{});
-    try b.appendImageDescriptor(gpa, .{});
-    try b.appendTrailer(gpa);
+    try b.appendHeader(.{ .gct_size_log = 1 }); // 4-entry GCT
+    try b.appendGce(.{});
+    try b.appendImageDescriptor(.{});
+    try b.appendTrailer();
 
-    var reader = buildReader(b.list.items);
+    var reader = buildReader(b.written());
     const info = try getInfo(&reader, .{});
 
     try expectEqual(Version.gif89a, info.version);
@@ -1333,16 +1330,16 @@ test "getInfo — GIF89a with 1 frame and GCE" {
 
 test "getInfo — NETSCAPE2.0 loop count = 3" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeader(gpa, .{});
-    try b.appendNetscape2(gpa, 3);
-    try b.appendImageDescriptor(gpa, .{});
-    try b.appendImageDescriptor(gpa, .{});
-    try b.appendTrailer(gpa);
+    try b.appendHeader(.{});
+    try b.appendNetscape2(3);
+    try b.appendImageDescriptor(.{});
+    try b.appendImageDescriptor(.{});
+    try b.appendTrailer();
 
-    var reader = buildReader(b.list.items);
+    var reader = buildReader(b.written());
     const info = try getInfo(&reader, .{});
 
     try expectEqual(@as(u16, 3), info.loop_count);
@@ -1351,15 +1348,15 @@ test "getInfo — NETSCAPE2.0 loop count = 3" {
 
 test "getInfo — comment extension is skipped" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeader(gpa, .{});
-    try b.appendComment(gpa, "made with zignal");
-    try b.appendImageDescriptor(gpa, .{});
-    try b.appendTrailer(gpa);
+    try b.appendHeader(.{});
+    try b.appendComment("made with zignal");
+    try b.appendImageDescriptor(.{});
+    try b.appendTrailer();
 
-    var reader = buildReader(b.list.items);
+    var reader = buildReader(b.written());
     const info = try getInfo(&reader, .{});
     try expectEqual(@as(u32, 1), info.frame_count);
 }
@@ -1378,28 +1375,28 @@ test "getInfo — unsupported version rejected" {
 
 test "getInfo — width exceeds limit" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeader(gpa, .{ .width = 2000, .height = 10 });
-    try b.appendTrailer(gpa);
+    try b.appendHeader(.{ .width = 2000, .height = 10 });
+    try b.appendTrailer();
 
-    var reader = buildReader(b.list.items);
+    var reader = buildReader(b.written());
     try expectError(error.ImageTooLarge, getInfo(&reader, .{ .max_width = 1024 }));
 }
 
 test "getInfo — frame count exceeds limit" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeader(gpa, .{});
-    try b.appendImageDescriptor(gpa, .{});
-    try b.appendImageDescriptor(gpa, .{});
-    try b.appendImageDescriptor(gpa, .{});
-    try b.appendTrailer(gpa);
+    try b.appendHeader(.{});
+    try b.appendImageDescriptor(.{});
+    try b.appendImageDescriptor(.{});
+    try b.appendImageDescriptor(.{});
+    try b.appendTrailer();
 
-    var reader = buildReader(b.list.items);
+    var reader = buildReader(b.written());
     try expectError(error.TooManyFrames, getInfo(&reader, .{ .max_frames = 2 }));
 }
 
@@ -1416,17 +1413,17 @@ const test_palette_4 = [_]Rgb{
 
 test "loadFromBytes — 1x1 red pixel" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeaderWithGct(gpa, 1, 1, &test_palette_4);
+    try b.appendHeaderWithGct(1, 1, &test_palette_4);
     // LZW for indices [1]: Clear=4, 1, EOI=5 at min_code_size=2.
     //   bits 0..2 = 100 (Clear), 3..5 = 001 (1), 6..8 = 101 (EOI)
     //   byte 0 = 0b01001100 = 0x4C, byte 1 = 0b00000001 = 0x01
-    try b.appendImageWithLzw(gpa, .{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
-    try b.appendTrailer(gpa);
+    try b.appendImageWithLzw(.{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
+    try b.appendTrailer();
 
-    var img = try loadFromBytes(Rgb, parallel.inline_io, gpa, b.list.items, .{});
+    var img = try loadFromBytes(Rgb, parallel.inline_io, gpa, b.written(), .{});
     defer img.deinit(gpa);
 
     try expectEqual(@as(usize, 1), img.rows);
@@ -1436,17 +1433,17 @@ test "loadFromBytes — 1x1 red pixel" {
 
 test "loadFromBytes — 2x2 with global palette" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeaderWithGct(gpa, 2, 2, &test_palette_4);
+    try b.appendHeaderWithGct(2, 2, &test_palette_4);
     // LZW for indices [0, 1, 2, 3]: encoder grows code_size after the third
     // user emission saturates the dict (next_code = 9 > 1<<3), so codes 0,1,2
     // are emitted at 3 bits and 3,EOI at 4 bits → bytes [0x44, 0x34, 0x05].
-    try b.appendImageWithLzw(gpa, .{ .width = 2, .height = 2 }, null, &.{ 0x44, 0x34, 0x05 });
-    try b.appendTrailer(gpa);
+    try b.appendImageWithLzw(.{ .width = 2, .height = 2 }, null, &.{ 0x44, 0x34, 0x05 });
+    try b.appendTrailer();
 
-    var img = try loadFromBytes(Rgb, parallel.inline_io, gpa, b.list.items, .{});
+    var img = try loadFromBytes(Rgb, parallel.inline_io, gpa, b.written(), .{});
     defer img.deinit(gpa);
 
     try expectEqual(Rgb{ .r = 0, .g = 0, .b = 0 }, img.at(0, 0).*);
@@ -1457,10 +1454,10 @@ test "loadFromBytes — 2x2 with global palette" {
 
 test "loadFromBytes — local color table overrides global" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeaderWithGct(gpa, 1, 1, &test_palette_4); // global red at idx 1
+    try b.appendHeaderWithGct(1, 1, &test_palette_4); // global red at idx 1
 
     // LCT: 4 entries, idx 1 = white (different from global red).
     const lct = [_]Rgb{
@@ -1471,14 +1468,13 @@ test "loadFromBytes — local color table overrides global" {
     };
     // packed_byte: LCT flag = 0x80, lct_size_log = 1 → 0x81.
     try b.appendImageWithLzw(
-        gpa,
         .{ .width = 1, .height = 1, .packed_byte = 0x81, .lct_size_log = 1 },
         &lct,
         &.{ 0x4C, 0x01 },
     );
-    try b.appendTrailer(gpa);
+    try b.appendTrailer();
 
-    var img = try loadFromBytes(Rgb, parallel.inline_io, gpa, b.list.items, .{});
+    var img = try loadFromBytes(Rgb, parallel.inline_io, gpa, b.written(), .{});
     defer img.deinit(gpa);
 
     try expectEqual(Rgb{ .r = 255, .g = 255, .b = 255 }, img.at(0, 0).*);
@@ -1486,17 +1482,17 @@ test "loadFromBytes — local color table overrides global" {
 
 test "loadFromBytes — frame outside screen rejected via descriptor checks" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeaderWithGct(gpa, 4, 4, &test_palette_4);
+    try b.appendHeaderWithGct(4, 4, &test_palette_4);
     // Frame width 6 — exceeds screen but per the LSD limit. Should be tolerated
     // by the parser (composition just clips), so this should NOT fail. Let's
     // test the actual oversize-rejection via DecodeLimits.max_width instead.
-    try b.appendImageWithLzw(gpa, .{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
-    try b.appendTrailer(gpa);
+    try b.appendImageWithLzw(.{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
+    try b.appendTrailer();
 
-    try expectError(error.ImageTooLarge, loadFromBytes(Rgb, parallel.inline_io, gpa, b.list.items, .{ .max_width = 2 }));
+    try expectError(error.ImageTooLarge, loadFromBytes(Rgb, parallel.inline_io, gpa, b.written(), .{ .max_width = 2 }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1505,26 +1501,26 @@ test "loadFromBytes — frame outside screen rejected via descriptor checks" {
 
 test "loadAnimated — two frames, do_not_dispose, per-frame delays" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeaderWithGct(gpa, 1, 1, &test_palette_4);
+    try b.appendHeaderWithGct(1, 1, &test_palette_4);
 
     // Frame 0: red (idx 1), delay 5cs.
-    try b.appendGce(gpa, .{ .disposal = 1, .delay_cs = 5 });
-    try b.appendImageWithLzw(gpa, .{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
+    try b.appendGce(.{ .disposal = 1, .delay_cs = 5 });
+    try b.appendImageWithLzw(.{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
 
     // Frame 1: green (idx 2), delay 10cs.
-    try b.appendGce(gpa, .{ .disposal = 1, .delay_cs = 10 });
+    try b.appendGce(.{ .disposal = 1, .delay_cs = 10 });
     // LZW for indices [2]: Clear=4, 2, EOI=5 at min_code_size=2.
     //   bits 0..2 = 100, 3..5 = 010, 6..8 = 101
     //   byte 0 = 0,0,1, 0,1,0, 1,0 = 0b01010100 = 0x54
     //   byte 1 = bit 8 = 1, rest = 0 = 0x01
-    try b.appendImageWithLzw(gpa, .{ .width = 1, .height = 1 }, null, &.{ 0x54, 0x01 });
+    try b.appendImageWithLzw(.{ .width = 1, .height = 1 }, null, &.{ 0x54, 0x01 });
 
-    try b.appendTrailer(gpa);
+    try b.appendTrailer();
 
-    var anim = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, b.list.items, .{});
+    var anim = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, b.written(), .{});
     defer anim.deinit(gpa);
 
     try expectEqual(@as(usize, 2), anim.frameCount());
@@ -1536,28 +1532,28 @@ test "loadAnimated — two frames, do_not_dispose, per-frame delays" {
 
 test "loadAnimated — restore_to_background blanks the previous rect" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
     // 2x1 screen: frame 0 covers full screen with red, then disposal=2 (RTB).
     // Frame 1 covers only the first column with green; column 1 should be transparent.
-    try b.appendHeaderWithGct(gpa, 2, 1, &test_palette_4);
+    try b.appendHeaderWithGct(2, 1, &test_palette_4);
 
     // Frame 0: 2x1 red. LZW encode indices [1, 1].
     //   Clear=4, 1, 1, EOI=5 (all 3 bits since dict_size never reaches 8).
     //   bits: 100 001 001 101
     //     byte 0 (bits 0..7) = 0,0,1,1,0,0,1,0 = 0x4C
     //     byte 1 (bits 8..11) = 0,1,0,1 + pad = 0,1,0,1,0,0,0,0 = 0x0A
-    try b.appendGce(gpa, .{ .disposal = 2 });
-    try b.appendImageWithLzw(gpa, .{ .width = 2, .height = 1 }, null, &.{ 0x4C, 0x0A });
+    try b.appendGce(.{ .disposal = 2 });
+    try b.appendImageWithLzw(.{ .width = 2, .height = 1 }, null, &.{ 0x4C, 0x0A });
 
     // Frame 1: 1x1 green at (0,0). LZW [2] = [0x54, 0x01].
-    try b.appendGce(gpa, .{});
-    try b.appendImageWithLzw(gpa, .{ .left = 0, .top = 0, .width = 1, .height = 1 }, null, &.{ 0x54, 0x01 });
+    try b.appendGce(.{});
+    try b.appendImageWithLzw(.{ .left = 0, .top = 0, .width = 1, .height = 1 }, null, &.{ 0x54, 0x01 });
 
-    try b.appendTrailer(gpa);
+    try b.appendTrailer();
 
-    var anim = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, b.list.items, .{});
+    var anim = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, b.written(), .{});
     defer anim.deinit(gpa);
 
     try expectEqual(@as(usize, 2), anim.frameCount());
@@ -1571,22 +1567,22 @@ test "loadAnimated — restore_to_background blanks the previous rect" {
 
 test "loadAnimated — transparent index → alpha=0 on Rgba" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
     // 2x1 frame, indices [0, 1]. Mark idx 0 transparent.
-    try b.appendHeaderWithGct(gpa, 2, 1, &test_palette_4);
+    try b.appendHeaderWithGct(2, 1, &test_palette_4);
 
-    try b.appendGce(gpa, .{ .disposal = 1, .has_transparent = true });
+    try b.appendGce(.{ .disposal = 1, .has_transparent = true });
     // LZW for indices [0, 1]: Clear=4, 0, 1, EOI=5 (all 3 bits).
     //   bits: 100 000 001 101
     //     byte 0 = 0,0,1,0,0,0,1,0 = 0x44
     //     byte 1 = 0,1,0,1 + pad = 0x0A
-    try b.appendImageWithLzw(gpa, .{ .width = 2, .height = 1 }, null, &.{ 0x44, 0x0A });
+    try b.appendImageWithLzw(.{ .width = 2, .height = 1 }, null, &.{ 0x44, 0x0A });
 
-    try b.appendTrailer(gpa);
+    try b.appendTrailer();
 
-    var anim = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, b.list.items, .{});
+    var anim = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, b.written(), .{});
     defer anim.deinit(gpa);
 
     // Pixel 0: index 0 is transparent → alpha=0 (canvas was initialized to all transparent).
@@ -1883,33 +1879,33 @@ test "encodeAnimated — mismatched frame dimensions rejected" {
 
 test "loadFromBytes — missing global color table without LCT" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendBytes(gpa, "GIF89a");
-    try b.appendU16(gpa, 1);
-    try b.appendU16(gpa, 1);
-    try b.appendByte(gpa, 0x00); // no GCT
-    try b.appendByte(gpa, 0); // bg
-    try b.appendByte(gpa, 0); // aspect
-    try b.appendImageWithLzw(gpa, .{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
-    try b.appendTrailer(gpa);
+    try b.appendBytes("GIF89a");
+    try b.appendU16(1);
+    try b.appendU16(1);
+    try b.appendByte(0x00); // no GCT
+    try b.appendByte(0); // bg
+    try b.appendByte(0); // aspect
+    try b.appendImageWithLzw(.{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
+    try b.appendTrailer();
 
-    try expectError(error.MissingGlobalColorTable, loadFromBytes(Rgb, parallel.inline_io, gpa, b.list.items, .{}));
+    try expectError(error.MissingGlobalColorTable, loadFromBytes(Rgb, parallel.inline_io, gpa, b.written(), .{}));
 }
 
 test "getInfo — image descriptor with local color table" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeader(gpa, .{ .gct_size_log = 0 }); // 2-entry GCT
+    try b.appendHeader(.{ .gct_size_log = 0 }); // 2-entry GCT
     // packed_byte: bit 7 = LCT flag, bit 0..2 = log2(LCT size) - 1
     // 0x80 sets LCT flag, lower 3 bits = 2 → 8 entries
-    try b.appendImageDescriptor(gpa, .{ .packed_byte = 0x82, .lct_size_log = 2 });
-    try b.appendTrailer(gpa);
+    try b.appendImageDescriptor(.{ .packed_byte = 0x82, .lct_size_log = 2 });
+    try b.appendTrailer();
 
-    var reader = buildReader(b.list.items);
+    var reader = buildReader(b.written());
     const info = try getInfo(&reader, .{});
     try expectEqual(@as(u32, 1), info.frame_count);
     try expect(info.has_global_color_table);
