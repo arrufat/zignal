@@ -9,7 +9,6 @@ const Io = std.Io;
 const animated = @import("../image/animated.zig");
 const AnimatedImage = animated.AnimatedImage;
 const Image = @import("../image.zig").Image;
-const Rectangle = @import("../geometry.zig").Rectangle;
 const codecs = @import("../codecs.zig");
 const NativeImage = codecs.NativeImage;
 const dynlib = @import("dynlib.zig");
@@ -335,8 +334,7 @@ pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: Anim
     }
 
     for (frames, 0..) |frame, i| {
-        // An identical frame keeps one pixel so its duration survives.
-        const region: Rectangle(u32) = if (is_animation and i > 0) frame.diffBounds(frames[i - 1]) orelse .init(0, 0, 1, 1) else frame.getRectangle();
+        const region = anim.changedRegion(i);
         if (is_animation) {
             var header = template;
             header.duration = anim.durations_ms[i];

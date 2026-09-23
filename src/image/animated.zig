@@ -8,6 +8,7 @@ const Io = std.Io;
 
 const codecs = @import("../codecs.zig");
 const Image = @import("../image.zig").Image;
+const Rectangle = @import("../geometry.zig").Rectangle;
 const ImageFormat = @import("format.zig").ImageFormat;
 
 /// Animated image with N frames, per-frame display durations, and a loop count.
@@ -97,6 +98,13 @@ pub fn AnimatedImage(comptime T: type) type {
             for (self.frames[1..]) |f| {
                 if (!f.hasSameShape(self.frames[0])) return error.InconsistentFrameDimensions;
             }
+        }
+
+        /// The region of frame `i` that differs from frame `i - 1`. An identical frame keeps one
+        /// pixel so its duration survives.
+        pub fn changedRegion(self: Self, i: usize) Rectangle(u32) {
+            if (i == 0) return self.frames[0].getRectangle();
+            return self.frames[i].diffBounds(self.frames[i - 1]) orelse .init(0, 0, 1, 1);
         }
 
         /// Total wall-clock duration in milliseconds.

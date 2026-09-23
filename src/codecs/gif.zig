@@ -939,10 +939,8 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
 // Animated encode
 // ---------------------------------------------------------------------------
 
-/// Encodes an `AnimatedImage(T)` as an animated GIF. Each frame is emitted at
-/// full screen size with disposal=unspecified; the decoder's full-frame
-/// composition is the inverse of this encoder. For `T == Rgba`, pixels with
-/// `alpha < 128` are mapped to a reserved transparent palette index.
+/// Encodes an `AnimatedImage(T)` as an animated GIF, storing only each frame's changed region.
+/// For `T == Rgba`, pixels with `alpha < 128` map to a reserved transparent palette index.
 pub fn encodeAnimated(comptime T: type, io: Io, gpa: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
     try anim.validate();
 
@@ -989,26 +987,46 @@ pub fn encodeAnimated(comptime T: type, io: Io, gpa: Allocator, anim: AnimatedIm
         try out.append(gpa, 0);
     }
 
-    for (anim.frames, anim.durations_ms) |frame, ms| {
+    // Transparent pixels show the canvas below, so uncovering one needs a cleared canvas.
+    var after_clear = false;
+    for (anim.frames, anim.durations_ms, 0..) |frame, ms, i| {
+        const clears_next = i + 1 < anim.frames.len and uncovers(T, frame, anim.frames[i + 1]);
+        const region = if (after_clear or clears_next) frame.getRectangle() else anim.changedRegion(i);
+        const disposal: DisposalMethod = if (clears_next) .restore_to_background else .do_not_dispose;
         // GIF delays are centiseconds.
         const delay_cs = @min((ms +| 5) / 10, std.math.maxInt(u16));
-        try emitAnimatedFrame(T, io, gpa, frame, delay_cs, has_global_palette, options, &out);
+        try emitAnimatedFrame(T, io, gpa, frame, region, disposal, delay_cs, has_global_palette, options, &out);
+        after_clear = clears_next;
     }
 
     try out.append(gpa, block_trailer);
     return out.toOwnedSlice(gpa);
 }
 
+/// Whether `next` makes transparent a pixel that is opaque in `current`.
+fn uncovers(comptime T: type, current: Image(T), next: Image(T)) bool {
+    if (T != Rgba) return false;
+    for (0..current.rows) |r| {
+        for (current.data[r * current.stride ..][0..current.cols], next.data[r * next.stride ..][0..next.cols]) |a, b| {
+            if (a.a >= 128 and b.a < 128) return true;
+        }
+    }
+    return false;
+}
+
 fn emitAnimatedFrame(
     comptime T: type,
     io: Io,
     gpa: Allocator,
-    frame: Image(T),
+    full_frame: Image(T),
+    region: Rectangle(u32),
+    disposal: DisposalMethod,
     delay_cs: u16,
     has_global_palette: bool,
     options: EncodeOptions,
     out: *std.ArrayList(u8),
 ) !void {
+    const frame = full_frame.view(region);
     const num_pixels: usize = @as(usize, frame.cols) * @as(usize, frame.rows);
 
     // Detect alpha=0 pixels for Rgba inputs so we can map them to a reserved
@@ -1072,7 +1090,7 @@ fn emitAnimatedFrame(
     try out.append(gpa, block_extension_introducer);
     try out.append(gpa, ext_label_graphic_control);
     try out.append(gpa, 0x04);
-    const gce_packed: u8 = if (has_transparent) gce_flag_transparent else 0;
+    const gce_packed: u8 = (@as(u8, @backingInt(disposal)) << 2) | if (has_transparent) gce_flag_transparent else 0;
     try out.append(gpa, gce_packed);
     try writeU16Le(gpa, out, delay_cs);
     try out.append(gpa, transparent_index);
@@ -1080,8 +1098,8 @@ fn emitAnimatedFrame(
 
     // Image Descriptor.
     try out.append(gpa, block_image_descriptor);
-    try writeU16Le(gpa, out, 0);
-    try writeU16Le(gpa, out, 0);
+    try writeU16Le(gpa, out, @intCast(region.l));
+    try writeU16Le(gpa, out, @intCast(region.t));
     try writeU16Le(gpa, out, @intCast(frame.cols));
     try writeU16Le(gpa, out, @intCast(frame.rows));
     var id_packed: u8 = 0;
@@ -1738,6 +1756,58 @@ test "encodeAnimated — Rgba transparent pixel round-trips alpha=0" {
     try expectEqual(@as(u8, 255), decoded.frame(0).at(0, 1).a);
     try expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 }, decoded.frame(1).at(0, 0).*);
     try expectEqual(Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 }, decoded.frame(1).at(0, 1).*);
+}
+
+test "encodeAnimated — opaque pixel turned transparent round-trips alpha=0" {
+    const gpa = std.testing.allocator;
+
+    const f0 = try Image(Rgba).init(gpa, 2, 3);
+    @memset(f0.data, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
+    const f1 = try Image(Rgba).init(gpa, 2, 3);
+    @memset(f1.data, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
+    f1.at(1, 2).a = 0;
+    const f2 = try Image(Rgba).init(gpa, 2, 3);
+    f1.copy(f2);
+    f2.at(0, 0).* = .{ .r = 0, .g = 0, .b = 255, .a = 255 };
+
+    var anim = try buildAnimated(Rgba, gpa, &.{ f0, f1, f2 }, &.{ 50, 50, 50 }, 0);
+    defer anim.deinit(gpa);
+    const data = try encodeAnimated(Rgba, parallel.inline_io, gpa, anim, .{});
+    defer gpa.free(data);
+    var decoded = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, data, .{});
+    defer decoded.deinit(gpa);
+
+    try expectEqual(@as(u8, 0), decoded.frame(1).at(1, 2).a);
+    try expectEqual(@as(u8, 0), decoded.frame(2).at(1, 2).a);
+    try expectEqual(Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 }, decoded.frame(2).at(0, 0).*);
+    try expectEqual(Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 }, decoded.frame(2).at(1, 1).*);
+}
+
+test "encodeAnimated — changed-region frames decode to the full frames" {
+    const gpa = std.testing.allocator;
+    const palette = [_]Rgb{ .{ .r = 10, .g = 20, .b = 30 }, .{ .r = 200, .g = 50, .b = 50 }, .{ .r = 40, .g = 220, .b = 90 } };
+
+    // A moving square, a repeated frame, then a change everywhere.
+    var frames: [5]Image(Rgb) = undefined;
+    for (&frames, 0..) |*f, i| {
+        f.* = try .init(gpa, 16, 24);
+        @memset(f.data, palette[0]);
+        if (i < 3) for (4..8) |r| for (2 + i * 5..6 + i * 5) |c| {
+            f.at(r, c).* = palette[1];
+        };
+    }
+    frames[2].copy(frames[3]);
+    @memset(frames[4].data, palette[2]);
+
+    var anim = try buildAnimated(Rgb, gpa, &frames, &.{ 30, 30, 30, 30, 30 }, 0);
+    defer anim.deinit(gpa);
+    const data = try encodeAnimated(Rgb, parallel.inline_io, gpa, anim, .{ .palette = &palette });
+    defer gpa.free(data);
+    var decoded = try loadAnimatedFromBytes(Rgb, parallel.inline_io, gpa, data, .{});
+    defer decoded.deinit(gpa);
+
+    try expectEqual(anim.frameCount(), decoded.frameCount());
+    for (anim.frames, decoded.frames) |a, b| try std.testing.expectEqualSlices(Rgb, a.data, b.data);
 }
 
 test "encodeAnimated — caller-supplied global palette uses GCT, no per-frame LCT" {
