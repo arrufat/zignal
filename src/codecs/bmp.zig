@@ -36,8 +36,6 @@ const max_palette_entries_default: u32 = 256;
 /// Resource limits applied while decoding BMP data. A zero value disables the
 /// corresponding limit.
 pub const DecodeLimits = struct {
-    /// Maximum number of bytes accepted in the original BMP buffer.
-    max_bmp_bytes: usize = codecs.max_file_size,
     /// Maximum allowed width in pixels.
     max_width: u32 = max_dimensions_default,
     /// Maximum allowed height in pixels.
@@ -156,12 +154,11 @@ fn isValidBitDepth(bit_depth: u8, compression: Compression) bool {
 
 /// Parses just the BITMAPFILEHEADER. Used by both `getInfo` and `decode` so
 /// the two share signature/size validation.
-fn readFileHeader(reader: *Io.Reader, limits: DecodeLimits) !FileHeader {
+fn readFileHeader(reader: *Io.Reader) !FileHeader {
     const sig = try reader.takeArray(2);
     if (!std.mem.eql(u8, sig, &signature)) return error.InvalidBmpSignature;
 
     const file_size = try reader.takeInt(u32, .little);
-    if (exceeds(limits.max_bmp_bytes, file_size)) return error.BmpDataTooLarge;
     _ = try reader.takeInt(u16, .little); // reserved1
     _ = try reader.takeInt(u16, .little); // reserved2
     const pixel_offset = try reader.takeInt(u32, .little);
@@ -321,7 +318,7 @@ fn shouldReadAlphaMask(file_header: FileHeader, header: Header) bool {
 /// Reads BMP metadata without decoding pixel data. Consumes the file header,
 /// the DIB header, and any v3 BI_BITFIELDS mask trailer.
 pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
-    const file_header = try readFileHeader(reader, limits);
+    const file_header = try readFileHeader(reader);
     var header = try readDibHeader(reader);
     try consumeBitfieldMasks(reader, &header, shouldReadAlphaMask(file_header, header));
 
@@ -369,15 +366,21 @@ fn computePostDibOffset(file_header: FileHeader, header: Header) u32 {
     return off;
 }
 
-/// Decodes a BMP file from a byte buffer. The returned state borrows from `data`
-/// for pixel data — `data` must outlive the state.
-pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !BmpState {
-    if (exceeds(limits.max_bmp_bytes, data.len)) return error.BmpDataTooLarge;
+/// Everything before the pixel data: the headers, the owned palette, and the pixel data offset.
+const Prelude = struct {
+    file_header: FileHeader,
+    header: Header,
+    palette: ?[]Rgba,
+    pixel_offset: u32,
+    /// Bytes consumed from the start of the file.
+    consumed: u32,
+};
 
-    var reader = Io.Reader.fixed(data);
-    const file_header = try readFileHeader(&reader, limits);
-    var header = try readDibHeader(&reader);
-    try consumeBitfieldMasks(&reader, &header, shouldReadAlphaMask(file_header, header));
+/// Reads the headers and palette, leaving `reader` just past the palette.
+fn readPrelude(gpa: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Prelude {
+    const file_header = try readFileHeader(reader);
+    var header = try readDibHeader(reader);
+    try consumeBitfieldMasks(reader, &header, shouldReadAlphaMask(file_header, header));
     try enforceHeaderLimits(header, limits);
 
     const palette_offset = computePostDibOffset(file_header, header);
@@ -386,18 +389,12 @@ pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !BmpState 
 
     var palette: ?[]Rgba = null;
     errdefer if (palette) |p| gpa.free(p);
-
     if (header.palette_entries > 0) {
-        if (@as(usize, palette_offset) + palette_bytes > data.len) return error.MissingPixelData;
         palette = try gpa.alloc(Rgba, header.palette_entries);
-        var i: u32 = 0;
-        while (i < header.palette_entries) : (i += 1) {
-            const off = palette_offset + i * palette_entry_size;
-            const b = data[off + 0];
-            const g = data[off + 1];
-            const r = data[off + 2];
+        for (palette.?) |*entry| {
+            const bgr = reader.take(palette_entry_size) catch |err| return missingOnEnd(err);
             // Palette alpha byte (INFO+) is reserved per the spec; treat as opaque.
-            palette.?[i] = .{ .r = r, .g = g, .b = b, .a = 255 };
+            entry.* = .{ .r = bgr[2], .g = bgr[1], .b = bgr[0], .a = 255 };
         }
     }
 
@@ -410,14 +407,32 @@ pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !BmpState 
     else
         declared;
 
-    if (pixel_offset > data.len) return error.MissingPixelData;
-    const pixel_data = data[pixel_offset..];
-
     return .{
         .file_header = file_header,
         .header = header,
         .palette = palette,
-        .pixel_data = pixel_data,
+        .pixel_offset = pixel_offset,
+        .consumed = min_pixel_offset,
+    };
+}
+
+/// A stream that ends early means the file is missing pixel data.
+fn missingOnEnd(err: anytype) (@TypeOf(err) || error{MissingPixelData}) {
+    return if (@as(anyerror, err) == error.EndOfStream) error.MissingPixelData else err;
+}
+
+/// Decodes a BMP file from a byte buffer. The returned state borrows from `data`
+/// for pixel data — `data` must outlive the state.
+pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !BmpState {
+    var reader = Io.Reader.fixed(data);
+    const prelude = try readPrelude(gpa, &reader, limits);
+    errdefer if (prelude.palette) |p| gpa.free(p);
+    if (prelude.pixel_offset > data.len) return error.MissingPixelData;
+    return .{
+        .file_header = prelude.file_header,
+        .header = prelude.header,
+        .palette = prelude.palette,
+        .pixel_data = data[prelude.pixel_offset..],
     };
 }
 
@@ -433,46 +448,115 @@ pub const NativeImage = codecs.NativeImage;
 
 /// Decodes the pixel buffer into a native-format `Image(T)`.
 pub fn toNativeImage(allocator: Allocator, state: BmpState) !NativeImage {
-    const h = state.header;
+    var reader = Io.Reader.fixed(state.pixel_data);
+    return readPixels(allocator, state.header, state.palette, &reader);
+}
+
+/// Decodes the pixel data that `reader` is positioned at into the image's native type.
+fn readPixels(allocator: Allocator, h: Header, palette: ?[]const Rgba, reader: *Io.Reader) !NativeImage {
     return switch (h.bit_depth) {
-        1 => switch (h.compression) {
-            .rgb => .{ .rgb = try decodeIndexed(allocator, state) },
-            else => return error.UnsupportedCompression,
+        1, 4, 8 => switch (h.compression) {
+            .rgb => .{ .rgb = try readRows(Rgb, allocator, h, reader, Indexed{ .palette = palette orelse return error.MissingPalette, .bit_depth = h.bit_depth }) },
+            .rle4, .rle8 => if (h.bit_depth == 1) error.UnsupportedCompression else .{ .rgb = try readRle(allocator, h, palette orelse return error.MissingPalette, reader) },
+            else => error.UnsupportedCompression,
         },
-        4 => switch (h.compression) {
-            .rgb => .{ .rgb = try decodeIndexed(allocator, state) },
-            .rle4 => .{ .rgb = try decodeRleToImage(allocator, state) },
-            else => return error.UnsupportedCompression,
-        },
-        8 => switch (h.compression) {
-            .rgb => .{ .rgb = try decodeIndexed(allocator, state) },
-            .rle8 => .{ .rgb = try decodeRleToImage(allocator, state) },
-            else => return error.UnsupportedCompression,
-        },
-        16 => switch (h.compression) {
-            .rgb => .{ .rgb = try decodePackedRgb(allocator, state, default16Masks(), 16) },
+        16, 32 => switch (h.compression) {
+            .rgb => if (h.bit_depth == 16)
+                .{ .rgb = try readRows(Rgb, allocator, h, reader, Packed(Rgb).init(default16Masks(), 16)) }
+            else
+                read32BppRgb(allocator, h, reader),
             .bitfields, .alphabitfields => blk: {
                 const masks = h.masks orelse return error.InvalidBitfieldsMasks;
-                if (masks.a != 0) break :blk .{ .rgba = try decodePackedRgba(allocator, state, masks, 16) };
-                break :blk .{ .rgb = try decodePackedRgb(allocator, state, masks, 16) };
+                if (masks.a != 0) break :blk .{ .rgba = try readRows(Rgba, allocator, h, reader, Packed(Rgba).init(masks, h.bit_depth)) };
+                break :blk .{ .rgb = try readRows(Rgb, allocator, h, reader, Packed(Rgb).init(masks, h.bit_depth)) };
             },
-            else => return error.UnsupportedCompression,
+            else => error.UnsupportedCompression,
         },
         24 => switch (h.compression) {
-            .rgb => .{ .rgb = try decode24Bpp(allocator, state) },
-            else => return error.UnsupportedCompression,
+            .rgb => .{ .rgb = try readRows(Rgb, allocator, h, reader, Bgr{}) },
+            else => error.UnsupportedCompression,
         },
-        32 => switch (h.compression) {
-            .rgb => try decode32BppRgb(allocator, state),
-            .bitfields, .alphabitfields => blk: {
-                const masks = h.masks orelse return error.InvalidBitfieldsMasks;
-                if (masks.a != 0) break :blk .{ .rgba = try decodePackedRgba(allocator, state, masks, 32) };
-                break :blk .{ .rgb = try decodePackedRgb(allocator, state, masks, 32) };
-            },
-            else => return error.UnsupportedCompression,
-        },
-        else => return error.UnsupportedBitDepth,
+        else => error.UnsupportedBitDepth,
     };
+}
+
+/// Reads the rows of an uncompressed bitmap in file order (bottom-up unless `top_down`) and
+/// converts each pixel with `format.pixel(row, x)`.
+fn readRows(comptime P: type, allocator: Allocator, h: Header, reader: *Io.Reader, format: anytype) !Image(P) {
+    const row = try allocator.alloc(u8, paddedRowBytes(h.width, h.bit_depth));
+    defer allocator.free(row);
+    var image = try Image(P).init(allocator, h.height, h.width);
+    errdefer image.deinit(allocator);
+    for (0..h.height) |i| {
+        reader.readSliceAll(row) catch |err| return missingOnEnd(err);
+        const y = if (h.top_down) i else h.height - 1 - i;
+        for (image.data[y * h.width ..][0..h.width], 0..) |*px, x| px.* = try format.pixel(row, x);
+    }
+    return image;
+}
+
+const Indexed = struct {
+    palette: []const Rgba,
+    bit_depth: u8,
+
+    inline fn pixel(self: Indexed, row: []const u8, x: usize) !Rgb {
+        const index: usize = switch (self.bit_depth) {
+            1 => (row[x / 8] >> @intCast(7 - x % 8)) & 1,
+            4 => if (x % 2 == 0) row[x / 2] >> 4 else row[x / 2] & 0x0F,
+            else => row[x],
+        };
+        if (index >= self.palette.len) return error.InvalidPaletteIndex;
+        const p = self.palette[index];
+        return .{ .r = p.r, .g = p.g, .b = p.b };
+    }
+};
+
+/// 16 or 32 bpp pixels split by channel masks.
+fn Packed(comptime P: type) type {
+    return struct {
+        r: ChannelInfo,
+        g: ChannelInfo,
+        b: ChannelInfo,
+        a: ChannelInfo,
+        bit_depth: u8,
+
+        fn init(masks: Masks, bit_depth: u8) @This() {
+            return .{ .r = channelInfo(masks.r), .g = channelInfo(masks.g), .b = channelInfo(masks.b), .a = channelInfo(masks.a), .bit_depth = bit_depth };
+        }
+
+        inline fn pixel(self: @This(), row: []const u8, x: usize) !P {
+            const word = readPixelWord(row, x * (self.bit_depth / 8), self.bit_depth);
+            const rgb: Rgb = .{ .r = extractChannelFast(word, self.r), .g = extractChannelFast(word, self.g), .b = extractChannelFast(word, self.b) };
+            return if (P == Rgba) .{ .r = rgb.r, .g = rgb.g, .b = rgb.b, .a = extractChannelFast(word, self.a) } else rgb;
+        }
+    };
+}
+
+const Bgr = struct {
+    inline fn pixel(_: Bgr, row: []const u8, x: usize) !Rgb {
+        return .{ .r = row[x * 3 + 2], .g = row[x * 3 + 1], .b = row[x * 3] };
+    }
+};
+
+/// 32bpp BI_RGB. Alpha is officially undefined; the heuristic is to treat the image as opaque
+/// if every alpha byte is zero (the common writer behaviour), otherwise honour the bytes.
+fn read32BppRgb(allocator: Allocator, h: Header, reader: *Io.Reader) !NativeImage {
+    const Bgra = struct {
+        any_alpha: bool = false,
+
+        inline fn pixel(self: *@This(), row: []const u8, x: usize) !Rgba {
+            const px: Rgba = .{ .r = row[x * 4 + 2], .g = row[x * 4 + 1], .b = row[x * 4], .a = row[x * 4 + 3] };
+            self.any_alpha = self.any_alpha or px.a != 0;
+            return px;
+        }
+    };
+    var format: Bgra = .{};
+    var image = try readRows(Rgba, allocator, h, reader, &format);
+    if (format.any_alpha) return .{ .rgba = image };
+    defer image.deinit(allocator);
+    const rgb = try Image(Rgb).init(allocator, h.height, h.width);
+    for (rgb.data, image.data) |*dst, src| dst.* = .{ .r = src.r, .g = src.g, .b = src.b };
+    return .{ .rgb = rgb };
 }
 
 fn default16Masks() Masks {
@@ -522,35 +606,35 @@ inline fn readPixelWord(bytes: []const u8, off: usize, bit_depth: u8) u32 {
 /// resolving each palette index at write time. Pixels never written by the
 /// stream stay zero (initial fill), matching the convention for `delta`
 /// escapes and runs that fall short of `width * height`.
-fn decodeRleToImage(allocator: Allocator, state: BmpState) !Image(Rgb) {
-    const palette = state.palette orelse return error.MissingPalette;
-    const w = state.header.width;
-    const h = state.header.height;
+fn readRle(allocator: Allocator, h: Header, palette: []const Rgba, reader: *Io.Reader) !Image(Rgb) {
+    const w = h.width;
+    const height = h.height;
 
-    var image = try Image(Rgb).init(allocator, h, w);
+    var image = try Image(Rgb).init(allocator, height, w);
     errdefer image.deinit(allocator);
     @memset(image.data, .{ .r = 0, .g = 0, .b = 0 });
 
     const writePixel = struct {
-        fn call(img: Image(Rgb), pal: []const Rgba, height: u32, width: u32, x: u32, y: u32, idx: u8) !void {
-            if (y >= height or x >= width) return error.RleOverflow;
+        fn call(img: Image(Rgb), pal: []const Rgba, x: u32, y: u32, idx: u8) !void {
+            if (y >= img.rows or x >= img.cols) return error.RleOverflow;
             if (idx >= pal.len) return error.InvalidPaletteIndex;
             const p = pal[idx];
-            img.data[(height - 1 - y) * width + x] = .{ .r = p.r, .g = p.g, .b = p.b };
+            img.data[(img.rows - 1 - y) * img.cols + x] = .{ .r = p.r, .g = p.g, .b = p.b };
         }
     }.call;
 
-    const data = state.pixel_data;
-    var pos: usize = 0;
     var x: u32 = 0;
     var y: u32 = 0; // y from the bottom (BMP RLE is bottom-up only)
+    const is_rle4 = h.compression == .rle4;
 
-    const is_rle4 = state.header.compression == .rle4;
-
-    while (pos + 1 < data.len) {
-        const b0 = data[pos];
-        const b1 = data[pos + 1];
-        pos += 2;
+    // A stream that ends between commands just leaves the rest of the image blank.
+    while (true) {
+        const pair = reader.takeArray(2) catch |err| switch (err) {
+            error.EndOfStream => return image,
+            else => |e| return e,
+        };
+        const b0 = pair[0];
+        const b1 = pair[1];
 
         if (b0 == 0) {
             switch (b1) {
@@ -560,26 +644,25 @@ fn decodeRleToImage(allocator: Allocator, state: BmpState) !Image(Rgb) {
                 },
                 0x01 => return image, // End of bitmap
                 0x02 => { // Delta
-                    if (pos + 1 >= data.len) return error.InvalidRleEscape;
-                    x += data[pos];
-                    y += data[pos + 1];
-                    pos += 2;
+                    const delta = reader.takeArray(2) catch |err| return invalidEscapeOnEnd(err);
+                    x += delta[0];
+                    y += delta[1];
                 },
                 else => { // Absolute mode: b1 = N (3..255) raw indices
                     const n: u32 = b1;
                     const byte_count: usize = if (is_rle4) (n + 1) / 2 else n;
-                    if (pos + byte_count > data.len) return error.InvalidRleEscape;
+                    const bytes = reader.take(byte_count) catch |err| return invalidEscapeOnEnd(err);
                     var i: u32 = 0;
                     while (i < n) : (i += 1) {
-                        const value: u8 = if (is_rle4) blk: {
-                            const byte = data[pos + i / 2];
-                            break :blk if (i % 2 == 0) (byte >> 4) else (byte & 0x0F);
-                        } else data[pos + i];
-                        try writePixel(image, palette, h, w, x, y, value);
+                        const value: u8 = if (is_rle4)
+                            (if (i % 2 == 0) bytes[i / 2] >> 4 else bytes[i / 2] & 0x0F)
+                        else
+                            bytes[i];
+                        try writePixel(image, palette, x, y, value);
                         x += 1;
                     }
-                    pos += byte_count;
-                    if (byte_count % 2 == 1) pos += 1; // align to 16-bit boundary
+                    // Runs are padded to 16 bits; the padding may be missing at the very end.
+                    if (byte_count % 2 == 1) _ = try reader.discard(.limited(1));
                 },
             }
         } else { // Encoded run: count copies of value
@@ -590,220 +673,30 @@ fn decodeRleToImage(allocator: Allocator, state: BmpState) !Image(Rgb) {
                     (if (i % 2 == 0) (b1 >> 4) else (b1 & 0x0F))
                 else
                     b1;
-                try writePixel(image, palette, h, w, x, y, value);
+                try writePixel(image, palette, x, y, value);
                 x += 1;
             }
         }
     }
-
-    return image;
 }
 
-fn decodeIndexed(allocator: Allocator, state: BmpState) !Image(Rgb) {
-    const bd = state.header.bit_depth;
-    const w = state.header.width;
-    const h = state.header.height;
-    const stride = paddedRowBytes(w, bd);
-    if (state.pixel_data.len < stride * h) return error.MissingPixelData;
-    const palette = state.palette orelse return error.MissingPalette;
-
-    var image = try Image(Rgb).init(allocator, h, w);
-    errdefer image.deinit(allocator);
-
-    var dst_y: u32 = 0;
-    while (dst_y < h) : (dst_y += 1) {
-        const src_y = if (state.header.top_down) dst_y else h - 1 - dst_y;
-        const row_off = src_y * stride;
-        var x: u32 = 0;
-        while (x < w) : (x += 1) {
-            const index: u32 = switch (bd) {
-                1 => blk: {
-                    const byte = state.pixel_data[row_off + x / 8];
-                    const bit_pos: u3 = @intCast(7 - (x % 8));
-                    break :blk (byte >> bit_pos) & 1;
-                },
-                4 => blk: {
-                    const byte = state.pixel_data[row_off + x / 2];
-                    break :blk if (x % 2 == 0) (byte >> 4) else (byte & 0x0F);
-                },
-                8 => state.pixel_data[row_off + x],
-                else => unreachable,
-            };
-            if (index >= palette.len) return error.InvalidPaletteIndex;
-            const p = palette[@intCast(index)];
-            image.data[dst_y * w + x] = .{ .r = p.r, .g = p.g, .b = p.b };
-        }
-    }
-    return image;
+fn invalidEscapeOnEnd(err: anytype) (@TypeOf(err) || error{InvalidRleEscape}) {
+    return if (@as(anyerror, err) == error.EndOfStream) error.InvalidRleEscape else err;
 }
 
-fn decodePackedRgb(allocator: Allocator, state: BmpState, masks: Masks, bit_depth: u8) !Image(Rgb) {
-    const w = state.header.width;
-    const h = state.header.height;
-    const bytes_per_pixel: u8 = bit_depth / 8;
-    const stride = paddedRowBytes(w, bit_depth);
-    if (state.pixel_data.len < stride * h) return error.MissingPixelData;
-
-    var image = try Image(Rgb).init(allocator, h, w);
-    errdefer image.deinit(allocator);
-
-    const r_info = channelInfo(masks.r);
-    const g_info = channelInfo(masks.g);
-    const b_info = channelInfo(masks.b);
-
-    var dst_y: u32 = 0;
-    while (dst_y < h) : (dst_y += 1) {
-        const src_y = if (state.header.top_down) dst_y else h - 1 - dst_y;
-        const row_off = src_y * stride;
-        var x: u32 = 0;
-        while (x < w) : (x += 1) {
-            const word = readPixelWord(state.pixel_data, row_off + x * bytes_per_pixel, bit_depth);
-            image.data[dst_y * w + x] = .{
-                .r = extractChannelFast(word, r_info),
-                .g = extractChannelFast(word, g_info),
-                .b = extractChannelFast(word, b_info),
-            };
-        }
-    }
-    return image;
-}
-
-fn decodePackedRgba(allocator: Allocator, state: BmpState, masks: Masks, bit_depth: u8) !Image(Rgba) {
-    const w = state.header.width;
-    const h = state.header.height;
-    const bytes_per_pixel: u8 = bit_depth / 8;
-    const stride = paddedRowBytes(w, bit_depth);
-    if (state.pixel_data.len < stride * h) return error.MissingPixelData;
-
-    var image = try Image(Rgba).init(allocator, h, w);
-    errdefer image.deinit(allocator);
-
-    const r_info = channelInfo(masks.r);
-    const g_info = channelInfo(masks.g);
-    const b_info = channelInfo(masks.b);
-    const a_info = channelInfo(masks.a);
-
-    var dst_y: u32 = 0;
-    while (dst_y < h) : (dst_y += 1) {
-        const src_y = if (state.header.top_down) dst_y else h - 1 - dst_y;
-        const row_off = src_y * stride;
-        var x: u32 = 0;
-        while (x < w) : (x += 1) {
-            const word = readPixelWord(state.pixel_data, row_off + x * bytes_per_pixel, bit_depth);
-            image.data[dst_y * w + x] = .{
-                .r = extractChannelFast(word, r_info),
-                .g = extractChannelFast(word, g_info),
-                .b = extractChannelFast(word, b_info),
-                .a = extractChannelFast(word, a_info),
-            };
-        }
-    }
-    return image;
-}
-
-/// Decodes 32bpp BI_RGB. Alpha is officially undefined; the heuristic is to
-/// promote to opaque if all alpha bytes are zero (the common writer behaviour),
-/// otherwise honour the bytes. The pre-scan early-exits on the first non-zero
-/// alpha, so the common case touches each pixel once.
-fn decode32BppRgb(allocator: Allocator, state: BmpState) !NativeImage {
-    const w = state.header.width;
-    const h = state.header.height;
-    const stride = paddedRowBytes(w, 32);
-    if (state.pixel_data.len < stride * h) return error.MissingPixelData;
-
-    var any_alpha_nonzero = false;
-    scan: for (0..h) |y| {
-        const row_off = y * stride;
-        for (0..w) |x| {
-            if (state.pixel_data[row_off + x * 4 + 3] != 0) {
-                any_alpha_nonzero = true;
-                break :scan;
-            }
-        }
-    }
-
-    if (!any_alpha_nonzero) {
-        var image = try Image(Rgb).init(allocator, h, w);
-        errdefer image.deinit(allocator);
-        var dst_y: u32 = 0;
-        while (dst_y < h) : (dst_y += 1) {
-            const src_y = if (state.header.top_down) dst_y else h - 1 - dst_y;
-            const row_off = src_y * stride;
-            var x: u32 = 0;
-            while (x < w) : (x += 1) {
-                const off = row_off + x * 4;
-                image.data[dst_y * w + x] = .{
-                    .r = state.pixel_data[off + 2],
-                    .g = state.pixel_data[off + 1],
-                    .b = state.pixel_data[off + 0],
-                };
-            }
-        }
-        return .{ .rgb = image };
-    }
-
-    var image = try Image(Rgba).init(allocator, h, w);
-    errdefer image.deinit(allocator);
-    var dst_y: u32 = 0;
-    while (dst_y < h) : (dst_y += 1) {
-        const src_y = if (state.header.top_down) dst_y else h - 1 - dst_y;
-        const row_off = src_y * stride;
-        var x: u32 = 0;
-        while (x < w) : (x += 1) {
-            const off = row_off + x * 4;
-            image.data[dst_y * w + x] = .{
-                .r = state.pixel_data[off + 2],
-                .g = state.pixel_data[off + 1],
-                .b = state.pixel_data[off + 0],
-                .a = state.pixel_data[off + 3],
-            };
-        }
-    }
-    return .{ .rgba = image };
-}
-
-fn decode24Bpp(allocator: Allocator, state: BmpState) !Image(Rgb) {
-    const w = state.header.width;
-    const h = state.header.height;
-    const stride = paddedRowBytes(w, 24);
-    const required = stride * h;
-    if (state.pixel_data.len < required) return error.MissingPixelData;
-
-    var image = try Image(Rgb).init(allocator, h, w);
-    errdefer image.deinit(allocator);
-
-    var dst_y: u32 = 0;
-    while (dst_y < h) : (dst_y += 1) {
-        const src_y = if (state.header.top_down) dst_y else h - 1 - dst_y;
-        const src_row_start = src_y * stride;
-        const dst_row_start = dst_y * w;
-        var x: u32 = 0;
-        while (x < w) : (x += 1) {
-            const off = src_row_start + x * 3;
-            image.data[dst_row_start + x] = .{
-                .r = state.pixel_data[off + 2],
-                .g = state.pixel_data[off + 1],
-                .b = state.pixel_data[off + 0],
-            };
-        }
-    }
-    return image;
+/// Reads a BMP from `reader`, one row at a time, converting to the requested pixel type.
+pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
+    const prelude = try readPrelude(allocator, reader, limits);
+    defer if (prelude.palette) |p| allocator.free(p);
+    reader.discardAll(prelude.pixel_offset - prelude.consumed) catch |err| return missingOnEnd(err);
+    var native = try readPixels(allocator, prelude.header, prelude.palette, reader);
+    return native.into(T, io, allocator);
 }
 
 /// Loads a BMP from an in-memory byte buffer, converting to the requested pixel type.
 pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
-    var state = try decode(allocator, data, limits);
-    defer state.deinit(allocator);
-
-    var native = try toNativeImage(allocator, state);
-    return native.into(T, io, allocator);
-}
-
-/// Reads a BMP image from `reader`, buffering at most the `DecodeLimits` byte cap.
-pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
-    const data = try reader.allocRemaining(allocator, codecs.readLimit(limits.max_bmp_bytes));
-    defer allocator.free(data);
-    return loadFromBytes(T, io, allocator, data, limits);
+    var reader = Io.Reader.fixed(data);
+    return read(T, io, allocator, &reader, limits);
 }
 
 // ---------------------------------------------------------------------------
@@ -1178,18 +1071,6 @@ test "BMP getInfo rejects unsupported bit depth" {
 
     var reader = Io.Reader.fixed(aw.written());
     try std.testing.expectError(error.UnsupportedBitDepth, getInfo(&reader, .{}));
-}
-
-test "BMP getInfo enforces max_bmp_bytes" {
-    const gpa = std.testing.allocator;
-    var aw: Io.Writer.Allocating = .init(gpa);
-    defer aw.deinit();
-    const fixture = &aw.writer;
-    try writeFileHeader(fixture, .{ .file_size = 10_000_000, .pixel_offset = 54 });
-    try writeInfoHeader(fixture, .{ .width = 8, .height = 8, .bit_depth = 24 });
-
-    var reader = Io.Reader.fixed(aw.written());
-    try std.testing.expectError(error.BmpDataTooLarge, getInfo(&reader, .{ .max_bmp_bytes = 1024 }));
 }
 
 test "BMP getInfo enforces max_pixels" {
