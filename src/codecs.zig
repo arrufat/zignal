@@ -36,13 +36,26 @@ pub const NativeImage = union(enum) {
     pub fn into(self: *NativeImage, comptime T: type, io: Io, allocator: Allocator) !Image(T) {
         switch (self.*) {
             inline else => |*img| {
-                if (@TypeOf(img.data[0]) == T) return img.*;
+                if (@TypeOf(img.*) == Image(T)) return img.*;
                 defer self.deinit(allocator);
                 return img.convert(io, allocator, T);
             },
         }
     }
 };
+
+/// Reads a whole file for decoding; `max_bytes == 0` means no cap.
+pub fn readFile(io: Io, allocator: Allocator, file_path: []const u8, max_bytes: usize) ![]u8 {
+    const limit: Io.Limit = if (max_bytes == 0) .unlimited else .limited(max_bytes);
+    return Io.Dir.cwd().readFileAlloc(io, file_path, allocator, limit);
+}
+
+/// Creates (or truncates) `file_path` and writes `data` to it.
+pub fn writeFile(io: Io, file_path: []const u8, data: []const u8) !void {
+    const file = try Io.Dir.cwd().createFile(io, file_path, .{});
+    defer file.close(io);
+    try file.writeStreamingAll(io, data);
+}
 
 test {
     _ = bmp;

@@ -54,8 +54,8 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
             defer file.close(io);
 
             var reader = file.reader(io, &read_buffer);
-            // Short files still get sniffed; the JXL container signature is the longest (12 bytes).
-            const peek = reader.interface.peekGreedy(jxl.container_signature.len) catch |err| switch (err) {
+            // Short files still get sniffed.
+            const peek = reader.interface.peekGreedy(zignal.ImageFormat.signature_len) catch |err| switch (err) {
                 error.EndOfStream => reader.interface.buffered(),
                 else => break :blk err,
             };

@@ -16,34 +16,43 @@ pub fn macosNames(comptime file: []const u8) []const []const u8 {
 }
 
 /// Loads the first of `names` that opens and resolves every field of `Api`, a struct of
-/// function pointers named after the exported symbols. The library stays loaded for the life
-/// of the process.
+/// function pointers named after the exported symbols. The outcome, success or not, is kept
+/// for the life of the process.
 pub fn Library(comptime Api: type, comptime names: []const []const u8) type {
     return struct {
-        var loaded: std.atomic.Value(?*const Api) = .init(null);
+        const State = enum(u8) { unloaded, loading, loaded, missing };
+        var state: std.atomic.Value(State) = .init(.unloaded);
+        var api: Api = undefined;
 
-        /// Racing first calls both load it and the loser drops its copy (`dlopen` is
-        /// reference counted).
         pub fn get() error{CodecUnavailable}!*const Api {
-            if (loaded.load(.acquire)) |ptr| return ptr;
-            const table = std.heap.page_allocator.create(Api) catch return error.CodecUnavailable;
-            errdefer std.heap.page_allocator.destroy(table);
-            var lib = for (names) |name| {
-                var lib = std.DynLib.open(name) catch continue;
-                if (resolve(&lib, table)) break lib;
-                lib.close();
-            } else return error.CodecUnavailable;
-            if (loaded.cmpxchgStrong(null, table, .acq_rel, .acquire)) |winner| {
-                std.heap.page_allocator.destroy(table);
-                lib.close();
-                return winner.?;
-            }
-            return table;
+            while (true) switch (state.load(.acquire)) {
+                .loaded => return &api,
+                .missing => return error.CodecUnavailable,
+                .unloaded => if (state.cmpxchgStrong(.unloaded, .loading, .acquire, .monotonic) == null) {
+                    state.store(if (load()) .loaded else .missing, .release);
+                },
+                // Only the first concurrent callers wait here, while one of them loads.
+                .loading => std.atomic.spinLoopHint(),
+            };
         }
 
-        fn resolve(lib: *std.DynLib, table: *Api) bool {
+        pub fn available() bool {
+            _ = get() catch return false;
+            return true;
+        }
+
+        fn load() bool {
+            for (names) |name| {
+                var lib = std.DynLib.open(name) catch continue;
+                if (resolve(&lib)) return true;
+                lib.close();
+            }
+            return false;
+        }
+
+        fn resolve(lib: *std.DynLib) bool {
             inline for (comptime meta.structFields(Api)) |field| {
-                @field(table, field.name) = lib.lookup(field.type, field.name) orelse return false;
+                @field(api, field.name) = lib.lookup(field.type, field.name) orelse return false;
             }
             return true;
         }

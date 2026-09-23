@@ -21,12 +21,6 @@ const convertColor = @import("color.zig").convertColor;
 const Rectangle = @import("geometry.zig").Rectangle;
 const Point = @import("geometry/Point.zig").Point;
 const codecs = @import("codecs.zig");
-const bmp = codecs.bmp;
-const gif = codecs.gif;
-const jxl = codecs.jxl;
-const webp = codecs.webp;
-const jpeg = codecs.jpeg;
-const png = codecs.png;
 const metrics = @import("image/metrics.zig");
 const diff_mod = @import("image/diff.zig");
 
@@ -262,12 +256,7 @@ pub fn Image(comptime T: type) type {
         pub fn load(io: Io, allocator: Allocator, file_path: []const u8) !Self {
             const image_format = try ImageFormat.detectFromPath(io, file_path) orelse return error.UnsupportedImageFormat;
             return switch (image_format) {
-                .png => png.load(T, io, allocator, file_path, .{}),
-                .jpeg => jpeg.load(T, io, allocator, file_path, .{}),
-                .bmp => bmp.load(T, io, allocator, file_path, .{}),
-                .gif => gif.load(T, io, allocator, file_path, .{}),
-                .jxl => jxl.load(T, io, allocator, file_path, .{}),
-                .webp => webp.load(T, io, allocator, file_path, .{}),
+                inline else => |f| @field(codecs, @tagName(f)).load(T, io, allocator, file_path, .{}),
             };
         }
 
@@ -283,12 +272,7 @@ pub fn Image(comptime T: type) type {
         pub fn loadFromBytes(io: Io, allocator: Allocator, data: []const u8) !Self {
             const image_format = ImageFormat.detectFromBytes(data) orelse return error.UnsupportedImageFormat;
             return switch (image_format) {
-                .png => png.loadFromBytes(T, io, allocator, data, .{}),
-                .jpeg => jpeg.loadFromBytes(T, io, allocator, data, .{}),
-                .bmp => bmp.loadFromBytes(T, io, allocator, data, .{}),
-                .gif => gif.loadFromBytes(T, io, allocator, data, .{}),
-                .jxl => jxl.loadFromBytes(T, io, allocator, data, .{}),
-                .webp => webp.loadFromBytes(T, io, allocator, data, .{}),
+                inline else => |f| @field(codecs, @tagName(f)).loadFromBytes(T, io, allocator, data, .{}),
             };
         }
 
@@ -299,12 +283,7 @@ pub fn Image(comptime T: type) type {
         pub fn save(self: Self, io: Io, allocator: Allocator, file_path: []const u8) !void {
             const fmt = ImageFormat.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
             return switch (fmt) {
-                .png => png.save(T, io, allocator, self, file_path),
-                .jpeg => jpeg.save(T, io, allocator, self, file_path),
-                .bmp => bmp.save(T, io, allocator, self, file_path),
-                .gif => gif.save(T, io, allocator, self, file_path),
-                .jxl => jxl.save(T, io, allocator, self, file_path),
-                .webp => webp.save(T, io, allocator, self, file_path),
+                inline else => |f| @field(codecs, @tagName(f)).save(T, io, allocator, self, file_path),
             };
         }
 

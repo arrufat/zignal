@@ -33,10 +33,8 @@ const default_bmp_limits: zignal.bmp.DecodeLimits = .{};
 const file_bmp_limits: zignal.bmp.DecodeLimits = .{ .max_bmp_bytes = 100 * 1024 * 1024 };
 const default_gif_limits: zignal.gif.DecodeLimits = .{};
 const file_gif_limits: zignal.gif.DecodeLimits = .{ .max_gif_bytes = 100 * 1024 * 1024 };
-const default_jxl_limits: zignal.jxl.DecodeLimits = .{};
-const file_jxl_limits: zignal.jxl.DecodeLimits = .{};
-const default_webp_limits: zignal.webp.DecodeLimits = .{};
-const file_webp_limits: zignal.webp.DecodeLimits = .{};
+const jxl_limits: zignal.jxl.DecodeLimits = .default;
+const webp_limits: zignal.webp.DecodeLimits = .default;
 
 // Import the ImageObject type from parent
 inline fn readLimit(max_bytes: usize) usize {
@@ -124,9 +122,9 @@ fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
             return wrapNativeImage(native);
         },
         .jxl, .webp => {
-            const codec, const limits = if (format == .jxl) .{ zignal.jxl, default_jxl_limits } else .{ zignal.webp, default_webp_limits };
-            const decoded = codec.decode(python.io, allocator, data, limits) catch |err| {
-                if (!setRuntimeCodecError(format, err)) setDecodeError(if (format == .jxl) "JPEG XL data" else "WebP data", err);
+            const limits = if (format == .jxl) jxl_limits else webp_limits;
+            const decoded = @field(zignal, @tagName(format)).decode(python.io, allocator, data, limits) catch |err| {
+                if (!setRuntimeCodecError(format, err)) setDecodeError(@tagName(format) ++ " data", err);
                 return null;
             };
             return wrapNativeImage(decoded);
@@ -187,8 +185,8 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         readLimit(file_jpeg_limits.max_jpeg_bytes),
         readLimit(file_bmp_limits.max_bmp_bytes),
         readLimit(file_gif_limits.max_gif_bytes),
-        readLimit(file_jxl_limits.max_jxl_bytes),
-        readLimit(file_webp_limits.max_webp_bytes),
+        readLimit(jxl_limits.max_jxl_bytes),
+        readLimit(webp_limits.max_webp_bytes),
     });
     const data = Io.Dir.cwd().readFileAlloc(python.io, path_slice, allocator, .limited(read_cap)) catch |err| {
         python.setErrorWithPath(err, path_slice);
@@ -206,8 +204,8 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         .jpeg => decodeFile(.jpeg, data, path_slice, file_jpeg_limits),
         .bmp => decodeFile(.bmp, data, path_slice, file_bmp_limits),
         .gif => decodeFile(.gif, data, path_slice, file_gif_limits),
-        .jxl => decodeFile(.jxl, data, path_slice, file_jxl_limits),
-        .webp => decodeFile(.webp, data, path_slice, file_webp_limits),
+        .jxl => decodeFile(.jxl, data, path_slice, jxl_limits),
+        .webp => decodeFile(.webp, data, path_slice, webp_limits),
     };
 }
 
@@ -262,8 +260,7 @@ fn decodeFile(comptime format: ImageFormat, data: []const u8, path: []const u8, 
             return wrapNativeImage(native);
         },
         .jxl, .webp => {
-            const codec = if (format == .jxl) zignal.jxl else zignal.webp;
-            const decoded = codec.decode(python.io, allocator, data, limits) catch |err| {
+            const decoded = @field(zignal, @tagName(format)).decode(python.io, allocator, data, limits) catch |err| {
                 if (!setRuntimeCodecError(format, err)) python.setErrorWithPath(err, path);
                 return null;
             };

@@ -8,7 +8,8 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 const Image = @import("../image.zig").Image;
-const NativeImage = @import("../codecs.zig").NativeImage;
+const codecs = @import("../codecs.zig");
+const NativeImage = codecs.NativeImage;
 const dynlib = @import("dynlib.zig");
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
@@ -108,8 +109,7 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []con
 
 pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
     if (!enabled) return error.CodecNotEnabled;
-    const read_limit = if (limits.max_webp_bytes == 0) std.math.maxInt(usize) else limits.max_webp_bytes;
-    const data = try Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
+    const data = try codecs.readFile(io, allocator, file_path, limits.max_webp_bytes);
     defer allocator.free(data);
     return loadFromBytes(T, io, allocator, data, limits);
 }
@@ -119,16 +119,12 @@ pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
     if (!enabled) return error.CodecNotEnabled;
     switch (T) {
-        Rgb, Rgba => {
-            if (image.isContiguous()) return encodeRaw(allocator, image.asBytes(), image.cols, image.rows, T == Rgba, options);
-            var contiguous = try image.dupe(allocator);
-            defer contiguous.deinit(allocator);
-            return encodeRaw(allocator, contiguous.asBytes(), image.cols, image.rows, T == Rgba, options);
-        },
+        // libwebp takes a row stride, so views encode without a copy.
+        Rgb, Rgba => return encodeRaw(allocator, @ptrCast(image.data.ptr), image.cols, image.rows, image.stride * @sizeOf(T), T == Rgba, options),
         else => {
             var rgb = try image.convert(io, allocator, Rgb);
             defer rgb.deinit(allocator);
-            return encodeRaw(allocator, rgb.asBytes(), image.cols, image.rows, false, options);
+            return encodeRaw(allocator, @ptrCast(rgb.data.ptr), rgb.cols, rgb.rows, rgb.stride * 3, false, options);
         },
     }
 }
@@ -136,26 +132,22 @@ pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), o
 pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
     const bytes = try encode(T, io, allocator, image, .default);
     defer allocator.free(bytes);
-
-    const file = try Io.Dir.cwd().createFile(io, file_path, .{});
-    defer file.close(io);
-
-    try file.writeStreamingAll(io, bytes);
+    try codecs.writeFile(io, file_path, bytes);
 }
 
-fn encodeRaw(allocator: Allocator, pixels: []const u8, width: u32, height: u32, alpha: bool, options: EncodeOptions) ![]u8 {
+fn encodeRaw(allocator: Allocator, pixels: [*]const u8, width: u32, height: u32, stride: usize, alpha: bool, options: EncodeOptions) ![]u8 {
     const max_side = 16383;
     if (width == 0 or height == 0 or width > max_side or height > max_side) return error.ImageTooLarge;
     const webp = try Libwebp.get();
     const w: c_int = @intCast(width);
     const h: c_int = @intCast(height);
-    const stride: c_int = w * @as(c_int, if (alpha) 4 else 3);
-    const quality: f32 = @floatFromInt(options.quality);
+    const row_bytes: c_int = @intCast(stride);
+    const quality: f32 = options.quality;
     var out: ?[*]u8 = null;
     const size = if (options.quality >= 100)
-        (if (alpha) webp.WebPEncodeLosslessRGBA else webp.WebPEncodeLosslessRGB)(pixels.ptr, w, h, stride, &out)
+        (if (alpha) webp.WebPEncodeLosslessRGBA else webp.WebPEncodeLosslessRGB)(pixels, w, h, row_bytes, &out)
     else
-        (if (alpha) webp.WebPEncodeRGBA else webp.WebPEncodeRGB)(pixels.ptr, w, h, stride, quality, &out);
+        (if (alpha) webp.WebPEncodeRGBA else webp.WebPEncodeRGB)(pixels, w, h, row_bytes, quality, &out);
     const bytes = out orelse return error.WebpEncodeFailed;
     defer webp.WebPFree(bytes);
     if (size == 0) return error.WebpEncodeFailed;
@@ -245,14 +237,8 @@ fn testImage(comptime T: type, allocator: Allocator) !Image(T) {
     return img;
 }
 
-/// Skips when this machine has no libwebp.
-fn requireLibwebp() !void {
-    if (!enabled) return error.SkipZigTest;
-    _ = Libwebp.get() catch return error.SkipZigTest;
-}
-
 test "lossless round trip" {
-    try requireLibwebp();
+    if (!enabled or !Libwebp.available()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
     inline for (.{ u8, Rgb, Rgba }) |T| {
@@ -274,8 +260,24 @@ test "lossless round trip" {
     }
 }
 
+test "views encode without a copy" {
+    if (!enabled or !Libwebp.available()) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var img = try testImage(Rgba, allocator);
+    defer img.deinit(allocator);
+    const view = img.view(.{ .l = 5, .t = 3, .r = 40, .b = 30 });
+    const bytes = try encode(Rgba, io, allocator, view, .lossless);
+    defer allocator.free(bytes);
+    var back = try loadFromBytes(Rgba, io, allocator, bytes, .default);
+    defer back.deinit(allocator);
+    var expected = try view.dupe(allocator);
+    defer expected.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, expected.asBytes(), back.asBytes());
+}
+
 test "lossy round trip stays close" {
-    try requireLibwebp();
+    if (!enabled or !Libwebp.available()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
     var img = try testImage(Rgb, allocator);

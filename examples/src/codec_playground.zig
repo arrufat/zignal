@@ -8,8 +8,6 @@ const png = zignal.png;
 const jpeg = zignal.jpeg;
 const bmp = zignal.bmp;
 const gif = zignal.gif;
-const jxl = zignal.jxl;
-const webp = zignal.webp;
 
 const Rgba = zignal.Rgba(u8);
 
@@ -89,14 +87,7 @@ fn isGrayscale(image: Image(Rgba)) bool {
 fn writeInfoFields(w: *std.Io.Writer, format: ImageFormat, data: []const u8) !void {
     switch (format) {
         inline else => |f| {
-            const codec = switch (f) {
-                .jpeg => jpeg,
-                .png => png,
-                .bmp => bmp,
-                .gif => gif,
-                .jxl => jxl,
-                .webp => webp,
-            };
+            const codec = @field(zignal, @tagName(f));
             var reader: std.Io.Reader = .fixed(data);
             const h = try codec.getInfo(&reader, .{});
             try w.print("\"format\":\"{t}\",\"width\":{d},\"height\":{d},\"file_size\":{d},\"details\":{{", .{ f, h.width, h.height, data.len });

@@ -7,7 +7,8 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 const Image = @import("../image.zig").Image;
-const NativeImage = @import("../codecs.zig").NativeImage;
+const codecs = @import("../codecs.zig");
+const NativeImage = codecs.NativeImage;
 const dynlib = @import("dynlib.zig");
 const parallel = @import("../parallel.zig");
 const Rgb = @import("../color.zig").Rgb(u8);
@@ -56,7 +57,6 @@ pub const Header = struct {
     num_color_channels: u32,
     has_alpha: bool,
     has_animation: bool,
-    orientation: u32,
     uses_original_profile: bool,
 };
 
@@ -152,8 +152,7 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []con
 
 pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
     if (!enabled) return error.CodecNotEnabled;
-    const read_limit = if (limits.max_jxl_bytes == 0) std.math.maxInt(usize) else limits.max_jxl_bytes;
-    const data = try Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
+    const data = try codecs.readFile(io, allocator, file_path, limits.max_jxl_bytes);
     defer allocator.free(data);
     return loadFromBytes(T, io, allocator, data, limits);
 }
@@ -179,11 +178,7 @@ pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), o
 pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
     const bytes = try encode(T, io, allocator, image, .default);
     defer allocator.free(bytes);
-
-    const file = try Io.Dir.cwd().createFile(io, file_path, .{});
-    defer file.close(io);
-
-    try file.writeStreamingAll(io, bytes);
+    try codecs.writeFile(io, file_path, bytes);
 }
 
 fn encodeRaw(io: Io, allocator: Allocator, pixels: []const u8, width: u32, height: u32, channels: u32, options: EncodeOptions) ![]u8 {
@@ -242,7 +237,7 @@ fn encodeRaw(io: Io, allocator: Allocator, pixels: []const u8, width: u32, heigh
 
 /// libjxl's quality→Butteraugli distance mapping (`JxlEncoderDistanceFromQuality`, cjxl `-q`).
 fn distanceFromQuality(quality: u8) f32 {
-    const q: f32 = @floatFromInt(quality);
+    const q: f32 = quality;
     if (quality >= 100) return 0;
     if (quality >= 30) return 0.1 + (100 - q) * 0.09;
     return 53.0 / 3000.0 * q * q - 23.0 / 20.0 * q + 25.0;
@@ -261,7 +256,6 @@ fn header(jxl: *const Api, dec: *Decoder) !Header {
         .num_color_channels = info.num_color_channels,
         .has_alpha = info.alpha_bits > 0,
         .has_animation = info.have_animation != 0,
-        .orientation = @bitCast(info.orientation),
         .uses_original_profile = info.uses_original_profile != 0,
     };
 }
@@ -460,14 +454,8 @@ fn testImage(comptime T: type, allocator: Allocator) !Image(T) {
     return img;
 }
 
-/// Skips when this machine has no libjxl.
-fn requireLibjxl() !void {
-    if (!enabled) return error.SkipZigTest;
-    _ = Libjxl.get() catch return error.SkipZigTest;
-}
-
 test "lossless round trip" {
-    try requireLibjxl();
+    if (!enabled or !Libjxl.available()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
     inline for (.{ u8, Rgb, Rgba }) |T| {
@@ -489,7 +477,7 @@ test "lossless round trip" {
 }
 
 test "lossy round trip stays close" {
-    try requireLibjxl();
+    if (!enabled or !Libjxl.available()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
     var img = try testImage(Rgb, allocator);
