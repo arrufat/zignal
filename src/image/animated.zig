@@ -43,7 +43,7 @@ pub fn AnimatedImage(comptime T: type) type {
             }
         }
 
-        /// Saves by extension. Codecs with `encodeAnimated` (GIF, JPEG XL) store every frame; any other
+        /// Saves by extension. Codecs with `encodeAnimated` store every frame; any other
         /// format takes a single frame.
         pub fn save(self: Self, io: Io, allocator: Allocator, file_path: []const u8) !void {
             const format = ImageFormat.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
