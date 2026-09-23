@@ -20,6 +20,7 @@ const Io = std.Io;
 const parallel = @import("../parallel.zig");
 
 const convertColor = @import("../color.zig").convertColor;
+const codecs = @import("../codecs.zig");
 const Image = @import("../image.zig").Image;
 const linear_gray_256 = @import("../image/quantize.zig").linear_gray_256;
 const Rgb = @import("../color.zig").Rgb(u8);
@@ -431,7 +432,7 @@ inline fn paddedRowBytes(width: u32, bit_depth: u8) usize {
 }
 
 /// Native-format pixel container produced by `toNativeImage`.
-pub const NativeImage = @import("../codecs.zig").NativeImage;
+pub const NativeImage = codecs.NativeImage;
 
 /// Decodes the pixel buffer into a native-format `Image(T)`.
 pub fn toNativeImage(allocator: Allocator, state: BmpState) !NativeImage {
@@ -803,8 +804,7 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []con
 
 /// Loads a BMP from a file path, converting to the requested pixel type.
 pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
-    const read_limit = if (limits.max_bmp_bytes == 0) std.math.maxInt(usize) else limits.max_bmp_bytes;
-    const data = try Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
+    const data = try codecs.readFile(io, allocator, file_path, limits.max_bmp_bytes);
     defer allocator.free(data);
     return loadFromBytes(T, io, allocator, data, limits);
 }
@@ -1036,11 +1036,7 @@ pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), o
 pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
     const data = try encode(T, io, allocator, image, .default);
     defer allocator.free(data);
-
-    const file = try Io.Dir.cwd().createFile(io, file_path, .{});
-    defer file.close(io);
-
-    try file.writeStreamingAll(io, data);
+    try codecs.writeFile(io, file_path, data);
 }
 
 // ---------------------------------------------------------------------------

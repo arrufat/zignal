@@ -11,7 +11,8 @@ const parallel = @import("../parallel.zig");
 
 const convertColor = @import("../color.zig").convertColor;
 const Image = @import("../image.zig").Image;
-const NativeImage = @import("../codecs.zig").NativeImage;
+const codecs = @import("../codecs.zig");
+const NativeImage = codecs.NativeImage;
 
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
@@ -1166,8 +1167,7 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, png_data: [
 }
 
 pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
-    const read_limit = if (limits.max_png_bytes == 0) std.math.maxInt(usize) else limits.max_png_bytes;
-    const png_data = try Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
+    const png_data = try codecs.readFile(io, allocator, file_path, limits.max_png_bytes);
     defer allocator.free(png_data);
     return loadFromBytes(T, io, allocator, png_data, limits);
 }
@@ -1499,11 +1499,7 @@ pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), o
 pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
     const png_data = try encode(T, io, allocator, image, .default);
     defer allocator.free(png_data);
-
-    const file = try Io.Dir.cwd().createFile(io, file_path, .{});
-    defer file.close(io);
-
-    try file.writeStreamingAll(io, png_data);
+    try codecs.writeFile(io, file_path, png_data);
 }
 
 /// PNG row filtering and defiltering functions.

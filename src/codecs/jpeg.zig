@@ -11,6 +11,7 @@ const parallel = @import("../parallel.zig");
 
 const convertColor = @import("../color.zig").convertColor;
 const bt601 = @import("../color.zig").bt601;
+const codecs = @import("../codecs.zig");
 const Image = @import("../image.zig").Image;
 
 const Rgb = @import("../color.zig").Rgb(u8);
@@ -321,10 +322,7 @@ pub const EncodeOptions = struct {
 pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
     const bytes = try encode(T, io, allocator, image, .default);
     defer allocator.free(bytes);
-
-    const file = try Io.Dir.cwd().createFile(io, file_path, .{});
-    defer file.close(io);
-    try file.writeStreamingAll(io, bytes);
+    try codecs.writeFile(io, file_path, bytes);
 }
 
 /// Encode an image into baseline JPEG bytes (SOF0, 8-bit, Huffman). Supports grayscale (u8)
@@ -3136,8 +3134,7 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []con
 }
 
 pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
-    const read_limit = if (limits.max_jpeg_bytes == 0) std.math.maxInt(usize) else limits.max_jpeg_bytes;
-    const jpeg_data = try Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
+    const jpeg_data = try codecs.readFile(io, allocator, file_path, limits.max_jpeg_bytes);
     defer allocator.free(jpeg_data);
     return loadFromBytes(T, io, allocator, jpeg_data, limits);
 }
