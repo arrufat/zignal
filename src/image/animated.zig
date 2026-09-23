@@ -43,14 +43,18 @@ pub fn AnimatedImage(comptime T: type) type {
             }
         }
 
-        /// Saves by extension. Codecs with `saveAnimated` (GIF) store every frame; any other
+        /// Saves by extension. Codecs with `encodeAnimated` (GIF, JPEG XL) store every frame; any other
         /// format takes a single frame.
         pub fn save(self: Self, io: Io, allocator: Allocator, file_path: []const u8) !void {
             const format = ImageFormat.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
             switch (format) {
                 inline else => |f| {
                     const codec = @field(codecs, @tagName(f));
-                    if (@hasDecl(codec, "saveAnimated")) return codec.saveAnimated(T, io, allocator, self, file_path);
+                    if (@hasDecl(codec, "encodeAnimated")) {
+                        const bytes = try codec.encodeAnimated(T, io, allocator, self, .default);
+                        defer allocator.free(bytes);
+                        return codecs.writeFile(io, file_path, bytes);
+                    }
                     if (self.frames.len != 1) return error.UnsupportedAnimation;
                     return codec.save(T, io, allocator, self.frames[0], file_path);
                 },
@@ -83,6 +87,16 @@ pub fn AnimatedImage(comptime T: type) type {
 
         pub inline fn frame(self: Self, i: usize) Image(T) {
             return self.frames[i];
+        }
+
+        /// Checks the invariants encoders rely on: at least one frame, one duration per frame
+        /// and every frame the size of the first.
+        pub fn validate(self: Self) !void {
+            if (self.frames.len == 0) return error.NoFrames;
+            if (self.frames.len != self.durations_ms.len) return error.InconsistentDurations;
+            for (self.frames[1..]) |f| {
+                if (!f.hasSameShape(self.frames[0])) return error.InconsistentFrameDimensions;
+            }
         }
 
         /// Total wall-clock duration in milliseconds.
