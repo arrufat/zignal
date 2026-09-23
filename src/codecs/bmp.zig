@@ -480,12 +480,19 @@ fn readPixels(allocator: Allocator, h: Header, palette: ?[]const Rgba, reader: *
 
 /// Reads rows in file order (bottom-up unless `top_down`), converting each with `format.pixel`.
 fn readRows(comptime P: type, allocator: Allocator, h: Header, reader: *Io.Reader, format: anytype) !Image(P) {
-    const row = try allocator.alloc(u8, paddedRowBytes(h.width, h.bit_depth));
-    defer allocator.free(row);
+    const row_bytes = paddedRowBytes(h.width, h.bit_depth);
+    // Rows are taken in place from the reader's buffer; wider rows go through a scratch copy.
+    const scratch: []u8 = if (row_bytes > reader.buffer.len) try allocator.alloc(u8, row_bytes) else &.{};
+    defer allocator.free(scratch);
     var image = try Image(P).init(allocator, h.height, h.width);
     errdefer image.deinit(allocator);
     for (0..h.height) |i| {
-        reader.readSliceAll(row) catch |err| return endAs(err, error.MissingPixelData);
+        const row = if (scratch.len == 0)
+            reader.take(row_bytes) catch |err| return endAs(err, error.MissingPixelData)
+        else blk: {
+            reader.readSliceAll(scratch) catch |err| return endAs(err, error.MissingPixelData);
+            break :blk scratch;
+        };
         const y = if (h.top_down) i else h.height - 1 - i;
         for (image.data[y * h.width ..][0..h.width], 0..) |*px, x| px.* = try format.pixel(row, x);
     }
