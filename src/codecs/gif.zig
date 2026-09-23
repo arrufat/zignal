@@ -7,7 +7,7 @@
 //! which return an `AnimatedImage(T)` of fully-composed frames (disposal, transparency,
 //! and interlace are absorbed inside the codec).
 //!
-//! `encodeAnimated` / `saveAnimated` write multi-frame GIFs.
+//! `encodeAnimated` writes multi-frame GIFs.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -943,17 +943,13 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
 /// full screen size with disposal=unspecified; the decoder's full-frame
 /// composition is the inverse of this encoder. For `T == Rgba`, pixels with
 /// `alpha < 128` are mapped to a reserved transparent palette index.
-pub fn encodeAnimated(comptime T: type, gpa: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
-    if (anim.frames.len == 0) return error.NoFrames;
-    if (anim.frames.len != anim.durations_ms.len) return error.InconsistentDurations;
+pub fn encodeAnimated(comptime T: type, io: Io, gpa: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
+    try anim.validate();
 
     const screen_w_u32 = anim.frames[0].cols;
     const screen_h_u32 = anim.frames[0].rows;
     if (screen_w_u32 == 0 or screen_h_u32 == 0) return error.InvalidDimensions;
     if (screen_w_u32 > 65535 or screen_h_u32 > 65535) return error.ImageTooLarge;
-    for (anim.frames[1..]) |f| {
-        if (f.cols != screen_w_u32 or f.rows != screen_h_u32) return error.InconsistentFrameDimensions;
-    }
     const screen_w: u16 = @intCast(screen_w_u32);
     const screen_h: u16 = @intCast(screen_h_u32);
 
@@ -996,22 +992,16 @@ pub fn encodeAnimated(comptime T: type, gpa: Allocator, anim: AnimatedImage(T), 
     for (anim.frames, anim.durations_ms) |frame, ms| {
         // GIF delays are centiseconds.
         const delay_cs = @min((ms +| 5) / 10, std.math.maxInt(u16));
-        try emitAnimatedFrame(T, gpa, frame, delay_cs, has_global_palette, options, &out);
+        try emitAnimatedFrame(T, io, gpa, frame, delay_cs, has_global_palette, options, &out);
     }
 
     try out.append(gpa, block_trailer);
     return out.toOwnedSlice(gpa);
 }
 
-/// Saves an `AnimatedImage(T)` as an animated GIF.
-pub fn saveAnimated(comptime T: type, io: Io, gpa: Allocator, anim: AnimatedImage(T), file_path: []const u8) !void {
-    const data = try encodeAnimated(T, gpa, anim, .default);
-    defer gpa.free(data);
-    try codecs.writeFile(io, file_path, data);
-}
-
 fn emitAnimatedFrame(
     comptime T: type,
+    io: Io,
     gpa: Allocator,
     frame: Image(T),
     delay_cs: u16,
@@ -1071,7 +1061,7 @@ fn emitAnimatedFrame(
 
     const indices = try gpa.alloc(u8, num_pixels);
     defer gpa.free(indices);
-    try mapImageToPalette(T, parallel.inline_io, gpa, frame, palette, indices, options.dither, if (has_transparent) transparent_index else null);
+    try mapImageToPalette(T, io, gpa, frame, palette, indices, options.dither, if (has_transparent) transparent_index else null);
 
     var min_code_size: u4 = 2;
     while ((@as(u16, 1) << min_code_size) < palette.len) min_code_size += 1;
@@ -1711,7 +1701,7 @@ test "encodeAnimated — 2 Rgb frames round-trip with delays and loop count" {
     var anim = try buildAnimated(Rgb, gpa, &.{ f0, f1 }, &.{ 50, 100 }, 3);
     defer anim.deinit(gpa);
 
-    const data = try encodeAnimated(Rgb, gpa, anim, .{});
+    const data = try encodeAnimated(Rgb, parallel.inline_io, gpa, anim, .{});
     defer gpa.free(data);
 
     var decoded = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, data, .{});
@@ -1738,7 +1728,7 @@ test "encodeAnimated — Rgba transparent pixel round-trips alpha=0" {
     var anim = try buildAnimated(Rgba, gpa, &.{ f0, f1 }, &.{ 0, 0 }, 0);
     defer anim.deinit(gpa);
 
-    const data = try encodeAnimated(Rgba, gpa, anim, .{});
+    const data = try encodeAnimated(Rgba, parallel.inline_io, gpa, anim, .{});
     defer gpa.free(data);
 
     var decoded = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, data, .{});
@@ -1767,7 +1757,7 @@ test "encodeAnimated — caller-supplied global palette uses GCT, no per-frame L
         .{ .r = 0, .g = 255, .b = 0 },
         .{ .r = 0, .g = 0, .b = 255 },
     };
-    const data = try encodeAnimated(Rgb, gpa, anim, .{ .palette = &palette });
+    const data = try encodeAnimated(Rgb, parallel.inline_io, gpa, anim, .{ .palette = &palette });
     defer gpa.free(data);
 
     var reader = Io.Reader.fixed(data);
@@ -1785,7 +1775,7 @@ test "encodeAnimated — caller-supplied global palette uses GCT, no per-frame L
 test "encodeAnimated — empty animation rejected" {
     const gpa = std.testing.allocator;
     const anim: AnimatedImage(Rgb) = .{ .frames = &.{}, .durations_ms = &.{}, .loop_count = 0 };
-    try expectError(error.NoFrames, encodeAnimated(Rgb, gpa, anim, .{}));
+    try expectError(error.NoFrames, encodeAnimated(Rgb, parallel.inline_io, gpa, anim, .{}));
 }
 
 test "encodeAnimated — mismatched frame dimensions rejected" {
@@ -1798,7 +1788,7 @@ test "encodeAnimated — mismatched frame dimensions rejected" {
     var anim = try buildAnimated(Rgb, gpa, &.{ f0, f1 }, &.{ 0, 0 }, 0);
     defer anim.deinit(gpa);
 
-    try expectError(error.InconsistentFrameDimensions, encodeAnimated(Rgb, gpa, anim, .{}));
+    try expectError(error.InconsistentFrameDimensions, encodeAnimated(Rgb, parallel.inline_io, gpa, anim, .{}));
 }
 
 test "loadFromBytes — missing global color table without LCT" {

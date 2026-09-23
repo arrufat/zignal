@@ -249,20 +249,9 @@ pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u
 
 /// Encodes `image` as sRGB JPEG XL. `u8`→grayscale, `Rgb`→RGB, `Rgba`→RGBA, others→RGB.
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
-    if (!enabled) return error.CodecNotEnabled;
-    switch (T) {
-        u8, Rgb, Rgba => {
-            if (image.isContiguous()) return encodeRaw(io, allocator, image.asBytes(), image.cols, image.rows, @sizeOf(T), options);
-            var contiguous = try image.dupe(allocator);
-            defer contiguous.deinit(allocator);
-            return encodeRaw(io, allocator, contiguous.asBytes(), image.cols, image.rows, @sizeOf(T), options);
-        },
-        else => {
-            var rgb = try image.convert(io, allocator, Rgb);
-            defer rgb.deinit(allocator);
-            return encodeRaw(io, allocator, rgb.asBytes(), image.cols, image.rows, 3, options);
-        },
-    }
+    var frames = [_]Image(T){image};
+    var durations = [_]u32{0};
+    return encodeAnimated(T, io, allocator, .{ .frames = &frames, .durations_ms = &durations, .loop_count = 0 }, options);
 }
 
 pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
@@ -271,7 +260,19 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
     try codecs.writeFile(io, file_path, bytes);
 }
 
-fn encodeRaw(io: Io, allocator: Allocator, pixels: []const u8, width: u32, height: u32, channels: u32, options: EncodeOptions) ![]u8 {
+/// Encodes every frame of `anim` at its full size; pixel types map as in `encode`.
+/// A one-frame animation is written as a still.
+pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
+    if (!enabled) return error.CodecNotEnabled;
+    try anim.validate();
+    const frames = anim.frames;
+    const is_animation = frames.len > 1;
+    // The pixel type handed to libjxl.
+    const E = switch (T) {
+        u8, Rgb, Rgba => T,
+        else => Rgb,
+    };
+    const channels: u32 = @sizeOf(E);
     const jxl = try Libjxl.get();
     const enc = jxl.JxlEncoderCreate(null) orelse return error.OutOfMemory;
     defer jxl.JxlEncoderDestroy(enc);
@@ -284,14 +285,19 @@ fn encodeRaw(io: Io, allocator: Allocator, pixels: []const u8, width: u32, heigh
 
     var info: BasicInfo = undefined;
     jxl.JxlEncoderInitBasicInfo(&info);
-    info.xsize = width;
-    info.ysize = height;
+    info.xsize = frames[0].cols;
+    info.ysize = frames[0].rows;
     info.bits_per_sample = 8;
     info.num_color_channels = num_color_channels;
     info.num_extra_channels = @intFromBool(has_alpha);
     info.alpha_bits = if (has_alpha) 8 else 0;
     // Lossless must keep the original color space; lossy is smaller in XYB.
     info.uses_original_profile = @intFromBool(lossless);
+    if (is_animation) {
+        info.have_animation = 1;
+        // One tick per millisecond.
+        info.animation = .{ .tps_numerator = 1000, .tps_denominator = 1, .num_loops = anim.loop_count, .have_timecodes = 0 };
+    }
     try encCheck(jxl.JxlEncoderSetBasicInfo(enc, &info));
 
     const srgb: ColorEncoding = .srgb(num_color_channels == 1);
@@ -302,27 +308,50 @@ fn encodeRaw(io: Io, allocator: Allocator, pixels: []const u8, width: u32, heigh
     try encCheck(jxl.JxlEncoderSetFrameLossless(settings, @intFromBool(lossless)));
     try encCheck(jxl.JxlEncoderFrameSettingsSetOption(settings, enc_frame_setting_effort, std.math.clamp(options.effort, 1, 10)));
 
-    const format: PixelFormat = .{ .num_channels = channels };
-    try encCheck(jxl.JxlEncoderAddImageFrame(settings, &format, pixels.ptr, pixels.len));
-    jxl.JxlEncoderCloseInput(enc);
-
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
-    try out.resize(allocator, @max(4096, pixels.len / 8));
-    var written: usize = 0;
+    try out.ensureTotalCapacity(allocator, @max(4096, @as(usize, frames[0].cols) * frames[0].rows * channels / 8));
+    var scratch: ?Image(E) = null;
+    defer if (scratch) |*img| img.deinit(allocator);
+
+    const format: PixelFormat = .{ .num_channels = channels };
+    for (frames, 0..) |frame, i| {
+        if (is_animation) {
+            var header: FrameHeader = undefined;
+            jxl.JxlEncoderInitFrameHeader(&header);
+            header.duration = anim.durations_ms[i];
+            try encCheck(jxl.JxlEncoderSetFrameHeader(settings, &header));
+        }
+        const pixels: Image(E) = if (T == E and frame.isContiguous()) frame else blk: {
+            if (scratch == null) scratch = try .init(allocator, frame.rows, frame.cols);
+            frame.convertInto(io, E, scratch.?);
+            break :blk scratch.?;
+        };
+        const bytes = pixels.asBytes();
+        try encCheck(jxl.JxlEncoderAddImageFrame(settings, &format, bytes.ptr, bytes.len));
+        // Drain as we go so libjxl does not hold every queued frame; the last one must
+        // follow `CloseInput`.
+        if (i + 1 < frames.len) try drainOutput(jxl, enc, allocator, &out);
+    }
+    jxl.JxlEncoderCloseInput(enc);
+    try drainOutput(jxl, enc, allocator, &out);
+    return out.toOwnedSlice(allocator);
+}
+
+/// Appends everything libjxl has ready to `out`.
+fn drainOutput(jxl: *const Api, enc: *Encoder, allocator: Allocator, out: *std.ArrayList(u8)) !void {
     while (true) {
-        var next: [*]u8 = out.items.ptr + written;
-        var avail: usize = out.items.len - written;
+        const free = out.unusedCapacitySlice();
+        var next: [*]u8 = free.ptr;
+        var avail: usize = free.len;
         const status = jxl.JxlEncoderProcessOutput(enc, &next, &avail);
-        written = out.items.len - avail;
+        out.items.len += free.len - avail;
         switch (status) {
-            enc_success => break,
-            enc_need_more_output => try out.resize(allocator, out.items.len * 2),
+            enc_success => return,
+            enc_need_more_output => try out.ensureUnusedCapacity(allocator, out.capacity),
             else => return error.JxlEncodeFailed,
         }
     }
-    out.shrinkRetainingCapacity(written);
-    return out.toOwnedSlice(allocator);
 }
 
 /// libjxl's quality→Butteraugli distance mapping (`JxlEncoderDistanceFromQuality`, cjxl `-q`).
@@ -500,6 +529,8 @@ const Api = struct {
     JxlEncoderSetFrameDistance: *const fn (settings: *FrameSettings, distance: f32) callconv(.c) c_int,
     JxlEncoderSetFrameLossless: *const fn (settings: *FrameSettings, lossless: Bool) callconv(.c) c_int,
     JxlEncoderFrameSettingsSetOption: *const fn (settings: *FrameSettings, option: c_int, value: i64) callconv(.c) c_int,
+    JxlEncoderInitFrameHeader: *const fn (header: *FrameHeader) callconv(.c) void,
+    JxlEncoderSetFrameHeader: *const fn (settings: *FrameSettings, header: *const FrameHeader) callconv(.c) c_int,
     JxlEncoderAddImageFrame: *const fn (settings: *const FrameSettings, format: *const PixelFormat, buffer: *const anyopaque, size: usize) callconv(.c) c_int,
     JxlEncoderCloseInput: *const fn (enc: *Encoder) callconv(.c) void,
     JxlEncoderProcessOutput: *const fn (enc: *Encoder, next_out: *[*]u8, avail_out: *usize) callconv(.c) c_int,
@@ -610,4 +641,76 @@ test "lossy round trip stays close" {
     var back = try loadFromBytes(Rgb, io, allocator, bytes, .default);
     defer back.deinit(allocator);
     try std.testing.expect(try img.psnr(back) > 30);
+}
+
+fn testAnimation(comptime T: type, allocator: Allocator, durations: []const u32, loop_count: u32) !AnimatedImage(T) {
+    var builder: animated.Builder(T) = .{};
+    defer builder.deinit(allocator);
+    for (durations, 0..) |ms, i| {
+        var img = try testImage(T, allocator);
+        errdefer img.deinit(allocator);
+        // Distinct frames so a dropped or repeated frame shows up.
+        for (img.data) |*p| p.* = switch (T) {
+            u8 => p.* +% @as(u8, @truncate(i * 40)),
+            else => blk: {
+                var q = p.*;
+                q.r +%= @truncate(i * 40);
+                break :blk q;
+            },
+        };
+        try builder.append(allocator, img, ms);
+    }
+    return builder.finish(allocator, loop_count);
+}
+
+test "animated lossless round trip" {
+    if (!enabled or !Libjxl.available()) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    inline for (.{ u8, Rgb, Rgba }) |T| {
+        var anim = try testAnimation(T, allocator, &.{ 40, 100, 0 }, 3);
+        defer anim.deinit(allocator);
+        const bytes = try encodeAnimated(T, io, allocator, anim, .lossless);
+        defer allocator.free(bytes);
+
+        var reader: Io.Reader = .fixed(bytes);
+        try std.testing.expect((try getInfo(&reader, .default)).has_animation);
+
+        var back = try loadAnimatedFromBytes(T, io, allocator, bytes, .default);
+        defer back.deinit(allocator);
+        try std.testing.expectEqual(3, back.frameCount());
+        try std.testing.expectEqual(3, back.loop_count);
+        try std.testing.expectEqualSlices(u32, anim.durations_ms, back.durations_ms);
+        for (anim.frames, back.frames) |a, b| try std.testing.expectEqualSlices(u8, a.asBytes(), b.asBytes());
+    }
+}
+
+test "a one-frame animation encodes as a still" {
+    if (!enabled or !Libjxl.available()) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var anim = try testAnimation(Rgb, allocator, &.{50}, 0);
+    defer anim.deinit(allocator);
+    const animated_bytes = try encodeAnimated(Rgb, io, allocator, anim, .lossless);
+    defer allocator.free(animated_bytes);
+    const still_bytes = try encode(Rgb, io, allocator, anim.frames[0], .lossless);
+    defer allocator.free(still_bytes);
+    try std.testing.expectEqualSlices(u8, still_bytes, animated_bytes);
+}
+
+test "animated encode rejects bad input" {
+    if (!enabled) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    const empty: AnimatedImage(Rgb) = .{ .frames = &.{}, .durations_ms = &.{}, .loop_count = 0 };
+    try std.testing.expectError(error.NoFrames, encodeAnimated(Rgb, io, allocator, empty, .default));
+
+    var a: Image(Rgb) = try .init(allocator, 4, 4);
+    defer a.deinit(allocator);
+    var b: Image(Rgb) = try .init(allocator, 4, 5);
+    defer b.deinit(allocator);
+    var frames = [_]Image(Rgb){ a, b };
+    var durations = [_]u32{ 10, 10 };
+    const mismatched: AnimatedImage(Rgb) = .{ .frames = &frames, .durations_ms = &durations, .loop_count = 0 };
+    try std.testing.expectError(error.InconsistentFrameDimensions, encodeAnimated(Rgb, io, allocator, mismatched, .default));
 }
