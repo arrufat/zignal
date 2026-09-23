@@ -7,8 +7,8 @@
 //!
 //! The decoder is chunked: callers feed sub-block payloads via `decodeChunk`
 //! and the decoder maintains its bit accumulator across calls. The encoder
-//! consumes a flat slice of palette indices and emits raw LZW bytes; the GIF
-//! caller wraps those in 0xFF-max sub-blocks.
+//! consumes a flat slice of palette indices and writes the LZW bytes as GIF
+//! sub-blocks of at most 255 bytes.
 
 const std = @import("std");
 const expect = std.testing.expect;
@@ -196,20 +196,28 @@ pub const Encoder = struct {
     bit_accum: u32,
     bits_in_accum: u5,
 
+    /// The sub-block being filled.
+    block: [255]u8 = undefined,
+    block_len: u8 = 0,
+
     pub fn init(gpa: std.mem.Allocator, min_code_size: u4) !Encoder {
-        if (min_code_size < 2 or min_code_size > 8) return error.InvalidMinCodeSize;
-        var self: Encoder = .{
-            .min_code_size = min_code_size,
-            .code_size = min_code_size + 1,
-            .clear_code = @as(u16, 1) << min_code_size,
-            .eoi_code = (@as(u16, 1) << min_code_size) + 1,
-            .next_code = (@as(u16, 1) << min_code_size) + 2,
-            .dict = .empty,
-            .bit_accum = 0,
-            .bits_in_accum = 0,
-        };
+        var self: Encoder = undefined;
+        self.dict = .empty;
+        try self.reset(min_code_size);
         try self.dict.ensureTotalCapacity(gpa, max_dict_entries);
         return self;
+    }
+
+    /// Starts a new image with `min_code_size`, keeping the dictionary's memory.
+    pub fn reset(self: *Encoder, min_code_size: u4) !void {
+        if (min_code_size < 2 or min_code_size > 8) return error.InvalidMinCodeSize;
+        self.min_code_size = min_code_size;
+        self.clear_code = @as(u16, 1) << min_code_size;
+        self.eoi_code = self.clear_code + 1;
+        self.bit_accum = 0;
+        self.bits_in_accum = 0;
+        self.block_len = 0;
+        self.resetDict();
     }
 
     pub fn deinit(self: *Encoder, gpa: std.mem.Allocator) void {
@@ -222,32 +230,45 @@ pub const Encoder = struct {
         self.next_code = self.eoi_code + 1;
     }
 
-    fn emitCode(self: *Encoder, gpa: std.mem.Allocator, code: u16, out: *std.ArrayList(u8)) !void {
+    fn emitByte(self: *Encoder, writer: *std.Io.Writer, byte: u8) !void {
+        self.block[self.block_len] = byte;
+        self.block_len += 1;
+        if (self.block_len == self.block.len) try self.flushBlock(writer);
+    }
+
+    fn flushBlock(self: *Encoder, writer: *std.Io.Writer) !void {
+        if (self.block_len == 0) return;
+        try writer.writeByte(self.block_len);
+        try writer.writeAll(self.block[0..self.block_len]);
+        self.block_len = 0;
+    }
+
+    fn emitCode(self: *Encoder, writer: *std.Io.Writer, code: u16) !void {
         self.bit_accum |= @as(u32, code) << self.bits_in_accum;
         self.bits_in_accum += @as(u5, self.code_size);
         while (self.bits_in_accum >= 8) {
-            try out.append(gpa, @intCast(self.bit_accum & 0xFF));
+            try self.emitByte(writer, @intCast(self.bit_accum & 0xFF));
             self.bit_accum >>= 8;
             self.bits_in_accum -= 8;
         }
     }
 
-    fn flushBits(self: *Encoder, gpa: std.mem.Allocator, out: *std.ArrayList(u8)) !void {
+    fn flushBits(self: *Encoder, writer: *std.Io.Writer) !void {
         if (self.bits_in_accum > 0) {
-            try out.append(gpa, @intCast(self.bit_accum & 0xFF));
+            try self.emitByte(writer, @intCast(self.bit_accum & 0xFF));
             self.bit_accum = 0;
             self.bits_in_accum = 0;
         }
+        try self.flushBlock(writer);
     }
 
-    /// Compresses `indices` (palette indices in scan order) into raw LZW bytes.
-    /// Caller wraps the result in 0xFF-max sub-blocks separately.
-    pub fn encodeAll(self: *Encoder, gpa: std.mem.Allocator, indices: []const u8, out: *std.ArrayList(u8)) !void {
-        try self.emitCode(gpa, self.clear_code, out);
+    /// Compresses `indices` into GIF sub-blocks, without the terminating empty block.
+    pub fn encodeAll(self: *Encoder, writer: *std.Io.Writer, indices: []const u8) !void {
+        try self.emitCode(writer, self.clear_code);
 
         if (indices.len == 0) {
-            try self.emitCode(gpa, self.eoi_code, out);
-            try self.flushBits(gpa, out);
+            try self.emitCode(writer, self.eoi_code);
+            try self.flushBits(writer);
             return;
         }
 
@@ -258,7 +279,7 @@ pub const Encoder = struct {
             if (self.dict.get(key)) |child| {
                 prev_code = child;
             } else {
-                try self.emitCode(gpa, prev_code, out);
+                try self.emitCode(writer, prev_code);
 
                 if (self.next_code < max_dict_entries) {
                     self.dict.putAssumeCapacity(key, self.next_code);
@@ -270,7 +291,7 @@ pub const Encoder = struct {
                     }
                 } else {
                     // Dictionary full — emit Clear and reset.
-                    try self.emitCode(gpa, self.clear_code, out);
+                    try self.emitCode(writer, self.clear_code);
                     self.resetDict();
                 }
 
@@ -278,9 +299,9 @@ pub const Encoder = struct {
             }
         }
 
-        try self.emitCode(gpa, prev_code, out);
-        try self.emitCode(gpa, self.eoi_code, out);
-        try self.flushBits(gpa, out);
+        try self.emitCode(writer, prev_code);
+        try self.emitCode(writer, self.eoi_code);
+        try self.flushBits(writer);
     }
 };
 
@@ -436,18 +457,26 @@ fn roundTrip(gpa: std.mem.Allocator, min_code_size: u4, indices: []const u8) !vo
     var encoder = try Encoder.init(gpa, min_code_size);
     defer encoder.deinit(gpa);
 
-    var encoded: std.ArrayList(u8) = .empty;
-    defer encoded.deinit(gpa);
-
-    try encoder.encodeAll(gpa, indices, &encoded);
+    var encoded: std.Io.Writer.Allocating = .init(gpa);
+    defer encoded.deinit();
+    try encoder.encodeAll(&encoded.writer, indices);
 
     var decoder = try Decoder.init(min_code_size);
     const decoded = try gpa.alloc(u8, indices.len);
     defer gpa.free(decoded);
 
-    const r = try decoder.decodeChunk(encoded.items, decoded);
+    // Feed the sub-blocks one at a time, as the GIF decoder does.
+    var written: usize = 0;
+    var rest = encoded.written();
+    while (rest.len > 0) {
+        const len: usize = rest[0];
+        try expect(len > 0 and len < rest.len);
+        const r = try decoder.decodeChunk(rest[1..][0..len], decoded[written..]);
+        written += r.written;
+        rest = rest[1 + len ..];
+    }
     try expect(decoder.isDone());
-    try expectEqual(indices.len, r.written);
+    try expectEqual(indices.len, written);
     try std.testing.expectEqualSlices(u8, indices, decoded);
 }
 

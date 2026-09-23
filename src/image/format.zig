@@ -25,6 +25,16 @@ pub const ImageFormat = enum {
     pub const signature_len = 12;
 
     /// Detects image format from the first few bytes of file data.
+    /// The format named by the signature at the start of `reader`, without consuming it.
+    pub fn peek(reader: *std.Io.Reader) !ImageFormat {
+        // Files shorter than a signature can still match a shorter one.
+        const head = reader.peekGreedy(signature_len) catch |err| switch (err) {
+            error.EndOfStream => reader.buffered(),
+            else => |e| return e,
+        };
+        return detectFromBytes(head) orelse error.UnsupportedImageFormat;
+    }
+
     pub fn detectFromBytes(data: []const u8) ?ImageFormat {
         // PNG signature
         if (data.len >= 8) {

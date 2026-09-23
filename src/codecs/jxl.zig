@@ -30,14 +30,14 @@ pub fn hasSignature(data: []const u8) bool {
 }
 
 pub const DecodeLimits = struct {
-    /// Maximum encoded size read by `load`; 0 disables the cap.
-    max_jxl_bytes: usize = codecs.max_file_size,
-    /// Maximum decoded pixel count (per frame); 0 disables the cap.
-    max_pixels: u64 = 1 << 28,
-    /// Maximum animation frames; 0 disables the cap.
-    max_frames: u32 = 4096,
-    /// Maximum pixels across all frames; 0 disables the cap.
-    max_total_pixels: u64 = 1 << 30,
+    /// Maximum encoded size `read` buffers.
+    max_jxl_bytes: Io.Limit = .limited(100 * 1024 * 1024),
+    /// Maximum decoded pixel count (per frame).
+    max_pixels: Io.Limit = .limited(1 << 28),
+    /// Maximum animation frames.
+    max_frames: Io.Limit = .limited(4096),
+    /// Maximum pixels across all frames.
+    max_total_pixels: Io.Limit = .limited(1 << 30),
 
     pub const default: DecodeLimits = .{};
 };
@@ -140,9 +140,10 @@ pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, dat
     return builder.finish(allocator, reader.animation.num_loops);
 }
 
-pub fn loadAnimated(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
+/// Reads every frame of a JPEG XL image from `reader`, buffering at most the `DecodeLimits` byte cap.
+pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnimatedImage(T) {
     if (!enabled) return error.CodecNotEnabled;
-    const data = try codecs.readFile(io, allocator, file_path, limits.max_jxl_bytes);
+    const data = try reader.allocRemaining(allocator, limits.max_jxl_bytes);
     defer allocator.free(data);
     return loadAnimatedFromBytes(T, io, allocator, data, limits);
 }
@@ -240,29 +241,34 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []con
     return native.into(T, io, allocator);
 }
 
-pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
+/// Reads a JPEG XL image from `reader`, buffering at most the `DecodeLimits` byte cap.
+pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
     if (!enabled) return error.CodecNotEnabled;
-    const data = try codecs.readFile(io, allocator, file_path, limits.max_jxl_bytes);
+    const data = try reader.allocRemaining(allocator, limits.max_jxl_bytes);
     defer allocator.free(data);
     return loadFromBytes(T, io, allocator, data, limits);
 }
 
 /// Encodes `image` as sRGB JPEG XL. `u8`→grayscale, `Rgb`→RGB, `Rgba`→RGBA, others→RGB.
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
-    var frames = [_]Image(T){image};
-    var durations = [_]u32{0};
-    return encodeAnimated(T, io, allocator, .{ .frames = &frames, .durations_ms = &durations, .loop_count = 0 }, options);
+    return codecs.encodeWith(allocator, write, .{ T, io, allocator }, .{ image, options });
 }
 
-pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const bytes = try encode(T, io, allocator, image, .default);
-    defer allocator.free(bytes);
-    try codecs.writeFile(io, file_path, bytes);
+/// Writes `image` as JPEG XL to `writer`; see `encode`.
+pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(T), options: EncodeOptions) !void {
+    var frames = [_]Image(T){image};
+    var durations = [_]u32{0};
+    return writeAnimated(T, io, allocator, writer, .{ .frames = &frames, .durations_ms = &durations, .loop_count = 0 }, options);
 }
 
 /// Encodes every frame of `anim` at its full size; pixel types map as in `encode`.
 /// A one-frame animation is written as a still.
 pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
+    return codecs.encodeWith(allocator, writeAnimated, .{ T, io, allocator }, .{ anim, options });
+}
+
+/// Writes `anim` as JPEG XL to `writer`; see `encodeAnimated`.
+pub fn writeAnimated(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, anim: AnimatedImage(T), options: EncodeOptions) !void {
     if (!enabled) return error.CodecNotEnabled;
     try anim.validate();
     const frames = anim.frames;
@@ -308,9 +314,6 @@ pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: Anim
     try encCheck(jxl.JxlEncoderSetFrameLossless(settings, @intFromBool(lossless)));
     try encCheck(jxl.JxlEncoderFrameSettingsSetOption(settings, enc_frame_setting_effort, std.math.clamp(options.effort, 1, 10)));
 
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-    try out.ensureTotalCapacity(allocator, @max(4096, @as(usize, frames[0].cols) * frames[0].rows * channels / 8));
     var scratch: ?Image(E) = null;
     defer if (scratch) |*img| img.deinit(allocator);
 
@@ -355,24 +358,23 @@ pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: Anim
         try encCheck(jxl.JxlEncoderAddImageFrame(settings, &format, bytes.ptr, bytes.len));
         // Drain as we go so libjxl does not hold every queued frame; the last one must
         // follow `CloseInput`.
-        if (i + 1 < frames.len) try drainOutput(jxl, enc, allocator, &out);
+        if (i + 1 < frames.len) try drainOutput(jxl, enc, writer);
     }
     jxl.JxlEncoderCloseInput(enc);
-    try drainOutput(jxl, enc, allocator, &out);
-    return out.toOwnedSlice(allocator);
+    try drainOutput(jxl, enc, writer);
 }
 
-/// Appends everything libjxl has ready to `out`.
-fn drainOutput(jxl: *const Api, enc: *Encoder, allocator: Allocator, out: *std.ArrayList(u8)) !void {
+/// Writes everything libjxl has ready to `writer`.
+fn drainOutput(jxl: *const Api, enc: *Encoder, writer: *Io.Writer) !void {
+    var chunk: [16 * 1024]u8 = undefined;
     while (true) {
-        const free = out.unusedCapacitySlice();
-        var next: [*]u8 = free.ptr;
-        var avail: usize = free.len;
+        var next: [*]u8 = &chunk;
+        var avail: usize = chunk.len;
         const status = jxl.JxlEncoderProcessOutput(enc, &next, &avail);
-        out.items.len += free.len - avail;
+        try writer.writeAll(chunk[0 .. chunk.len - avail]);
         switch (status) {
             enc_success => return,
-            enc_need_more_output => try out.ensureUnusedCapacity(allocator, out.capacity),
+            enc_need_more_output => {},
             else => return error.JxlEncodeFailed,
         }
     }

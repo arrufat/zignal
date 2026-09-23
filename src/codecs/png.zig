@@ -20,27 +20,20 @@ const max_dimensions_default: u32 = 8192;
 const max_pixels_default: u64 = 67_108_864; // 8K square
 const max_decompressed_default: usize = 536_886_272; // 8K×8K RGBA 16-bit Adam7 worst case
 
-/// User-configurable resource limits applied while decoding PNG data.
-/// A zero value disables the corresponding limit.
+/// User-configurable resource limits applied while decoding PNG data; `.unlimited` disables one.
 pub const DecodeLimits = struct {
-    /// Maximum number of bytes accepted in the original PNG buffer (signature + chunks).
-    max_png_bytes: usize = codecs.max_file_size,
-    /// Maximum cumulative size (in bytes) across all chunk payloads.
-    max_chunk_bytes: usize = codecs.max_file_size,
-    /// Maximum cumulative size of IDAT chunk payloads (compressed image stream).
-    max_idat_bytes: usize = codecs.max_file_size,
     /// Maximum number of chunks accepted in a single PNG. Helps prevent zip bombs
     /// that add thousands of tiny ancillary entries.
-    max_chunks: usize = 8192,
+    max_chunks: Io.Limit = .limited(8192),
     /// Maximum allowed width in pixels.
-    max_width: u32 = max_dimensions_default,
+    max_width: Io.Limit = .limited(max_dimensions_default),
     /// Maximum allowed height in pixels.
-    max_height: u32 = max_dimensions_default,
+    max_height: Io.Limit = .limited(max_dimensions_default),
     /// Maximum allowed pixel count (width * height). Default ~8K square.
-    max_pixels: u64 = max_pixels_default,
+    max_pixels: Io.Limit = .limited(max_pixels_default),
     /// Maximum number of bytes produced by zlib inflate (including filter bytes,
     /// across all Adam7 passes when applicable).
-    max_decompressed_bytes: usize = max_decompressed_default,
+    max_decompressed_bytes: Io.Limit = .limited(max_decompressed_default),
 
     pub const default: DecodeLimits = .{};
 };
@@ -56,22 +49,6 @@ const ChunkOrderState = struct {
 };
 
 const exceeds = codecs.exceeds;
-
-const accumulateWithLimit = codecs.accumulateWithLimit;
-
-fn ensureArrayCapacityWithinLimit(list: *ArrayList(u8), allocator: Allocator, required_len: usize, limit: usize) !void {
-    if (required_len <= list.capacity) return;
-
-    var target = required_len;
-    if (list.capacity > 0) {
-        const doubled = std.math.mul(usize, list.capacity, 2) catch std.math.maxInt(usize);
-        if (doubled > target) target = doubled;
-    }
-    if (exceeds(limit, target)) {
-        target = limit;
-    }
-    try list.ensureTotalCapacityPrecise(allocator, target);
-}
 
 /// PNG signature: 8-byte magic header that identifies a PNG file.
 pub const signature = [_]u8{ 137, 80, 78, 71, 13, 10, 26, 10 };
@@ -124,9 +101,6 @@ pub const Chunk = struct {
     length: u32,
     type: [4]u8,
     data: []const u8,
-    crc: u32,
-    /// True for a chunk cut short by end of data (CRC bytes absent, unverified).
-    truncated: bool = false,
 };
 
 /// Decoded PNG IHDR chunk header metadata.
@@ -285,15 +259,15 @@ pub const PngState = struct {
     header: Header,
     palette: ?[][3]u8 = null,
     transparency: ?[]u8 = null, // For palette transparency or single transparent color
-    idat_data: ArrayList(u8),
-    scan_data_bytes: usize = 0,
+    /// Defiltered scanlines, each with its leading filter byte.
+    scanlines: []u8 = &.{},
 
     /// Input was truncated; the decoded image may be partial (prefix rows, rest zeroed) or
     /// complete.
     truncated: bool = false,
 
     pub fn deinit(self: *PngState, gpa: Allocator) void {
-        self.idat_data.deinit(gpa);
+        gpa.free(self.scanlines);
         if (self.palette) |palette| {
             gpa.free(palette);
         }
@@ -306,11 +280,9 @@ pub const PngState = struct {
 /// Retrieve metadata from a PNG stream without decoding the full image.
 /// This reads headers and ancillary chunks (gAMA, sRGB) but stops before IDAT.
 pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
-    var bytes_read: usize = 0;
     var chunk_count: usize = 0;
 
     const sig = try reader.takeArray(8);
-    bytes_read += sig.len;
     if (!std.mem.eql(u8, sig, &signature)) {
         return error.InvalidPngSignature;
     }
@@ -319,30 +291,17 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
     var header_found = false;
 
     while (true) {
-        // Check limits before reading next chunk
-        if (exceeds(limits.max_png_bytes, bytes_read)) {
-            return error.PngDataTooLarge;
-        }
-
         const length = reader.takeInt(u32, .big) catch |err| switch (err) {
             error.EndOfStream => break,
             else => return err,
         };
-        bytes_read += @sizeOf(u32);
 
         const chunk_type_ptr = try reader.takeArray(4);
-        bytes_read += chunk_type_ptr.len;
         const chunk_type = chunk_type_ptr.*;
 
         chunk_count += 1;
         if (exceeds(limits.max_chunks, chunk_count)) {
             return error.TooManyChunks;
-        }
-
-        // Total chunk size: length + 4 (CRC)
-        const total_chunk_size = @as(usize, length) + 4;
-        if (exceeds(limits.max_png_bytes, bytes_read + total_chunk_size)) {
-            return error.PngDataTooLarge;
         }
 
         // Stop at image data or end of file
@@ -354,7 +313,6 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
             if (length != 13) return error.InvalidHeaderLength;
 
             const data = try reader.takeArray(13);
-            bytes_read += data.len;
 
             const width = std.mem.readInt(u32, data[0..4], .big);
             const height = std.mem.readInt(u32, data[4..8], .big);
@@ -380,17 +338,15 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
                 .interlace_method = data[12],
             };
             header_found = true;
-            bytes_read += try reader.discard(Io.Limit.limited(4)); // CRC
+            _ = try reader.discard(Io.Limit.limited(4)); // CRC
         } else if (std.mem.eql(u8, &chunk_type, "gAMA") and header_found) {
             if (length != 4) return error.InvalidGammaLength;
             const gamma_int = try reader.takeInt(u32, .big);
-            bytes_read += @sizeOf(u32);
             header.gamma = @as(f32, @floatFromInt(gamma_int)) / 100000.0;
-            bytes_read += try reader.discard(Io.Limit.limited(4)); // CRC
+            _ = try reader.discard(Io.Limit.limited(4)); // CRC
         } else if (std.mem.eql(u8, &chunk_type, "sRGB") and header_found) {
             if (length != 1) return error.InvalidSrgbLength;
             const intent_raw = try reader.takeByte();
-            bytes_read += @sizeOf(u8);
             header.srgb_intent = switch (intent_raw) {
                 0 => .perceptual,
                 1 => .relative_colorimetric,
@@ -398,10 +354,10 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
                 3 => .absolute_colorimetric,
                 else => return error.InvalidSrgbIntent,
             };
-            bytes_read += try reader.discard(Io.Limit.limited(4)); // CRC
+            _ = try reader.discard(Io.Limit.limited(4)); // CRC
         } else {
             // Skip unknown or unneeded chunk data + CRC
-            bytes_read += try reader.discard(Io.Limit.limited64(@as(u64, length) + 4));
+            _ = try reader.discard(Io.Limit.limited64(@as(u64, length) + 4));
         }
     }
 
@@ -411,19 +367,20 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
 
 test "PNG getInfo" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var data_out: Io.Writer.Allocating = .init(gpa);
+    defer data_out.deinit();
+    const data = &data_out.writer;
 
-    try data.appendSlice(gpa, &signature);
+    try data.writeAll(&signature);
 
-    try appendTestIhdr(&data, gpa, 100, 200, 8, .rgba, 0);
+    try writeTestIhdr(data, 100, 200, 8, .rgba, 0);
 
     const gama_payload = [_]u8{ 0, 0, 0x88, 0xB8 }; // 35000 -> 0.35
-    try appendTestChunk(&data, gpa, "gAMA".*, &gama_payload);
+    try writeChunk(data, "gAMA".*, &gama_payload);
 
-    try appendTestChunk(&data, gpa, "IDAT".*, &[_]u8{});
+    try writeChunk(data, "IDAT".*, &[_]u8{});
 
-    var reader = Io.Reader.fixed(data.items);
+    var reader = Io.Reader.fixed(data_out.written());
     const header = try getInfo(&reader, .{});
 
     try std.testing.expectEqual(100, header.width);
@@ -509,51 +466,122 @@ fn crc(buf: []const u8) u32 {
     return updateCrc(0xffffffff, buf) ^ 0xffffffff;
 }
 
-// Read PNG chunks from byte stream
-pub const ChunkReader = struct {
-    data: []const u8,
-    pos: usize = 0,
+/// Chunk walker: `next` reads a header; `body` or an `IdatReader` consumes the payload and CRC.
+const ChunkStream = struct {
+    reader: *Io.Reader,
+    max_chunks: Io.Limit,
+    count: usize = 0,
 
-    pub fn init(data: []const u8) ChunkReader {
-        return .{ .data = data, .pos = 0 };
+    const Head = struct { length: u32, type: [4]u8 };
+
+    /// The next chunk's header, or null when the stream ends between chunks.
+    fn next(self: *ChunkStream) !?Head {
+        const head = self.reader.takeArray(8) catch |err| switch (err) {
+            error.EndOfStream => return null,
+            else => |e| return e,
+        };
+        self.count += 1;
+        if (exceeds(self.max_chunks, self.count)) return error.TooManyChunks;
+        return .{ .length = std.mem.readInt(u32, head[0..4], .big), .type = head[4..8].* };
     }
 
-    pub fn nextChunk(self: *ChunkReader) !?Chunk {
-        if (self.pos + 8 > self.data.len) return null;
-
-        const length = std.mem.readInt(u32, self.data[self.pos .. self.pos + 4][0..4], .big);
-        self.pos += 4;
-
-        const chunk_type = self.data[self.pos .. self.pos + 4][0..4].*;
-        self.pos += 4;
-
-        if (self.pos + length + 4 > self.data.len) {
-            // Cut short by end of data: return the available payload, CRC unverifiable.
-            const take: u32 = @intCast(@min(length, self.data.len - self.pos));
-            const chunk_data = self.data[self.pos .. self.pos + take];
-            self.pos = self.data.len;
-            return Chunk{ .length = take, .type = chunk_type, .data = chunk_data, .crc = 0, .truncated = true };
+    /// Reads payload and CRC; returns the payload if it fits `keep`, null if the stream ends.
+    fn body(self: *ChunkStream, head: Head, keep: []u8) !?[]const u8 {
+        var chunk_crc = updateCrc(0xffffffff, &head.type);
+        var remaining: usize = head.length;
+        const kept = if (head.length <= keep.len) keep[0..head.length] else keep[0..0];
+        var pos: usize = 0;
+        while (remaining > 0) {
+            const available = self.reader.peekGreedy(1) catch |err| switch (err) {
+                error.EndOfStream => return null,
+                else => |e| return e,
+            };
+            const n = @min(available.len, remaining);
+            chunk_crc = updateCrc(chunk_crc, available[0..n]);
+            if (kept.len != 0) @memcpy(kept[pos..][0..n], available[0..n]);
+            pos += n;
+            self.reader.toss(n);
+            remaining -= n;
         }
-
-        const chunk_data = self.data[self.pos .. self.pos + length];
-        self.pos += length;
-
-        const chunk_crc = std.mem.readInt(u32, self.data[self.pos .. self.pos + 4][0..4], .big);
-        self.pos += 4;
-
-        // Verify CRC (includes chunk type and data)
-        const crc_start = self.pos - length - 8;
-        const computed_crc = crc(self.data[crc_start .. self.pos - 4]);
-        if (computed_crc != chunk_crc) {
-            return error.InvalidCrc;
-        }
-
-        return Chunk{
-            .length = length,
-            .type = chunk_type,
-            .data = chunk_data,
-            .crc = chunk_crc,
+        const stored = self.reader.takeInt(u32, .big) catch |err| switch (err) {
+            error.EndOfStream => return null,
+            else => |e| return e,
         };
+        if (stored != chunk_crc ^ 0xffffffff) return error.InvalidCrc;
+        return kept;
+    }
+};
+
+/// The payloads of a run of consecutive IDAT chunks as one stream, their CRCs checked on the way.
+const IdatReader = struct {
+    chunks: *ChunkStream,
+    /// Payload bytes left in the current chunk.
+    remaining: u32,
+    chunk_crc: u32,
+    /// Payload bytes delivered so far.
+    total: usize = 0,
+    /// The input ended inside the run.
+    truncated: bool = false,
+    /// The run is over; later reads return `EndOfStream`.
+    done: bool = false,
+    /// The chunk after the run, its header already read.
+    after: ?ChunkStream.Head = null,
+    err: ?error{ InvalidCrc, TooManyChunks, ReadFailed } = null,
+    interface: Io.Reader,
+
+    fn init(chunks: *ChunkStream, first: ChunkStream.Head, buffer: []u8) IdatReader {
+        return .{
+            .chunks = chunks,
+            .remaining = first.length,
+            .chunk_crc = updateCrc(0xffffffff, "IDAT"),
+            .interface = .{ .vtable = &.{ .stream = stream }, .buffer = buffer, .seek = 0, .end = 0 },
+        };
+    }
+
+    fn stream(r: *Io.Reader, w: *Io.Writer, limit: Io.Limit) Io.Reader.StreamError!usize {
+        const self: *IdatReader = @alignCast(@fieldParentPtr("interface", r));
+        while (self.remaining == 0) {
+            if (self.done) return error.EndOfStream;
+            self.done = !(self.nextChunk() catch |err| {
+                self.err = err;
+                return error.ReadFailed;
+            });
+        }
+        const input = self.chunks.reader;
+        const available = input.peekGreedy(1) catch |err| switch (err) {
+            error.EndOfStream => {
+                self.truncated = true;
+                return error.EndOfStream;
+            },
+            error.ReadFailed => return error.ReadFailed,
+        };
+        const bytes = limit.slice(available[0..@min(available.len, self.remaining)]);
+        const n = try w.write(bytes);
+        self.chunk_crc = updateCrc(self.chunk_crc, bytes[0..n]);
+        input.toss(n);
+        self.remaining -= @intCast(n);
+        self.total += n;
+        return n;
+    }
+
+    /// Checks the finished chunk's CRC and starts the next one; false once the run is over.
+    fn nextChunk(self: *IdatReader) !bool {
+        const stored = self.chunks.reader.takeInt(u32, .big) catch |err| switch (err) {
+            error.EndOfStream => {
+                self.truncated = true;
+                return false;
+            },
+            else => |e| return e,
+        };
+        if (stored != self.chunk_crc ^ 0xffffffff) return error.InvalidCrc;
+        const head = try self.chunks.next() orelse return false;
+        if (!std.mem.eql(u8, &head.type, "IDAT")) {
+            self.after = head;
+            return false;
+        }
+        self.remaining = head.length;
+        self.chunk_crc = updateCrc(0xffffffff, "IDAT");
+        return true;
     }
 };
 
@@ -624,50 +652,55 @@ fn parseHeader(chunk: Chunk) !Header {
     };
 }
 
-/// PNG decoder entry point. Truncated pixel data decodes partially and sets
-/// `truncated`; structural corruption errors.
+/// Decodes a PNG buffer; truncated pixel data decodes partially and sets `truncated`.
 pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngState {
-    if (png_data.len < 8 or !std.mem.eql(u8, png_data[0..8], &signature)) {
-        return error.InvalidPngSignature;
-    }
-    if (exceeds(limits.max_png_bytes, png_data.len)) {
-        return error.PngDataTooLarge;
-    }
+    var reader: Io.Reader = .fixed(png_data);
+    return parse(gpa, &reader, limits);
+}
 
-    var reader: ChunkReader = .init(png_data[8..]);
-    var png_state: PngState = .{
-        .header = undefined,
-        .idat_data = .empty,
+/// `decode` from a stream; the image data is inflated straight from the IDAT chunks.
+fn parse(gpa: Allocator, reader: *Io.Reader, limits: DecodeLimits) !PngState {
+    const sig = reader.takeArray(8) catch |err| switch (err) {
+        error.EndOfStream => return error.InvalidPngSignature,
+        else => |e| return e,
     };
+    if (!std.mem.eql(u8, sig, &signature)) return error.InvalidPngSignature;
+
+    var chunks: ChunkStream = .{ .reader = reader, .max_chunks = limits.max_chunks };
+    var png_state: PngState = .{ .header = undefined };
     errdefer png_state.deinit(gpa);
 
     var header_found = false;
     var chunk_state: ChunkOrderState = .{};
-    var total_chunk_bytes: usize = 0;
-    var total_idat_bytes: usize = 0;
-    var chunk_count: usize = 0;
+    // Large enough for every chunk whose payload is read (IHDR, PLTE, tRNS, gAMA, sRGB).
+    var keep: [3 * 256]u8 = undefined;
+    var pending: ?ChunkStream.Head = null;
 
-    while (try reader.nextChunk()) |chunk| {
-        chunk_count += 1;
-        if (exceeds(limits.max_chunks, chunk_count)) {
-            return error.TooManyChunks;
+    while (true) {
+        const head = pending orelse try chunks.next() orelse break;
+        pending = null;
+
+        if (std.mem.eql(u8, &head.type, "IDAT")) {
+            if (!header_found) return error.ChunkBeforeHeader;
+            if (chunk_state.idat_stream_finished) return error.NonConsecutiveIdatChunks;
+            if (png_state.header.color_type == .palette and png_state.palette == null) {
+                return error.MissingPalette;
+            }
+            chunk_state.seen_idat = true;
+            pending = try inflate(gpa, &png_state, &chunks, head, limits);
+            chunk_state.idat_stream_finished = true;
+            continue;
         }
-
-        const chunk_len = chunk.data.len;
-        try accumulateWithLimit(&total_chunk_bytes, chunk_len, limits.max_chunk_bytes, error.ChunkDataLimitExceeded);
 
         // Cut inside a non-IDAT chunk: fatal before pixel data, tolerable after.
-        if (chunk.truncated and !std.mem.eql(u8, &chunk.type, "IDAT")) {
+        const data = try chunks.body(head, &keep) orelse {
             if (!chunk_state.seen_idat) return error.InvalidChunkLength;
             break;
-        }
+        };
+        const chunk: Chunk = .{ .length = head.length, .type = head.type, .data = data };
 
         if (!header_found and !std.mem.eql(u8, &chunk.type, "IHDR")) {
             return error.ChunkBeforeHeader;
-        }
-
-        if (chunk_state.seen_idat and !std.mem.eql(u8, &chunk.type, "IDAT")) {
-            chunk_state.idat_stream_finished = true;
         }
 
         if (std.mem.eql(u8, &chunk.type, "IHDR")) {
@@ -751,19 +784,6 @@ pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngSt
             if (chunk_state.seen_idat) return error.IccpAfterImageData;
             if (chunk_state.seen_srgb) return error.ColorProfileConflict;
             chunk_state.seen_iccp = true;
-        } else if (std.mem.eql(u8, &chunk.type, "IDAT")) {
-            if (chunk_state.idat_stream_finished) {
-                return error.NonConsecutiveIdatChunks;
-            }
-            if (png_state.header.color_type == .palette and png_state.palette == null) {
-                return error.MissingPalette;
-            }
-            try accumulateWithLimit(&total_idat_bytes, chunk_len, limits.max_idat_bytes, error.ImageDataLimitExceeded);
-            const new_len = std.math.add(usize, png_state.idat_data.items.len, chunk.data.len) catch return error.ImageTooLarge;
-            try ensureArrayCapacityWithinLimit(&png_state.idat_data, gpa, new_len, limits.max_idat_bytes);
-            png_state.idat_data.appendSliceAssumeCapacity(chunk.data);
-            chunk_state.seen_idat = true;
-            if (chunk.truncated) break;
         } else if (std.mem.eql(u8, &chunk.type, "IEND")) {
             chunk_state.seen_iend = true;
             break;
@@ -774,19 +794,13 @@ pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngSt
     if (!header_found) {
         return error.MissingHeader;
     }
-
-    if (png_state.idat_data.items.len == 0) {
+    if (!chunk_state.seen_idat) {
         return error.MissingImageData;
     }
 
     // Missing IEND: cut short, but the pixel data present may still be complete.
     if (!chunk_state.seen_iend) {
         png_state.truncated = true;
-    }
-
-    png_state.scan_data_bytes = try scanDataLength(png_state.header);
-    if (exceeds(limits.max_decompressed_bytes, png_state.scan_data_bytes)) {
-        return error.ImageTooLarge;
     }
 
     return png_state;
@@ -797,55 +811,53 @@ fn isZlibTruncation(decompressor: *const flate.Decompress) bool {
     return if (decompressor.err) |err| err == error.EndOfStream else false;
 }
 
+/// Inflates and defilters the IDAT run into `scanlines`; returns the next chunk's header if read.
+fn inflate(gpa: Allocator, png_state: *PngState, chunks: *ChunkStream, first: ChunkStream.Head, limits: DecodeLimits) !?ChunkStream.Head {
+    const header = png_state.header;
+    const scan_data_bytes = try scanDataLength(header);
+    if (exceeds(limits.max_decompressed_bytes, scan_data_bytes)) {
+        return error.ImageTooLarge;
+    }
+
+    const input_buffer = try gpa.alloc(u8, idat_buffer_len);
+    defer gpa.free(input_buffer);
+    var idat: IdatReader = .init(chunks, first, input_buffer);
+    // Direct mode: the inflater writes straight into the scanlines, which double as its history.
+    var decompressor: flate.Decompress = .init(&idat.interface, .zlib, &.{});
+
+    // One spare byte catches a stream that inflates past the image.
+    const scanlines = try gpa.alloc(u8, scan_data_bytes + 1);
+    errdefer gpa.free(scanlines);
+    var out: Io.Writer = .fixed(scanlines);
+    _ = decompressor.reader.streamRemaining(&out) catch |err| switch (err) {
+        error.WriteFailed => return error.ImageTooLarge,
+        error.ReadFailed => {
+            if (idat.err) |e| return e;
+            // Truncated stream: keep what was inflated; a cut inside the checksum loses nothing.
+            if (!isZlibTruncation(&decompressor)) return err;
+        },
+    };
+    if (out.end > scan_data_bytes) return error.ImageTooLarge;
+    // Read the rest of the run (trailing bytes after the zlib stream), checking CRCs.
+    _ = idat.interface.discardRemaining() catch |err| return idat.err orelse err;
+    if (idat.total == 0) return error.MissingImageData;
+
+    // Zero-fill the rest: zero filter bytes decode as .none, so missing rows become zero pixels.
+    if (out.end < scan_data_bytes) {
+        png_state.truncated = true;
+        @memset(scanlines[completeScanPrefix(out.end, header)..], 0);
+    }
+    png_state.scanlines = try gpa.realloc(scanlines, scan_data_bytes);
+    try defilterScanlines(png_state.scanlines, header);
+    return idat.after;
+}
+
+/// Input buffered ahead of the inflater.
+const idat_buffer_len = 16 * 1024;
+
 /// Converts PNG image data to its natural Zignal image type.
 pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !NativeImage {
-    // Decompress IDAT data
-    var reader: Io.Reader = .fixed(png_state.idat_data.items);
-
-    const buffer = try allocator.alloc(u8, flate.max_window_len);
-    defer allocator.free(buffer);
-
-    var decompressor: flate.Decompress = .init(&reader, .zlib, buffer);
-
-    var aw: Io.Writer.Allocating = .init(allocator);
-    errdefer aw.deinit();
-
-    var remaining: Io.Limit = .limited(png_state.scan_data_bytes);
-    while (remaining.nonzero()) {
-        const n = decompressor.reader.stream(&aw.writer, remaining) catch |err| switch (err) {
-            error.EndOfStream => break,
-            error.ReadFailed => {
-                if (!isZlibTruncation(&decompressor)) return err;
-                // Truncated stream: recover bytes decompressed but not yet delivered.
-                try aw.writer.writeAll(remaining.sliceConst(decompressor.reader.buffered()));
-                break;
-            },
-            else => return err,
-        };
-        remaining = remaining.subtract(n).?;
-    } else {
-        // We've hit the limit, check if there's more data.
-        var one_byte_buf: [1]u8 = undefined;
-        var dummy_writer: Io.Writer = .fixed(&one_byte_buf);
-        if (decompressor.reader.stream(&dummy_writer, .limited(1))) |n| {
-            if (n > 0) return error.ImageTooLarge;
-        } else |err| switch (err) {
-            error.EndOfStream => {}, // This is fine, we're at the end.
-            // Stream cut inside the zlib checksum: all pixel data arrived.
-            error.ReadFailed => if (!isZlibTruncation(&decompressor)) return err,
-            else => return err,
-        }
-    }
-    // Zero-pad to full size: zero filter bytes decode as .none, so padded rows become zero pixels.
-    if (aw.written().len < png_state.scan_data_bytes) {
-        png_state.truncated = true;
-        const keep = completeScanPrefix(aw.written().len, png_state.header);
-        aw.shrinkRetainingCapacity(keep);
-        try aw.writer.splatByteAll(0, png_state.scan_data_bytes - keep);
-    }
-    const decompressed = try aw.toOwnedSlice();
-    defer allocator.free(decompressed);
-    try defilterScanlines(decompressed, png_state.header);
+    const decompressed = png_state.scanlines;
 
     const width = png_state.header.width;
     const height = png_state.header.height;
@@ -1152,59 +1164,28 @@ pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !NativeImage {
 /// Truncated pixel data yields a partial image; use `decode` + `toNativeImage`
 /// to observe the `truncated` flag.
 pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, png_data: []const u8, limits: DecodeLimits) !Image(T) {
-    var png_state = try decode(allocator, png_data, limits);
-    defer png_state.deinit(allocator);
-
-    var native = try toNativeImage(allocator, &png_state);
-    return native.into(T, io, allocator);
+    var reader: Io.Reader = .fixed(png_data);
+    return read(T, io, allocator, &reader, limits);
 }
 
-pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
-    const png_data = try codecs.readFile(io, allocator, file_path, limits.max_png_bytes);
-    defer allocator.free(png_data);
-    return loadFromBytes(T, io, allocator, png_data, limits);
+/// Reads a PNG from `reader`, inflating the image data straight from the stream.
+pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
+    var png_state = try parse(allocator, reader, limits);
+    defer png_state.deinit(allocator);
+    var native = try toNativeImage(allocator, &png_state);
+    return native.into(T, io, allocator);
 }
 
 // PNG Encoder functionality
 
 // Chunk writer for PNG encoding
-pub const ChunkWriter = struct {
-    gpa: Allocator,
-    data: ArrayList(u8),
-
-    pub fn init(gpa: Allocator) ChunkWriter {
-        return .{ .gpa = gpa, .data = .empty };
-    }
-
-    pub fn deinit(self: *ChunkWriter) void {
-        self.data.deinit(self.gpa);
-    }
-
-    pub fn writeChunk(self: *ChunkWriter, chunk_type: [4]u8, chunk_data: []const u8) !void {
-        // Length (4 bytes, big endian)
-        const length: u32 = @intCast(chunk_data.len);
-        try self.data.appendSlice(self.gpa, std.mem.asBytes(&std.mem.nativeTo(u32, length, .big)));
-
-        // Type (4 bytes)
-        try self.data.appendSlice(self.gpa, &chunk_type);
-
-        // Data
-        try self.data.appendSlice(self.gpa, chunk_data);
-
-        // CRC (4 bytes, big endian) - calculate CRC of type + data
-        var crc_data = try self.gpa.alloc(u8, 4 + chunk_data.len);
-        defer self.gpa.free(crc_data);
-        @memcpy(crc_data[0..4], &chunk_type);
-        @memcpy(crc_data[4..], chunk_data);
-
-        const chunk_crc = crc(crc_data);
-        try self.data.appendSlice(self.gpa, std.mem.asBytes(&std.mem.nativeTo(u32, chunk_crc, .big)));
-    }
-
-    pub fn toOwnedSlice(self: *ChunkWriter) ![]u8 {
-        return self.data.toOwnedSlice(self.gpa);
-    }
-};
+/// Writes one PNG chunk: length, type, data, then the CRC over type and data.
+pub fn writeChunk(writer: *Io.Writer, chunk_type: [4]u8, chunk_data: []const u8) !void {
+    try writer.writeInt(u32, @intCast(chunk_data.len), .big);
+    try writer.writeAll(&chunk_type);
+    try writer.writeAll(chunk_data);
+    try writer.writeInt(u32, updateCrc(updateCrc(0xffffffff, &chunk_type), chunk_data) ^ 0xffffffff, .big);
+}
 
 /// Creates IHDR chunk data.
 fn createIHDR(header: Header) ![13]u8 {
@@ -1336,12 +1317,8 @@ fn adlerCombine(a: u32, b: u32, b_len: usize) u32 {
     return @intCast(s1 | (s2 << 16));
 }
 
-/// The zlib stream of the filtered rows: chunks of `chunkRows` rows are filtered and
-/// deflated in bands on `io`, each chunk as an independent raw deflate run ended by a sync
-/// flush (byte-aligned, non-final block) so the runs concatenate; the last chunk finishes
-/// the stream, and the zlib header and adler32 over all rows are written here. The
-/// compression itself is `std.compress.flate`; only the chunking is ours.
-fn deflateRows(io: Io, gpa: Allocator, image_data: []const u8, header: Header, options: EncodeOptions) ![]u8 {
+/// Writes one IDAT: rows deflated in parallel chunks, each ending in a sync flush so they concatenate.
+fn writeIdat(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8, header: Header, options: EncodeOptions) !void {
     const rows_per_chunk: usize = chunkRows(header);
     const chunks = @max(1, (@as(usize, header.height) + rows_per_chunk - 1) / rows_per_chunk);
     const bands = parallel.bandCount(chunks, rows_per_chunk * header.scanlineBytes());
@@ -1401,34 +1378,32 @@ fn deflateRows(io: Io, gpa: Allocator, image_data: []const u8, header: Header, o
     };
     try parallel.forRowBandsTry(io, chunks, bands, &ctx, Ctx.run);
 
-    var total: usize = flate.Container.zlib.size();
+    // The bands stream straight into the chunk, the CRC following along.
+    var len: usize = flate.Container.zlib.size();
     var adler: u32 = 1;
     for (band_list) |*band| {
-        total += band.out.written().len;
+        len += band.out.written().len;
         adler = adlerCombine(adler, band.adler, band.len);
     }
-    var stream = try gpa.alloc(u8, total);
-    errdefer gpa.free(stream);
-    var pos: usize = 0;
+    var adler_bytes: [4]u8 = undefined;
+    std.mem.writeInt(u32, &adler_bytes, adler, .big);
+    try writer.writeInt(u32, @intCast(len), .big);
+    try writer.writeAll("IDAT");
+    var chunk_crc = updateCrc(0xffffffff, "IDAT");
     const zlib_header = flate.Container.zlib.header();
-    @memcpy(stream[pos..][0..zlib_header.len], zlib_header);
-    pos += zlib_header.len;
+    try writer.writeAll(zlib_header);
+    chunk_crc = updateCrc(chunk_crc, zlib_header);
     for (band_list) |*band| {
-        const bytes = band.out.written();
-        @memcpy(stream[pos..][0..bytes.len], bytes);
-        pos += bytes.len;
+        try writer.writeAll(band.out.written());
+        chunk_crc = updateCrc(chunk_crc, band.out.written());
     }
-    std.mem.writeInt(u32, stream[pos..][0..4], adler, .big);
-    return stream;
+    try writer.writeAll(&adler_bytes);
+    chunk_crc = updateCrc(chunk_crc, &adler_bytes);
+    try writer.writeInt(u32, chunk_crc ^ 0xffffffff, .big);
 }
 
-// Encode raw image data to PNG format (internal use)
-fn encodeRaw(io: Io, gpa: Allocator, image_data: []const u8, width: u32, height: u32, color_type: ColorType, bit_depth: u8, options: EncodeOptions) ![]u8 {
-    var writer = ChunkWriter.init(gpa);
-    defer writer.deinit();
-
-    // Write PNG signature
-    try writer.data.appendSlice(gpa, &signature);
+fn writeRaw(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8, width: u32, height: u32, color_type: ColorType, bit_depth: u8, options: EncodeOptions) !void {
+    try writer.writeAll(&signature);
 
     // Create and write IHDR
     const header: Header = .{
@@ -1439,60 +1414,51 @@ fn encodeRaw(io: Io, gpa: Allocator, image_data: []const u8, width: u32, height:
     };
 
     const ihdr_data = try createIHDR(header);
-    try writer.writeChunk("IHDR".*, &ihdr_data);
+    try writeChunk(writer, "IHDR".*, &ihdr_data);
 
     // Write color management chunks if specified
     if (options.srgb_intent) |intent| {
         // sRGB chunk - must come before PLTE and IDAT
         const srgb_data = [_]u8{@backingInt(intent)};
-        try writer.writeChunk("sRGB".*, &srgb_data);
+        try writeChunk(writer, "sRGB".*, &srgb_data);
     } else if (options.gamma) |g| {
         // gAMA chunk - must come before PLTE and IDAT
         // Store gamma * 100000 as big-endian u32
         const gamma_int: u32 = @trunc(g * 100000.0);
         var gama_data: [4]u8 = undefined;
         std.mem.writeInt(u32, &gama_data, gamma_int, .big);
-        try writer.writeChunk("gAMA".*, &gama_data);
+        try writeChunk(writer, "gAMA".*, &gama_data);
     }
 
-    const compressed_data = try deflateRows(io, gpa, image_data, header, options);
-    defer gpa.free(compressed_data);
-
-    // Write IDAT chunk
-    try writer.writeChunk("IDAT".*, compressed_data);
+    try writeIdat(io, gpa, writer, image_data, header, options);
 
     // Write IEND chunk
-    try writer.writeChunk("IEND".*, &[_]u8{});
-
-    return writer.toOwnedSlice();
+    try writeChunk(writer, "IEND".*, &[_]u8{});
 }
 
-/// Generic PNG encoding function that works with any supported pixel type.
+/// Encodes `image` as a PNG byte buffer; see `write`. Caller owns the returned slice.
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
+    return codecs.encodeWith(allocator, write, .{ T, io, allocator }, .{ image, options });
+}
+
+/// Writes `image` as a PNG to `writer`: `u8`→grayscale, `Rgb`→RGB, `Rgba`→RGBA, others→RGB.
+pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(T), options: EncodeOptions) !void {
     const color_type = getColorType(T);
 
     switch (T) {
         u8, Rgb, Rgba => {
             // Views are packed into a contiguous copy first.
-            if (image.isContiguous()) return encodeRaw(io, allocator, image.asBytes(), image.cols, image.rows, color_type, 8, options);
+            if (image.isContiguous()) return writeRaw(io, allocator, writer, image.asBytes(), image.cols, image.rows, color_type, 8, options);
             var contiguous = try image.dupe(allocator);
             defer contiguous.deinit(allocator);
-            return encodeRaw(io, allocator, contiguous.asBytes(), image.cols, image.rows, color_type, 8, options);
+            return writeRaw(io, allocator, writer, contiguous.asBytes(), image.cols, image.rows, color_type, 8, options);
         },
         else => {
             var rgb_image = try image.convert(io, allocator, Rgb);
             defer rgb_image.deinit(allocator);
-            return encodeRaw(io, allocator, rgb_image.asBytes(), image.cols, image.rows, color_type, 8, options);
+            return writeRaw(io, allocator, writer, rgb_image.asBytes(), image.cols, image.rows, color_type, 8, options);
         },
     }
-}
-
-/// Encodes `image` to a PNG file at `file_path` using deflate compression with row filtering.
-/// Output color format is chosen from `T`: `u8`→grayscale, `Rgb`→RGB, `Rgba`→RGBA, others→RGB.
-pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const png_data = try encode(T, io, allocator, image, .default);
-    defer allocator.free(png_data);
-    try codecs.writeFile(io, file_path, png_data);
 }
 
 /// PNG row filtering and defiltering functions.
@@ -2054,23 +2020,6 @@ fn extractPalettePixel(
     };
 }
 
-fn appendTestChunk(list: *ArrayList(u8), allocator: Allocator, chunk_type: [4]u8, chunk_data: []const u8) !void {
-    var length_be = std.mem.nativeTo(u32, @intCast(chunk_data.len), .big);
-    try list.appendSlice(allocator, std.mem.asBytes(&length_be));
-    try list.appendSlice(allocator, &chunk_type);
-    if (chunk_data.len != 0) {
-        try list.appendSlice(allocator, chunk_data);
-    }
-
-    var crc_val = updateCrc(0xffffffff, &chunk_type);
-    if (chunk_data.len != 0) {
-        crc_val = updateCrc(crc_val, chunk_data);
-    }
-    const chunk_crc = crc_val ^ 0xffffffff;
-    var crc_be = std.mem.nativeTo(u32, chunk_crc, .big);
-    try list.appendSlice(allocator, std.mem.asBytes(&crc_be));
-}
-
 // Simple test for the PNG structure
 test "PNG signature validation" {
     const invalid_sig = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
@@ -2080,137 +2029,145 @@ test "PNG signature validation" {
 
 test "PNG rejects chunks before IHDR" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var data_out: Io.Writer.Allocating = .init(gpa);
+    defer data_out.deinit();
+    const data = &data_out.writer;
 
-    try data.appendSlice(gpa, &signature);
+    try data.writeAll(&signature);
     const plte_payload = [_]u8{ 0, 0, 0 };
-    try appendTestChunk(&data, gpa, "PLTE".*, &plte_payload);
-    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+    try writeChunk(data, "PLTE".*, &plte_payload);
+    try writeChunk(data, "IEND".*, &[_]u8{});
 
-    try std.testing.expectError(error.ChunkBeforeHeader, decode(gpa, data.items, .{}));
+    try std.testing.expectError(error.ChunkBeforeHeader, decode(gpa, data_out.written(), .{}));
 }
 
 test "PNG palette images require PLTE before IDAT" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var data_out: Io.Writer.Allocating = .init(gpa);
+    defer data_out.deinit();
+    const data = &data_out.writer;
 
-    try data.appendSlice(gpa, &signature);
+    try data.writeAll(&signature);
 
-    try appendTestIhdr(&data, gpa, 1, 1, 8, .palette, 0);
+    try writeTestIhdr(data, 1, 1, 8, .palette, 0);
 
-    try appendTestChunk(&data, gpa, "IDAT".*, &[_]u8{});
-    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+    try writeChunk(data, "IDAT".*, &[_]u8{});
+    try writeChunk(data, "IEND".*, &[_]u8{});
 
-    try std.testing.expectError(error.MissingPalette, decode(gpa, data.items, .{}));
+    try std.testing.expectError(error.MissingPalette, decode(gpa, data_out.written(), .{}));
 }
 
 test "PNG palette transparency requires PLTE first" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var data_out: Io.Writer.Allocating = .init(gpa);
+    defer data_out.deinit();
+    const data = &data_out.writer;
 
-    try data.appendSlice(gpa, &signature);
+    try data.writeAll(&signature);
 
-    try appendTestIhdr(&data, gpa, 1, 1, 8, .palette, 0);
+    try writeTestIhdr(data, 1, 1, 8, .palette, 0);
 
     const trns_payload = [_]u8{0x00};
-    try appendTestChunk(&data, gpa, "tRNS".*, &trns_payload);
+    try writeChunk(data, "tRNS".*, &trns_payload);
 
     const plte_payload = [_]u8{ 0, 0, 0 };
-    try appendTestChunk(&data, gpa, "PLTE".*, &plte_payload);
-    try appendTestChunk(&data, gpa, "IDAT".*, &[_]u8{});
-    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+    try writeChunk(data, "PLTE".*, &plte_payload);
+    try writeChunk(data, "IDAT".*, &[_]u8{});
+    try writeChunk(data, "IEND".*, &[_]u8{});
 
-    try std.testing.expectError(error.TransparencyBeforePalette, decode(gpa, data.items, .{}));
+    try std.testing.expectError(error.TransparencyBeforePalette, decode(gpa, data_out.written(), .{}));
 }
 
 test "PNG rejects PLTE for grayscale" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var data_out: Io.Writer.Allocating = .init(gpa);
+    defer data_out.deinit();
+    const data = &data_out.writer;
 
-    try data.appendSlice(gpa, &signature);
+    try data.writeAll(&signature);
 
-    try appendTestIhdr(&data, gpa, 1, 1, 8, .grayscale, 0);
+    try writeTestIhdr(data, 1, 1, 8, .grayscale, 0);
 
     const plte_payload = [_]u8{ 0, 0, 0 };
-    try appendTestChunk(&data, gpa, "PLTE".*, &plte_payload);
-    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+    try writeChunk(data, "PLTE".*, &plte_payload);
+    try writeChunk(data, "IEND".*, &[_]u8{});
 
-    try std.testing.expectError(error.PaletteForbiddenForColorType, decode(gpa, data.items, .{}));
+    try std.testing.expectError(error.PaletteForbiddenForColorType, decode(gpa, data_out.written(), .{}));
 }
 
 test "PNG IDAT chunks must be consecutive" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var data_out: Io.Writer.Allocating = .init(gpa);
+    defer data_out.deinit();
+    const data = &data_out.writer;
 
-    try data.appendSlice(gpa, &signature);
-    try appendTestIhdr(&data, gpa, 1, 1, 8, .rgb, 0);
+    try data.writeAll(&signature);
+    try writeTestIhdr(data, 1, 1, 8, .rgb, 0);
 
     const empty_idat = [_]u8{ 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 };
-    try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
+    try writeChunk(data, "IDAT".*, &empty_idat);
 
     const text_payload = [_]u8{ 'k', 'e', 'y', 0, 'v', 'a', 'l' };
-    try appendTestChunk(&data, gpa, "tEXt".*, &text_payload);
+    try writeChunk(data, "tEXt".*, &text_payload);
 
-    try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
-    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+    try writeChunk(data, "IDAT".*, &empty_idat);
+    try writeChunk(data, "IEND".*, &[_]u8{});
 
-    try std.testing.expectError(error.NonConsecutiveIdatChunks, decode(gpa, data.items, .{}));
+    try std.testing.expectError(error.NonConsecutiveIdatChunks, decode(gpa, data_out.written(), .{}));
 }
 
 test "PNG gamma chunk must precede PLTE" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var data_out: Io.Writer.Allocating = .init(gpa);
+    defer data_out.deinit();
+    const data = &data_out.writer;
 
-    try data.appendSlice(gpa, &signature);
+    try data.writeAll(&signature);
 
-    try appendTestIhdr(&data, gpa, 1, 1, 8, .rgb, 0);
+    try writeTestIhdr(data, 1, 1, 8, .rgb, 0);
 
     const plte_payload = [_]u8{ 0, 0, 0 };
-    try appendTestChunk(&data, gpa, "PLTE".*, &plte_payload);
+    try writeChunk(data, "PLTE".*, &plte_payload);
 
     const gama_payload = [_]u8{ 0, 0, 0, 1 };
-    try appendTestChunk(&data, gpa, "gAMA".*, &gama_payload);
-    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+    try writeChunk(data, "gAMA".*, &gama_payload);
+    try writeChunk(data, "IEND".*, &[_]u8{});
 
-    try std.testing.expectError(error.GammaAfterPalette, decode(gpa, data.items, .{}));
+    try std.testing.expectError(error.GammaAfterPalette, decode(gpa, data_out.written(), .{}));
 }
 
 test "PNG sRGB chunk must precede IDAT" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var data_out: Io.Writer.Allocating = .init(gpa);
+    defer data_out.deinit();
+    const data = &data_out.writer;
 
-    try data.appendSlice(gpa, &signature);
-    try appendTestIhdr(&data, gpa, 1, 1, 8, .rgb, 0);
+    try data.writeAll(&signature);
+    try writeTestIhdr(data, 1, 1, 8, .rgb, 0);
 
     const empty_idat = [_]u8{ 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 };
-    try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
+    try writeChunk(data, "IDAT".*, &empty_idat);
 
     const srgb_payload = [_]u8{0};
-    try appendTestChunk(&data, gpa, "sRGB".*, &srgb_payload);
-    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+    try writeChunk(data, "sRGB".*, &srgb_payload);
+    try writeChunk(data, "IEND".*, &[_]u8{});
 
-    try std.testing.expectError(error.SrgbAfterImageData, decode(gpa, data.items, .{}));
+    try std.testing.expectError(error.SrgbAfterImageData, decode(gpa, data_out.written(), .{}));
 }
 
 test "PNG missing IEND decodes as truncated" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
+    var data_out: Io.Writer.Allocating = .init(gpa);
+    defer data_out.deinit();
+    const data = &data_out.writer;
 
-    try data.appendSlice(gpa, &signature);
-    try appendTestIhdr(&data, gpa, 1, 1, 8, .rgb, 0);
+    try data.writeAll(&signature);
+    try writeTestIhdr(data, 1, 1, 8, .rgb, 0);
 
     const empty_idat = [_]u8{ 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 };
-    try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
+    try writeChunk(data, "IDAT".*, &empty_idat);
 
-    var state = try decode(gpa, data.items, .{});
+    var state = try decode(gpa, data_out.written(), .{});
     defer state.deinit(gpa);
     try std.testing.expect(state.truncated);
 
@@ -2246,7 +2203,7 @@ fn findTestChunk(data: []const u8, name: *const [4]u8) ?struct { data_start: usi
     return null;
 }
 
-fn appendTestIhdr(list: *ArrayList(u8), gpa: Allocator, width: u32, height: u32, bit_depth: u8, color_type: ColorType, interlace: u8) !void {
+fn writeTestIhdr(writer: *Io.Writer, width: u32, height: u32, bit_depth: u8, color_type: ColorType, interlace: u8) !void {
     var ihdr: [13]u8 = undefined;
     std.mem.writeInt(u32, ihdr[0..4], width, .big);
     std.mem.writeInt(u32, ihdr[4..8], height, .big);
@@ -2255,18 +2212,15 @@ fn appendTestIhdr(list: *ArrayList(u8), gpa: Allocator, width: u32, height: u32,
     ihdr[10] = 0;
     ihdr[11] = 0;
     ihdr[12] = interlace;
-    try appendTestChunk(list, gpa, "IHDR".*, &ihdr);
+    try writeChunk(writer, "IHDR".*, &ihdr);
 }
 
 // Stored-block (BTYPE=00) zlib stream cut short: truncation offset maps 1:1 to output bytes.
-fn appendTruncatedStoredZlib(list: *ArrayList(u8), gpa: Allocator, raw: []const u8, declared_len: u16) !void {
-    try list.appendSlice(gpa, &[_]u8{ 0x78, 0x01, 0x01 });
-    try list.append(gpa, @truncate(declared_len));
-    try list.append(gpa, @truncate(declared_len >> 8));
-    const nlen = ~declared_len;
-    try list.append(gpa, @truncate(nlen));
-    try list.append(gpa, @truncate(nlen >> 8));
-    try list.appendSlice(gpa, raw);
+fn writeTruncatedStoredZlib(writer: *Io.Writer, raw: []const u8, declared_len: u16) !void {
+    try writer.writeAll(&[_]u8{ 0x78, 0x01, 0x01 });
+    try writer.writeInt(u16, declared_len, .little);
+    try writer.writeInt(u16, ~declared_len, .little);
+    try writer.writeAll(raw);
 }
 
 fn expectPrefixOrZero(full: Image(Rgb), partial: Image(Rgb)) !void {
@@ -2338,16 +2292,17 @@ test "PNG truncated ancillary chunk after IDAT decodes fully" {
     defer full.deinit(gpa);
 
     // Replace IEND with a tEXt chunk cut inside its payload.
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
-    try data.appendSlice(gpa, png_data[0 .. png_data.len - 12]);
-    try data.appendSlice(gpa, &([_]u8{ 0x00, 0x00, 0x00, 0x20 } ++ "tEXt".* ++ [_]u8{ 0x41, 0x42 }));
+    var data_out: Io.Writer.Allocating = .init(gpa);
+    defer data_out.deinit();
+    const data = &data_out.writer;
+    try data.writeAll(png_data[0 .. png_data.len - 12]);
+    try data.writeAll(&([_]u8{ 0x00, 0x00, 0x00, 0x20 } ++ "tEXt".* ++ [_]u8{ 0x41, 0x42 }));
 
-    var state = try decode(gpa, data.items, .{});
+    var state = try decode(gpa, data_out.written(), .{});
     defer state.deinit(gpa);
     try std.testing.expect(state.truncated);
 
-    var partial: Image(Rgb) = try loadFromBytes(Rgb, parallel.inline_io, gpa, data.items, .{});
+    var partial: Image(Rgb) = try loadFromBytes(Rgb, parallel.inline_io, gpa, data_out.written(), .{});
     defer partial.deinit(gpa);
     try std.testing.expectEqualSlices(Rgb, full.data, partial.data);
 }
@@ -2367,21 +2322,23 @@ test "PNG truncated zlib stream drops partial row deterministically" {
         }
     }
 
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
-    try data.appendSlice(gpa, &signature);
-    try appendTestIhdr(&data, gpa, 4, 4, 8, .rgb, 0);
+    var data_out: Io.Writer.Allocating = .init(gpa);
+    defer data_out.deinit();
+    const data = &data_out.writer;
+    try data.writeAll(&signature);
+    try writeTestIhdr(data, 4, 4, 8, .rgb, 0);
 
-    var zlib_stream: ArrayList(u8) = .empty;
-    defer zlib_stream.deinit(gpa);
-    try appendTruncatedStoredZlib(&zlib_stream, gpa, &raw, 52);
-    try appendTestChunk(&data, gpa, "IDAT".*, zlib_stream.items);
-    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+    var zlib_stream_out: Io.Writer.Allocating = .init(gpa);
+    defer zlib_stream_out.deinit();
+    const zlib_stream = &zlib_stream_out.writer;
+    try writeTruncatedStoredZlib(zlib_stream, &raw, 52);
+    try writeChunk(data, "IDAT".*, zlib_stream_out.written());
+    try writeChunk(data, "IEND".*, &[_]u8{});
 
     // Chunk layer is intact (valid CRCs, IEND present) — only the zlib stream is short.
-    var state = try decode(gpa, data.items, .{});
+    var state = try decode(gpa, data_out.written(), .{});
     defer state.deinit(gpa);
-    try std.testing.expect(!state.truncated);
+    try std.testing.expect(state.truncated);
 
     const native = try toNativeImage(gpa, &state);
     var img = switch (native) {
@@ -2417,18 +2374,20 @@ test "PNG truncated Adam7 keeps complete passes" {
     const row_starts = [_]usize{ 0, 4, 8, 15, 22, 29, 42, 55 }; // filter-byte offsets of the 8 rows present
     for (row_starts) |offset| raw[offset] = 0;
 
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
-    try data.appendSlice(gpa, &signature);
-    try appendTestIhdr(&data, gpa, 8, 8, 8, .rgb, 1); // Adam7
+    var data_out: Io.Writer.Allocating = .init(gpa);
+    defer data_out.deinit();
+    const data = &data_out.writer;
+    try data.writeAll(&signature);
+    try writeTestIhdr(data, 8, 8, 8, .rgb, 1); // Adam7
 
-    var zlib_stream: ArrayList(u8) = .empty;
-    defer zlib_stream.deinit(gpa);
-    try appendTruncatedStoredZlib(&zlib_stream, gpa, &raw, 207);
-    try appendTestChunk(&data, gpa, "IDAT".*, zlib_stream.items);
-    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+    var zlib_stream_out: Io.Writer.Allocating = .init(gpa);
+    defer zlib_stream_out.deinit();
+    const zlib_stream = &zlib_stream_out.writer;
+    try writeTruncatedStoredZlib(zlib_stream, &raw, 207);
+    try writeChunk(data, "IDAT".*, zlib_stream_out.written());
+    try writeChunk(data, "IEND".*, &[_]u8{});
 
-    var state = try decode(gpa, data.items, .{});
+    var state = try decode(gpa, data_out.written(), .{});
     defer state.deinit(gpa);
     const native = try toNativeImage(gpa, &state);
     var img = switch (native) {
@@ -2452,107 +2411,59 @@ test "PNG structural corruption still errors" {
     const gpa = std.testing.allocator;
 
     // Declared length past EOF on a non-IDAT chunk.
-    var bad: ArrayList(u8) = .empty;
-    defer bad.deinit(gpa);
-    try bad.appendSlice(gpa, &signature);
-    try bad.appendSlice(gpa, &([_]u8{ 0x00, 0x00, 0x00, 0x0D } ++ "IHDR".* ++ [_]u8{ 0x00, 0x00 }));
-    try std.testing.expectError(error.InvalidChunkLength, decode(gpa, bad.items, .{}));
+    var bad_out: Io.Writer.Allocating = .init(gpa);
+    defer bad_out.deinit();
+    const bad = &bad_out.writer;
+    try bad.writeAll(&signature);
+    try bad.writeAll(&([_]u8{ 0x00, 0x00, 0x00, 0x0D } ++ "IHDR".* ++ [_]u8{ 0x00, 0x00 }));
+    try std.testing.expectError(error.InvalidChunkLength, decode(gpa, bad_out.written(), .{}));
 
     // Garbage zlib bytes in a well-formed IDAT chunk: corruption, not truncation.
-    var corrupt: ArrayList(u8) = .empty;
-    defer corrupt.deinit(gpa);
-    try corrupt.appendSlice(gpa, &signature);
-    try appendTestIhdr(&corrupt, gpa, 1, 1, 8, .rgb, 0);
-    try appendTestChunk(&corrupt, gpa, "IDAT".*, &[_]u8{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF });
-    try appendTestChunk(&corrupt, gpa, "IEND".*, &[_]u8{});
+    var corrupt_out: Io.Writer.Allocating = .init(gpa);
+    defer corrupt_out.deinit();
+    const corrupt = &corrupt_out.writer;
+    try corrupt.writeAll(&signature);
+    try writeTestIhdr(corrupt, 1, 1, 8, .rgb, 0);
+    try writeChunk(corrupt, "IDAT".*, &[_]u8{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF });
+    try writeChunk(corrupt, "IEND".*, &[_]u8{});
 
-    var state = try decode(gpa, corrupt.items, .{});
-    defer state.deinit(gpa);
-    try std.testing.expectError(error.ReadFailed, toNativeImage(gpa, &state));
-}
-
-test "PNG enforces max_png_bytes limit" {
-    var buffer: [9]u8 = undefined;
-    @memcpy(buffer[0..8], &signature);
-    buffer[8] = 0;
-    const result = decode(std.testing.allocator, &buffer, .{ .max_png_bytes = 8 });
-    try std.testing.expectError(error.PngDataTooLarge, result);
-}
-
-test "PNG enforces chunk byte limit" {
-    const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
-    try data.appendSlice(gpa, &signature);
-
-    try appendTestIhdr(&data, gpa, 1, 1, 8, .rgb, 0);
-
-    const limits: DecodeLimits = .{
-        .max_png_bytes = 1024,
-        .max_chunk_bytes = 8,
-        .max_idat_bytes = 1024,
-        .max_chunks = 16,
-    };
-    try std.testing.expectError(error.ChunkDataLimitExceeded, decode(gpa, data.items, limits));
-}
-
-test "PNG enforces IDAT byte limit" {
-    const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
-    try data.appendSlice(gpa, &signature);
-    try appendTestIhdr(&data, gpa, 1, 1, 8, .rgb, 0);
-
-    const empty_idat = [_]u8{ 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 };
-    try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
-    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
-
-    const limits: DecodeLimits = .{
-        .max_png_bytes = 1024,
-        .max_chunk_bytes = 1024,
-        .max_idat_bytes = 4,
-        .max_chunks = 16,
-    };
-    try std.testing.expectError(error.ImageDataLimitExceeded, decode(gpa, data.items, limits));
+    try std.testing.expectError(error.ReadFailed, decode(gpa, corrupt_out.written(), .{}));
 }
 
 test "PNG enforces chunk count limit" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
-    try data.appendSlice(gpa, &signature);
+    var data_out: Io.Writer.Allocating = .init(gpa);
+    defer data_out.deinit();
+    const data = &data_out.writer;
+    try data.writeAll(&signature);
 
-    try appendTestIhdr(&data, gpa, 1, 1, 8, .rgb, 0);
-    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+    try writeTestIhdr(data, 1, 1, 8, .rgb, 0);
+    try writeChunk(data, "IEND".*, &[_]u8{});
 
     const limits: DecodeLimits = .{
-        .max_png_bytes = 1024,
-        .max_chunk_bytes = 1024,
-        .max_chunks = 1,
+        .max_chunks = .limited(1),
     };
-    try std.testing.expectError(error.TooManyChunks, decode(gpa, data.items, limits));
+    try std.testing.expectError(error.TooManyChunks, decode(gpa, data_out.written(), limits));
 }
 
 test "PNG enforces decompressed byte limit" {
     const gpa = std.testing.allocator;
-    var data: ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
-    try data.appendSlice(gpa, &signature);
+    var data_out: Io.Writer.Allocating = .init(gpa);
+    defer data_out.deinit();
+    const data = &data_out.writer;
+    try data.writeAll(&signature);
 
-    try appendTestIhdr(&data, gpa, 1, 1, 8, .grayscale, 0);
+    try writeTestIhdr(data, 1, 1, 8, .grayscale, 0);
 
     const empty_idat = [_]u8{ 0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01 };
-    try appendTestChunk(&data, gpa, "IDAT".*, &empty_idat);
-    try appendTestChunk(&data, gpa, "IEND".*, &[_]u8{});
+    try writeChunk(data, "IDAT".*, &empty_idat);
+    try writeChunk(data, "IEND".*, &[_]u8{});
 
     const limits: DecodeLimits = .{
-        .max_png_bytes = 1024,
-        .max_chunk_bytes = 1024,
-        .max_idat_bytes = 1024,
-        .max_chunks = 16,
-        .max_decompressed_bytes = 1,
+        .max_chunks = .limited(16),
+        .max_decompressed_bytes = .limited(1),
     };
-    try std.testing.expectError(error.ImageTooLarge, decode(gpa, data.items, limits));
+    try std.testing.expectError(error.ImageTooLarge, decode(gpa, data_out.written(), limits));
 }
 
 test "PNG default decompressed limit covers 8K RGBA 16-bit" {
@@ -2567,7 +2478,7 @@ test "PNG default decompressed limit covers 8K RGBA 16-bit" {
     };
     const inflated = try adam7TotalSize(header);
     const limits = DecodeLimits{};
-    try std.testing.expect(inflated <= limits.max_decompressed_bytes);
+    try std.testing.expect(!exceeds(limits.max_decompressed_bytes, inflated));
 }
 
 test "CRC calculation" {
@@ -2922,8 +2833,6 @@ test "PNG encode with color management chunks" {
 }
 
 test "PNG CRC validation" {
-    const gpa = std.testing.allocator;
-
     // Test IHDR chunk CRC
     const ihdr_type = "IHDR";
     const ihdr_data = [_]u8{
@@ -2936,20 +2845,15 @@ test "PNG CRC validation" {
         0, // interlace
     };
 
-    var test_data: ArrayList(u8) = .empty;
-    defer test_data.deinit(gpa);
-
-    try test_data.appendSlice(gpa, ihdr_type);
-    try test_data.appendSlice(gpa, &ihdr_data);
-
-    const calculated_crc = crc(test_data.items);
+    var test_data = ihdr_type.* ++ ihdr_data;
+    const calculated_crc = crc(&test_data);
 
     // Verify CRC was calculated
     try std.testing.expect(calculated_crc != 0);
 
     // Test with invalid data should give different CRC
-    test_data.items[4] = 1; // Change width
-    const different_crc = crc(test_data.items);
+    test_data[4] = 1; // Change width
+    const different_crc = crc(&test_data);
     try std.testing.expect(calculated_crc != different_crc);
 }
 
@@ -2998,38 +2902,18 @@ test "PNG bounds checking - large image dimensions" {
     const gpa = std.testing.allocator;
 
     // Create a malformed PNG with excessively large dimensions
-    var png_data: ArrayList(u8) = .empty;
-    defer png_data.deinit(gpa);
+    var png_data_out: Io.Writer.Allocating = .init(gpa);
+    defer png_data_out.deinit();
+    const png_data = &png_data_out.writer;
 
     // PNG signature
-    try png_data.appendSlice(gpa, &signature);
+    try png_data.writeAll(&signature);
 
-    // IHDR chunk with oversized dimensions
-    const ihdr_length: u32 = 13;
-    try png_data.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u32, ihdr_length, .big)));
-    try png_data.appendSlice(gpa, "IHDR");
-
-    // Width: 50000 (exceeds MAX_DIMENSION)
-    try png_data.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u32, 50000, .big)));
-    // Height: 50000 (exceeds MAX_DIMENSION)
-    try png_data.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u32, 50000, .big)));
-
-    try png_data.append(gpa, 8); // bit depth
-    try png_data.append(gpa, 2); // color type (RGB)
-    try png_data.append(gpa, 0); // compression
-    try png_data.append(gpa, 0); // filter
-    try png_data.append(gpa, 0); // interlace
-
-    // Calculate and append CRC
-    var crc_data = try gpa.alloc(u8, 4 + 13);
-    defer gpa.free(crc_data);
-    @memcpy(crc_data[0..4], "IHDR");
-    @memcpy(crc_data[4..], png_data.items[16..29]);
-    const ihdr_crc = crc(crc_data);
-    try png_data.appendSlice(gpa, std.mem.asBytes(&std.mem.nativeTo(u32, ihdr_crc, .big)));
+    // IHDR with 50000x50000, beyond the dimension limit.
+    try writeTestIhdr(png_data, 50000, 50000, 8, .rgb, 0);
 
     // Try to decode - should fail with ImageTooLarge
-    const result = decode(gpa, png_data.items, .{});
+    const result = decode(gpa, png_data_out.written(), .{});
     try std.testing.expectError(error.ImageTooLarge, result);
 }
 
@@ -3041,7 +2925,6 @@ test "PNG bounds checking - malformed palette" {
         .length = 10, // Should be multiple of 3
         .type = "PLTE".*,
         .data = &[_]u8{ 255, 0, 0, 0, 255, 0, 0, 0 }, // Only 8 bytes, but length claims 10
-        .crc = 0,
     };
 
     var png_state = PngState{
@@ -3054,7 +2937,6 @@ test "PNG bounds checking - malformed palette" {
             .filter_method = 0,
             .interlace_method = 0,
         },
-        .idat_data = .empty,
     };
     defer png_state.deinit(gpa);
 
@@ -3207,7 +3089,6 @@ test "PNG palette transparency support" {
             .filter_method = 0,
             .interlace_method = 0,
         },
-        .idat_data = .empty,
     };
     defer png_state.deinit(allocator);
 
@@ -3309,7 +3190,6 @@ test "PNG transparency error cases" {
             .bit_depth = 8,
             .color_type = .grayscale_alpha, // This color type cannot have tRNS
         },
-        .idat_data = .empty,
     };
     defer png_state.deinit(allocator);
 
@@ -3318,7 +3198,6 @@ test "PNG transparency error cases" {
         .length = 2,
         .type = [4]u8{ 't', 'R', 'N', 'S' },
         .data = &[_]u8{ 0x00, 0x80 },
-        .crc = 0,
     };
 
     // This should fail during chunk parsing (tested in integration tests)
@@ -3353,7 +3232,6 @@ test "PNG gAMA chunk parsing" {
         .length = 4,
         .type = [4]u8{ 'g', 'A', 'M', 'A' },
         .data = &[_]u8{ 0x00, 0x00, 0xB1, 0x8F }, // 45455 in big endian
-        .crc = 0,
     };
 
     var png_state = PngState{
@@ -3366,7 +3244,6 @@ test "PNG gAMA chunk parsing" {
             .filter_method = 0,
             .interlace_method = 0,
         },
-        .idat_data = .empty,
     };
     defer png_state.deinit(allocator);
 
@@ -3387,7 +3264,6 @@ test "PNG sRGB chunk parsing" {
         .length = 1,
         .type = [4]u8{ 's', 'R', 'G', 'B' },
         .data = &[_]u8{0}, // perceptual intent
-        .crc = 0,
     };
 
     var png_state = PngState{
@@ -3400,7 +3276,6 @@ test "PNG sRGB chunk parsing" {
             .filter_method = 0,
             .interlace_method = 0,
         },
-        .idat_data = .empty,
     };
     defer png_state.deinit(allocator);
 
