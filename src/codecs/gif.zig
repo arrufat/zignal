@@ -746,10 +746,7 @@ fn writeLzwImageData(encoder: *lzw.Encoder, writer: *Io.Writer, indices: []const
 
 /// Encodes a single-frame GIF from `image`. Caller frees the returned slice.
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
-    var aw: Io.Writer.Allocating = .init(allocator);
-    defer aw.deinit();
-    write(T, io, allocator, &aw.writer, image, options) catch |err| return codecs.allocatingError(err);
-    return aw.toOwnedSlice();
+    return codecs.encodeWith(allocator, write, .{ T, io, allocator }, .{ image, options });
 }
 
 /// Writes `image` as a single-frame GIF to `writer`.
@@ -921,10 +918,7 @@ fn mapImageToPalette(
 /// Encodes an `AnimatedImage(T)` as an animated GIF, storing only each frame's changed region.
 /// For `T == Rgba`, pixels with `alpha < 128` map to a reserved transparent palette index.
 pub fn encodeAnimated(comptime T: type, io: Io, gpa: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
-    var aw: Io.Writer.Allocating = .init(gpa);
-    defer aw.deinit();
-    writeAnimated(T, io, gpa, &aw.writer, anim, options) catch |err| return codecs.allocatingError(err);
-    return aw.toOwnedSlice();
+    return codecs.encodeWith(gpa, writeAnimated, .{ T, io, gpa }, .{ anim, options });
 }
 
 /// Writes `anim` as an animated GIF to `writer`; see `encodeAnimated`.

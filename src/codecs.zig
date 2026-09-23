@@ -56,35 +56,40 @@ pub fn accumulateWithLimit(current: *usize, addend: usize, limit: Io.Limit, limi
     current.* = new_total;
 }
 
-/// Opens `file_path` and returns `source.read(reader)`. A failed file read returns the file's
-/// own error rather than `error.ReadFailed`.
-pub fn readFile(io: Io, file_path: []const u8, source: anytype) !ReadResult(@TypeOf(source)) {
+/// Returns `read(before ++ .{reader} ++ after)` on `file_path`, surfacing the file's own error.
+pub fn readFile(io: Io, file_path: []const u8, comptime read: anytype, before: anytype, after: anytype) !Payload(read) {
     const file = try Io.Dir.cwd().openFile(io, file_path, .{});
     defer file.close(io);
     var buffer: [16 * 1024]u8 = undefined;
     var file_reader = file.reader(io, &buffer);
-    return source.read(&file_reader.interface) catch |err| return file_reader.err orelse err;
+    return @call(.auto, read, before ++ .{&file_reader.interface} ++ after) catch |err| return file_reader.err orelse err;
 }
 
-fn ReadResult(comptime Source: type) type {
-    return @typeInfo(@typeInfo(@TypeOf(Source.read)).@"fn".return_type.?).error_union.payload;
+fn Payload(comptime f: anytype) type {
+    return @typeInfo(@typeInfo(@TypeOf(f)).@"fn".return_type.?).error_union.payload;
 }
 
-/// An allocating writer fails only when out of memory, so its `error.WriteFailed` becomes
-/// `error.OutOfMemory`. Takes any error set, including ones without `WriteFailed`.
+/// An allocating writer only fails when out of memory: `WriteFailed` becomes `OutOfMemory`.
 pub fn allocatingError(err: anytype) (@TypeOf(err) || error{OutOfMemory}) {
     if (@as(anyerror, err) == error.WriteFailed) return error.OutOfMemory;
     return err;
 }
 
-/// Creates (or truncates) `file_path` and streams `source.write(writer)` into it. A failed
-/// file write returns the file's own error rather than `error.WriteFailed`.
-pub fn writeFile(io: Io, file_path: []const u8, source: anytype) !void {
+/// Returns the bytes `write(before ++ .{writer} ++ after)` writes. Caller owns them.
+pub fn encodeWith(allocator: Allocator, comptime write: anytype, before: anytype, after: anytype) ![]u8 {
+    var aw: Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    @call(.auto, write, before ++ .{&aw.writer} ++ after) catch |err| return allocatingError(err);
+    return aw.toOwnedSlice();
+}
+
+/// Streams `write(before ++ .{writer} ++ after)` into `file_path`, surfacing the file's own error.
+pub fn writeFile(io: Io, file_path: []const u8, comptime write: anytype, before: anytype, after: anytype) !void {
     const file = try Io.Dir.cwd().createFile(io, file_path, .{});
     defer file.close(io);
     var buffer: [32 * 1024]u8 = undefined;
     var file_writer = file.writer(io, &buffer);
-    source.write(&file_writer.interface) catch |err| return file_writer.err orelse err;
+    @call(.auto, write, before ++ .{&file_writer.interface} ++ after) catch |err| return file_writer.err orelse err;
     file_writer.interface.flush() catch return file_writer.err.?;
 }
 

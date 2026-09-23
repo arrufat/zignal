@@ -251,10 +251,7 @@ pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, 
 
 /// Encodes `image` as sRGB JPEG XL. `u8`→grayscale, `Rgb`→RGB, `Rgba`→RGBA, others→RGB.
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
-    var aw: Io.Writer.Allocating = .init(allocator);
-    defer aw.deinit();
-    write(T, io, allocator, &aw.writer, image, options) catch |err| return codecs.allocatingError(err);
-    return aw.toOwnedSlice();
+    return codecs.encodeWith(allocator, write, .{ T, io, allocator }, .{ image, options });
 }
 
 /// Writes `image` as JPEG XL to `writer`; see `encode`.
@@ -267,10 +264,7 @@ pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer,
 /// Encodes every frame of `anim` at its full size; pixel types map as in `encode`.
 /// A one-frame animation is written as a still.
 pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
-    var aw: Io.Writer.Allocating = .init(allocator);
-    defer aw.deinit();
-    writeAnimated(T, io, allocator, &aw.writer, anim, options) catch |err| return codecs.allocatingError(err);
-    return aw.toOwnedSlice();
+    return codecs.encodeWith(allocator, writeAnimated, .{ T, io, allocator }, .{ anim, options });
 }
 
 /// Writes `anim` as JPEG XL to `writer`; see `encodeAnimated`.

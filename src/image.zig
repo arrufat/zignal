@@ -245,8 +245,7 @@ pub fn Image(comptime T: type) type {
             return @as([*]u8, @ptrCast(@alignCast(self.data.ptr)))[0 .. self.data.len * @sizeOf(T)];
         }
 
-        /// Loads an image from a file, detecting the format from its signature and decoding
-        /// straight from the file.
+        /// Loads an image from a file, detecting the format from its signature.
         ///
         /// Example usage:
         /// ```zig
@@ -254,17 +253,14 @@ pub fn Image(comptime T: type) type {
         /// defer img.deinit(allocator);
         /// ```
         pub fn load(io: Io, allocator: Allocator, file_path: []const u8) !Self {
-            const Source = struct {
-                io: Io,
-                allocator: Allocator,
+            return codecs.readFile(io, file_path, read, .{ io, allocator }, .{});
+        }
 
-                pub fn read(source: @This(), reader: *Io.Reader) !Self {
-                    return switch (try ImageFormat.peek(reader)) {
-                        inline else => |f| @field(codecs, @tagName(f)).read(T, source.io, source.allocator, reader, .{}),
-                    };
-                }
+        /// Reads an image from `reader`, detecting the format from its signature.
+        pub fn read(io: Io, allocator: Allocator, reader: *Io.Reader) !Self {
+            return switch (try ImageFormat.peek(reader)) {
+                inline else => |f| @field(codecs, @tagName(f)).read(T, io, allocator, reader, .{}),
             };
-            return codecs.readFile(io, file_path, Source{ .io = io, .allocator = allocator });
         }
 
         /// Loads an image from an in-memory byte buffer with automatic format detection.
@@ -288,21 +284,15 @@ pub fn Image(comptime T: type) type {
         /// `.jxl` and `.webp` need libc linked and the system library at runtime).
         /// Returns `error.UnsupportedImageFormat` for any other extension.
         pub fn save(self: Self, io: Io, allocator: Allocator, file_path: []const u8) !void {
-            const fmt = ImageFormat.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
-            switch (fmt) {
-                inline else => |f| {
-                    const Source = struct {
-                        image: Self,
-                        io: Io,
-                        allocator: Allocator,
+            const image_format = ImageFormat.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
+            return codecs.writeFile(io, file_path, write, .{ self, io, allocator }, .{image_format});
+        }
 
-                        pub fn write(source: @This(), writer: *Io.Writer) !void {
-                            return @field(codecs, @tagName(f)).write(T, source.io, source.allocator, writer, source.image, .default);
-                        }
-                    };
-                    return codecs.writeFile(io, file_path, Source{ .image = self, .io = io, .allocator = allocator });
-                },
-            }
+        /// Writes the image to `writer` as `image_format` with the codec's default options.
+        pub fn write(self: Self, io: Io, allocator: Allocator, writer: *Io.Writer, image_format: ImageFormat) !void {
+            return switch (image_format) {
+                inline else => |f| @field(codecs, @tagName(f)).write(T, io, allocator, writer, self, .default),
+            };
         }
 
         /// Returns the total number of pixels in the image (rows * cols).

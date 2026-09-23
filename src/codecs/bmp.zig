@@ -478,8 +478,7 @@ fn readPixels(allocator: Allocator, h: Header, palette: ?[]const Rgba, reader: *
     };
 }
 
-/// Reads the rows of an uncompressed bitmap in file order (bottom-up unless `top_down`) and
-/// converts each pixel with `format.pixel(row, x)`.
+/// Reads rows in file order (bottom-up unless `top_down`), converting each with `format.pixel`.
 fn readRows(comptime P: type, allocator: Allocator, h: Header, reader: *Io.Reader, format: anytype) !Image(P) {
     const row = try allocator.alloc(u8, paddedRowBytes(h.width, h.bit_depth));
     defer allocator.free(row);
@@ -536,8 +535,7 @@ const Bgr = struct {
     }
 };
 
-/// 32bpp BI_RGB. Alpha is officially undefined; the heuristic is to treat the image as opaque
-/// if every alpha byte is zero (the common writer behaviour), otherwise honour the bytes.
+/// 32bpp BI_RGB, whose alpha is undefined: all-zero alpha (what writers emit) means opaque.
 fn read32BppRgb(allocator: Allocator, h: Header, reader: *Io.Reader) !NativeImage {
     const Bgra = struct {
         any_alpha: bool = false,
@@ -775,9 +773,7 @@ const canonical_rgba_masks: Masks = .{
     .a = 0xFF000000,
 };
 
-/// Writes `image` as a BMP to `writer`: `Rgba` as 32bpp BI_BITFIELDS (the GDI+ convention),
-/// `u8` as 8bpp with a linear gray palette when `use_palette_for_grayscale`, anything else as
-/// 24bpp. Rows go out one at a time.
+/// Writes a BMP: `Rgba` as 32bpp BI_BITFIELDS, `u8` as 8bpp gray palette (opt-in), else 24bpp.
 pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(T), options: EncodeOptions) !void {
     // Serial and allocation-free; `io` and `allocator` keep the codec entry points uniform.
     _ = io;

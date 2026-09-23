@@ -27,21 +27,18 @@ pub fn AnimatedImage(comptime T: type) type {
         /// Loads every frame of `file_path`, detecting the format from its signature.
         /// Still formats give one frame with a zero duration.
         pub fn load(io: Io, allocator: Allocator, file_path: []const u8) !Self {
-            const Source = struct {
-                io: Io,
-                allocator: Allocator,
+            return codecs.readFile(io, file_path, read, .{ io, allocator }, .{});
+        }
 
-                pub fn read(source: @This(), reader: *Io.Reader) !Self {
-                    switch (try ImageFormat.peek(reader)) {
-                        inline else => |f| {
-                            const codec = @field(codecs, @tagName(f));
-                            if (@hasDecl(codec, "readAnimated")) return codec.readAnimated(T, source.io, source.allocator, reader, .{});
-                            return fromStill(source.allocator, try codec.read(T, source.io, source.allocator, reader, .{}));
-                        },
-                    }
-                }
-            };
-            return codecs.readFile(io, file_path, Source{ .io = io, .allocator = allocator });
+        /// Reads every frame from `reader`, detecting the format from its signature.
+        pub fn read(io: Io, allocator: Allocator, reader: *Io.Reader) !Self {
+            switch (try ImageFormat.peek(reader)) {
+                inline else => |f| {
+                    const codec = @field(codecs, @tagName(f));
+                    if (@hasDecl(codec, "readAnimated")) return codec.readAnimated(T, io, allocator, reader, .{});
+                    return fromStill(allocator, try codec.read(T, io, allocator, reader, .{}));
+                },
+            }
         }
 
         /// `load` for an in-memory encoded image.
@@ -62,24 +59,22 @@ pub fn AnimatedImage(comptime T: type) type {
         /// format takes a single frame.
         pub fn save(self: Self, io: Io, allocator: Allocator, file_path: []const u8) !void {
             const format = ImageFormat.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
+            // Checked before the file is created.
+            const animated = switch (format) {
+                inline else => |f| @hasDecl(@field(codecs, @tagName(f)), "writeAnimated"),
+            };
+            if (!animated and self.frames.len != 1) return error.UnsupportedAnimation;
+            return codecs.writeFile(io, file_path, write, .{ self, io, allocator }, .{format});
+        }
+
+        /// Writes every frame to `writer` as `format`; still formats take a single frame.
+        pub fn write(self: Self, io: Io, allocator: Allocator, writer: *Io.Writer, format: ImageFormat) !void {
             switch (format) {
                 inline else => |f| {
                     const codec = @field(codecs, @tagName(f));
-                    const animated = @hasDecl(codec, "writeAnimated");
-                    if (!animated and self.frames.len != 1) return error.UnsupportedAnimation;
-                    const Source = struct {
-                        anim: Self,
-                        io: Io,
-                        allocator: Allocator,
-
-                        pub fn write(source: @This(), writer: *Io.Writer) !void {
-                            return if (animated)
-                                codec.writeAnimated(T, source.io, source.allocator, writer, source.anim, .default)
-                            else
-                                codec.write(T, source.io, source.allocator, writer, source.anim.frames[0], .default);
-                        }
-                    };
-                    return codecs.writeFile(io, file_path, Source{ .anim = self, .io = io, .allocator = allocator });
+                    if (@hasDecl(codec, "writeAnimated")) return codec.writeAnimated(T, io, allocator, writer, self, .default);
+                    if (self.frames.len != 1) return error.UnsupportedAnimation;
+                    return codec.write(T, io, allocator, writer, self.frames[0], .default);
                 },
             }
         }

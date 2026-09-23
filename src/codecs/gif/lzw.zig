@@ -262,8 +262,7 @@ pub const Encoder = struct {
         try self.flushBlock(writer);
     }
 
-    /// Compresses `indices` (palette indices in scan order) into GIF sub-blocks on `writer`,
-    /// without the terminating empty block.
+    /// Compresses `indices` into GIF sub-blocks, without the terminating empty block.
     pub fn encodeAll(self: *Encoder, writer: *std.Io.Writer, indices: []const u8) !void {
         try self.emitCode(writer, self.clear_code);
 

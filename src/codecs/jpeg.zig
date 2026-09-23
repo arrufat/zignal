@@ -312,15 +312,10 @@ pub const EncodeOptions = struct {
 
 /// Encodes `image` as baseline JPEG bytes; see `write`. Caller owns the returned slice.
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
-    var aw: Io.Writer.Allocating = .init(allocator);
-    defer aw.deinit();
-    write(T, io, allocator, &aw.writer, image, options) catch |err| return codecs.allocatingError(err);
-    return aw.toOwnedSlice();
+    return codecs.encodeWith(allocator, write, .{ T, io, allocator }, .{ image, options });
 }
 
-/// Writes `image` as baseline JPEG (SOF0, 8-bit, Huffman) to `writer`. Supports grayscale (u8)
-/// and RGB (Rgb); other types are converted to RGB. With restart intervals the scan is
-/// encoded in bands on `io`, one restart segment run per band.
+/// Writes baseline JPEG (u8 as gray, anything else as RGB); restart intervals encode in parallel bands.
 pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(T), options: EncodeOptions) !void {
     // Validate image dimensions
     if (image.rows == 0 or image.cols == 0) {

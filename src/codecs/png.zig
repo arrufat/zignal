@@ -466,8 +466,7 @@ fn crc(buf: []const u8) u32 {
     return updateCrc(0xffffffff, buf) ^ 0xffffffff;
 }
 
-/// Walks the chunks of a PNG stream. `next` returns a chunk's length and type; the caller then
-/// consumes its payload and CRC with `body` or, for IDAT, an `IdatReader`.
+/// Chunk walker: `next` reads a header; `body` or an `IdatReader` consumes the payload and CRC.
 const ChunkStream = struct {
     reader: *Io.Reader,
     max_chunks: Io.Limit,
@@ -486,8 +485,7 @@ const ChunkStream = struct {
         return .{ .length = std.mem.readInt(u32, head[0..4], .big), .type = head[4..8].* };
     }
 
-    /// Reads a chunk's payload and CRC, returning the payload when it fits in `keep` (empty
-    /// otherwise), or null when the stream ends inside the chunk.
+    /// Reads payload and CRC; returns the payload if it fits `keep`, null if the stream ends.
     fn body(self: *ChunkStream, head: Head, keep: []u8) !?[]const u8 {
         var chunk_crc = updateCrc(0xffffffff, &head.type);
         var remaining: usize = head.length;
@@ -654,15 +652,13 @@ fn parseHeader(chunk: Chunk) !Header {
     };
 }
 
-/// PNG decoder entry point: parses the chunks and decodes the scanlines. Truncated pixel data
-/// decodes partially and sets `truncated`; structural corruption errors.
+/// Decodes a PNG buffer; truncated pixel data decodes partially and sets `truncated`.
 pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngState {
     var reader: Io.Reader = .fixed(png_data);
     return parse(gpa, &reader, limits);
 }
 
-/// `decode` from a stream: chunks are read and checked in order and the image data is inflated
-/// straight from the IDAT chunks.
+/// `decode` from a stream; the image data is inflated straight from the IDAT chunks.
 fn parse(gpa: Allocator, reader: *Io.Reader, limits: DecodeLimits) !PngState {
     const sig = reader.takeArray(8) catch |err| switch (err) {
         error.EndOfStream => return error.InvalidPngSignature,
@@ -815,8 +811,7 @@ fn isZlibTruncation(decompressor: *const flate.Decompress) bool {
     return if (decompressor.err) |err| err == error.EndOfStream else false;
 }
 
-/// Inflates the IDAT run starting with `first` into `png_state.scanlines` and undoes the row
-/// filters. Returns the chunk after the run, if its header was read.
+/// Inflates and defilters the IDAT run into `scanlines`; returns the next chunk's header if read.
 fn inflate(gpa: Allocator, png_state: *PngState, chunks: *ChunkStream, first: ChunkStream.Head, limits: DecodeLimits) !?ChunkStream.Head {
     const header = png_state.header;
     const scan_data_bytes = try scanDataLength(header);
@@ -1322,11 +1317,7 @@ fn adlerCombine(a: u32, b: u32, b_len: usize) u32 {
     return @intCast(s1 | (s2 << 16));
 }
 
-/// Writes the IDAT chunk holding the zlib stream of the filtered rows: chunks of `chunkRows`
-/// rows are filtered and deflated in bands on `io`, each chunk as an independent raw deflate
-/// run ended by a sync flush (byte-aligned, non-final block) so the runs concatenate; the last
-/// chunk finishes the stream, and the zlib header and adler32 over all rows are written here.
-/// The compression itself is `std.compress.flate`; only the chunking is ours.
+/// Writes one IDAT: rows deflated in parallel chunks, each ending in a sync flush so they concatenate.
 fn writeIdat(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8, header: Header, options: EncodeOptions) !void {
     const rows_per_chunk: usize = chunkRows(header);
     const chunks = @max(1, (@as(usize, header.height) + rows_per_chunk - 1) / rows_per_chunk);
@@ -1447,10 +1438,7 @@ fn writeRaw(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8, 
 
 /// Encodes `image` as a PNG byte buffer; see `write`. Caller owns the returned slice.
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
-    var aw: Io.Writer.Allocating = .init(allocator);
-    defer aw.deinit();
-    write(T, io, allocator, &aw.writer, image, options) catch |err| return codecs.allocatingError(err);
-    return aw.toOwnedSlice();
+    return codecs.encodeWith(allocator, write, .{ T, io, allocator }, .{ image, options });
 }
 
 /// Writes `image` as a PNG to `writer`: `u8`→grayscale, `Rgb`→RGB, `Rgba`→RGBA, others→RGB.
