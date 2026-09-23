@@ -25,14 +25,14 @@ pub fn hasSignature(data: []const u8) bool {
 }
 
 pub const DecodeLimits = struct {
-    /// Maximum encoded size read by `load`; 0 disables the cap.
-    max_webp_bytes: usize = codecs.max_file_size,
-    /// Maximum decoded pixel count (per frame); 0 disables the cap.
-    max_pixels: u64 = 1 << 28,
-    /// Maximum animation frames; 0 disables the cap.
-    max_frames: u32 = 4096,
-    /// Maximum pixels across all composed frames; 0 disables the cap.
-    max_total_pixels: u64 = 1 << 30,
+    /// Maximum encoded size `read` buffers.
+    max_webp_bytes: Io.Limit = .limited(100 * 1024 * 1024),
+    /// Maximum decoded pixel count (per frame).
+    max_pixels: Io.Limit = .limited(1 << 28),
+    /// Maximum animation frames.
+    max_frames: Io.Limit = .limited(4096),
+    /// Maximum pixels across all composed frames.
+    max_total_pixels: Io.Limit = .limited(1 << 30),
 
     pub const default: DecodeLimits = .{};
 };
@@ -114,9 +114,10 @@ pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, dat
     return builder.finish(allocator, reader.info.loop_count);
 }
 
-pub fn loadAnimated(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
+/// Reads every frame of a WebP image from `reader`, buffering at most the `DecodeLimits` byte cap.
+pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnimatedImage(T) {
     if (!enabled) return error.CodecNotEnabled;
-    const data = try codecs.readFile(io, allocator, file_path, limits.max_webp_bytes);
+    const data = try reader.allocRemaining(allocator, limits.max_webp_bytes);
     defer allocator.free(data);
     return loadAnimatedFromBytes(T, io, allocator, data, limits);
 }
@@ -200,9 +201,10 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []con
     return native.into(T, io, allocator);
 }
 
-pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
+/// Reads a WebP image from `reader`, buffering at most the `DecodeLimits` byte cap.
+pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
     if (!enabled) return error.CodecNotEnabled;
-    const data = try codecs.readFile(io, allocator, file_path, limits.max_webp_bytes);
+    const data = try reader.allocRemaining(allocator, limits.max_webp_bytes);
     defer allocator.free(data);
     return loadFromBytes(T, io, allocator, data, limits);
 }
@@ -210,6 +212,11 @@ pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u
 /// Encodes `image` as WebP: `Rgba`→RGBA, everything else→RGB. WebP caps each side at 16383.
 /// Lossless keeps every visible pixel; the RGB of fully transparent ones may change.
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
+    return codecs.encodeWith(allocator, write, .{ T, io, allocator }, .{ image, options });
+}
+
+/// Writes `image` as WebP to `writer`; see `encode`.
+pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(T), options: EncodeOptions) !void {
     if (!enabled) return error.CodecNotEnabled;
     try checkSize(image.cols, image.rows);
     const webp = try Libwebp.get();
@@ -227,18 +234,10 @@ pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), o
         },
     }
 
-    var writer: Writer = .{ .allocator = allocator };
-    errdefer writer.out.deinit(allocator);
-    picture.writer = Writer.write;
-    picture.custom_ptr = &writer;
-    if (webp.WebPEncode(&config, &picture) == 0) return if (writer.out_of_memory) error.OutOfMemory else error.WebpEncodeFailed;
-    return writer.out.toOwnedSlice(allocator);
-}
-
-pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const bytes = try encode(T, io, allocator, image, .default);
-    defer allocator.free(bytes);
-    try codecs.writeFile(io, file_path, bytes);
+    var sink: Sink = .{ .writer = writer };
+    picture.writer = Sink.write;
+    picture.custom_ptr = &sink;
+    if (webp.WebPEncode(&config, &picture) == 0) return if (sink.failed) error.WriteFailed else error.WebpEncodeFailed;
 }
 
 /// Encodes every frame of `anim` through libwebpmux, which stores only the region that changed
@@ -246,9 +245,14 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
 /// written as a still. libwebp folds identical consecutive frames into one longer frame, so
 /// loading the result back can give fewer frames over the same total duration.
 pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
+    return codecs.encodeWith(allocator, writeAnimated, .{ T, io, allocator }, .{ anim, options });
+}
+
+/// Writes `anim` as an animated WebP to `writer`; see `encodeAnimated`.
+pub fn writeAnimated(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, anim: AnimatedImage(T), options: EncodeOptions) !void {
     if (!enabled) return error.CodecNotEnabled;
     try anim.validate();
-    if (anim.frames.len == 1) return encode(T, io, allocator, anim.frames[0], options);
+    if (anim.frames.len == 1) return write(T, io, allocator, writer, anim.frames[0], options);
     const width = anim.frames[0].cols;
     const height = anim.frames[0].rows;
     try checkSize(width, height);
@@ -289,7 +293,7 @@ pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: Anim
     var data: WebPData = .{ .bytes = undefined, .size = 0 };
     if (mux.WebPAnimEncoderAssemble(enc, &data) == 0) return error.WebpEncodeFailed;
     defer webp.WebPFree(@constCast(data.bytes));
-    return allocator.dupe(u8, data.bytes[0..data.size]);
+    try writer.writeAll(data.bytes[0..data.size]);
 }
 
 /// WebP caps each side at 16383 pixels.
@@ -324,16 +328,15 @@ fn importPixels(webp: *const Api, picture: *Picture, comptime T: type, pixels: I
     if (import(picture, @ptrCast(pixels.data.ptr), @intCast(pixels.stride * @sizeOf(T))) == 0) return error.OutOfMemory;
 }
 
-/// A `WebPWriterFunction` target that collects the output in an allocator-owned buffer.
-const Writer = struct {
-    allocator: Allocator,
-    out: std.ArrayList(u8) = .empty,
-    out_of_memory: bool = false,
+/// A `WebPWriterFunction` target that forwards the output to `writer`.
+const Sink = struct {
+    writer: *Io.Writer,
+    failed: bool = false,
 
     fn write(data: [*]const u8, size: usize, picture: *const Picture) callconv(.c) c_int {
-        const self: *Writer = @ptrCast(@alignCast(picture.custom_ptr));
-        self.out.appendSlice(self.allocator, data[0..size]) catch {
-            self.out_of_memory = true;
+        const self: *Sink = @ptrCast(@alignCast(picture.custom_ptr));
+        self.writer.writeAll(data[0..size]) catch {
+            self.failed = true;
             return 0;
         };
         return 1;

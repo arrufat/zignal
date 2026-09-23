@@ -245,8 +245,7 @@ pub fn Image(comptime T: type) type {
             return @as([*]u8, @ptrCast(@alignCast(self.data.ptr)))[0 .. self.data.len * @sizeOf(T)];
         }
 
-        /// Loads an image from a file with automatic format detection: reads it (up to
-        /// `codecs.max_file_size`) and hands the bytes to `loadFromBytes`.
+        /// Loads an image from a file, detecting the format from its signature.
         ///
         /// Example usage:
         /// ```zig
@@ -254,9 +253,14 @@ pub fn Image(comptime T: type) type {
         /// defer img.deinit(allocator);
         /// ```
         pub fn load(io: Io, allocator: Allocator, file_path: []const u8) !Self {
-            const data = try codecs.readFile(io, allocator, file_path, codecs.max_file_size);
-            defer allocator.free(data);
-            return loadFromBytes(io, allocator, data);
+            return codecs.readFile(io, file_path, read, .{ io, allocator }, .{});
+        }
+
+        /// Reads an image from `reader`, detecting the format from its signature.
+        pub fn read(io: Io, allocator: Allocator, reader: *Io.Reader) !Self {
+            return switch (try ImageFormat.peek(reader)) {
+                inline else => |f| @field(codecs, @tagName(f)).read(T, io, allocator, reader, .{}),
+            };
         }
 
         /// Loads an image from an in-memory byte buffer with automatic format detection.
@@ -280,9 +284,14 @@ pub fn Image(comptime T: type) type {
         /// `.jxl` and `.webp` need libc linked and the system library at runtime).
         /// Returns `error.UnsupportedImageFormat` for any other extension.
         pub fn save(self: Self, io: Io, allocator: Allocator, file_path: []const u8) !void {
-            const fmt = ImageFormat.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
-            return switch (fmt) {
-                inline else => |f| @field(codecs, @tagName(f)).save(T, io, allocator, self, file_path),
+            const image_format = ImageFormat.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
+            return codecs.writeFile(io, file_path, write, .{ self, io, allocator }, .{image_format});
+        }
+
+        /// Writes the image to `writer` as `image_format` with the codec's default options.
+        pub fn write(self: Self, io: Io, allocator: Allocator, writer: *Io.Writer, image_format: ImageFormat) !void {
+            return switch (image_format) {
+                inline else => |f| @field(codecs, @tagName(f)).write(T, io, allocator, writer, self, .default),
             };
         }
 

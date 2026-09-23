@@ -60,7 +60,7 @@ fn fail(err_name: []const u8, message: []const u8) i32 {
 
 fn failErr(err: anyerror) i32 {
     const message = switch (err) {
-        error.ImageTooLarge, error.PngDataTooLarge => "Image exceeds the decoder size limits.",
+        error.ImageTooLarge => "Image exceeds the decoder size limits.",
         error.OutOfMemory => "Out of memory.",
         else => "",
     };
@@ -103,11 +103,11 @@ fn writeInfoFields(w: *std.Io.Writer, format: ImageFormat, data: []const u8) !vo
                     if (h.srgb_intent) |s| try w.print("\"{t}\"", .{s}) else try w.writeAll("null");
                 },
                 .bmp => {
-                    // tagName over {t}: Compression and DibHeaderKind are non-exhaustive.
+                    // tagName over {t}: Compression and DibHeader are non-exhaustive.
                     try w.print("\"bit_depth\":{d},\"compression\":\"{s}\",\"dib_header\":\"{s}\",\"top_down\":{},\"palette_entries\":{d},\"has_alpha\":{}", .{
                         h.bit_depth,
                         std.enums.tagName(bmp.Compression, h.compression) orelse "unknown",
-                        std.enums.tagName(bmp.DibHeaderKind, h.dib_kind) orelse "unknown",
+                        std.enums.tagName(bmp.DibHeader, h.dib_header) orelse "unknown",
                         h.top_down,
                         h.palette_entries,
                         h.hasAlpha(),
