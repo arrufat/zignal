@@ -251,10 +251,7 @@ pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
     var aw: Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
-    write(T, io, allocator, &aw.writer, image, options) catch |err| return switch (err) {
-        error.WriteFailed => error.OutOfMemory,
-        else => |e| e,
-    };
+    write(T, io, allocator, &aw.writer, image, options) catch |err| return codecs.allocatingError(err);
     return aw.toOwnedSlice();
 }
 
@@ -265,21 +262,12 @@ pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer,
     return writeAnimated(T, io, allocator, writer, .{ .frames = &frames, .durations_ms = &durations, .loop_count = 0 }, options);
 }
 
-pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const bytes = try encode(T, io, allocator, image, .default);
-    defer allocator.free(bytes);
-    try codecs.writeFile(io, file_path, bytes);
-}
-
 /// Encodes every frame of `anim` at its full size; pixel types map as in `encode`.
 /// A one-frame animation is written as a still.
 pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
     var aw: Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
-    writeAnimated(T, io, allocator, &aw.writer, anim, options) catch |err| return switch (err) {
-        error.WriteFailed => error.OutOfMemory,
-        else => |e| e,
-    };
+    writeAnimated(T, io, allocator, &aw.writer, anim, options) catch |err| return codecs.allocatingError(err);
     return aw.toOwnedSlice();
 }
 

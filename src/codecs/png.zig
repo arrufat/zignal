@@ -1434,10 +1434,7 @@ fn writeRaw(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8, 
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
     var aw: Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
-    write(T, io, allocator, &aw.writer, image, options) catch |err| return switch (err) {
-        error.WriteFailed => error.OutOfMemory,
-        else => |e| e,
-    };
+    write(T, io, allocator, &aw.writer, image, options) catch |err| return codecs.allocatingError(err);
     return aw.toOwnedSlice();
 }
 
@@ -1459,14 +1456,6 @@ pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer,
             return writeRaw(io, allocator, writer, rgb_image.asBytes(), image.cols, image.rows, color_type, 8, options);
         },
     }
-}
-
-/// Encodes `image` to a PNG file at `file_path` using deflate compression with row filtering.
-/// Output color format is chosen from `T`: `u8`→grayscale, `Rgb`→RGB, `Rgba`→RGBA, others→RGB.
-pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const png_data = try encode(T, io, allocator, image, .default);
-    defer allocator.free(png_data);
-    try codecs.writeFile(io, file_path, png_data);
 }
 
 /// PNG row filtering and defiltering functions.

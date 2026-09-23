@@ -38,26 +38,36 @@ pub fn AnimatedImage(comptime T: type) type {
             switch (format) {
                 inline else => |f| {
                     const codec = @field(codecs, @tagName(f));
-                    if (@hasDecl(codec, "loadAnimatedFromBytes")) return codec.loadAnimatedFromBytes(T, io, allocator, data, .{});
-                    return fromStill(allocator, try codec.loadFromBytes(T, io, allocator, data, .{}));
+                    return if (@hasDecl(codec, "loadAnimatedFromBytes"))
+                        codec.loadAnimatedFromBytes(T, io, allocator, data, .{})
+                    else
+                        fromStill(allocator, try codec.loadFromBytes(T, io, allocator, data, .{}));
                 },
             }
         }
 
-        /// Saves by extension. Codecs with `encodeAnimated` store every frame; any other
+        /// Saves by extension. Codecs with `writeAnimated` store every frame; any other
         /// format takes a single frame.
         pub fn save(self: Self, io: Io, allocator: Allocator, file_path: []const u8) !void {
             const format = ImageFormat.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
             switch (format) {
                 inline else => |f| {
                     const codec = @field(codecs, @tagName(f));
-                    if (@hasDecl(codec, "encodeAnimated")) {
-                        const bytes = try codec.encodeAnimated(T, io, allocator, self, .default);
-                        defer allocator.free(bytes);
-                        return codecs.writeFile(io, file_path, bytes);
-                    }
-                    if (self.frames.len != 1) return error.UnsupportedAnimation;
-                    return codec.save(T, io, allocator, self.frames[0], file_path);
+                    const animated = @hasDecl(codec, "writeAnimated");
+                    if (!animated and self.frames.len != 1) return error.UnsupportedAnimation;
+                    const Source = struct {
+                        anim: Self,
+                        io: Io,
+                        allocator: Allocator,
+
+                        pub fn write(source: @This(), writer: *Io.Writer) !void {
+                            return if (animated)
+                                codec.writeAnimated(T, source.io, source.allocator, writer, source.anim, .default)
+                            else
+                                codec.write(T, source.io, source.allocator, writer, source.anim.frames[0], .default);
+                        }
+                    };
+                    return codecs.writeFile(io, file_path, Source{ .anim = self, .io = io, .allocator = allocator });
                 },
             }
         }
@@ -193,4 +203,35 @@ test "still formats load as one frame" {
     try std.testing.expectEqual(1, anim.frameCount());
     try std.testing.expectEqual(0, anim.durations_ms[0]);
     try std.testing.expectEqualSlices(u8, img.data, anim.frame(0).data);
+}
+
+test "save writes what encode returns" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try tmp.dir.realPathFileAlloc(io, ".", gpa);
+    defer gpa.free(dir);
+
+    var anim: AnimatedImage(u8) = try .fromStill(gpa, try .init(gpa, 6, 9));
+    defer anim.deinit(gpa);
+    for (anim.frame(0).data, 0..) |*p, i| p.* = @truncate(i * 7);
+
+    inline for (.{ "png", "bmp", "gif", "jpg" }, .{ codecs.png, codecs.bmp, codecs.gif, codecs.jpeg }) |ext, codec| {
+        const path = try std.fs.path.join(gpa, &.{ dir, "still." ++ ext });
+        defer gpa.free(path);
+        try anim.frame(0).save(io, gpa, path);
+        const saved = try std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .unlimited);
+        defer gpa.free(saved);
+        const encoded = try codec.encode(u8, io, gpa, anim.frame(0), .default);
+        defer gpa.free(encoded);
+        try std.testing.expectEqualSlices(u8, encoded, saved);
+
+        try anim.save(io, gpa, path);
+        const saved_anim = try std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .unlimited);
+        defer gpa.free(saved_anim);
+        const encoded_anim = if (@hasDecl(codec, "encodeAnimated")) try codec.encodeAnimated(u8, io, gpa, anim, .default) else try codec.encode(u8, io, gpa, anim.frame(0), .default);
+        defer gpa.free(encoded_anim);
+        try std.testing.expectEqualSlices(u8, encoded_anim, saved_anim);
+    }
 }

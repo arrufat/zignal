@@ -310,21 +310,11 @@ pub const EncodeOptions = struct {
     pub const default: EncodeOptions = .{};
 };
 
-/// Save Image to JPEG file with baseline encoding.
-pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const bytes = try encode(T, io, allocator, image, .default);
-    defer allocator.free(bytes);
-    try codecs.writeFile(io, file_path, bytes);
-}
-
 /// Encodes `image` as baseline JPEG bytes; see `write`. Caller owns the returned slice.
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
     var aw: Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
-    write(T, io, allocator, &aw.writer, image, options) catch |err| return switch (err) {
-        error.WriteFailed => error.OutOfMemory,
-        else => |e| e,
-    };
+    write(T, io, allocator, &aw.writer, image, options) catch |err| return codecs.allocatingError(err);
     return aw.toOwnedSlice();
 }
 

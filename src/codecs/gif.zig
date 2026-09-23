@@ -752,10 +752,7 @@ fn writeLzwImageData(allocator: Allocator, writer: *Io.Writer, indices: []const 
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
     var aw: Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
-    write(T, io, allocator, &aw.writer, image, options) catch |err| return switch (err) {
-        error.WriteFailed => error.OutOfMemory,
-        else => |e| e,
-    };
+    write(T, io, allocator, &aw.writer, image, options) catch |err| return codecs.allocatingError(err);
     return aw.toOwnedSlice();
 }
 
@@ -919,19 +916,6 @@ fn mapImageToPalette(
     }
 }
 
-/// Saves `image` as a GIF to `file_path`.
-pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const file = try Io.Dir.cwd().createFile(io, file_path, .{});
-    defer file.close(io);
-    var buffer: [4096]u8 = undefined;
-    var file_writer = file.writer(io, &buffer);
-    write(T, io, allocator, &file_writer.interface, image, .default) catch |err| return switch (err) {
-        error.WriteFailed => file_writer.err.?,
-        else => |e| e,
-    };
-    file_writer.interface.flush() catch return file_writer.err.?;
-}
-
 // ---------------------------------------------------------------------------
 // Animated encode
 // ---------------------------------------------------------------------------
@@ -941,10 +925,7 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
 pub fn encodeAnimated(comptime T: type, io: Io, gpa: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
-    writeAnimated(T, io, gpa, &aw.writer, anim, options) catch |err| return switch (err) {
-        error.WriteFailed => error.OutOfMemory,
-        else => |e| e,
-    };
+    writeAnimated(T, io, gpa, &aw.writer, anim, options) catch |err| return codecs.allocatingError(err);
     return aw.toOwnedSlice();
 }
 

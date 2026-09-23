@@ -67,11 +67,22 @@ pub fn readFile(io: Io, allocator: Allocator, file_path: []const u8, max_bytes: 
     return Io.Dir.cwd().readFileAlloc(io, file_path, allocator, limit);
 }
 
-/// Creates (or truncates) `file_path` and writes `data` to it.
-pub fn writeFile(io: Io, file_path: []const u8, data: []const u8) !void {
+/// An allocating writer fails only when out of memory, so its `error.WriteFailed` becomes
+/// `error.OutOfMemory`. Takes any error set, including ones without `WriteFailed`.
+pub fn allocatingError(err: anytype) (@TypeOf(err) || error{OutOfMemory}) {
+    if (@as(anyerror, err) == error.WriteFailed) return error.OutOfMemory;
+    return err;
+}
+
+/// Creates (or truncates) `file_path` and streams `source.write(writer)` into it. A failed
+/// file write returns the file's own error rather than `error.WriteFailed`.
+pub fn writeFile(io: Io, file_path: []const u8, source: anytype) !void {
     const file = try Io.Dir.cwd().createFile(io, file_path, .{});
     defer file.close(io);
-    try file.writeStreamingAll(io, data);
+    var buffer: [4096]u8 = undefined;
+    var file_writer = file.writer(io, &buffer);
+    source.write(&file_writer.interface) catch |err| return file_writer.err orelse err;
+    file_writer.interface.flush() catch return file_writer.err.?;
 }
 
 test {

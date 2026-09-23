@@ -930,18 +930,8 @@ pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), o
     var aw: Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
     try aw.ensureTotalCapacity((try Layout.init(T, image, options)).fileSize());
-    write(T, io, allocator, &aw.writer, image, options) catch |err| return switch (err) {
-        error.WriteFailed => error.OutOfMemory,
-        else => |e| e,
-    };
+    write(T, io, allocator, &aw.writer, image, options) catch |err| return codecs.allocatingError(err);
     return aw.toOwnedSlice();
-}
-
-/// Encodes the image and writes it to `file_path`.
-pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const data = try encode(T, io, allocator, image, .default);
-    defer allocator.free(data);
-    try codecs.writeFile(io, file_path, data);
 }
 
 // ---------------------------------------------------------------------------

@@ -281,9 +281,20 @@ pub fn Image(comptime T: type) type {
         /// Returns `error.UnsupportedImageFormat` for any other extension.
         pub fn save(self: Self, io: Io, allocator: Allocator, file_path: []const u8) !void {
             const fmt = ImageFormat.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
-            return switch (fmt) {
-                inline else => |f| @field(codecs, @tagName(f)).save(T, io, allocator, self, file_path),
-            };
+            switch (fmt) {
+                inline else => |f| {
+                    const Source = struct {
+                        image: Self,
+                        io: Io,
+                        allocator: Allocator,
+
+                        pub fn write(source: @This(), writer: *Io.Writer) !void {
+                            return @field(codecs, @tagName(f)).write(T, source.io, source.allocator, writer, source.image, .default);
+                        }
+                    };
+                    return codecs.writeFile(io, file_path, Source{ .image = self, .io = io, .allocator = allocator });
+                },
+            }
         }
 
         /// Returns the total number of pixels in the image (rows * cols).
