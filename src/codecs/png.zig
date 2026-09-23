@@ -11,6 +11,7 @@ const parallel = @import("../parallel.zig");
 
 const convertColor = @import("../color.zig").convertColor;
 const Image = @import("../image.zig").Image;
+const NativeImage = @import("../codecs.zig").NativeImage;
 
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
@@ -803,11 +804,7 @@ fn isZlibTruncation(decompressor: *const flate.Decompress) bool {
 }
 
 /// Converts PNG image data to its natural Zignal image type.
-pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !union(enum) {
-    grayscale: Image(u8),
-    rgb: Image(Rgb),
-    rgba: Image(Rgba),
-} {
+pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !NativeImage {
     // Decompress IDAT data
     var reader: Io.Reader = .fixed(png_state.idat_data.items);
 
@@ -1164,37 +1161,8 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, png_data: [
     var png_state = try decode(allocator, png_data, limits);
     defer png_state.deinit(allocator);
 
-    // Load the PNG in its native format first, then convert to requested type
-    var native_image = try toNativeImage(allocator, &png_state);
-    switch (native_image) {
-        .grayscale => |*img| {
-            if (T == u8) {
-                // Direct return without conversion - no extra allocation needed
-                return img.*;
-            } else {
-                defer img.deinit(allocator);
-                return img.convert(io, allocator, T);
-            }
-        },
-        .rgb => |*img| {
-            if (T == Rgb) {
-                // Direct return without conversion - no extra allocation needed
-                return img.*;
-            } else {
-                defer img.deinit(allocator);
-                return img.convert(io, allocator, T);
-            }
-        },
-        .rgba => |*img| {
-            if (T == Rgba) {
-                // Direct return without conversion - no extra allocation needed
-                return img.*;
-            } else {
-                defer img.deinit(allocator);
-                return img.convert(io, allocator, T);
-            }
-        },
-    }
+    var native = try toNativeImage(allocator, &png_state);
+    return native.into(T, io, allocator);
 }
 
 pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {

@@ -18,6 +18,7 @@ const expect = std.testing.expect;
 const expectError = std.testing.expectError;
 const expectEqual = std.testing.expectEqual;
 
+const codecs = @import("../codecs.zig");
 const Image = @import("../image.zig").Image;
 const AnimatedImage = @import("../image.zig").AnimatedImage;
 const convertColor = @import("../color.zig").convertColor;
@@ -708,21 +709,16 @@ pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, dat
     return composeAnimated(T, io, allocator, state);
 }
 
-fn readGifFile(io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) ![]u8 {
-    const read_limit = if (limits.max_gif_bytes == 0) std.math.maxInt(usize) else limits.max_gif_bytes;
-    return Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
-}
-
 /// Loads all frames from a GIF file into an `AnimatedImage(T)`.
 pub fn loadAnimated(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
-    const data = try readGifFile(io, allocator, file_path, limits);
+    const data = try codecs.readFile(io, allocator, file_path, limits.max_gif_bytes);
     defer allocator.free(data);
     return loadAnimatedFromBytes(T, io, allocator, data, limits);
 }
 
 /// Loads a GIF from a file path. Returns frame 0 only.
 pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
-    const data = try readGifFile(io, allocator, file_path, limits);
+    const data = try codecs.readFile(io, allocator, file_path, limits.max_gif_bytes);
     defer allocator.free(data);
     return loadFromBytes(T, io, allocator, data, limits);
 }
@@ -959,13 +955,7 @@ fn mapImageToPalette(
 pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
     const data = try encode(T, io, allocator, image, .default);
     defer allocator.free(data);
-    try writeFile(io, file_path, data);
-}
-
-fn writeFile(io: Io, file_path: []const u8, data: []const u8) !void {
-    const file = try Io.Dir.cwd().createFile(io, file_path, .{});
-    defer file.close(io);
-    try file.writeStreamingAll(io, data);
+    try codecs.writeFile(io, file_path, data);
 }
 
 // ---------------------------------------------------------------------------
@@ -1038,7 +1028,7 @@ pub fn encodeAnimated(comptime T: type, gpa: Allocator, anim: AnimatedImage(T), 
 pub fn saveAnimated(comptime T: type, io: Io, gpa: Allocator, anim: AnimatedImage(T), file_path: []const u8) !void {
     const data = try encodeAnimated(T, gpa, anim, .default);
     defer gpa.free(data);
-    try writeFile(io, file_path, data);
+    try codecs.writeFile(io, file_path, data);
 }
 
 fn emitAnimatedFrame(

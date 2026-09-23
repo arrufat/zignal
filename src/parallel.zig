@@ -19,7 +19,7 @@ const min_pixels_per_band: usize = 32 * 1024;
 var cpu_count: std.atomic.Value(usize) = .init(0);
 
 /// Logical CPUs, queried once (`getCpuCount` is a syscall) and cached.
-fn cpuCount() usize {
+pub fn cpuCount() usize {
     const cached = cpu_count.load(.monotonic);
     if (cached != 0) return cached;
     const n = std.Thread.getCpuCount() catch 1;

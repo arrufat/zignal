@@ -430,13 +430,8 @@ inline fn paddedRowBytes(width: u32, bit_depth: u8) usize {
     return @intCast(((bits + 31) / 32) * 4);
 }
 
-/// Native-format pixel container produced by `toNativeImage`. The variant
-/// reflects the most natural pixel type for the decoded source.
-pub const NativeImage = union(enum) {
-    grayscale: Image(u8),
-    rgb: Image(Rgb),
-    rgba: Image(Rgba),
-};
+/// Native-format pixel container produced by `toNativeImage`.
+pub const NativeImage = @import("../codecs.zig").NativeImage;
 
 /// Decodes the pixel buffer into a native-format `Image(T)`.
 pub fn toNativeImage(allocator: Allocator, state: BmpState) !NativeImage {
@@ -803,23 +798,7 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []con
     defer state.deinit(allocator);
 
     var native = try toNativeImage(allocator, state);
-    switch (native) {
-        .grayscale => |*img| {
-            if (T == u8) return img.*;
-            defer img.deinit(allocator);
-            return img.convert(io, allocator, T);
-        },
-        .rgb => |*img| {
-            if (T == Rgb) return img.*;
-            defer img.deinit(allocator);
-            return img.convert(io, allocator, T);
-        },
-        .rgba => |*img| {
-            if (T == Rgba) return img.*;
-            defer img.deinit(allocator);
-            return img.convert(io, allocator, T);
-        },
-    }
+    return native.into(T, io, allocator);
 }
 
 /// Loads a BMP from a file path, converting to the requested pixel type.
