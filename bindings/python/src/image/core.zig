@@ -23,7 +23,6 @@ const c = python.c;
 const Rgba = zignal.Rgba(u8);
 const Rgb = zignal.Rgb(u8);
 const default_png_limits: zignal.png.DecodeLimits = .{};
-const file_png_limits: zignal.png.DecodeLimits = .{ .max_png_bytes = 100 * 1024 * 1024 };
 const default_jpeg_limits: zignal.jpeg.DecodeLimits = .{};
 const file_jpeg_limits: zignal.jpeg.DecodeLimits = .{
     .max_jpeg_bytes = 200 * 1024 * 1024,
@@ -179,7 +178,6 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     // Read with the most generous per-format cap; per-format limits enforced
     // by the decoders below.
     const read_cap = std.mem.max(usize, &.{
-        readLimit(file_png_limits.max_png_bytes),
         readLimit(file_jpeg_limits.max_jpeg_bytes),
         readLimit(jxl_limits.max_jxl_bytes),
         readLimit(webp_limits.max_webp_bytes),
@@ -196,7 +194,7 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     };
 
     return switch (detected) {
-        .png => decodeFile(.png, data, path_slice, file_png_limits),
+        .png => decodeFile(.png, data, path_slice, default_png_limits),
         .jpeg => decodeFile(.jpeg, data, path_slice, file_jpeg_limits),
         .bmp => decodeFile(.bmp, data, path_slice, default_bmp_limits),
         .gif => decodeFile(.gif, data, path_slice, default_gif_limits),

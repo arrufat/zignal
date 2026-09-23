@@ -60,7 +60,7 @@ fn fail(err_name: []const u8, message: []const u8) i32 {
 
 fn failErr(err: anyerror) i32 {
     const message = switch (err) {
-        error.ImageTooLarge, error.PngDataTooLarge => "Image exceeds the decoder size limits.",
+        error.ImageTooLarge => "Image exceeds the decoder size limits.",
         error.OutOfMemory => "Out of memory.",
         else => "",
     };
