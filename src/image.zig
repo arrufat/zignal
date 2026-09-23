@@ -1156,6 +1156,12 @@ pub fn Image(comptime T: type) type {
             return diff_mod.compute(T, self, out, other, opts);
         }
 
+        /// Bounds of the pixels that differ from `other` (half-open, as in `view`), or null
+        /// if the images are identical.
+        pub fn diffBounds(self: Self, other: Self) ?Rectangle(u32) {
+            return diff_mod.bounds(T, self, other);
+        }
+
         /// Computes the mean absolute pixel error normalized by the maximum channel value
         /// (e.g. 255 for `u8`). Requires both images to share the same dimensions.
         pub fn meanPixelError(self: Self, other: Self) !f64 {
