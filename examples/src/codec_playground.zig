@@ -87,12 +87,7 @@ fn isGrayscale(image: Image(Rgba)) bool {
 fn writeInfoFields(w: *std.Io.Writer, format: ImageFormat, data: []const u8) !void {
     switch (format) {
         inline else => |f| {
-            const codec = switch (f) {
-                .jpeg => jpeg,
-                .png => png,
-                .bmp => bmp,
-                .gif => gif,
-            };
+            const codec = @field(zignal, @tagName(f));
             var reader: std.Io.Reader = .fixed(data);
             const h = try codec.getInfo(&reader, .{});
             try w.print("\"format\":\"{t}\",\"width\":{d},\"height\":{d},\"file_size\":{d},\"details\":{{", .{ f, h.width, h.height, data.len });
@@ -120,6 +115,12 @@ fn writeInfoFields(w: *std.Io.Writer, format: ImageFormat, data: []const u8) !vo
                 },
                 .gif => {
                     try w.print("\"version\":\"{t}\",\"frame_count\":{d},\"loop_count\":{d},\"global_color_table_size\":{d}", .{ h.version, h.frame_count, h.loop_count, h.global_color_table_size });
+                },
+                .jxl => {
+                    try w.print("\"bits_per_sample\":{d},\"num_color_channels\":{d},\"has_alpha\":{},\"has_animation\":{}", .{ h.bits_per_sample, h.num_color_channels, h.has_alpha, h.has_animation });
+                },
+                .webp => {
+                    try w.print("\"encoding\":\"{t}\",\"has_alpha\":{},\"has_animation\":{}", .{ h.format, h.has_alpha, h.has_animation });
                 },
             }
             try w.writeAll("}");
