@@ -24,6 +24,7 @@ const codecs = @import("codecs.zig");
 const bmp = codecs.bmp;
 const gif = codecs.gif;
 const jxl = codecs.jxl;
+const webp = codecs.webp;
 const jpeg = codecs.jpeg;
 const png = codecs.png;
 const metrics = @import("image/metrics.zig");
@@ -266,6 +267,7 @@ pub fn Image(comptime T: type) type {
                 .bmp => bmp.load(T, io, allocator, file_path, .{}),
                 .gif => gif.load(T, io, allocator, file_path, .{}),
                 .jxl => jxl.load(T, io, allocator, file_path, .{}),
+                .webp => webp.load(T, io, allocator, file_path, .{}),
             };
         }
 
@@ -286,11 +288,13 @@ pub fn Image(comptime T: type) type {
                 .bmp => bmp.loadFromBytes(T, io, allocator, data, .{}),
                 .gif => gif.loadFromBytes(T, io, allocator, data, .{}),
                 .jxl => jxl.loadFromBytes(T, io, allocator, data, .{}),
+                .webp => webp.loadFromBytes(T, io, allocator, data, .{}),
             };
         }
 
         /// Saves the image to a file. Format is selected from the file extension:
-        /// `.png`, `.jpg`/`.jpeg`, `.bmp`, `.gif`, or `.jxl` (case-insensitive; `.jxl` needs `-fsys=jxl`).
+        /// `.png`, `.jpg`/`.jpeg`, `.bmp`, `.gif`, `.jxl`, or `.webp` (case-insensitive;
+        /// `.jxl` and `.webp` need libc linked and the system library at runtime).
         /// Returns `error.UnsupportedImageFormat` for any other extension.
         pub fn save(self: Self, io: Io, allocator: Allocator, file_path: []const u8) !void {
             const fmt = ImageFormat.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
@@ -300,6 +304,7 @@ pub fn Image(comptime T: type) type {
                 .bmp => bmp.save(T, io, allocator, self, file_path),
                 .gif => gif.save(T, io, allocator, self, file_path),
                 .jxl => jxl.save(T, io, allocator, self, file_path),
+                .webp => webp.save(T, io, allocator, self, file_path),
             };
         }
 

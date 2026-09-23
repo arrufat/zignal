@@ -8,6 +8,7 @@ const bmp = codecs.bmp;
 const gif = codecs.gif;
 const jpeg = codecs.jpeg;
 const jxl = codecs.jxl;
+const webp = codecs.webp;
 const png = codecs.png;
 
 /// Supported image formats for automatic detection and loading.
@@ -16,8 +17,8 @@ pub const ImageFormat = enum {
     jpeg,
     bmp,
     gif,
-    /// Loading and saving need `zig build -fsys=jxl`; detection always works.
     jxl,
+    webp,
 
     /// Detects image format from the first few bytes of file data.
     pub fn detectFromBytes(data: []const u8) ?ImageFormat {
@@ -50,6 +51,7 @@ pub const ImageFormat = enum {
         }
 
         if (jxl.hasSignature(data)) return .jxl;
+        if (webp.hasSignature(data)) return .webp;
 
         return null;
     }
@@ -76,6 +78,17 @@ pub const ImageFormat = enum {
         if (matches(file_path, ".bmp")) return .bmp;
         if (matches(file_path, ".gif")) return .gif;
         if (matches(file_path, ".jxl")) return .jxl;
+        if (matches(file_path, ".webp")) return .webp;
         return null;
+    }
+
+    /// The system library a runtime-loaded codec needs (see `codecs/dynlib.zig`), or null
+    /// for the native codecs.
+    pub fn runtimeLibrary(self: ImageFormat) ?[]const u8 {
+        return switch (self) {
+            .png, .jpeg, .bmp, .gif => null,
+            .jxl => "libjxl",
+            .webp => "libwebp",
+        };
     }
 };

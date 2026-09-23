@@ -11,10 +11,8 @@ pub fn build(b: *Build) void {
 
     const print_md5sums = b.option(bool, "print-md5sums", "Print MD5 checksums instead of testing them") orelse false;
     const debug_test_images = b.option(bool, "debug-test-images", "Save regression test renderings as PNGs") orelse false;
-    // Opt-in JPEG XL through the system libjxl, opened at runtime: `zig build -fsys=jxl`.
-    // `std.DynLib` needs libc on Linux and has no Windows backend.
-    const jxl = b.systemIntegrationOption("jxl", .{}) and
-        !target.result.cpu.arch.isWasm() and target.result.os.tag != .windows;
+    const cli_libc = b.option(bool, "libc", "Link the CLI against libc, which enables JPEG XL and WebP through the system libraries (default: Windows only)") orelse
+        (target.result.os.tag == .windows);
 
     const zignal = b.addModule("zignal", .{
         .root_source_file = b.path("src/root.zig"),
@@ -25,9 +23,7 @@ pub fn build(b: *Build) void {
     build_options.addOption([]const u8, "version", b.fmt("{f}", .{version}));
     build_options.addOption(bool, "print_md5sums", print_md5sums);
     build_options.addOption(bool, "debug_test_images", debug_test_images);
-    build_options.addOption(bool, "jxl", jxl);
     zignal.addOptions("build_options", build_options);
-    if (jxl) zignal.link_libc = true;
 
     const lib = b.addLibrary(.{
         .name = "zignal",
@@ -50,7 +46,7 @@ pub fn build(b: *Build) void {
             .target = target,
             .optimize = optimize,
             .strip = optimize != .debug,
-            .link_libc = target.result.os.tag == .windows,
+            .link_libc = cli_libc,
             .imports = &.{
                 .{ .name = "zignal", .module = zignal },
             },
@@ -84,7 +80,8 @@ pub fn build(b: *Build) void {
         }),
     });
     lib_test.root_module.addOptions("build_options", build_options);
-    if (jxl) lib_test.root_module.link_libc = true;
+    // libc lets the tests load libjxl/libwebp (src/codecs/dynlib.zig).
+    lib_test.root_module.link_libc = !target.result.cpu.arch.isWasm() and target.result.os.tag != .windows;
     test_step.dependOn(&b.addRunArtifact(lib_test).step);
 
     const fmt_step = b.step("fmt", "Check code formatting");

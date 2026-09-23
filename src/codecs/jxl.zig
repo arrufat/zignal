@@ -1,7 +1,5 @@
-//! JPEG XL codec backed by the system libjxl, enabled with `zig build -fsys=jxl`.
-//! libjxl is opened at runtime on first use, so a build with the flag still runs where
-//! libjxl is missing and only JPEG XL calls fail, with `error.JxlUnavailable`. Without the
-//! flag every entry point returns `error.JxlNotEnabled`; signature detection works either way.
+//! JPEG XL codec backed by the system libjxl, opened at runtime (see `dynlib.zig`).
+//! Signature detection works in every build.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -9,13 +7,14 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 const Image = @import("../image.zig").Image;
-const meta = @import("../meta.zig");
+const NativeImage = @import("../codecs.zig").NativeImage;
+const dynlib = @import("dynlib.zig");
 const parallel = @import("../parallel.zig");
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
 
-/// Whether this build can load libjxl (never on wasm or Windows, which has no `DynLib` backend).
-pub const enabled = @import("build_options").jxl;
+/// Whether this build can load libjxl; otherwise every call returns `error.CodecNotEnabled`.
+pub const enabled = dynlib.supported;
 
 const max_file_size: usize = 100 * 1024 * 1024;
 
@@ -61,24 +60,11 @@ pub const Header = struct {
     uses_original_profile: bool,
 };
 
-/// Decoded first frame in its natural pixel type.
-pub const NativeImage = union(enum) {
-    grayscale: Image(u8),
-    rgb: Image(Rgb),
-    rgba: Image(Rgba),
-
-    pub fn deinit(self: *NativeImage, allocator: Allocator) void {
-        switch (self.*) {
-            inline else => |*img| img.deinit(allocator),
-        }
-    }
-};
-
 /// Reads just enough of `reader` to parse the header.
 pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
-    if (!enabled) return error.JxlNotEnabled;
+    if (!enabled) return error.CodecNotEnabled;
     _ = limits;
-    const jxl = try api();
+    const jxl = try Libjxl.get();
     const dec = jxl.JxlDecoderCreate(null) orelse return error.OutOfMemory;
     defer jxl.JxlDecoderDestroy(dec);
     try decCheck(jxl.JxlDecoderSubscribeEvents(dec, dec_basic_info));
@@ -106,9 +92,9 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
 /// Decodes the first frame of `data` into its natural pixel type, converted to sRGB when the
 /// codestream allows it (XYB-encoded images). libjxl's worker tasks run on `io`.
 pub fn decode(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !NativeImage {
-    if (!enabled) return error.JxlNotEnabled;
+    if (!enabled) return error.CodecNotEnabled;
     if (!hasSignature(data)) return error.InvalidJxl;
-    const jxl = try api();
+    const jxl = try Libjxl.get();
 
     const dec = jxl.JxlDecoderCreate(null) orelse return error.OutOfMemory;
     defer jxl.JxlDecoderDestroy(dec);
@@ -161,18 +147,11 @@ pub fn decode(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimi
 /// Decodes a JPEG XL byte stream into `Image(T)`, converting from the natural pixel type as needed.
 pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
     var native = try decode(io, allocator, data, limits);
-    switch (native) {
-        inline else => |*img| {
-            const Src = @TypeOf(img.*.data[0]);
-            if (Src == T) return img.*;
-            defer native.deinit(allocator);
-            return img.convert(io, allocator, T);
-        },
-    }
+    return native.into(T, io, allocator);
 }
 
 pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
-    if (!enabled) return error.JxlNotEnabled;
+    if (!enabled) return error.CodecNotEnabled;
     const read_limit = if (limits.max_jxl_bytes == 0) std.math.maxInt(usize) else limits.max_jxl_bytes;
     const data = try Io.Dir.cwd().readFileAlloc(io, file_path, allocator, .limited(read_limit));
     defer allocator.free(data);
@@ -181,7 +160,7 @@ pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u
 
 /// Encodes `image` as sRGB JPEG XL. `u8`→grayscale, `Rgb`→RGB, `Rgba`→RGBA, others→RGB.
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
-    if (!enabled) return error.JxlNotEnabled;
+    if (!enabled) return error.CodecNotEnabled;
     switch (T) {
         u8, Rgb, Rgba => {
             if (image.isContiguous()) return encodeRaw(io, allocator, image.asBytes(), image.cols, image.rows, @sizeOf(T), options);
@@ -208,7 +187,7 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
 }
 
 fn encodeRaw(io: Io, allocator: Allocator, pixels: []const u8, width: u32, height: u32, channels: u32, options: EncodeOptions) ![]u8 {
-    const jxl = try api();
+    const jxl = try Libjxl.get();
     const enc = jxl.JxlEncoderCreate(null) orelse return error.OutOfMemory;
     defer jxl.JxlEncoderDestroy(enc);
     var runner: Runner = .{ .io = io };
@@ -435,38 +414,10 @@ const Api = struct {
 };
 
 /// Newest first; the soname carries the minor version while libjxl is 0.x.
-const library_names: []const []const u8 = switch (builtin.os.tag) {
-    .macos => &.{ "libjxl.dylib", "/opt/homebrew/lib/libjxl.dylib", "/usr/local/lib/libjxl.dylib" },
+const Libjxl = dynlib.Library(Api, switch (builtin.os.tag) {
+    .macos => dynlib.macosNames("libjxl.dylib"),
     else => &.{ "libjxl.so.1", "libjxl.so.0.13", "libjxl.so.0.12", "libjxl.so.0.11", "libjxl.so.0.10", "libjxl.so.0.9", "libjxl.so.0.8", "libjxl.so.0.7", "libjxl.so" },
-};
-
-var loaded: std.atomic.Value(?*const Api) = .init(null);
-
-/// Opens libjxl once per process; the library stays loaded. Racing first calls both load it
-/// and the loser drops its copy (`dlopen` is reference counted).
-fn api() error{JxlUnavailable}!*const Api {
-    if (loaded.load(.acquire)) |ptr| return ptr;
-    var lib: std.DynLib = for (library_names) |name| {
-        break std.DynLib.open(name) catch continue;
-    } else return error.JxlUnavailable;
-    const table = std.heap.page_allocator.create(Api) catch {
-        lib.close();
-        return error.JxlUnavailable;
-    };
-    inline for (comptime meta.structFields(Api)) |field| {
-        @field(table, field.name) = lib.lookup(field.type, field.name) orelse {
-            std.heap.page_allocator.destroy(table);
-            lib.close();
-            return error.JxlUnavailable;
-        };
-    }
-    if (loaded.cmpxchgStrong(null, table, .acq_rel, .acquire)) |winner| {
-        std.heap.page_allocator.destroy(table);
-        lib.close();
-        return winner.?;
-    }
-    return table;
-}
+});
 
 test "signature detection" {
     try std.testing.expect(hasSignature(&signature));
@@ -474,9 +425,9 @@ test "signature detection" {
     try std.testing.expect(!hasSignature(&.{ 0xFF, 0xD8 }));
 }
 
-test "disabled build reports JxlNotEnabled" {
+test "disabled build reports CodecNotEnabled" {
     if (enabled) return error.SkipZigTest;
-    try std.testing.expectError(error.JxlNotEnabled, decode(std.testing.io, std.testing.allocator, &signature, .default));
+    try std.testing.expectError(error.CodecNotEnabled, decode(std.testing.io, std.testing.allocator, &signature, .default));
 }
 
 test "ABI layout matches libjxl" {
@@ -512,7 +463,7 @@ fn testImage(comptime T: type, allocator: Allocator) !Image(T) {
 /// Skips when this machine has no libjxl.
 fn requireLibjxl() !void {
     if (!enabled) return error.SkipZigTest;
-    _ = api() catch return error.SkipZigTest;
+    _ = Libjxl.get() catch return error.SkipZigTest;
 }
 
 test "lossless round trip" {

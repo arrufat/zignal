@@ -10,6 +10,7 @@ const jpeg = zignal.jpeg;
 const bmp = zignal.bmp;
 const gif = zignal.gif;
 const jxl = zignal.jxl;
+const webp = zignal.webp;
 
 const args = @import("args.zig");
 const common = @import("common.zig");
@@ -128,6 +129,17 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
                     try writer.print("Bit Depth:   {d}{s}\n", .{ info.bits_per_sample, if (info.exponent_bits_per_sample > 0) " (float)" else "" });
                     try writer.print("Channels:    {d}\n", .{info.num_color_channels + @intFromBool(info.has_alpha)});
                     try writer.print("Encoding:    {s}\n", .{if (info.uses_original_profile) "original color space" else "XYB"});
+                    if (info.has_animation) {
+                        try writer.print("Animated:    yes\n", .{});
+                    }
+                },
+                .webp => {
+                    const info = webp.getInfo(&reader.interface, .{}) catch |err| break :blk err;
+
+                    try writer.print("Format:      WebP\n", .{});
+                    try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
+                    try writer.print("Encoding:    {s}\n", .{@tagName(info.format)});
+                    try writer.print("Alpha:       {s}\n", .{if (info.has_alpha) "yes" else "no"});
                     if (info.has_animation) {
                         try writer.print("Animated:    yes\n", .{});
                     }

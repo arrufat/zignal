@@ -9,6 +9,7 @@ const jpeg = zignal.jpeg;
 const bmp = zignal.bmp;
 const gif = zignal.gif;
 const jxl = zignal.jxl;
+const webp = zignal.webp;
 
 const Rgba = zignal.Rgba(u8);
 
@@ -94,6 +95,7 @@ fn writeInfoFields(w: *std.Io.Writer, format: ImageFormat, data: []const u8) !vo
                 .bmp => bmp,
                 .gif => gif,
                 .jxl => jxl,
+                .webp => webp,
             };
             var reader: std.Io.Reader = .fixed(data);
             const h = try codec.getInfo(&reader, .{});
@@ -125,6 +127,9 @@ fn writeInfoFields(w: *std.Io.Writer, format: ImageFormat, data: []const u8) !vo
                 },
                 .jxl => {
                     try w.print("\"bits_per_sample\":{d},\"num_color_channels\":{d},\"has_alpha\":{},\"has_animation\":{}", .{ h.bits_per_sample, h.num_color_channels, h.has_alpha, h.has_animation });
+                },
+                .webp => {
+                    try w.print("\"encoding\":\"{t}\",\"has_alpha\":{},\"has_animation\":{}", .{ h.format, h.has_alpha, h.has_animation });
                 },
             }
             try w.writeAll("}");
