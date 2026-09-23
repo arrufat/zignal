@@ -18,14 +18,12 @@ const Rgb = @import("../color.zig").Rgb(u8);
 const Ycbcr = @import("../color.zig").Ycbcr(u8);
 const meta = @import("../meta.zig");
 
-const max_file_size: usize = 100 * 1024 * 1024;
-
 /// User-configurable resource limits for JPEG decoding. Zero disables a limit.
 pub const DecodeLimits = struct {
     /// Maximum number of bytes accepted for the original JPEG buffer.
-    max_jpeg_bytes: usize = max_file_size,
+    max_jpeg_bytes: usize = codecs.max_file_size,
     /// Cap on total marker payload bytes (length-prefixed segments plus entropy data).
-    max_marker_bytes: usize = max_file_size,
+    max_marker_bytes: usize = codecs.max_file_size,
     /// Maximum declared image width/height in pixels.
     max_width: u32 = 8192,
     max_height: u32 = 8192,
@@ -39,15 +37,9 @@ pub const DecodeLimits = struct {
     pub const default: DecodeLimits = .{};
 };
 
-inline fn exceeds(limit: u64, value: u64) bool {
-    return limit != 0 and value > limit;
-}
+const exceeds = codecs.exceeds;
 
-fn accumulateWithLimit(current: *usize, addend: usize, limit: usize, limit_error: anyerror) !void {
-    const new_total = std.math.add(usize, current.*, addend) catch return limit_error;
-    if (limit != 0 and new_total > limit) return limit_error;
-    current.* = new_total;
-}
+const accumulateWithLimit = codecs.accumulateWithLimit;
 
 /// JPEG signature: 2-byte magic header that identifies a JPEG file (SOI marker).
 pub const signature = [_]u8{ 0xFF, 0xD8 };

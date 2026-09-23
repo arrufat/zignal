@@ -7,6 +7,8 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
+const animated = @import("../image/animated.zig");
+const AnimatedImage = animated.AnimatedImage;
 const Image = @import("../image.zig").Image;
 const codecs = @import("../codecs.zig");
 const NativeImage = codecs.NativeImage;
@@ -17,8 +19,6 @@ const Rgba = @import("../color.zig").Rgba(u8);
 /// Whether this build can load libwebp; otherwise every call returns `error.CodecNotEnabled`.
 pub const enabled = dynlib.supported;
 
-const max_file_size: usize = 100 * 1024 * 1024;
-
 /// `RIFF` then the little-endian file size, then `WEBP`.
 pub fn hasSignature(data: []const u8) bool {
     return data.len >= 12 and std.mem.eql(u8, data[0..4], "RIFF") and std.mem.eql(u8, data[8..12], "WEBP");
@@ -26,9 +26,13 @@ pub fn hasSignature(data: []const u8) bool {
 
 pub const DecodeLimits = struct {
     /// Maximum encoded size read by `load`; 0 disables the cap.
-    max_webp_bytes: usize = max_file_size,
-    /// Maximum decoded pixel count; 0 disables the cap.
+    max_webp_bytes: usize = codecs.max_file_size,
+    /// Maximum decoded pixel count (per frame); 0 disables the cap.
     max_pixels: u64 = 1 << 28,
+    /// Maximum animation frames; 0 disables the cap.
+    max_frames: u32 = 4096,
+    /// Maximum pixels across all composed frames; 0 disables the cap.
+    max_total_pixels: u64 = 1 << 30,
 
     pub const default: DecodeLimits = .{};
 };
@@ -75,19 +79,50 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
     }
 }
 
-/// Decodes a still WebP into RGBA when it has alpha, else RGB (WebP has no grayscale).
-/// Animations return `error.UnsupportedAnimation`.
+/// Decodes a WebP into RGBA when it has alpha, else RGB (WebP has no grayscale). Animations
+/// give their first composed frame, as RGBA.
 pub fn decode(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !NativeImage {
     if (!enabled) return error.CodecNotEnabled;
     _ = io;
-    if (!hasSignature(data)) return error.InvalidWebp;
     const webp = try Libwebp.get();
-    var features: Features = undefined;
-    if (webp.WebPGetFeaturesInternal(data.ptr, data.len, &features, decoder_abi) != status_ok) return error.InvalidWebp;
-    const info = try header(features);
-    if (info.has_animation) return error.UnsupportedAnimation;
-    if (limits.max_pixels != 0 and @as(u64, info.width) * info.height > limits.max_pixels) return error.ImageTooLarge;
+    const info = try readHeader(webp, data);
+    if (!info.has_animation) return decodeStill(webp, allocator, data, info, limits);
+    var reader: AnimReader = try .init(data, limits);
+    defer reader.deinit();
+    const first = try reader.next() orelse return error.InvalidWebp;
+    return .{ .rgba = try reader.canvas(first).dupe(allocator) };
+}
 
+/// Loads every frame; a still WebP gives one frame.
+pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
+    if (!enabled) return error.CodecNotEnabled;
+    const webp = try Libwebp.get();
+    const info = try readHeader(webp, data);
+    if (!info.has_animation) {
+        var still = try decodeStill(webp, allocator, data, info, limits);
+        return .fromStill(allocator, try still.into(T, io, allocator));
+    }
+    var reader: AnimReader = try .init(data, limits);
+    defer reader.deinit();
+    var builder: animated.Builder(T) = .{};
+    defer builder.deinit(allocator);
+    while (try reader.next()) |frame| {
+        // The decoder reuses its canvas: copy it out, converting on the way when T isn't RGBA.
+        const canvas = reader.canvas(frame);
+        try builder.append(allocator, if (T == Rgba) try canvas.dupe(allocator) else try canvas.convert(io, allocator, T), frame.duration_ms);
+    }
+    return builder.finish(allocator, reader.info.loop_count);
+}
+
+pub fn loadAnimated(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
+    if (!enabled) return error.CodecNotEnabled;
+    const data = try codecs.readFile(io, allocator, file_path, limits.max_webp_bytes);
+    defer allocator.free(data);
+    return loadAnimatedFromBytes(T, io, allocator, data, limits);
+}
+
+fn decodeStill(webp: *const Api, allocator: Allocator, data: []const u8, info: Header, limits: DecodeLimits) !NativeImage {
+    if (codecs.exceeds(limits.max_pixels, @as(u64, info.width) * info.height)) return error.ImageTooLarge;
     var native: NativeImage = if (info.has_alpha)
         .{ .rgba = try .init(allocator, info.height, info.width) }
     else
@@ -100,6 +135,64 @@ pub fn decode(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimi
     };
     if (decoded == null) return error.InvalidWebp;
     return native;
+}
+
+/// Walks the composed RGBA frames of an animated WebP through libwebpdemux.
+const AnimReader = struct {
+    demux: *const DemuxApi,
+    dec: *AnimDecoder,
+    info: AnimInfo,
+    read: u32 = 0,
+    /// End time of the previous frame in milliseconds (libwebp timestamps are frame end times).
+    previous_end: c_int = 0,
+
+    const Frame = struct { pixels: []const u8, duration_ms: u32 };
+
+    fn init(data: []const u8, limits: DecodeLimits) !AnimReader {
+        const demux = try LibwebpDemux.get();
+        var options: AnimDecoderOptions = undefined;
+        if (demux.WebPAnimDecoderOptionsInitInternal(&options, demux_abi) == 0) return error.CodecUnavailable;
+        options.color_mode = mode_rgba;
+        options.use_threads = 1;
+        const webp_data: WebPData = .{ .bytes = data.ptr, .size = data.len };
+        const dec = demux.WebPAnimDecoderNewInternal(&webp_data, &options, demux_abi) orelse return error.InvalidWebp;
+        errdefer demux.WebPAnimDecoderDelete(dec);
+        var info: AnimInfo = undefined;
+        if (demux.WebPAnimDecoderGetInfo(dec, &info) == 0) return error.InvalidWebp;
+        const canvas_pixels = @as(u64, info.canvas_width) * info.canvas_height;
+        if (codecs.exceeds(limits.max_frames, info.frame_count)) return error.TooManyFrames;
+        if (codecs.exceeds(limits.max_pixels, canvas_pixels)) return error.ImageTooLarge;
+        if (codecs.exceeds(limits.max_total_pixels, canvas_pixels * info.frame_count)) return error.ImageTooLarge;
+        return .{ .demux = demux, .dec = dec, .info = info };
+    }
+
+    fn deinit(self: *AnimReader) void {
+        self.demux.WebPAnimDecoderDelete(self.dec);
+    }
+
+    /// The next frame, borrowed until the following call, or null after the last one.
+    fn next(self: *AnimReader) !?Frame {
+        if (self.read == self.info.frame_count) return null;
+        var pixels: ?[*]const u8 = null;
+        var end: c_int = 0;
+        if (self.demux.WebPAnimDecoderGetNext(self.dec, &pixels, &end) == 0) return error.InvalidWebp;
+        self.read += 1;
+        defer self.previous_end = end;
+        const len = @as(usize, self.info.canvas_width) * self.info.canvas_height * 4;
+        return .{ .pixels = (pixels orelse return error.InvalidWebp)[0..len], .duration_ms = @intCast(@max(0, end - self.previous_end)) };
+    }
+
+    /// Views a borrowed frame as an image (still owned by the decoder).
+    fn canvas(self: AnimReader, frame: Frame) Image(Rgba) {
+        return .initFromBytes(self.info.canvas_height, self.info.canvas_width, @constCast(frame.pixels));
+    }
+};
+
+fn readHeader(webp: *const Api, data: []const u8) !Header {
+    if (!hasSignature(data)) return error.InvalidWebp;
+    var features: Features = undefined;
+    if (webp.WebPGetFeaturesInternal(data.ptr, data.len, &features, decoder_abi) != status_ok) return error.InvalidWebp;
+    return header(features);
 }
 
 pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
@@ -205,6 +298,42 @@ const Libwebp = dynlib.Library(Api, switch (builtin.os.tag) {
     else => &.{ "libwebp.so.7", "libwebp.so" },
 });
 
+// libwebpdemux, for animations. Only the major byte of `WEBP_DEMUX_ABI_VERSION` must match.
+const demux_abi = 0x0100;
+const mode_rgba = 1;
+
+const WebPData = extern struct { bytes: [*]const u8, size: usize };
+
+const AnimDecoderOptions = extern struct {
+    color_mode: c_int,
+    use_threads: c_int,
+    padding: [7]u32,
+};
+
+const AnimInfo = extern struct {
+    canvas_width: u32,
+    canvas_height: u32,
+    loop_count: u32,
+    bgcolor: u32,
+    frame_count: u32,
+    pad: [4]u32,
+};
+
+const AnimDecoder = opaque {};
+
+const DemuxApi = struct {
+    WebPAnimDecoderOptionsInitInternal: *const fn (options: *AnimDecoderOptions, abi: c_int) callconv(.c) c_int,
+    WebPAnimDecoderNewInternal: *const fn (data: *const WebPData, options: *const AnimDecoderOptions, abi: c_int) callconv(.c) ?*AnimDecoder,
+    WebPAnimDecoderGetInfo: *const fn (dec: *const AnimDecoder, info: *AnimInfo) callconv(.c) c_int,
+    WebPAnimDecoderGetNext: *const fn (dec: *AnimDecoder, buf: *?[*]const u8, timestamp: *c_int) callconv(.c) c_int,
+    WebPAnimDecoderDelete: *const fn (dec: *AnimDecoder) callconv(.c) void,
+};
+
+const LibwebpDemux = dynlib.Library(DemuxApi, switch (builtin.os.tag) {
+    .macos => dynlib.macosNames("libwebpdemux.dylib"),
+    else => &.{ "libwebpdemux.so.2", "libwebpdemux.so" },
+});
+
 test "signature detection" {
     try std.testing.expect(hasSignature("RIFF\x24\x00\x00\x00WEBPVP8 "));
     try std.testing.expect(!hasSignature("RIFF\x24\x00\x00\x00WAVEfmt "));
@@ -218,6 +347,9 @@ test "disabled build reports CodecNotEnabled" {
 
 test "ABI layout matches libwebp" {
     try std.testing.expectEqual(40, @sizeOf(Features));
+    try std.testing.expectEqual(36, @sizeOf(AnimDecoderOptions));
+    try std.testing.expectEqual(36, @sizeOf(AnimInfo));
+    if (@sizeOf(usize) == 8) try std.testing.expectEqual(16, @sizeOf(WebPData));
 }
 
 /// Smooth gradients (lossy WebP subsamples chroma) and no fully transparent pixels, whose RGB
@@ -274,6 +406,20 @@ test "views encode without a copy" {
     var expected = try view.dupe(allocator);
     defer expected.deinit(allocator);
     try std.testing.expectEqualSlices(u8, expected.asBytes(), back.asBytes());
+}
+
+test "a still loads as a one-frame animation" {
+    if (!enabled or !Libwebp.available()) return error.SkipZigTest;
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var img = try testImage(Rgb, allocator);
+    defer img.deinit(allocator);
+    const bytes = try encode(Rgb, io, allocator, img, .lossless);
+    defer allocator.free(bytes);
+    var anim = try loadAnimatedFromBytes(Rgb, io, allocator, bytes, .default);
+    defer anim.deinit(allocator);
+    try std.testing.expectEqual(1, anim.frameCount());
+    try std.testing.expectEqualSlices(u8, img.asBytes(), anim.frame(0).asBytes());
 }
 
 test "lossy round trip stays close" {

@@ -16,7 +16,6 @@ const NativeImage = codecs.NativeImage;
 
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
-const max_file_size: usize = 100 * 1024 * 1024;
 const max_dimensions_default: u32 = 8192;
 const max_pixels_default: u64 = 67_108_864; // 8K square
 const max_decompressed_default: usize = 536_886_272; // 8K×8K RGBA 16-bit Adam7 worst case
@@ -25,11 +24,11 @@ const max_decompressed_default: usize = 536_886_272; // 8K×8K RGBA 16-bit Adam7
 /// A zero value disables the corresponding limit.
 pub const DecodeLimits = struct {
     /// Maximum number of bytes accepted in the original PNG buffer (signature + chunks).
-    max_png_bytes: usize = max_file_size,
+    max_png_bytes: usize = codecs.max_file_size,
     /// Maximum cumulative size (in bytes) across all chunk payloads.
-    max_chunk_bytes: usize = max_file_size,
+    max_chunk_bytes: usize = codecs.max_file_size,
     /// Maximum cumulative size of IDAT chunk payloads (compressed image stream).
-    max_idat_bytes: usize = max_file_size,
+    max_idat_bytes: usize = codecs.max_file_size,
     /// Maximum number of chunks accepted in a single PNG. Helps prevent zip bombs
     /// that add thousands of tiny ancillary entries.
     max_chunks: usize = 8192,
@@ -56,15 +55,9 @@ const ChunkOrderState = struct {
     idat_stream_finished: bool = false,
 };
 
-inline fn exceeds(T: type, limit: T, value: T) bool {
-    return limit != 0 and value > limit;
-}
+const exceeds = codecs.exceeds;
 
-fn accumulateWithLimit(current: *usize, addend: usize, limit: usize, limit_error: anyerror) !void {
-    const new_total = std.math.add(usize, current.*, addend) catch return limit_error;
-    if (limit != 0 and new_total > limit) return limit_error;
-    current.* = new_total;
-}
+const accumulateWithLimit = codecs.accumulateWithLimit;
 
 fn ensureArrayCapacityWithinLimit(list: *ArrayList(u8), allocator: Allocator, required_len: usize, limit: usize) !void {
     if (required_len <= list.capacity) return;
@@ -74,7 +67,7 @@ fn ensureArrayCapacityWithinLimit(list: *ArrayList(u8), allocator: Allocator, re
         const doubled = std.math.mul(usize, list.capacity, 2) catch std.math.maxInt(usize);
         if (doubled > target) target = doubled;
     }
-    if (limit != 0 and target > limit) {
+    if (exceeds(limit, target)) {
         target = limit;
     }
     try list.ensureTotalCapacityPrecise(allocator, target);
@@ -278,11 +271,11 @@ fn completeScanPrefix(len: usize, header: Header) usize {
 }
 
 fn enforceHeaderLimits(header: Header, limits: DecodeLimits) !void {
-    if (exceeds(u32, limits.max_width, header.width) or exceeds(u32, limits.max_height, header.height)) {
+    if (exceeds(limits.max_width, header.width) or exceeds(limits.max_height, header.height)) {
         return error.ImageTooLarge;
     }
     const total_pixels = header.totalPixels();
-    if (exceeds(u64, limits.max_pixels, total_pixels)) {
+    if (exceeds(limits.max_pixels, total_pixels)) {
         return error.ImageTooLarge;
     }
 }
@@ -327,7 +320,7 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
 
     while (true) {
         // Check limits before reading next chunk
-        if (exceeds(usize, limits.max_png_bytes, bytes_read)) {
+        if (exceeds(limits.max_png_bytes, bytes_read)) {
             return error.PngDataTooLarge;
         }
 
@@ -342,13 +335,13 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
         const chunk_type = chunk_type_ptr.*;
 
         chunk_count += 1;
-        if (exceeds(usize, limits.max_chunks, chunk_count)) {
+        if (exceeds(limits.max_chunks, chunk_count)) {
             return error.TooManyChunks;
         }
 
         // Total chunk size: length + 4 (CRC)
         const total_chunk_size = @as(usize, length) + 4;
-        if (limits.max_png_bytes != 0 and bytes_read + total_chunk_size > limits.max_png_bytes) {
+        if (exceeds(limits.max_png_bytes, bytes_read + total_chunk_size)) {
             return error.PngDataTooLarge;
         }
 
@@ -637,7 +630,7 @@ pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngSt
     if (png_data.len < 8 or !std.mem.eql(u8, png_data[0..8], &signature)) {
         return error.InvalidPngSignature;
     }
-    if (exceeds(usize, limits.max_png_bytes, png_data.len)) {
+    if (exceeds(limits.max_png_bytes, png_data.len)) {
         return error.PngDataTooLarge;
     }
 
@@ -656,7 +649,7 @@ pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngSt
 
     while (try reader.nextChunk()) |chunk| {
         chunk_count += 1;
-        if (exceeds(usize, limits.max_chunks, chunk_count)) {
+        if (exceeds(limits.max_chunks, chunk_count)) {
             return error.TooManyChunks;
         }
 
@@ -792,7 +785,7 @@ pub fn decode(gpa: Allocator, png_data: []const u8, limits: DecodeLimits) !PngSt
     }
 
     png_state.scan_data_bytes = try scanDataLength(png_state.header);
-    if (exceeds(usize, limits.max_decompressed_bytes, png_state.scan_data_bytes)) {
+    if (exceeds(limits.max_decompressed_bytes, png_state.scan_data_bytes)) {
         return error.ImageTooLarge;
     }
 

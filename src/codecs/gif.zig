@@ -7,7 +7,7 @@
 //! which return an `AnimatedImage(T)` of fully-composed frames (disposal, transparency,
 //! and interlace are absorbed inside the codec).
 //!
-//! Encoder is single-frame for v1; animated encoding lands later.
+//! `encodeAnimated` / `saveAnimated` write multi-frame GIFs.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -20,7 +20,8 @@ const expectEqual = std.testing.expectEqual;
 
 const codecs = @import("../codecs.zig");
 const Image = @import("../image.zig").Image;
-const AnimatedImage = @import("../image.zig").AnimatedImage;
+const animated = @import("../image/animated.zig");
+const AnimatedImage = animated.AnimatedImage;
 const convertColor = @import("../color.zig").convertColor;
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
@@ -39,7 +40,6 @@ pub const signature = [_]u8{ 'G', 'I', 'F' };
 /// GIF version (87a or 89a).
 pub const Version = enum { gif87a, gif89a };
 
-const max_file_size_default: usize = 100 * 1024 * 1024;
 const max_dimensions_default: u32 = 8192;
 const max_pixels_default: u64 = 67_108_864; // per frame
 const max_frames_default: u32 = 4096;
@@ -48,7 +48,7 @@ const max_total_pixels_default: u64 = 1_073_741_824; // sum across frames (LZW b
 /// Resource limits applied while decoding GIF data. Zero disables the
 /// corresponding limit.
 pub const DecodeLimits = struct {
-    max_gif_bytes: usize = max_file_size_default,
+    max_gif_bytes: usize = codecs.max_file_size,
     max_width: u32 = max_dimensions_default,
     max_height: u32 = max_dimensions_default,
     /// Per-frame pixel count cap.
@@ -81,9 +81,7 @@ pub const Header = struct {
     }
 };
 
-inline fn exceeds(comptime T: type, limit: T, value: T) bool {
-    return limit != 0 and value > limit;
-}
+const exceeds = codecs.exceeds;
 
 // ---------------------------------------------------------------------------
 // Block introducer constants
@@ -140,10 +138,10 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
     _ = try reader.takeByte(); // pixel aspect ratio (unused)
 
     if (screen_w == 0 or screen_h == 0) return error.InvalidLogicalScreenDescriptor;
-    if (exceeds(u32, limits.max_width, screen_w) or exceeds(u32, limits.max_height, screen_h)) {
+    if (exceeds(limits.max_width, screen_w) or exceeds(limits.max_height, screen_h)) {
         return error.ImageTooLarge;
     }
-    if (exceeds(u64, limits.max_pixels, @as(u64, screen_w) * @as(u64, screen_h))) {
+    if (exceeds(limits.max_pixels, @as(u64, screen_w) * @as(u64, screen_h))) {
         return error.ImageTooLarge;
     }
 
@@ -176,7 +174,7 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
                 try skipSubBlocks(reader);
 
                 frame_count += 1;
-                if (exceeds(u32, limits.max_frames, frame_count)) return error.TooManyFrames;
+                if (exceeds(limits.max_frames, frame_count)) return error.TooManyFrames;
             },
             block_extension_introducer => {
                 const label = try reader.takeByte();
@@ -320,7 +318,7 @@ pub const GifState = struct {
 /// palette indices; composition into Images happens via `loadFromBytes`
 /// (single-frame) or `loadAnimated*` (multi-frame).
 pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState {
-    if (exceeds(usize, limits.max_gif_bytes, data.len)) return error.GifDataTooLarge;
+    if (exceeds(limits.max_gif_bytes, data.len)) return error.GifDataTooLarge;
 
     var reader: Io.Reader = .fixed(data);
 
@@ -340,10 +338,10 @@ pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState 
     _ = try reader.takeByte(); // pixel aspect ratio
 
     if (screen_w == 0 or screen_h == 0) return error.InvalidLogicalScreenDescriptor;
-    if (exceeds(u32, limits.max_width, screen_w) or exceeds(u32, limits.max_height, screen_h)) {
+    if (exceeds(limits.max_width, screen_w) or exceeds(limits.max_height, screen_h)) {
         return error.ImageTooLarge;
     }
-    if (exceeds(u64, limits.max_pixels, @as(u64, screen_w) * @as(u64, screen_h))) {
+    if (exceeds(limits.max_pixels, @as(u64, screen_w) * @as(u64, screen_h))) {
         return error.ImageTooLarge;
     }
 
@@ -384,7 +382,7 @@ pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState 
                 const frame = try parseImageBlock(gpa, &reader, limits, global_palette, pending_gce, &total_pixels);
                 pending_gce = null;
                 try frames.append(gpa, frame);
-                if (exceeds(u32, limits.max_frames, @intCast(frames.items.len))) {
+                if (exceeds(limits.max_frames, @intCast(frames.items.len))) {
                     return error.TooManyFrames;
                 }
             },
@@ -447,13 +445,13 @@ fn parseImageBlock(
     const img_packed = try reader.takeByte();
 
     if (width == 0 or height == 0) return error.InvalidImageDescriptor;
-    if (exceeds(u32, limits.max_width, width) or exceeds(u32, limits.max_height, height)) {
+    if (exceeds(limits.max_width, width) or exceeds(limits.max_height, height)) {
         return error.ImageTooLarge;
     }
     const num_pixels: u64 = @as(u64, width) * @as(u64, height);
-    if (exceeds(u64, limits.max_pixels, num_pixels)) return error.ImageTooLarge;
+    if (exceeds(limits.max_pixels, num_pixels)) return error.ImageTooLarge;
     total_pixels.* +|= num_pixels;
-    if (exceeds(u64, limits.max_total_pixels, total_pixels.*)) return error.ImageTooLarge;
+    if (exceeds(limits.max_total_pixels, total_pixels.*)) return error.ImageTooLarge;
 
     const has_lct = (img_packed & id_flag_local_color_table) != 0;
     const interlaced = (img_packed & id_flag_interlace) != 0;
@@ -619,20 +617,13 @@ fn composeAnimated(comptime T: type, io: Io, allocator: Allocator, state: GifSta
         null;
     defer if (snapshot) |s| allocator.free(s);
 
-    const frames_out = try allocator.alloc(Image(T), state.frames.len);
-    var frames_init: usize = 0;
-    errdefer {
-        for (frames_out[0..frames_init]) |*f| f.deinit(allocator);
-        allocator.free(frames_out);
-    }
-
-    var delays_out = try allocator.alloc(u16, state.frames.len);
-    errdefer allocator.free(delays_out);
+    var builder: animated.Builder(T) = .{};
+    defer builder.deinit(allocator);
 
     var prev_disposal: DisposalMethod = .unspecified;
     var prev_rect: Rectangle(u32) = .init(0, 0, 0, 0);
 
-    for (state.frames, 0..) |frame, i| {
+    for (state.frames) |frame| {
         switch (prev_disposal) {
             .restore_to_background => canvas.view(prev_rect).fill(.{ .r = 0, .g = 0, .b = 0, .a = 0 }),
             .restore_to_previous => if (snapshot) |s| @memcpy(canvas.data, s),
@@ -647,27 +638,13 @@ fn composeAnimated(comptime T: type, io: Io, allocator: Allocator, state: GifSta
 
         try compositeFrameOntoCanvas(&canvas, frame);
 
-        var rgba_frame = try Image(Rgba).init(allocator, screen_h, screen_w);
-        @memcpy(rgba_frame.data, canvas.data);
-
-        if (T == Rgba) {
-            frames_out[i] = rgba_frame;
-        } else {
-            defer rgba_frame.deinit(allocator);
-            frames_out[i] = try rgba_frame.convert(io, allocator, T);
-        }
-        frames_init = i + 1;
-
-        delays_out[i] = if (frame.gce) |g| g.delay_cs else 0;
+        const duration_ms: u32 = if (frame.gce) |g| @as(u32, g.delay_cs) * 10 else 0;
+        try builder.append(allocator, if (T == Rgba) try canvas.dupe(allocator) else try canvas.convert(io, allocator, T), duration_ms);
         prev_disposal = if (frame.gce) |g| g.disposal else .unspecified;
         prev_rect = .init(frame.left, frame.top, frame.left +| frame.width, frame.top +| frame.height);
     }
 
-    return .{
-        .frames = frames_out,
-        .delays_cs = delays_out,
-        .loop_count = state.header.loop_count,
-    };
+    return builder.finish(allocator, state.header.loop_count);
 }
 
 fn compositeFrameOntoCanvas(canvas: *Image(Rgba), frame: FrameRecord) !void {
@@ -968,7 +945,7 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
 /// `alpha < 128` are mapped to a reserved transparent palette index.
 pub fn encodeAnimated(comptime T: type, gpa: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
     if (anim.frames.len == 0) return error.NoFrames;
-    if (anim.frames.len != anim.delays_cs.len) return error.InconsistentDelays;
+    if (anim.frames.len != anim.durations_ms.len) return error.InconsistentDurations;
 
     const screen_w_u32 = anim.frames[0].cols;
     const screen_h_u32 = anim.frames[0].rows;
@@ -1012,11 +989,13 @@ pub fn encodeAnimated(comptime T: type, gpa: Allocator, anim: AnimatedImage(T), 
         try out.appendSlice(gpa, "NETSCAPE2.0");
         try out.append(gpa, 0x03);
         try out.append(gpa, 0x01);
-        try writeU16Le(gpa, &out, anim.loop_count);
+        try writeU16Le(gpa, &out, @min(anim.loop_count, std.math.maxInt(u16)));
         try out.append(gpa, 0);
     }
 
-    for (anim.frames, anim.delays_cs) |frame, delay_cs| {
+    for (anim.frames, anim.durations_ms) |frame, ms| {
+        // GIF delays are centiseconds.
+        const delay_cs = @min((ms +| 5) / 10, std.math.maxInt(u16));
         try emitAnimatedFrame(T, gpa, frame, delay_cs, has_global_palette, options, &out);
     }
 
@@ -1521,8 +1500,8 @@ test "loadAnimated — two frames, do_not_dispose, per-frame delays" {
     defer anim.deinit(gpa);
 
     try expectEqual(@as(usize, 2), anim.frameCount());
-    try expectEqual(@as(u16, 5), anim.delays_cs[0]);
-    try expectEqual(@as(u16, 10), anim.delays_cs[1]);
+    try expectEqual(@as(u32, 50), anim.durations_ms[0]);
+    try expectEqual(@as(u32, 100), anim.durations_ms[1]);
     try expectEqual(Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 }, anim.frame(0).at(0, 0).*);
     try expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 }, anim.frame(1).at(0, 0).*);
 }
@@ -1715,12 +1694,10 @@ test "encode — getInfo on encoded output is consistent" {
 // Animated encode tests
 // ---------------------------------------------------------------------------
 
-fn buildAnimated(comptime T: type, gpa: Allocator, frame_data: []const Image(T), delays: []const u16, loop: u16) !AnimatedImage(T) {
+fn buildAnimated(comptime T: type, gpa: Allocator, frame_data: []const Image(T), durations_ms: []const u32, loop: u32) !AnimatedImage(T) {
     const frames = try gpa.alloc(Image(T), frame_data.len);
     @memcpy(frames, frame_data);
-    const delays_out = try gpa.alloc(u16, delays.len);
-    @memcpy(delays_out, delays);
-    return .{ .frames = frames, .delays_cs = delays_out, .loop_count = loop };
+    return .{ .frames = frames, .durations_ms = try gpa.dupe(u32, durations_ms), .loop_count = loop };
 }
 
 test "encodeAnimated — 2 Rgb frames round-trip with delays and loop count" {
@@ -1731,7 +1708,7 @@ test "encodeAnimated — 2 Rgb frames round-trip with delays and loop count" {
     const f1 = try Image(Rgb).init(gpa, 2, 2);
     @memset(f1.data, .{ .r = 0, .g = 255, .b = 0 });
 
-    var anim = try buildAnimated(Rgb, gpa, &.{ f0, f1 }, &.{ 5, 10 }, 3);
+    var anim = try buildAnimated(Rgb, gpa, &.{ f0, f1 }, &.{ 50, 100 }, 3);
     defer anim.deinit(gpa);
 
     const data = try encodeAnimated(Rgb, gpa, anim, .{});
@@ -1741,9 +1718,9 @@ test "encodeAnimated — 2 Rgb frames round-trip with delays and loop count" {
     defer decoded.deinit(gpa);
 
     try expectEqual(@as(usize, 2), decoded.frameCount());
-    try expectEqual(@as(u16, 3), decoded.loop_count);
-    try expectEqual(@as(u16, 5), decoded.delays_cs[0]);
-    try expectEqual(@as(u16, 10), decoded.delays_cs[1]);
+    try expectEqual(@as(u32, 3), decoded.loop_count);
+    try expectEqual(@as(u32, 50), decoded.durations_ms[0]);
+    try expectEqual(@as(u32, 100), decoded.durations_ms[1]);
     try expectEqual(Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 }, decoded.frame(0).at(0, 0).*);
     try expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 }, decoded.frame(1).at(0, 0).*);
 }
@@ -1781,7 +1758,7 @@ test "encodeAnimated — caller-supplied global palette uses GCT, no per-frame L
     const f1 = try Image(Rgb).init(gpa, 1, 1);
     f1.at(0, 0).* = .{ .r = 0, .g = 0, .b = 255 };
 
-    var anim = try buildAnimated(Rgb, gpa, &.{ f0, f1 }, &.{ 5, 5 }, 0);
+    var anim = try buildAnimated(Rgb, gpa, &.{ f0, f1 }, &.{ 50, 50 }, 0);
     defer anim.deinit(gpa);
 
     const palette = [_]Rgb{
@@ -1807,7 +1784,7 @@ test "encodeAnimated — caller-supplied global palette uses GCT, no per-frame L
 
 test "encodeAnimated — empty animation rejected" {
     const gpa = std.testing.allocator;
-    const anim: AnimatedImage(Rgb) = .{ .frames = &.{}, .delays_cs = &.{}, .loop_count = 0 };
+    const anim: AnimatedImage(Rgb) = .{ .frames = &.{}, .durations_ms = &.{}, .loop_count = 0 };
     try expectError(error.NoFrames, encodeAnimated(Rgb, gpa, anim, .{}));
 }
 
