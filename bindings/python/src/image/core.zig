@@ -111,7 +111,7 @@ fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
             return wrapNativeImage(native);
         },
         .jxl => {
-            const decoded = zignal.jxl.decode(allocator, data, default_jxl_limits) catch |err| {
+            const decoded = zignal.jxl.decode(python.io, allocator, data, default_jxl_limits) catch |err| {
                 setDecodeError("JPEG XL data", err);
                 return null;
             };
@@ -140,7 +140,7 @@ pub const image_load_doc =
     \\
     \\## Raises
     \\- `FileNotFoundError`: If the file does not exist
-    \\- `ValueError`: If the file format is unsupported, or JPEG XL and the module was built without `-fsys=jxl`
+    \\- `ValueError`: If the file format is unsupported, or JPEG XL without `-fsys=jxl` or libjxl
     \\- `MemoryError`: If allocation fails during loading
     \\- `PermissionError`: If read permission is denied
     \\
@@ -246,7 +246,7 @@ fn decodeFile(comptime format: ImageFormat, data: []const u8, path: []const u8, 
             return wrapNativeImage(native);
         },
         .jxl => {
-            const decoded = zignal.jxl.decode(allocator, data, limits) catch |err| {
+            const decoded = zignal.jxl.decode(python.io, allocator, data, limits) catch |err| {
                 python.setErrorWithPath(err, path);
                 return null;
             };
@@ -334,7 +334,7 @@ pub const image_save_doc =
     \\Save the image to a file (PNG, JPEG, BMP, GIF, or JPEG XL format).
     \\
     \\The format is determined by the file extension (.png, .jpg, .jpeg, .bmp, .gif, or .jxl).
-    \\JPEG XL needs a module built with `-fsys=jxl`.
+    \\JPEG XL needs a module built with `-fsys=jxl` and libjxl installed.
     \\
     \\## Parameters
     \\- `path` (str): Path where the image file will be saved.
@@ -374,6 +374,10 @@ pub fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                 }
                 if (err == error.JxlNotEnabled) {
                     python.setValueError("JPEG XL support is not enabled; rebuild with -fsys=jxl.", .{});
+                    return null;
+                }
+                if (err == error.JxlUnavailable) {
+                    python.setValueError("JPEG XL needs libjxl, which was not found.", .{});
                     return null;
                 }
                 python.setErrorWithPath(err, path);

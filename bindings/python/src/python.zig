@@ -889,6 +889,7 @@ pub fn setErrorWithPath(err: anyerror, path: []const u8) void {
 
         error.UnsupportedImageFormat,
         error.JxlNotEnabled,
+        error.JxlUnavailable,
         error.UnsupportedFontFormat,
         error.InvalidFormat,
         error.UnexpectedEof,

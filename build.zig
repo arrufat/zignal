@@ -11,8 +11,10 @@ pub fn build(b: *Build) void {
 
     const print_md5sums = b.option(bool, "print-md5sums", "Print MD5 checksums instead of testing them") orelse false;
     const debug_test_images = b.option(bool, "debug-test-images", "Save regression test renderings as PNGs") orelse false;
-    // Opt-in JPEG XL through the system libjxl: `zig build -fsys=jxl`. Never on wasm.
-    const jxl = b.systemIntegrationOption("jxl", .{}) and !target.result.cpu.arch.isWasm();
+    // Opt-in JPEG XL through the system libjxl, opened at runtime: `zig build -fsys=jxl`.
+    // `std.DynLib` needs libc on Linux and has no Windows backend.
+    const jxl = b.systemIntegrationOption("jxl", .{}) and
+        !target.result.cpu.arch.isWasm() and target.result.os.tag != .windows;
 
     const zignal = b.addModule("zignal", .{
         .root_source_file = b.path("src/root.zig"),
@@ -25,7 +27,7 @@ pub fn build(b: *Build) void {
     build_options.addOption(bool, "debug_test_images", debug_test_images);
     build_options.addOption(bool, "jxl", jxl);
     zignal.addOptions("build_options", build_options);
-    const jxl_c = if (jxl) addJxl(b, zignal) else null;
+    if (jxl) zignal.link_libc = true;
 
     const lib = b.addLibrary(.{
         .name = "zignal",
@@ -82,7 +84,7 @@ pub fn build(b: *Build) void {
         }),
     });
     lib_test.root_module.addOptions("build_options", build_options);
-    if (jxl_c) |c| linkJxl(lib_test.root_module, c);
+    if (jxl) lib_test.root_module.link_libc = true;
     test_step.dependOn(&b.addRunArtifact(lib_test).step);
 
     const fmt_step = b.step("fmt", "Check code formatting");
@@ -180,27 +182,6 @@ pub fn build(b: *Build) void {
     usf.addCopyFileToSource(py_module.getEmittedBin(), b.fmt("bindings/python/zignal/_zignal{s}", .{extension}));
     usf.addCopyFileToSource(exe.getEmittedBin(), b.fmt("bindings/python/zignal/zignal{s}", .{target.result.exeFileExt()}));
     py_bindings_step.dependOn(&usf.step);
-}
-
-/// Translates the libjxl headers and links the system libraries into `module`.
-fn addJxl(b: *std.Build, module: *std.Build.Module) *std.Build.Module {
-    const tc = b.addTranslateC(.{
-        .root_source_file = b.path("src/codecs/jxl/c.h"),
-        .target = module.resolved_target.?,
-        .optimize = .ReleaseFast,
-    });
-    tc.linkSystemLibrary("libjxl", .{});
-    tc.linkSystemLibrary("libjxl_threads", .{});
-    const c = tc.createModule();
-    linkJxl(module, c);
-    return c;
-}
-
-fn linkJxl(module: *std.Build.Module, c: *std.Build.Module) void {
-    module.addImport("jxl_c", c);
-    module.link_libc = true;
-    module.linkSystemLibrary("libjxl", .{});
-    module.linkSystemLibrary("libjxl_threads", .{});
 }
 
 // Gating `build`'s parameter type keeps the version message as the only error on old compilers.
