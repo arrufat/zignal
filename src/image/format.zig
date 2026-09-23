@@ -7,6 +7,7 @@ const codecs = @import("../codecs.zig");
 const bmp = codecs.bmp;
 const gif = codecs.gif;
 const jpeg = codecs.jpeg;
+const jxl = codecs.jxl;
 const png = codecs.png;
 
 /// Supported image formats for automatic detection and loading.
@@ -15,6 +16,8 @@ pub const ImageFormat = enum {
     jpeg,
     bmp,
     gif,
+    /// Loading and saving need `zig build -fsys=jxl`; detection always works.
+    jxl,
 
     /// Detects image format from the first few bytes of file data.
     pub fn detectFromBytes(data: []const u8) ?ImageFormat {
@@ -46,6 +49,8 @@ pub const ImageFormat = enum {
             }
         }
 
+        if (jxl.hasSignature(data)) return .jxl;
+
         return null;
     }
 
@@ -54,7 +59,7 @@ pub const ImageFormat = enum {
         const file = try Io.Dir.cwd().openFile(io, file_path, .{});
         defer file.close(io);
 
-        var header: [8]u8 = undefined;
+        var header: [jxl.container_signature.len]u8 = undefined;
         var iov = [_][]u8{header[0..]};
         const bytes_read = try file.readStreaming(io, &iov);
 
@@ -70,6 +75,7 @@ pub const ImageFormat = enum {
         if (matches(file_path, ".jpg") or matches(file_path, ".jpeg")) return .jpeg;
         if (matches(file_path, ".bmp")) return .bmp;
         if (matches(file_path, ".gif")) return .gif;
+        if (matches(file_path, ".jxl")) return .jxl;
         return null;
     }
 };

@@ -33,6 +33,8 @@ const default_bmp_limits: zignal.bmp.DecodeLimits = .{};
 const file_bmp_limits: zignal.bmp.DecodeLimits = .{ .max_bmp_bytes = 100 * 1024 * 1024 };
 const default_gif_limits: zignal.gif.DecodeLimits = .{};
 const file_gif_limits: zignal.gif.DecodeLimits = .{ .max_gif_bytes = 100 * 1024 * 1024 };
+const default_jxl_limits: zignal.jxl.DecodeLimits = .{};
+const file_jxl_limits: zignal.jxl.DecodeLimits = .{};
 
 // Import the ImageObject type from parent
 inline fn readLimit(max_bytes: usize) usize {
@@ -108,6 +110,13 @@ fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
             };
             return wrapNativeImage(native);
         },
+        .jxl => {
+            const decoded = zignal.jxl.decode(allocator, data, default_jxl_limits) catch |err| {
+                setDecodeError("JPEG XL data", err);
+                return null;
+            };
+            return wrapNativeImage(decoded);
+        },
     }
 }
 
@@ -116,7 +125,7 @@ fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
 // ============================================================================
 
 pub const image_load_doc =
-    \\Load an image from file (PNG, JPEG, BMP, or GIF).
+    \\Load an image from file (PNG, JPEG, BMP, GIF, or JPEG XL).
     \\
     \\The pixel format (Gray, Rgb, or Rgba) is automatically determined from the
     \\file metadata. For PNGs, the format matches the file's color type. For JPEGs,
@@ -124,14 +133,14 @@ pub const image_load_doc =
     \\24bpp images load as Rgb; 32bpp images with an alpha channel load as Rgba.
     \\
     \\## Parameters
-    \\- `path` (str): Path to the PNG, JPEG, BMP, or GIF file to load
+    \\- `path` (str): Path to the PNG, JPEG, BMP, GIF, or JPEG XL file to load
     \\
     \\## Returns
     \\Image: A new Image object with pixels in the format matching the file
     \\
     \\## Raises
     \\- `FileNotFoundError`: If the file does not exist
-    \\- `ValueError`: If the file format is unsupported
+    \\- `ValueError`: If the file format is unsupported, or JPEG XL and the module was built without `-fsys=jxl`
     \\- `MemoryError`: If allocation fails during loading
     \\- `PermissionError`: If read permission is denied
     \\
@@ -164,6 +173,7 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         readLimit(file_jpeg_limits.max_jpeg_bytes),
         readLimit(file_bmp_limits.max_bmp_bytes),
         readLimit(file_gif_limits.max_gif_bytes),
+        readLimit(file_jxl_limits.max_jxl_bytes),
     });
     const data = Io.Dir.cwd().readFileAlloc(python.io, path_slice, allocator, .limited(read_cap)) catch |err| {
         python.setErrorWithPath(err, path_slice);
@@ -181,6 +191,7 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         .jpeg => decodeFile(.jpeg, data, path_slice, file_jpeg_limits),
         .bmp => decodeFile(.bmp, data, path_slice, file_bmp_limits),
         .gif => decodeFile(.gif, data, path_slice, file_gif_limits),
+        .jxl => decodeFile(.jxl, data, path_slice, file_jxl_limits),
     };
 }
 
@@ -234,18 +245,25 @@ fn decodeFile(comptime format: ImageFormat, data: []const u8, path: []const u8, 
             };
             return wrapNativeImage(native);
         },
+        .jxl => {
+            const decoded = zignal.jxl.decode(allocator, data, limits) catch |err| {
+                python.setErrorWithPath(err, path);
+                return null;
+            };
+            return wrapNativeImage(decoded);
+        },
     }
 }
 
 pub const image_load_from_bytes_doc =
-    \\Load an image from an in-memory bytes-like object (PNG, JPEG, BMP, or GIF).
+    \\Load an image from an in-memory bytes-like object (PNG, JPEG, BMP, GIF, or JPEG XL).
     \\
     \\Accepts any object that implements the Python buffer protocol, such as
     \\`bytes`, `bytearray`, or `memoryview`. The image format is detected from
     \\the data's file signature, so no file extension is required.
     \\
     \\## Parameters
-    \\- `data` (bytes-like): Raw PNG, JPEG, BMP, or GIF bytes.
+    \\- `data` (bytes-like): Raw PNG, JPEG, BMP, GIF, or JPEG XL bytes.
     \\
     \\## Returns
     \\Image: A new Image with pixel storage matching the encoded file (Gray, Rgb, or Rgba).
@@ -295,7 +313,7 @@ pub fn image_load_from_bytes(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?
     const data_slice = byte_ptr[0..@intCast(buffer.len)];
 
     const detected = ImageFormat.detectFromBytes(data_slice) orelse {
-        python.setValueError("Unsupported image data: expected PNG, JPEG, BMP, or GIF signature", .{});
+        python.setValueError("Unsupported image data: expected PNG, JPEG, BMP, GIF, or JPEG XL signature", .{});
         return null;
     };
 
@@ -304,6 +322,7 @@ pub fn image_load_from_bytes(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?
         .jpeg => loadBytes(.jpeg, data_slice),
         .bmp => loadBytes(.bmp, data_slice),
         .gif => loadBytes(.gif, data_slice),
+        .jxl => loadBytes(.jxl, data_slice),
     };
 }
 
@@ -312,16 +331,17 @@ pub fn image_load_from_bytes(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?
 // ============================================================================
 
 pub const image_save_doc =
-    \\Save the image to a file (PNG, JPEG, BMP, or GIF format).
+    \\Save the image to a file (PNG, JPEG, BMP, GIF, or JPEG XL format).
     \\
-    \\The format is determined by the file extension (.png, .jpg, .jpeg, or .bmp).
+    \\The format is determined by the file extension (.png, .jpg, .jpeg, .bmp, .gif, or .jxl).
+    \\JPEG XL needs a module built with `-fsys=jxl`.
     \\
     \\## Parameters
     \\- `path` (str): Path where the image file will be saved.
-    \\  Must have .png, .jpg, .jpeg, or .bmp extension.
+    \\  Must have .png, .jpg, .jpeg, .bmp, .gif, or .jxl extension.
     \\
     \\## Raises
-    \\- `ValueError`: If the file has an unsupported extension
+    \\- `ValueError`: If the file has an unsupported extension, or .jxl without JPEG XL support
     \\- `MemoryError`: If allocation fails during save
     \\- `PermissionError`: If write permission is denied
     \\- `FileNotFoundError`: If the directory does not exist
@@ -349,7 +369,11 @@ pub fn image_save(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         fn apply(img: anytype, path: []const u8) ?*c.PyObject {
             img.save(python.io, allocator, path) catch |err| {
                 if (err == error.UnsupportedImageFormat) {
-                    python.setValueError("Unsupported image format. File must have a valid PNG, JPEG, BMP, or GIF extension.", .{});
+                    python.setValueError("Unsupported image format. File must have a valid PNG, JPEG, BMP, GIF, or JXL extension.", .{});
+                    return null;
+                }
+                if (err == error.JxlNotEnabled) {
+                    python.setValueError("JPEG XL support is not enabled; rebuild with -fsys=jxl.", .{});
                     return null;
                 }
                 python.setErrorWithPath(err, path);

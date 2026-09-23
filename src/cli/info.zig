@@ -9,6 +9,7 @@ const png = zignal.png;
 const jpeg = zignal.jpeg;
 const bmp = zignal.bmp;
 const gif = zignal.gif;
+const jxl = zignal.jxl;
 
 const args = @import("args.zig");
 const common = @import("common.zig");
@@ -52,7 +53,11 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
             defer file.close(io);
 
             var reader = file.reader(io, &read_buffer);
-            const peek = reader.interface.peek(8) catch |err| break :blk err;
+            // Short files still get sniffed; the JXL container signature is the longest (12 bytes).
+            const peek = reader.interface.peekGreedy(jxl.container_signature.len) catch |err| switch (err) {
+                error.EndOfStream => reader.interface.buffered(),
+                else => break :blk err,
+            };
             const image_format = zignal.ImageFormat.detectFromBytes(peek) orelse break :blk error.UnsupportedImageFormat;
             std.log.debug("format detected: {s}", .{@tagName(image_format)});
 
@@ -113,6 +118,18 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
                     }
                     if (info.has_global_color_table) {
                         try writer.print("Palette:     {d} entries (global)\n", .{info.global_color_table_size});
+                    }
+                },
+                .jxl => {
+                    const info = jxl.getInfo(&reader.interface, .{}) catch |err| break :blk err;
+
+                    try writer.print("Format:      JPEG XL\n", .{});
+                    try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
+                    try writer.print("Bit Depth:   {d}{s}\n", .{ info.bits_per_sample, if (info.exponent_bits_per_sample > 0) " (float)" else "" });
+                    try writer.print("Channels:    {d}\n", .{info.num_color_channels + @intFromBool(info.has_alpha)});
+                    try writer.print("Encoding:    {s}\n", .{if (info.uses_original_profile) "original color space" else "XYB"});
+                    if (info.has_animation) {
+                        try writer.print("Animated:    yes\n", .{});
                     }
                 },
             }

@@ -888,6 +888,7 @@ pub fn setErrorWithPath(err: anyerror, path: []const u8) void {
         => c.PyExc_PermissionError,
 
         error.UnsupportedImageFormat,
+        error.JxlNotEnabled,
         error.UnsupportedFontFormat,
         error.InvalidFormat,
         error.UnexpectedEof,
