@@ -25,8 +25,8 @@ pub fn hasSignature(data: []const u8) bool {
 }
 
 pub const DecodeLimits = struct {
-    /// Maximum encoded size read by `load`; 0 disables the cap.
-    max_webp_bytes: usize = codecs.max_file_size,
+    /// Maximum encoded size `read` buffers; 0 disables the cap.
+    max_webp_bytes: usize = 100 * 1024 * 1024,
     /// Maximum decoded pixel count (per frame); 0 disables the cap.
     max_pixels: u64 = 1 << 28,
     /// Maximum animation frames; 0 disables the cap.

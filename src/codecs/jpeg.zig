@@ -20,10 +20,10 @@ const meta = @import("../meta.zig");
 
 /// User-configurable resource limits for JPEG decoding. Zero disables a limit.
 pub const DecodeLimits = struct {
-    /// Maximum number of bytes accepted for the original JPEG buffer.
-    max_jpeg_bytes: usize = codecs.max_file_size,
+    /// Maximum encoded size `read` buffers; 0 disables the cap.
+    max_jpeg_bytes: usize = 100 * 1024 * 1024,
     /// Cap on total marker payload bytes (length-prefixed segments plus entropy data).
-    max_marker_bytes: usize = codecs.max_file_size,
+    max_marker_bytes: usize = 100 * 1024 * 1024,
     /// Maximum declared image width/height in pixels.
     max_width: u32 = 8192,
     max_height: u32 = 8192,

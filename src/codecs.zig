@@ -45,10 +45,6 @@ pub const NativeImage = union(enum) {
     }
 };
 
-/// Default cap on encoded input, shared by every codec's `DecodeLimits` and the
-/// format-detecting loaders.
-pub const max_file_size: usize = 100 * 1024 * 1024;
-
 /// Whether `value` is over `limit`; a zero limit disables the check.
 pub inline fn exceeds(limit: u64, value: u64) bool {
     return limit != 0 and value > limit;

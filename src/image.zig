@@ -245,8 +245,8 @@ pub fn Image(comptime T: type) type {
             return @as([*]u8, @ptrCast(@alignCast(self.data.ptr)))[0 .. self.data.len * @sizeOf(T)];
         }
 
-        /// Loads an image from a file with automatic format detection: reads it (up to
-        /// `codecs.max_file_size`) and hands the bytes to `loadFromBytes`.
+        /// Loads an image from a file, detecting the format from its signature and decoding
+        /// straight from the file.
         ///
         /// Example usage:
         /// ```zig
