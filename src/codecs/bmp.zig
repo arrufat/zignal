@@ -779,8 +779,9 @@ const canonical_rgba_masks: Masks = .{
 /// `u8` as 8bpp with a linear gray palette when `use_palette_for_grayscale`, anything else as
 /// 24bpp. Rows go out one at a time.
 pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(T), options: EncodeOptions) !void {
-    // Serial encoder; `io` keeps the codec entry points uniform.
+    // Serial and allocation-free; `io` and `allocator` keep the codec entry points uniform.
     _ = io;
+    _ = allocator;
     const layout: Layout = try .init(T, image, options);
     try writeHeaders(writer, layout, image.cols, image.rows, options.top_down);
     switch (layout.bit_depth) {
@@ -791,24 +792,32 @@ pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer,
         else => {},
     }
 
-    // Row padding stays zero.
-    const row = try allocator.alloc(u8, layout.row_bytes);
-    defer allocator.free(row);
-    @memset(row, 0);
+    const bytes_per_pixel = layout.bit_depth / 8;
+    const padding = layout.row_bytes - image.cols * bytes_per_pixel;
+    // Pixels are converted in stack batches; one write per pixel is 2-3x slower.
+    var batch: [1024 * 4]u8 = undefined;
     for (0..image.rows) |i| {
         const y = if (options.top_down) i else image.rows - 1 - i;
-        for (0..image.cols) |x| {
-            const px = image.at(y, x).*;
-            if (T == Rgba) {
-                row[x * 4 ..][0..4].* = .{ px.b, px.g, px.r, px.a };
-            } else if (T == u8 and layout.bit_depth == 8) {
-                row[x] = px;
-            } else {
-                const rgb = if (T == Rgb) px else convertColor(Rgb, px);
-                row[x * 3 ..][0..3].* = .{ rgb.b, rgb.g, rgb.r };
+        const row = image.data[y * image.stride ..][0..image.cols];
+        if (T == u8 and layout.bit_depth == 8) {
+            try writer.writeAll(row);
+        } else {
+            var x: usize = 0;
+            while (x < row.len) {
+                const n: usize = @min(row.len - x, batch.len / 4);
+                for (row[x..][0..n], 0..) |px, k| {
+                    if (T == Rgba) {
+                        batch[k * 4 ..][0..4].* = .{ px.b, px.g, px.r, px.a };
+                    } else {
+                        const rgb = if (T == Rgb) px else convertColor(Rgb, px);
+                        batch[k * 3 ..][0..3].* = .{ rgb.b, rgb.g, rgb.r };
+                    }
+                }
+                try writer.writeAll(batch[0 .. n * bytes_per_pixel]);
+                x += n;
             }
         }
-        try writer.writeAll(row);
+        try writer.splatByteAll(0, padding);
     }
 }
 
@@ -1764,4 +1773,17 @@ test "BMP getInfo: 8bpp uses default 256 palette entries when colors_used=0" {
     var reader = Io.Reader.fixed(aw.written());
     const header = try getInfo(&reader, .{});
     try std.testing.expectEqual(@as(u32, 256), header.palette_entries);
+}
+
+test "rows wider than one conversion batch round-trip" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var img: Image(Rgb) = try .init(gpa, 3, 2500);
+    defer img.deinit(gpa);
+    for (img.data, 0..) |*p, k| p.* = .{ .r = @truncate(k), .g = @truncate(k >> 8), .b = @truncate(k >> 3) };
+    const bytes = try encode(Rgb, io, gpa, img, .default);
+    defer gpa.free(bytes);
+    var back = try loadFromBytes(Rgb, io, gpa, bytes, .{});
+    defer back.deinit(gpa);
+    try std.testing.expectEqualSlices(Rgb, img.data, back.data);
 }

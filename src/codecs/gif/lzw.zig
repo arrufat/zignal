@@ -201,19 +201,23 @@ pub const Encoder = struct {
     block_len: u8 = 0,
 
     pub fn init(gpa: std.mem.Allocator, min_code_size: u4) !Encoder {
-        if (min_code_size < 2 or min_code_size > 8) return error.InvalidMinCodeSize;
-        var self: Encoder = .{
-            .min_code_size = min_code_size,
-            .code_size = min_code_size + 1,
-            .clear_code = @as(u16, 1) << min_code_size,
-            .eoi_code = (@as(u16, 1) << min_code_size) + 1,
-            .next_code = (@as(u16, 1) << min_code_size) + 2,
-            .dict = .empty,
-            .bit_accum = 0,
-            .bits_in_accum = 0,
-        };
+        var self: Encoder = undefined;
+        self.dict = .empty;
+        try self.reset(min_code_size);
         try self.dict.ensureTotalCapacity(gpa, max_dict_entries);
         return self;
+    }
+
+    /// Starts a new image with `min_code_size`, keeping the dictionary's memory.
+    pub fn reset(self: *Encoder, min_code_size: u4) !void {
+        if (min_code_size < 2 or min_code_size > 8) return error.InvalidMinCodeSize;
+        self.min_code_size = min_code_size;
+        self.clear_code = @as(u16, 1) << min_code_size;
+        self.eoi_code = self.clear_code + 1;
+        self.bit_accum = 0;
+        self.bits_in_accum = 0;
+        self.block_len = 0;
+        self.resetDict();
     }
 
     pub fn deinit(self: *Encoder, gpa: std.mem.Allocator) void {

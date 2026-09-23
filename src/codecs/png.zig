@@ -824,57 +824,35 @@ fn inflate(gpa: Allocator, png_state: *PngState, chunks: *ChunkStream, first: Ch
         return error.ImageTooLarge;
     }
 
-    const buffers = try gpa.alloc(u8, flate.max_window_len + idat_buffer_len);
-    defer gpa.free(buffers);
-    var idat: IdatReader = .init(chunks, first, buffers[flate.max_window_len..]);
-    var decompressor: flate.Decompress = .init(&idat.interface, .zlib, buffers[0..flate.max_window_len]);
+    const input_buffer = try gpa.alloc(u8, idat_buffer_len);
+    defer gpa.free(input_buffer);
+    var idat: IdatReader = .init(chunks, first, input_buffer);
+    // Direct mode: the inflater writes straight into the scanlines, which double as its history.
+    var decompressor: flate.Decompress = .init(&idat.interface, .zlib, &.{});
 
-    var aw: Io.Writer.Allocating = .init(gpa);
-    defer aw.deinit();
-    try aw.ensureTotalCapacity(scan_data_bytes);
-
-    var remaining: Io.Limit = .limited(scan_data_bytes);
-    while (remaining.nonzero()) {
-        const n = decompressor.reader.stream(&aw.writer, remaining) catch |err| switch (err) {
-            error.EndOfStream => break,
-            error.ReadFailed => {
-                if (idat.err) |e| return e;
-                if (!isZlibTruncation(&decompressor)) return err;
-                // Truncated stream: recover bytes decompressed but not yet delivered.
-                try aw.writer.writeAll(remaining.sliceConst(decompressor.reader.buffered()));
-                break;
-            },
-            else => return err,
-        };
-        remaining = remaining.subtract(n).?;
-    } else {
-        // We've hit the limit, check if there's more data.
-        var one_byte_buf: [1]u8 = undefined;
-        var dummy_writer: Io.Writer = .fixed(&one_byte_buf);
-        if (decompressor.reader.stream(&dummy_writer, .limited(1))) |n| {
-            if (n > 0) return error.ImageTooLarge;
-        } else |err| switch (err) {
-            error.EndOfStream => {}, // This is fine, we're at the end.
-            // Stream cut inside the zlib checksum: all pixel data arrived.
-            error.ReadFailed => {
-                if (idat.err) |e| return e;
-                if (!isZlibTruncation(&decompressor)) return err;
-            },
-            else => return err,
-        }
-    }
+    // One spare byte catches a stream that inflates past the image.
+    const scanlines = try gpa.alloc(u8, scan_data_bytes + 1);
+    errdefer gpa.free(scanlines);
+    var out: Io.Writer = .fixed(scanlines);
+    _ = decompressor.reader.streamRemaining(&out) catch |err| switch (err) {
+        error.WriteFailed => return error.ImageTooLarge,
+        error.ReadFailed => {
+            if (idat.err) |e| return e;
+            // Truncated stream: keep what was inflated; a cut inside the checksum loses nothing.
+            if (!isZlibTruncation(&decompressor)) return err;
+        },
+    };
+    if (out.end > scan_data_bytes) return error.ImageTooLarge;
     // Read the rest of the run (trailing bytes after the zlib stream), checking CRCs.
     _ = idat.interface.discardRemaining() catch |err| return idat.err orelse err;
     if (idat.total == 0) return error.MissingImageData;
 
-    // Zero-pad to full size: zero filter bytes decode as .none, so padded rows become zero pixels.
-    if (aw.written().len < scan_data_bytes) {
+    // Zero-fill the rest: zero filter bytes decode as .none, so missing rows become zero pixels.
+    if (out.end < scan_data_bytes) {
         png_state.truncated = true;
-        const keep = completeScanPrefix(aw.written().len, header);
-        aw.shrinkRetainingCapacity(keep);
-        try aw.writer.splatByteAll(0, scan_data_bytes - keep);
+        @memset(scanlines[completeScanPrefix(out.end, header)..], 0);
     }
-    png_state.scanlines = try aw.toOwnedSlice();
+    png_state.scanlines = try gpa.realloc(scanlines, scan_data_bytes);
     try defilterScanlines(png_state.scanlines, header);
     return idat.after;
 }

@@ -737,11 +737,9 @@ fn writeColorTable(writer: *Io.Writer, palette: []const Rgb, declared_entries: u
 
 /// Emits the LZW data section of an Image block: `min_code_size` byte +
 /// LZW-compressed indices wrapped in 0xFF-max sub-blocks + terminator.
-fn writeLzwImageData(allocator: Allocator, writer: *Io.Writer, indices: []const u8, min_code_size: u4) !void {
+fn writeLzwImageData(encoder: *lzw.Encoder, writer: *Io.Writer, indices: []const u8, min_code_size: u4) !void {
     try writer.writeByte(min_code_size);
-
-    var encoder = try lzw.Encoder.init(allocator, min_code_size);
-    defer encoder.deinit(allocator);
+    try encoder.reset(min_code_size);
     try encoder.encodeAll(writer, indices);
     try writer.writeByte(0);
 }
@@ -855,7 +853,9 @@ pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer,
     try writer.writeInt(u16, height, .little);
     try writer.writeByte(0x00); // packed: no LCT, not interlaced
 
-    try writeLzwImageData(allocator, writer, indices, min_code_size);
+    var encoder = try lzw.Encoder.init(allocator, min_code_size);
+    defer encoder.deinit(allocator);
+    try writeLzwImageData(&encoder, writer, indices, min_code_size);
 
     try writer.writeByte(block_trailer);
 }
@@ -972,6 +972,9 @@ pub fn writeAnimated(comptime T: type, io: Io, gpa: Allocator, writer: *Io.Write
     }
 
     // Transparent pixels show the canvas below, so uncovering one needs a cleared canvas.
+    // One encoder for every frame; `reset` keeps its dictionary's memory.
+    var encoder = try lzw.Encoder.init(gpa, 2);
+    defer encoder.deinit(gpa);
     var after_clear = false;
     for (anim.frames, anim.durations_ms, 0..) |frame, ms, i| {
         const clears_next = i + 1 < anim.frames.len and uncovers(T, frame, anim.frames[i + 1]);
@@ -979,7 +982,7 @@ pub fn writeAnimated(comptime T: type, io: Io, gpa: Allocator, writer: *Io.Write
         const disposal: DisposalMethod = if (clears_next) .restore_to_background else .do_not_dispose;
         // GIF delays are centiseconds.
         const delay_cs = @min((ms +| 5) / 10, std.math.maxInt(u16));
-        try emitAnimatedFrame(T, io, gpa, frame, region, disposal, delay_cs, has_global_palette, options, writer);
+        try emitAnimatedFrame(T, io, gpa, &encoder, frame, region, disposal, delay_cs, has_global_palette, options, writer);
         after_clear = clears_next;
     }
 
@@ -1001,6 +1004,7 @@ fn emitAnimatedFrame(
     comptime T: type,
     io: Io,
     gpa: Allocator,
+    encoder: *lzw.Encoder,
     full_frame: Image(T),
     region: Rectangle(u32),
     disposal: DisposalMethod,
@@ -1096,7 +1100,7 @@ fn emitAnimatedFrame(
         try writeColorTable(writer, palette, declared_entries);
     }
 
-    try writeLzwImageData(gpa, writer, indices, min_code_size);
+    try writeLzwImageData(encoder, writer, indices, min_code_size);
 }
 
 // ---------------------------------------------------------------------------
