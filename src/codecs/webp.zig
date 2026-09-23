@@ -210,6 +210,17 @@ pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u
 /// Encodes `image` as WebP: `Rgba`→RGBA, everything else→RGB. WebP caps each side at 16383.
 /// Lossless keeps every visible pixel; the RGB of fully transparent ones may change.
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
+    var aw: Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    write(T, io, allocator, &aw.writer, image, options) catch |err| return switch (err) {
+        error.WriteFailed => error.OutOfMemory,
+        else => |e| e,
+    };
+    return aw.toOwnedSlice();
+}
+
+/// Writes `image` as WebP to `writer`; see `encode`.
+pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(T), options: EncodeOptions) !void {
     if (!enabled) return error.CodecNotEnabled;
     try checkSize(image.cols, image.rows);
     const webp = try Libwebp.get();
@@ -227,12 +238,10 @@ pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), o
         },
     }
 
-    var writer: Writer = .{ .allocator = allocator };
-    errdefer writer.out.deinit(allocator);
-    picture.writer = Writer.write;
-    picture.custom_ptr = &writer;
-    if (webp.WebPEncode(&config, &picture) == 0) return if (writer.out_of_memory) error.OutOfMemory else error.WebpEncodeFailed;
-    return writer.out.toOwnedSlice(allocator);
+    var sink: Sink = .{ .writer = writer };
+    picture.writer = Sink.write;
+    picture.custom_ptr = &sink;
+    if (webp.WebPEncode(&config, &picture) == 0) return if (sink.failed) error.WriteFailed else error.WebpEncodeFailed;
 }
 
 pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
@@ -246,9 +255,20 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
 /// written as a still. libwebp folds identical consecutive frames into one longer frame, so
 /// loading the result back can give fewer frames over the same total duration.
 pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
+    var aw: Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    writeAnimated(T, io, allocator, &aw.writer, anim, options) catch |err| return switch (err) {
+        error.WriteFailed => error.OutOfMemory,
+        else => |e| e,
+    };
+    return aw.toOwnedSlice();
+}
+
+/// Writes `anim` as an animated WebP to `writer`; see `encodeAnimated`.
+pub fn writeAnimated(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, anim: AnimatedImage(T), options: EncodeOptions) !void {
     if (!enabled) return error.CodecNotEnabled;
     try anim.validate();
-    if (anim.frames.len == 1) return encode(T, io, allocator, anim.frames[0], options);
+    if (anim.frames.len == 1) return write(T, io, allocator, writer, anim.frames[0], options);
     const width = anim.frames[0].cols;
     const height = anim.frames[0].rows;
     try checkSize(width, height);
@@ -289,7 +309,7 @@ pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: Anim
     var data: WebPData = .{ .bytes = undefined, .size = 0 };
     if (mux.WebPAnimEncoderAssemble(enc, &data) == 0) return error.WebpEncodeFailed;
     defer webp.WebPFree(@constCast(data.bytes));
-    return allocator.dupe(u8, data.bytes[0..data.size]);
+    try writer.writeAll(data.bytes[0..data.size]);
 }
 
 /// WebP caps each side at 16383 pixels.
@@ -325,15 +345,14 @@ fn importPixels(webp: *const Api, picture: *Picture, comptime T: type, pixels: I
 }
 
 /// A `WebPWriterFunction` target that collects the output in an allocator-owned buffer.
-const Writer = struct {
-    allocator: Allocator,
-    out: std.ArrayList(u8) = .empty,
-    out_of_memory: bool = false,
+const Sink = struct {
+    writer: *Io.Writer,
+    failed: bool = false,
 
     fn write(data: [*]const u8, size: usize, picture: *const Picture) callconv(.c) c_int {
-        const self: *Writer = @ptrCast(@alignCast(picture.custom_ptr));
-        self.out.appendSlice(self.allocator, data[0..size]) catch {
-            self.out_of_memory = true;
+        const self: *Sink = @ptrCast(@alignCast(picture.custom_ptr));
+        self.writer.writeAll(data[0..size]) catch {
+            self.failed = true;
             return 0;
         };
         return 1;
