@@ -1160,8 +1160,9 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, png_data: [
     return native.into(T, io, allocator);
 }
 
-pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
-    const png_data = try codecs.readFile(io, allocator, file_path, limits.max_png_bytes);
+/// Reads a PNG image from `reader`, buffering at most the `DecodeLimits` byte cap.
+pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
+    const png_data = try reader.allocRemaining(allocator, codecs.readLimit(limits.max_png_bytes));
     defer allocator.free(png_data);
     return loadFromBytes(T, io, allocator, png_data, limits);
 }

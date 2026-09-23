@@ -114,9 +114,10 @@ pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, dat
     return builder.finish(allocator, reader.info.loop_count);
 }
 
-pub fn loadAnimated(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
+/// Reads every frame of a WebP image from `reader`, buffering at most the `DecodeLimits` byte cap.
+pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnimatedImage(T) {
     if (!enabled) return error.CodecNotEnabled;
-    const data = try codecs.readFile(io, allocator, file_path, limits.max_webp_bytes);
+    const data = try reader.allocRemaining(allocator, codecs.readLimit(limits.max_webp_bytes));
     defer allocator.free(data);
     return loadAnimatedFromBytes(T, io, allocator, data, limits);
 }
@@ -200,9 +201,10 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []con
     return native.into(T, io, allocator);
 }
 
-pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
+/// Reads a WebP image from `reader`, buffering at most the `DecodeLimits` byte cap.
+pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
     if (!enabled) return error.CodecNotEnabled;
-    const data = try codecs.readFile(io, allocator, file_path, limits.max_webp_bytes);
+    const data = try reader.allocRemaining(allocator, codecs.readLimit(limits.max_webp_bytes));
     defer allocator.free(data);
     return loadFromBytes(T, io, allocator, data, limits);
 }

@@ -9,6 +9,7 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
 const Image = @import("image.zig").Image;
+const ImageFormat = @import("image/format.zig").ImageFormat;
 const Rgb = @import("color.zig").Rgb(u8);
 const Rgba = @import("color.zig").Rgba(u8);
 
@@ -61,10 +62,33 @@ pub fn accumulateWithLimit(current: *usize, addend: usize, limit: usize, limit_e
     current.* = new_total;
 }
 
-/// Reads a whole file for decoding; `max_bytes == 0` means no cap.
-pub fn readFile(io: Io, allocator: Allocator, file_path: []const u8, max_bytes: usize) ![]u8 {
-    const limit: Io.Limit = if (max_bytes == 0) .unlimited else .limited(max_bytes);
-    return Io.Dir.cwd().readFileAlloc(io, file_path, allocator, limit);
+/// A `DecodeLimits` byte cap as a read limit; 0 means no cap.
+pub fn readLimit(max_bytes: usize) Io.Limit {
+    return if (max_bytes == 0) .unlimited else .limited(max_bytes);
+}
+
+/// The format named by the signature at the start of `reader`, without consuming it.
+pub fn peekFormat(reader: *Io.Reader) !ImageFormat {
+    // Files shorter than a signature can still match a shorter one.
+    const head = reader.peekGreedy(ImageFormat.signature_len) catch |err| switch (err) {
+        error.EndOfStream => reader.buffered(),
+        else => |e| return e,
+    };
+    return ImageFormat.detectFromBytes(head) orelse error.UnsupportedImageFormat;
+}
+
+/// Opens `file_path` and returns `source.read(reader)`. A failed file read returns the file's
+/// own error rather than `error.ReadFailed`.
+pub fn readFile(io: Io, file_path: []const u8, source: anytype) !ReadResult(@TypeOf(source)) {
+    const file = try Io.Dir.cwd().openFile(io, file_path, .{});
+    defer file.close(io);
+    var buffer: [16 * 1024]u8 = undefined;
+    var file_reader = file.reader(io, &buffer);
+    return source.read(&file_reader.interface) catch |err| return file_reader.err orelse err;
+}
+
+fn ReadResult(comptime Source: type) type {
+    return @typeInfo(@typeInfo(@TypeOf(Source.read)).@"fn".return_type.?).error_union.payload;
 }
 
 /// An allocating writer fails only when out of memory, so its `error.WriteFailed` becomes

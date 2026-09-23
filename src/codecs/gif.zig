@@ -48,7 +48,6 @@ const max_total_pixels_default: u64 = 1_073_741_824; // sum across frames (LZW b
 /// Resource limits applied while decoding GIF data. Zero disables the
 /// corresponding limit.
 pub const DecodeLimits = struct {
-    max_gif_bytes: usize = codecs.max_file_size,
     max_width: u32 = max_dimensions_default,
     max_height: u32 = max_dimensions_default,
     /// Per-frame pixel count cap.
@@ -318,10 +317,12 @@ pub const GifState = struct {
 /// palette indices; composition into Images happens via `loadFromBytes`
 /// (single-frame) or `loadAnimated*` (multi-frame).
 pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState {
-    if (exceeds(limits.max_gif_bytes, data.len)) return error.GifDataTooLarge;
-
     var reader: Io.Reader = .fixed(data);
+    return parse(gpa, &reader, limits);
+}
 
+/// `decode` from a stream. The reader's buffer must hold a whole color table (768 bytes).
+fn parse(gpa: Allocator, reader: *Io.Reader, limits: DecodeLimits) !GifState {
     const sig = try reader.takeArray(6);
     if (!std.mem.eql(u8, sig[0..3], &signature)) return error.InvalidGifSignature;
     const version: Version = if (std.mem.eql(u8, sig[3..6], "87a"))
@@ -379,7 +380,7 @@ pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState 
         switch (introducer) {
             block_trailer => break :block_loop,
             block_image_descriptor => {
-                const frame = try parseImageBlock(gpa, &reader, limits, global_palette, pending_gce, &total_pixels);
+                const frame = try parseImageBlock(gpa, reader, limits, global_palette, pending_gce, &total_pixels);
                 pending_gce = null;
                 try frames.append(gpa, frame);
                 if (exceeds(limits.max_frames, @intCast(frames.items.len))) {
@@ -389,9 +390,9 @@ pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState 
             block_extension_introducer => {
                 const label = try reader.takeByte();
                 switch (label) {
-                    ext_label_graphic_control => pending_gce = try parseGce(&reader),
-                    ext_label_application => try parseAppExtension(&reader, &loop_count),
-                    else => try skipSubBlocks(&reader),
+                    ext_label_graphic_control => pending_gce = try parseGce(reader),
+                    ext_label_application => try parseAppExtension(reader, &loop_count),
+                    else => try skipSubBlocks(reader),
                 }
             },
             else => return error.InvalidExtensionLabel,
@@ -686,18 +687,18 @@ pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, dat
     return composeAnimated(T, io, allocator, state);
 }
 
-/// Loads all frames from a GIF file into an `AnimatedImage(T)`.
-pub fn loadAnimated(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
-    const data = try codecs.readFile(io, allocator, file_path, limits.max_gif_bytes);
-    defer allocator.free(data);
-    return loadAnimatedFromBytes(T, io, allocator, data, limits);
+/// Reads a GIF from `reader`, returning frame 0 only; see `readAnimated`.
+pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
+    var state = try parse(allocator, reader, limits);
+    defer state.deinit(allocator);
+    return composeFirstFrame(T, io, allocator, state);
 }
 
-/// Loads a GIF from a file path. Returns frame 0 only.
-pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
-    const data = try codecs.readFile(io, allocator, file_path, limits.max_gif_bytes);
-    defer allocator.free(data);
-    return loadFromBytes(T, io, allocator, data, limits);
+/// Reads every frame of a GIF from `reader`, fully composed.
+pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnimatedImage(T) {
+    var state = try parse(allocator, reader, limits);
+    defer state.deinit(allocator);
+    return composeAnimated(T, io, allocator, state);
 }
 
 // ---------------------------------------------------------------------------

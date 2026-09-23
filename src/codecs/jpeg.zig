@@ -3107,8 +3107,9 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []con
     return img;
 }
 
-pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
-    const jpeg_data = try codecs.readFile(io, allocator, file_path, limits.max_jpeg_bytes);
+/// Reads a JPEG image from `reader`, buffering at most the `DecodeLimits` byte cap.
+pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
+    const jpeg_data = try reader.allocRemaining(allocator, codecs.readLimit(limits.max_jpeg_bytes));
     defer allocator.free(jpeg_data);
     return loadFromBytes(T, io, allocator, jpeg_data, limits);
 }

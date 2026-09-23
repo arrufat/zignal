@@ -254,9 +254,17 @@ pub fn Image(comptime T: type) type {
         /// defer img.deinit(allocator);
         /// ```
         pub fn load(io: Io, allocator: Allocator, file_path: []const u8) !Self {
-            const data = try codecs.readFile(io, allocator, file_path, codecs.max_file_size);
-            defer allocator.free(data);
-            return loadFromBytes(io, allocator, data);
+            const Source = struct {
+                io: Io,
+                allocator: Allocator,
+
+                pub fn read(source: @This(), reader: *Io.Reader) !Self {
+                    return switch (try codecs.peekFormat(reader)) {
+                        inline else => |f| @field(codecs, @tagName(f)).read(T, source.io, source.allocator, reader, .{}),
+                    };
+                }
+            };
+            return codecs.readFile(io, file_path, Source{ .io = io, .allocator = allocator });
         }
 
         /// Loads an image from an in-memory byte buffer with automatic format detection.

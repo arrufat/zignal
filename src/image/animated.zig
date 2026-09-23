@@ -27,9 +27,21 @@ pub fn AnimatedImage(comptime T: type) type {
         /// Loads every frame of `file_path`, detecting the format from its signature.
         /// Still formats give one frame with a zero duration.
         pub fn load(io: Io, allocator: Allocator, file_path: []const u8) !Self {
-            const data = try codecs.readFile(io, allocator, file_path, codecs.max_file_size);
-            defer allocator.free(data);
-            return loadFromBytes(io, allocator, data);
+            const Source = struct {
+                io: Io,
+                allocator: Allocator,
+
+                pub fn read(source: @This(), reader: *Io.Reader) !Self {
+                    switch (try codecs.peekFormat(reader)) {
+                        inline else => |f| {
+                            const codec = @field(codecs, @tagName(f));
+                            if (@hasDecl(codec, "readAnimated")) return codec.readAnimated(T, source.io, source.allocator, reader, .{});
+                            return fromStill(source.allocator, try codec.read(T, source.io, source.allocator, reader, .{}));
+                        },
+                    }
+                }
+            };
+            return codecs.readFile(io, file_path, Source{ .io = io, .allocator = allocator });
         }
 
         /// `load` for an in-memory encoded image.

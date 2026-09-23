@@ -799,9 +799,9 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []con
     return native.into(T, io, allocator);
 }
 
-/// Loads a BMP from a file path, converting to the requested pixel type.
-pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
-    const data = try codecs.readFile(io, allocator, file_path, limits.max_bmp_bytes);
+/// Reads a BMP image from `reader`, buffering at most the `DecodeLimits` byte cap.
+pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
+    const data = try reader.allocRemaining(allocator, codecs.readLimit(limits.max_bmp_bytes));
     defer allocator.free(data);
     return loadFromBytes(T, io, allocator, data, limits);
 }
