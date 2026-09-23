@@ -3,6 +3,8 @@
 const std = @import("std");
 const meta = @import("../meta.zig");
 const Image = @import("../image.zig").Image;
+const Rectangle = @import("../geometry.zig").Rectangle;
+const Rgb = @import("../color.zig").Rgb(u8);
 const RunningStats = @import("../stats.zig").RunningStats;
 
 /// Options for computing image differences.
@@ -202,4 +204,56 @@ pub fn compute(
         }
     }
     return DiffResult{ .stats = stats, .diff_count = diff_count };
+}
+
+/// See `Image.diffBounds`.
+pub fn bounds(comptime T: type, previous: Image(T), current: Image(T)) ?Rectangle(u32) {
+    std.debug.assert(previous.hasSameShape(current));
+    const Row = struct {
+        fn bytes(image: Image(T), r: usize) []const u8 {
+            return std.mem.sliceAsBytes(image.data[r * image.stride ..][0..image.cols]);
+        }
+    };
+    var top: usize = 0;
+    while (top < current.rows and std.mem.eql(u8, Row.bytes(previous, top), Row.bytes(current, top))) top += 1;
+    if (top == current.rows) return null;
+    var bottom: usize = current.rows;
+    while (std.mem.eql(u8, Row.bytes(previous, bottom - 1), Row.bytes(current, bottom - 1))) bottom -= 1;
+
+    var left: usize = current.cols;
+    var right: usize = 0;
+    for (top..bottom) |r| {
+        const a = Row.bytes(previous, r);
+        const b = Row.bytes(current, r);
+        const first = std.mem.indexOfDiff(u8, a, b) orelse continue;
+        var last = a.len;
+        while (a[last - 1] == b[last - 1]) last -= 1;
+        left = @min(left, first / @sizeOf(T));
+        right = @max(right, (last - 1) / @sizeOf(T) + 1);
+    }
+    return .init(@intCast(left), @intCast(top), @intCast(right), @intCast(bottom));
+}
+
+test "bounds of the differing pixels" {
+    const allocator = std.testing.allocator;
+    var a: Image(Rgb) = try .init(allocator, 6, 8);
+    defer a.deinit(allocator);
+    var b: Image(Rgb) = try .init(allocator, 6, 8);
+    defer b.deinit(allocator);
+    @memset(a.data, .{ .r = 1, .g = 2, .b = 3 });
+    @memset(b.data, .{ .r = 1, .g = 2, .b = 3 });
+    try std.testing.expectEqual(null, a.diffBounds(b));
+
+    // One channel of one pixel still widens to the whole pixel.
+    b.at(2, 5).g = 9;
+    try std.testing.expectEqual(Rectangle(u32).init(5, 2, 6, 3), a.diffBounds(b).?);
+    b.at(4, 1).* = .{ .r = 0, .g = 0, .b = 0 };
+    try std.testing.expectEqual(Rectangle(u32).init(1, 2, 6, 5), a.diffBounds(b).?);
+
+    // Views compare only their own pixels, relative to the view.
+    const rect: Rectangle(u32) = .init(3, 1, 7, 6);
+    try std.testing.expectEqual(Rectangle(u32).init(2, 1, 3, 2), a.view(rect).diffBounds(b.view(rect)).?);
+
+    @memset(b.data, .{ .r = 7, .g = 7, .b = 7 });
+    try std.testing.expectEqual(Rectangle(u32).init(0, 0, 8, 6), a.diffBounds(b).?);
 }
