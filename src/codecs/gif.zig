@@ -45,17 +45,15 @@ const max_pixels_default: u64 = 67_108_864; // per frame
 const max_frames_default: u32 = 4096;
 const max_total_pixels_default: u64 = 1_073_741_824; // sum across frames (LZW bomb guard)
 
-/// Resource limits applied while decoding GIF data. Zero disables the
-/// corresponding limit.
+/// Resource limits applied while decoding GIF data; `.unlimited` disables one.
 pub const DecodeLimits = struct {
-    max_gif_bytes: usize = codecs.max_file_size,
-    max_width: u32 = max_dimensions_default,
-    max_height: u32 = max_dimensions_default,
+    max_width: Io.Limit = .limited(max_dimensions_default),
+    max_height: Io.Limit = .limited(max_dimensions_default),
     /// Per-frame pixel count cap.
-    max_pixels: u64 = max_pixels_default,
-    max_frames: u32 = max_frames_default,
+    max_pixels: Io.Limit = .limited(max_pixels_default),
+    max_frames: Io.Limit = .limited(max_frames_default),
     /// Total composed pixels across all frames (decoder-bomb guard).
-    max_total_pixels: u64 = max_total_pixels_default,
+    max_total_pixels: Io.Limit = .limited(max_total_pixels_default),
 
     pub const default: DecodeLimits = .{};
 };
@@ -318,10 +316,12 @@ pub const GifState = struct {
 /// palette indices; composition into Images happens via `loadFromBytes`
 /// (single-frame) or `loadAnimated*` (multi-frame).
 pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState {
-    if (exceeds(limits.max_gif_bytes, data.len)) return error.GifDataTooLarge;
-
     var reader: Io.Reader = .fixed(data);
+    return parse(gpa, &reader, limits);
+}
 
+/// `decode` from a stream. The reader's buffer must hold a whole color table (768 bytes).
+fn parse(gpa: Allocator, reader: *Io.Reader, limits: DecodeLimits) !GifState {
     const sig = try reader.takeArray(6);
     if (!std.mem.eql(u8, sig[0..3], &signature)) return error.InvalidGifSignature;
     const version: Version = if (std.mem.eql(u8, sig[3..6], "87a"))
@@ -379,7 +379,7 @@ pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState 
         switch (introducer) {
             block_trailer => break :block_loop,
             block_image_descriptor => {
-                const frame = try parseImageBlock(gpa, &reader, limits, global_palette, pending_gce, &total_pixels);
+                const frame = try parseImageBlock(gpa, reader, limits, global_palette, pending_gce, &total_pixels);
                 pending_gce = null;
                 try frames.append(gpa, frame);
                 if (exceeds(limits.max_frames, @intCast(frames.items.len))) {
@@ -389,9 +389,9 @@ pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState 
             block_extension_introducer => {
                 const label = try reader.takeByte();
                 switch (label) {
-                    ext_label_graphic_control => pending_gce = try parseGce(&reader),
-                    ext_label_application => try parseAppExtension(&reader, &loop_count),
-                    else => try skipSubBlocks(&reader),
+                    ext_label_graphic_control => pending_gce = try parseGce(reader),
+                    ext_label_application => try parseAppExtension(reader, &loop_count),
+                    else => try skipSubBlocks(reader),
                 }
             },
             else => return error.InvalidExtensionLabel,
@@ -584,9 +584,8 @@ pub fn toNativeImage(io: Io, allocator: Allocator, state: GifState) !NativeImage
 /// Loads a GIF from in-memory bytes. Returns frame 0 only — see
 /// `loadAnimatedFromBytes` for full multi-frame access.
 pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
-    var state = try decode(allocator, data, limits);
-    defer state.deinit(allocator);
-    return composeFirstFrame(T, io, allocator, state);
+    var reader: Io.Reader = .fixed(data);
+    return read(T, io, allocator, &reader, limits);
 }
 
 // ---------------------------------------------------------------------------
@@ -681,23 +680,22 @@ fn compositeFrameOntoCanvas(canvas: *Image(Rgba), frame: FrameRecord) !void {
 /// Disposal and transparency are absorbed by the decoder — every output frame
 /// is fully composed.
 pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
-    var state = try decode(allocator, data, limits);
+    var reader: Io.Reader = .fixed(data);
+    return readAnimated(T, io, allocator, &reader, limits);
+}
+
+/// Reads a GIF from `reader`, returning frame 0 only; see `readAnimated`.
+pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
+    var state = try parse(allocator, reader, limits);
+    defer state.deinit(allocator);
+    return composeFirstFrame(T, io, allocator, state);
+}
+
+/// Reads every frame of a GIF from `reader`, fully composed.
+pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnimatedImage(T) {
+    var state = try parse(allocator, reader, limits);
     defer state.deinit(allocator);
     return composeAnimated(T, io, allocator, state);
-}
-
-/// Loads all frames from a GIF file into an `AnimatedImage(T)`.
-pub fn loadAnimated(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
-    const data = try codecs.readFile(io, allocator, file_path, limits.max_gif_bytes);
-    defer allocator.free(data);
-    return loadAnimatedFromBytes(T, io, allocator, data, limits);
-}
-
-/// Loads a GIF from a file path. Returns frame 0 only.
-pub fn load(comptime T: type, io: Io, allocator: Allocator, file_path: []const u8, limits: DecodeLimits) !Image(T) {
-    const data = try codecs.readFile(io, allocator, file_path, limits.max_gif_bytes);
-    defer allocator.free(data);
-    return loadFromBytes(T, io, allocator, data, limits);
 }
 
 // ---------------------------------------------------------------------------
@@ -732,36 +730,27 @@ fn declaredSizeLog(palette_len: usize) u3 {
 }
 
 /// Emits a color table to `out`, padded with `(0,0,0)` to `declared_entries`.
-fn writeColorTable(allocator: Allocator, out: *std.ArrayList(u8), palette: []const Rgb, declared_entries: u16) !void {
-    for (palette) |c| try out.appendSlice(allocator, &.{ c.r, c.g, c.b });
-    var pad_i: usize = palette.len;
-    while (pad_i < declared_entries) : (pad_i += 1) try out.appendSlice(allocator, &.{ 0, 0, 0 });
+fn writeColorTable(writer: *Io.Writer, palette: []const Rgb, declared_entries: u16) !void {
+    for (palette) |c| try writer.writeAll(&.{ c.r, c.g, c.b });
+    try writer.splatByteAll(0, 3 * (declared_entries - palette.len));
 }
 
 /// Emits the LZW data section of an Image block: `min_code_size` byte +
 /// LZW-compressed indices wrapped in 0xFF-max sub-blocks + terminator.
-fn writeLzwImageData(allocator: Allocator, out: *std.ArrayList(u8), indices: []const u8, min_code_size: u4) !void {
-    try out.append(allocator, @as(u8, min_code_size));
-
-    var encoder = try lzw.Encoder.init(allocator, min_code_size);
-    defer encoder.deinit(allocator);
-
-    var lzw_bytes: std.ArrayList(u8) = .empty;
-    defer lzw_bytes.deinit(allocator);
-    try encoder.encodeAll(allocator, indices, &lzw_bytes);
-
-    var idx: usize = 0;
-    while (idx < lzw_bytes.items.len) {
-        const chunk_len = @min(lzw_bytes.items.len - idx, 255);
-        try out.append(allocator, @intCast(chunk_len));
-        try out.appendSlice(allocator, lzw_bytes.items[idx .. idx + chunk_len]);
-        idx += chunk_len;
-    }
-    try out.append(allocator, 0);
+fn writeLzwImageData(encoder: *lzw.Encoder, writer: *Io.Writer, indices: []const u8, min_code_size: u4) !void {
+    try writer.writeByte(min_code_size);
+    try encoder.reset(min_code_size);
+    try encoder.encodeAll(writer, indices);
+    try writer.writeByte(0);
 }
 
 /// Encodes a single-frame GIF from `image`. Caller frees the returned slice.
 pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), options: EncodeOptions) ![]u8 {
+    return codecs.encodeWith(allocator, write, .{ T, io, allocator }, .{ image, options });
+}
+
+/// Writes `image` as a single-frame GIF to `writer`.
+pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(T), options: EncodeOptions) !void {
     if (image.cols == 0 or image.rows == 0) return error.InvalidDimensions;
     if (image.cols > 65535 or image.rows > 65535) return error.ImageTooLarge;
 
@@ -833,45 +822,39 @@ pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), o
     const size_log = declaredSizeLog(palette.len);
     const declared_entries: u16 = @as(u16, 2) << size_log;
 
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(allocator);
-
-    try out.appendSlice(allocator, "GIF89a");
-    try writeU16Le(allocator, &out, width);
-    try writeU16Le(allocator, &out, height);
+    try writer.writeAll("GIF89a");
+    try writer.writeInt(u16, width, .little);
+    try writer.writeInt(u16, height, .little);
     const lsd_packed: u8 = lsd_flag_global_color_table | lsd_color_resolution_default | @as(u8, size_log);
-    try out.append(allocator, lsd_packed);
-    try out.append(allocator, 0); // background color index
-    try out.append(allocator, 0); // pixel aspect ratio
+    try writer.writeByte(lsd_packed);
+    try writer.writeByte(0); // background color index
+    try writer.writeByte(0); // pixel aspect ratio
 
-    try writeColorTable(allocator, &out, palette, declared_entries);
+    try writeColorTable(writer, palette, declared_entries);
 
     if (has_transparent) {
         // Graphic Control Extension naming the transparent index.
-        try out.append(allocator, block_extension_introducer);
-        try out.append(allocator, ext_label_graphic_control);
-        try out.append(allocator, 0x04);
-        try out.append(allocator, gce_flag_transparent);
-        try writeU16Le(allocator, &out, 0);
-        try out.append(allocator, transparent_index);
-        try out.append(allocator, 0);
+        try writer.writeByte(block_extension_introducer);
+        try writer.writeByte(ext_label_graphic_control);
+        try writer.writeByte(0x04);
+        try writer.writeByte(gce_flag_transparent);
+        try writer.writeInt(u16, 0, .little);
+        try writer.writeByte(transparent_index);
+        try writer.writeByte(0);
     }
 
-    try out.append(allocator, block_image_descriptor);
-    try writeU16Le(allocator, &out, 0);
-    try writeU16Le(allocator, &out, 0);
-    try writeU16Le(allocator, &out, width);
-    try writeU16Le(allocator, &out, height);
-    try out.append(allocator, 0x00); // packed: no LCT, not interlaced
+    try writer.writeByte(block_image_descriptor);
+    try writer.writeInt(u16, 0, .little);
+    try writer.writeInt(u16, 0, .little);
+    try writer.writeInt(u16, width, .little);
+    try writer.writeInt(u16, height, .little);
+    try writer.writeByte(0x00); // packed: no LCT, not interlaced
 
-    try writeLzwImageData(allocator, &out, indices, min_code_size);
+    var encoder = try lzw.Encoder.init(allocator, min_code_size);
+    defer encoder.deinit(allocator);
+    try writeLzwImageData(&encoder, writer, indices, min_code_size);
 
-    try out.append(allocator, block_trailer);
-    return out.toOwnedSlice(allocator);
-}
-
-inline fn writeU16Le(allocator: Allocator, out: *std.ArrayList(u8), v: u16) !void {
-    try out.appendSlice(allocator, &std.mem.toBytes(std.mem.nativeTo(u16, v, .little)));
+    try writer.writeByte(block_trailer);
 }
 
 /// Maps each pixel to the nearest palette index, with optional Floyd–Steinberg
@@ -928,13 +911,6 @@ fn mapImageToPalette(
     }
 }
 
-/// Saves `image` as a GIF to `file_path`.
-pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), file_path: []const u8) !void {
-    const data = try encode(T, io, allocator, image, .default);
-    defer allocator.free(data);
-    try codecs.writeFile(io, file_path, data);
-}
-
 // ---------------------------------------------------------------------------
 // Animated encode
 // ---------------------------------------------------------------------------
@@ -942,6 +918,11 @@ pub fn save(comptime T: type, io: Io, allocator: Allocator, image: Image(T), fil
 /// Encodes an `AnimatedImage(T)` as an animated GIF, storing only each frame's changed region.
 /// For `T == Rgba`, pixels with `alpha < 128` map to a reserved transparent palette index.
 pub fn encodeAnimated(comptime T: type, io: Io, gpa: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
+    return codecs.encodeWith(gpa, writeAnimated, .{ T, io, gpa }, .{ anim, options });
+}
+
+/// Writes `anim` as an animated GIF to `writer`; see `encodeAnimated`.
+pub fn writeAnimated(comptime T: type, io: Io, gpa: Allocator, writer: *Io.Writer, anim: AnimatedImage(T), options: EncodeOptions) !void {
     try anim.validate();
 
     const screen_w_u32 = anim.frames[0].cols;
@@ -951,12 +932,9 @@ pub fn encodeAnimated(comptime T: type, io: Io, gpa: Allocator, anim: AnimatedIm
     const screen_w: u16 = @intCast(screen_w_u32);
     const screen_h: u16 = @intCast(screen_h_u32);
 
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(gpa);
-
-    try out.appendSlice(gpa, "GIF89a");
-    try writeU16Le(gpa, &out, screen_w);
-    try writeU16Le(gpa, &out, screen_h);
+    try writer.writeAll("GIF89a");
+    try writer.writeInt(u16, screen_w, .little);
+    try writer.writeInt(u16, screen_h, .little);
 
     const has_global_palette = options.palette != null;
     var lsd_packed: u8 = 0;
@@ -965,29 +943,32 @@ pub fn encodeAnimated(comptime T: type, io: Io, gpa: Allocator, anim: AnimatedIm
         const size_log = declaredSizeLog(custom.len);
         lsd_packed = lsd_flag_global_color_table | lsd_color_resolution_default | @as(u8, size_log);
     }
-    try out.append(gpa, lsd_packed);
-    try out.append(gpa, 0); // background color index
-    try out.append(gpa, 0); // pixel aspect ratio
+    try writer.writeByte(lsd_packed);
+    try writer.writeByte(0); // background color index
+    try writer.writeByte(0); // pixel aspect ratio
 
     if (options.palette) |custom| {
         const declared: u16 = @as(u16, 2) << declaredSizeLog(custom.len);
-        try writeColorTable(gpa, &out, custom, declared);
+        try writeColorTable(writer, custom, declared);
     }
 
     // NETSCAPE2.0 application extension carrying the loop count. Always emit
     // for animations so the loop_count is explicit.
     if (anim.frames.len >= 2) {
-        try out.append(gpa, block_extension_introducer);
-        try out.append(gpa, ext_label_application);
-        try out.append(gpa, 0x0B);
-        try out.appendSlice(gpa, "NETSCAPE2.0");
-        try out.append(gpa, 0x03);
-        try out.append(gpa, 0x01);
-        try writeU16Le(gpa, &out, @min(anim.loop_count, std.math.maxInt(u16)));
-        try out.append(gpa, 0);
+        try writer.writeByte(block_extension_introducer);
+        try writer.writeByte(ext_label_application);
+        try writer.writeByte(0x0B);
+        try writer.writeAll("NETSCAPE2.0");
+        try writer.writeByte(0x03);
+        try writer.writeByte(0x01);
+        try writer.writeInt(u16, @min(anim.loop_count, std.math.maxInt(u16)), .little);
+        try writer.writeByte(0);
     }
 
     // Transparent pixels show the canvas below, so uncovering one needs a cleared canvas.
+    // One encoder for every frame; `reset` keeps its dictionary's memory.
+    var encoder = try lzw.Encoder.init(gpa, 2);
+    defer encoder.deinit(gpa);
     var after_clear = false;
     for (anim.frames, anim.durations_ms, 0..) |frame, ms, i| {
         const clears_next = i + 1 < anim.frames.len and uncovers(T, frame, anim.frames[i + 1]);
@@ -995,12 +976,11 @@ pub fn encodeAnimated(comptime T: type, io: Io, gpa: Allocator, anim: AnimatedIm
         const disposal: DisposalMethod = if (clears_next) .restore_to_background else .do_not_dispose;
         // GIF delays are centiseconds.
         const delay_cs = @min((ms +| 5) / 10, std.math.maxInt(u16));
-        try emitAnimatedFrame(T, io, gpa, frame, region, disposal, delay_cs, has_global_palette, options, &out);
+        try emitAnimatedFrame(T, io, gpa, &encoder, frame, region, disposal, delay_cs, has_global_palette, options, writer);
         after_clear = clears_next;
     }
 
-    try out.append(gpa, block_trailer);
-    return out.toOwnedSlice(gpa);
+    try writer.writeByte(block_trailer);
 }
 
 /// Whether `next` makes transparent a pixel that is opaque in `current`.
@@ -1018,13 +998,14 @@ fn emitAnimatedFrame(
     comptime T: type,
     io: Io,
     gpa: Allocator,
+    encoder: *lzw.Encoder,
     full_frame: Image(T),
     region: Rectangle(u32),
     disposal: DisposalMethod,
     delay_cs: u16,
     has_global_palette: bool,
     options: EncodeOptions,
-    out: *std.ArrayList(u8),
+    writer: *Io.Writer,
 ) !void {
     const frame = full_frame.view(region);
     const num_pixels: usize = @as(usize, frame.cols) * @as(usize, frame.rows);
@@ -1087,33 +1068,33 @@ fn emitAnimatedFrame(
     const declared_entries: u16 = @as(u16, 2) << size_log;
 
     // Graphic Control Extension (always emit so delay_cs is explicit).
-    try out.append(gpa, block_extension_introducer);
-    try out.append(gpa, ext_label_graphic_control);
-    try out.append(gpa, 0x04);
+    try writer.writeByte(block_extension_introducer);
+    try writer.writeByte(ext_label_graphic_control);
+    try writer.writeByte(0x04);
     const gce_packed: u8 = (@as(u8, @backingInt(disposal)) << 2) | if (has_transparent) gce_flag_transparent else 0;
-    try out.append(gpa, gce_packed);
-    try writeU16Le(gpa, out, delay_cs);
-    try out.append(gpa, transparent_index);
-    try out.append(gpa, 0);
+    try writer.writeByte(gce_packed);
+    try writer.writeInt(u16, delay_cs, .little);
+    try writer.writeByte(transparent_index);
+    try writer.writeByte(0);
 
     // Image Descriptor.
-    try out.append(gpa, block_image_descriptor);
-    try writeU16Le(gpa, out, @intCast(region.l));
-    try writeU16Le(gpa, out, @intCast(region.t));
-    try writeU16Le(gpa, out, @intCast(frame.cols));
-    try writeU16Le(gpa, out, @intCast(frame.rows));
+    try writer.writeByte(block_image_descriptor);
+    try writer.writeInt(u16, @intCast(region.l), .little);
+    try writer.writeInt(u16, @intCast(region.t), .little);
+    try writer.writeInt(u16, @intCast(frame.cols), .little);
+    try writer.writeInt(u16, @intCast(frame.rows), .little);
     var id_packed: u8 = 0;
     if (!has_global_palette) {
         id_packed |= id_flag_local_color_table;
         id_packed |= @as(u8, size_log);
     }
-    try out.append(gpa, id_packed);
+    try writer.writeByte(id_packed);
 
     if (!has_global_palette) {
-        try writeColorTable(gpa, out, palette, declared_entries);
+        try writeColorTable(writer, palette, declared_entries);
     }
 
-    try writeLzwImageData(gpa, out, indices, min_code_size);
+    try writeLzwImageData(encoder, writer, indices, min_code_size);
 }
 
 // ---------------------------------------------------------------------------
@@ -1121,90 +1102,102 @@ fn emitAnimatedFrame(
 // ---------------------------------------------------------------------------
 
 const TestBuilder = struct {
-    list: std.ArrayList(u8) = .empty,
+    aw: Io.Writer.Allocating,
 
-    fn deinit(self: *TestBuilder, gpa: Allocator) void {
-        self.list.deinit(gpa);
+    fn init(gpa: Allocator) TestBuilder {
+        return .{ .aw = .init(gpa) };
     }
 
-    fn appendByte(self: *TestBuilder, gpa: Allocator, b: u8) !void {
-        try self.list.append(gpa, b);
+    fn deinit(self: *TestBuilder) void {
+        self.aw.deinit();
     }
 
-    fn appendBytes(self: *TestBuilder, gpa: Allocator, bs: []const u8) !void {
-        try self.list.appendSlice(gpa, bs);
+    fn written(self: *TestBuilder) []u8 {
+        return self.aw.written();
     }
 
-    fn appendHeader(self: *TestBuilder, gpa: Allocator, opts: HeaderOpts) !void {
-        try self.appendBytes(gpa, opts.signature);
-        try writeU16Le(gpa, &self.list, opts.width);
-        try writeU16Le(gpa, &self.list, opts.height);
+    fn appendByte(self: *TestBuilder, b: u8) !void {
+        try self.aw.writer.writeByte(b);
+    }
+
+    fn appendBytes(self: *TestBuilder, bs: []const u8) !void {
+        try self.aw.writer.writeAll(bs);
+    }
+
+    fn appendU16(self: *TestBuilder, v: u16) !void {
+        try self.aw.writer.writeInt(u16, v, .little);
+    }
+
+    fn appendHeader(self: *TestBuilder, opts: HeaderOpts) !void {
+        try self.appendBytes(opts.signature);
+        try self.appendU16(opts.width);
+        try self.appendU16(opts.height);
         var packed_byte: u8 = 0;
         if (opts.gct_size_log) |s| {
             packed_byte |= lsd_flag_global_color_table;
             packed_byte |= lsd_color_resolution_default;
             packed_byte |= s;
         }
-        try self.appendByte(gpa, packed_byte);
-        try self.appendByte(gpa, opts.bg_index);
-        try self.appendByte(gpa, 0); // pixel aspect ratio
+        try self.appendByte(packed_byte);
+        try self.appendByte(opts.bg_index);
+        try self.appendByte(0); // pixel aspect ratio
         if (opts.gct_size_log) |s| {
             const entries: u32 = @as(u32, 2) << @intCast(s);
             // Fill with zeros — content doesn't affect getInfo.
-            try self.list.appendNTimes(gpa, 0, @as(usize, entries) * 3);
+            try self.aw.writer.splatByteAll(0, @as(usize, entries) * 3);
         }
     }
 
-    fn appendImageDescriptor(self: *TestBuilder, gpa: Allocator, opts: ImageDescOpts) !void {
-        try self.appendByte(gpa, block_image_descriptor);
-        try writeU16Le(gpa, &self.list, opts.left);
-        try writeU16Le(gpa, &self.list, opts.top);
-        try writeU16Le(gpa, &self.list, opts.width);
-        try writeU16Le(gpa, &self.list, opts.height);
-        try self.appendByte(gpa, opts.packed_byte);
+    fn appendImageDescriptor(self: *TestBuilder, opts: ImageDescOpts) !void {
+        try self.appendByte(block_image_descriptor);
+        try self.appendU16(opts.left);
+        try self.appendU16(opts.top);
+        try self.appendU16(opts.width);
+        try self.appendU16(opts.height);
+        try self.appendByte(opts.packed_byte);
         if (opts.lct_size_log) |s| {
             const entries: u32 = @as(u32, 2) << @intCast(s);
-            try self.list.appendNTimes(gpa, 0, @as(usize, entries) * 3);
+            try self.aw.writer.splatByteAll(0, @as(usize, entries) * 3);
         }
-        try self.appendByte(gpa, opts.lzw_min_code_size);
+        try self.appendByte(opts.lzw_min_code_size);
         // Empty data: just the terminator sub-block.
-        try self.appendByte(gpa, 0);
+        try self.appendByte(0);
     }
 
-    fn appendImageWithLzw(self: *TestBuilder, gpa: Allocator, opts: ImageDescOpts, lct: ?[]const Rgb, lzw_data: []const u8) !void {
-        try self.appendByte(gpa, block_image_descriptor);
-        try writeU16Le(gpa, &self.list, opts.left);
-        try writeU16Le(gpa, &self.list, opts.top);
-        try writeU16Le(gpa, &self.list, opts.width);
-        try writeU16Le(gpa, &self.list, opts.height);
-        try self.appendByte(gpa, opts.packed_byte);
+    fn appendImageWithLzw(self: *TestBuilder, opts: ImageDescOpts, lct: ?[]const Rgb, lzw_data: []const u8) !void {
+        try self.appendByte(block_image_descriptor);
+        try self.appendU16(opts.left);
+        try self.appendU16(opts.top);
+        try self.appendU16(opts.width);
+        try self.appendU16(opts.height);
+        try self.appendByte(opts.packed_byte);
         if (lct) |entries| {
             for (entries) |e| {
-                try self.appendBytes(gpa, &.{ e.r, e.g, e.b });
+                try self.appendBytes(&.{ e.r, e.g, e.b });
             }
         }
-        try self.appendByte(gpa, opts.lzw_min_code_size);
+        try self.appendByte(opts.lzw_min_code_size);
         var idx: usize = 0;
         while (idx < lzw_data.len) {
             const chunk_len = @min(lzw_data.len - idx, 255);
-            try self.appendByte(gpa, @intCast(chunk_len));
-            try self.appendBytes(gpa, lzw_data[idx .. idx + chunk_len]);
+            try self.appendByte(@intCast(chunk_len));
+            try self.appendBytes(lzw_data[idx .. idx + chunk_len]);
             idx += chunk_len;
         }
-        try self.appendByte(gpa, 0);
+        try self.appendByte(0);
     }
 
-    fn appendHeaderWithGct(self: *TestBuilder, gpa: Allocator, w: u16, h: u16, gct: []const Rgb) !void {
-        try self.appendBytes(gpa, "GIF89a");
-        try writeU16Le(gpa, &self.list, w);
-        try writeU16Le(gpa, &self.list, h);
+    fn appendHeaderWithGct(self: *TestBuilder, w: u16, h: u16, gct: []const Rgb) !void {
+        try self.appendBytes("GIF89a");
+        try self.appendU16(w);
+        try self.appendU16(h);
         const s = declaredSizeLog(gct.len);
         const declared: u16 = @as(u16, 2) << s;
         const packed_byte: u8 = lsd_flag_global_color_table | lsd_color_resolution_default | @as(u8, s);
-        try self.appendByte(gpa, packed_byte);
-        try self.appendByte(gpa, 0); // bg
-        try self.appendByte(gpa, 0); // aspect
-        try writeColorTable(gpa, &self.list, gct, declared);
+        try self.appendByte(packed_byte);
+        try self.appendByte(0); // bg
+        try self.appendByte(0); // aspect
+        try writeColorTable(&self.aw.writer, gct, declared);
     }
 
     const GceOpts = struct {
@@ -1214,39 +1207,39 @@ const TestBuilder = struct {
         transparent_index: u8 = 0,
     };
 
-    fn appendGce(self: *TestBuilder, gpa: Allocator, opts: GceOpts) !void {
-        try self.appendByte(gpa, block_extension_introducer);
-        try self.appendByte(gpa, ext_label_graphic_control);
-        try self.appendByte(gpa, 0x04); // block size (always 4)
+    fn appendGce(self: *TestBuilder, opts: GceOpts) !void {
+        try self.appendByte(block_extension_introducer);
+        try self.appendByte(ext_label_graphic_control);
+        try self.appendByte(0x04); // block size (always 4)
         const trans_flag: u8 = if (opts.has_transparent) gce_flag_transparent else 0;
         const packed_byte: u8 = (@as(u8, opts.disposal) << 2) | trans_flag;
-        try self.appendByte(gpa, packed_byte);
-        try writeU16Le(gpa, &self.list, opts.delay_cs);
-        try self.appendByte(gpa, opts.transparent_index);
-        try self.appendByte(gpa, 0); // sub-block terminator
+        try self.appendByte(packed_byte);
+        try self.appendU16(opts.delay_cs);
+        try self.appendByte(opts.transparent_index);
+        try self.appendByte(0); // sub-block terminator
     }
 
-    fn appendNetscape2(self: *TestBuilder, gpa: Allocator, loop_count: u16) !void {
-        try self.appendByte(gpa, block_extension_introducer);
-        try self.appendByte(gpa, ext_label_application);
-        try self.appendByte(gpa, 0x0B); // block size = 11
-        try self.appendBytes(gpa, "NETSCAPE2.0");
-        try self.appendByte(gpa, 0x03); // sub-block size = 3
-        try self.appendByte(gpa, 0x01); // sub-block id
-        try writeU16Le(gpa, &self.list, loop_count);
-        try self.appendByte(gpa, 0); // terminator
+    fn appendNetscape2(self: *TestBuilder, loop_count: u16) !void {
+        try self.appendByte(block_extension_introducer);
+        try self.appendByte(ext_label_application);
+        try self.appendByte(0x0B); // block size = 11
+        try self.appendBytes("NETSCAPE2.0");
+        try self.appendByte(0x03); // sub-block size = 3
+        try self.appendByte(0x01); // sub-block id
+        try self.appendU16(loop_count);
+        try self.appendByte(0); // terminator
     }
 
-    fn appendComment(self: *TestBuilder, gpa: Allocator, text: []const u8) !void {
-        try self.appendByte(gpa, block_extension_introducer);
-        try self.appendByte(gpa, ext_label_comment);
-        try self.appendByte(gpa, @intCast(text.len));
-        try self.appendBytes(gpa, text);
-        try self.appendByte(gpa, 0);
+    fn appendComment(self: *TestBuilder, text: []const u8) !void {
+        try self.appendByte(block_extension_introducer);
+        try self.appendByte(ext_label_comment);
+        try self.appendByte(@intCast(text.len));
+        try self.appendBytes(text);
+        try self.appendByte(0);
     }
 
-    fn appendTrailer(self: *TestBuilder, gpa: Allocator) !void {
-        try self.appendByte(gpa, block_trailer);
+    fn appendTrailer(self: *TestBuilder) !void {
+        try self.appendByte(block_trailer);
     }
 
     const HeaderOpts = struct {
@@ -1274,13 +1267,13 @@ fn buildReader(data: []const u8) Io.Reader {
 
 test "getInfo — minimal GIF87a, no frames" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeader(gpa, .{ .signature = "GIF87a", .width = 16, .height = 8 });
-    try b.appendTrailer(gpa);
+    try b.appendHeader(.{ .signature = "GIF87a", .width = 16, .height = 8 });
+    try b.appendTrailer();
 
-    var reader = buildReader(b.list.items);
+    var reader = buildReader(b.written());
     const info = try getInfo(&reader, .{});
 
     try expectEqual(Version.gif87a, info.version);
@@ -1293,15 +1286,15 @@ test "getInfo — minimal GIF87a, no frames" {
 
 test "getInfo — GIF89a with 1 frame and GCE" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeader(gpa, .{ .gct_size_log = 1 }); // 4-entry GCT
-    try b.appendGce(gpa, .{});
-    try b.appendImageDescriptor(gpa, .{});
-    try b.appendTrailer(gpa);
+    try b.appendHeader(.{ .gct_size_log = 1 }); // 4-entry GCT
+    try b.appendGce(.{});
+    try b.appendImageDescriptor(.{});
+    try b.appendTrailer();
 
-    var reader = buildReader(b.list.items);
+    var reader = buildReader(b.written());
     const info = try getInfo(&reader, .{});
 
     try expectEqual(Version.gif89a, info.version);
@@ -1313,16 +1306,16 @@ test "getInfo — GIF89a with 1 frame and GCE" {
 
 test "getInfo — NETSCAPE2.0 loop count = 3" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeader(gpa, .{});
-    try b.appendNetscape2(gpa, 3);
-    try b.appendImageDescriptor(gpa, .{});
-    try b.appendImageDescriptor(gpa, .{});
-    try b.appendTrailer(gpa);
+    try b.appendHeader(.{});
+    try b.appendNetscape2(3);
+    try b.appendImageDescriptor(.{});
+    try b.appendImageDescriptor(.{});
+    try b.appendTrailer();
 
-    var reader = buildReader(b.list.items);
+    var reader = buildReader(b.written());
     const info = try getInfo(&reader, .{});
 
     try expectEqual(@as(u16, 3), info.loop_count);
@@ -1331,15 +1324,15 @@ test "getInfo — NETSCAPE2.0 loop count = 3" {
 
 test "getInfo — comment extension is skipped" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeader(gpa, .{});
-    try b.appendComment(gpa, "made with zignal");
-    try b.appendImageDescriptor(gpa, .{});
-    try b.appendTrailer(gpa);
+    try b.appendHeader(.{});
+    try b.appendComment("made with zignal");
+    try b.appendImageDescriptor(.{});
+    try b.appendTrailer();
 
-    var reader = buildReader(b.list.items);
+    var reader = buildReader(b.written());
     const info = try getInfo(&reader, .{});
     try expectEqual(@as(u32, 1), info.frame_count);
 }
@@ -1358,29 +1351,29 @@ test "getInfo — unsupported version rejected" {
 
 test "getInfo — width exceeds limit" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeader(gpa, .{ .width = 2000, .height = 10 });
-    try b.appendTrailer(gpa);
+    try b.appendHeader(.{ .width = 2000, .height = 10 });
+    try b.appendTrailer();
 
-    var reader = buildReader(b.list.items);
-    try expectError(error.ImageTooLarge, getInfo(&reader, .{ .max_width = 1024 }));
+    var reader = buildReader(b.written());
+    try expectError(error.ImageTooLarge, getInfo(&reader, .{ .max_width = .limited(1024) }));
 }
 
 test "getInfo — frame count exceeds limit" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeader(gpa, .{});
-    try b.appendImageDescriptor(gpa, .{});
-    try b.appendImageDescriptor(gpa, .{});
-    try b.appendImageDescriptor(gpa, .{});
-    try b.appendTrailer(gpa);
+    try b.appendHeader(.{});
+    try b.appendImageDescriptor(.{});
+    try b.appendImageDescriptor(.{});
+    try b.appendImageDescriptor(.{});
+    try b.appendTrailer();
 
-    var reader = buildReader(b.list.items);
-    try expectError(error.TooManyFrames, getInfo(&reader, .{ .max_frames = 2 }));
+    var reader = buildReader(b.written());
+    try expectError(error.TooManyFrames, getInfo(&reader, .{ .max_frames = .limited(2) }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1396,17 +1389,17 @@ const test_palette_4 = [_]Rgb{
 
 test "loadFromBytes — 1x1 red pixel" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeaderWithGct(gpa, 1, 1, &test_palette_4);
+    try b.appendHeaderWithGct(1, 1, &test_palette_4);
     // LZW for indices [1]: Clear=4, 1, EOI=5 at min_code_size=2.
     //   bits 0..2 = 100 (Clear), 3..5 = 001 (1), 6..8 = 101 (EOI)
     //   byte 0 = 0b01001100 = 0x4C, byte 1 = 0b00000001 = 0x01
-    try b.appendImageWithLzw(gpa, .{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
-    try b.appendTrailer(gpa);
+    try b.appendImageWithLzw(.{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
+    try b.appendTrailer();
 
-    var img = try loadFromBytes(Rgb, parallel.inline_io, gpa, b.list.items, .{});
+    var img = try loadFromBytes(Rgb, parallel.inline_io, gpa, b.written(), .{});
     defer img.deinit(gpa);
 
     try expectEqual(@as(usize, 1), img.rows);
@@ -1416,17 +1409,17 @@ test "loadFromBytes — 1x1 red pixel" {
 
 test "loadFromBytes — 2x2 with global palette" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeaderWithGct(gpa, 2, 2, &test_palette_4);
+    try b.appendHeaderWithGct(2, 2, &test_palette_4);
     // LZW for indices [0, 1, 2, 3]: encoder grows code_size after the third
     // user emission saturates the dict (next_code = 9 > 1<<3), so codes 0,1,2
     // are emitted at 3 bits and 3,EOI at 4 bits → bytes [0x44, 0x34, 0x05].
-    try b.appendImageWithLzw(gpa, .{ .width = 2, .height = 2 }, null, &.{ 0x44, 0x34, 0x05 });
-    try b.appendTrailer(gpa);
+    try b.appendImageWithLzw(.{ .width = 2, .height = 2 }, null, &.{ 0x44, 0x34, 0x05 });
+    try b.appendTrailer();
 
-    var img = try loadFromBytes(Rgb, parallel.inline_io, gpa, b.list.items, .{});
+    var img = try loadFromBytes(Rgb, parallel.inline_io, gpa, b.written(), .{});
     defer img.deinit(gpa);
 
     try expectEqual(Rgb{ .r = 0, .g = 0, .b = 0 }, img.at(0, 0).*);
@@ -1437,10 +1430,10 @@ test "loadFromBytes — 2x2 with global palette" {
 
 test "loadFromBytes — local color table overrides global" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeaderWithGct(gpa, 1, 1, &test_palette_4); // global red at idx 1
+    try b.appendHeaderWithGct(1, 1, &test_palette_4); // global red at idx 1
 
     // LCT: 4 entries, idx 1 = white (different from global red).
     const lct = [_]Rgb{
@@ -1451,14 +1444,13 @@ test "loadFromBytes — local color table overrides global" {
     };
     // packed_byte: LCT flag = 0x80, lct_size_log = 1 → 0x81.
     try b.appendImageWithLzw(
-        gpa,
         .{ .width = 1, .height = 1, .packed_byte = 0x81, .lct_size_log = 1 },
         &lct,
         &.{ 0x4C, 0x01 },
     );
-    try b.appendTrailer(gpa);
+    try b.appendTrailer();
 
-    var img = try loadFromBytes(Rgb, parallel.inline_io, gpa, b.list.items, .{});
+    var img = try loadFromBytes(Rgb, parallel.inline_io, gpa, b.written(), .{});
     defer img.deinit(gpa);
 
     try expectEqual(Rgb{ .r = 255, .g = 255, .b = 255 }, img.at(0, 0).*);
@@ -1466,17 +1458,17 @@ test "loadFromBytes — local color table overrides global" {
 
 test "loadFromBytes — frame outside screen rejected via descriptor checks" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeaderWithGct(gpa, 4, 4, &test_palette_4);
+    try b.appendHeaderWithGct(4, 4, &test_palette_4);
     // Frame width 6 — exceeds screen but per the LSD limit. Should be tolerated
     // by the parser (composition just clips), so this should NOT fail. Let's
     // test the actual oversize-rejection via DecodeLimits.max_width instead.
-    try b.appendImageWithLzw(gpa, .{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
-    try b.appendTrailer(gpa);
+    try b.appendImageWithLzw(.{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
+    try b.appendTrailer();
 
-    try expectError(error.ImageTooLarge, loadFromBytes(Rgb, parallel.inline_io, gpa, b.list.items, .{ .max_width = 2 }));
+    try expectError(error.ImageTooLarge, loadFromBytes(Rgb, parallel.inline_io, gpa, b.written(), .{ .max_width = .limited(2) }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1485,26 +1477,26 @@ test "loadFromBytes — frame outside screen rejected via descriptor checks" {
 
 test "loadAnimated — two frames, do_not_dispose, per-frame delays" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeaderWithGct(gpa, 1, 1, &test_palette_4);
+    try b.appendHeaderWithGct(1, 1, &test_palette_4);
 
     // Frame 0: red (idx 1), delay 5cs.
-    try b.appendGce(gpa, .{ .disposal = 1, .delay_cs = 5 });
-    try b.appendImageWithLzw(gpa, .{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
+    try b.appendGce(.{ .disposal = 1, .delay_cs = 5 });
+    try b.appendImageWithLzw(.{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
 
     // Frame 1: green (idx 2), delay 10cs.
-    try b.appendGce(gpa, .{ .disposal = 1, .delay_cs = 10 });
+    try b.appendGce(.{ .disposal = 1, .delay_cs = 10 });
     // LZW for indices [2]: Clear=4, 2, EOI=5 at min_code_size=2.
     //   bits 0..2 = 100, 3..5 = 010, 6..8 = 101
     //   byte 0 = 0,0,1, 0,1,0, 1,0 = 0b01010100 = 0x54
     //   byte 1 = bit 8 = 1, rest = 0 = 0x01
-    try b.appendImageWithLzw(gpa, .{ .width = 1, .height = 1 }, null, &.{ 0x54, 0x01 });
+    try b.appendImageWithLzw(.{ .width = 1, .height = 1 }, null, &.{ 0x54, 0x01 });
 
-    try b.appendTrailer(gpa);
+    try b.appendTrailer();
 
-    var anim = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, b.list.items, .{});
+    var anim = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, b.written(), .{});
     defer anim.deinit(gpa);
 
     try expectEqual(@as(usize, 2), anim.frameCount());
@@ -1516,28 +1508,28 @@ test "loadAnimated — two frames, do_not_dispose, per-frame delays" {
 
 test "loadAnimated — restore_to_background blanks the previous rect" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
     // 2x1 screen: frame 0 covers full screen with red, then disposal=2 (RTB).
     // Frame 1 covers only the first column with green; column 1 should be transparent.
-    try b.appendHeaderWithGct(gpa, 2, 1, &test_palette_4);
+    try b.appendHeaderWithGct(2, 1, &test_palette_4);
 
     // Frame 0: 2x1 red. LZW encode indices [1, 1].
     //   Clear=4, 1, 1, EOI=5 (all 3 bits since dict_size never reaches 8).
     //   bits: 100 001 001 101
     //     byte 0 (bits 0..7) = 0,0,1,1,0,0,1,0 = 0x4C
     //     byte 1 (bits 8..11) = 0,1,0,1 + pad = 0,1,0,1,0,0,0,0 = 0x0A
-    try b.appendGce(gpa, .{ .disposal = 2 });
-    try b.appendImageWithLzw(gpa, .{ .width = 2, .height = 1 }, null, &.{ 0x4C, 0x0A });
+    try b.appendGce(.{ .disposal = 2 });
+    try b.appendImageWithLzw(.{ .width = 2, .height = 1 }, null, &.{ 0x4C, 0x0A });
 
     // Frame 1: 1x1 green at (0,0). LZW [2] = [0x54, 0x01].
-    try b.appendGce(gpa, .{});
-    try b.appendImageWithLzw(gpa, .{ .left = 0, .top = 0, .width = 1, .height = 1 }, null, &.{ 0x54, 0x01 });
+    try b.appendGce(.{});
+    try b.appendImageWithLzw(.{ .left = 0, .top = 0, .width = 1, .height = 1 }, null, &.{ 0x54, 0x01 });
 
-    try b.appendTrailer(gpa);
+    try b.appendTrailer();
 
-    var anim = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, b.list.items, .{});
+    var anim = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, b.written(), .{});
     defer anim.deinit(gpa);
 
     try expectEqual(@as(usize, 2), anim.frameCount());
@@ -1551,22 +1543,22 @@ test "loadAnimated — restore_to_background blanks the previous rect" {
 
 test "loadAnimated — transparent index → alpha=0 on Rgba" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
     // 2x1 frame, indices [0, 1]. Mark idx 0 transparent.
-    try b.appendHeaderWithGct(gpa, 2, 1, &test_palette_4);
+    try b.appendHeaderWithGct(2, 1, &test_palette_4);
 
-    try b.appendGce(gpa, .{ .disposal = 1, .has_transparent = true });
+    try b.appendGce(.{ .disposal = 1, .has_transparent = true });
     // LZW for indices [0, 1]: Clear=4, 0, 1, EOI=5 (all 3 bits).
     //   bits: 100 000 001 101
     //     byte 0 = 0,0,1,0,0,0,1,0 = 0x44
     //     byte 1 = 0,1,0,1 + pad = 0x0A
-    try b.appendImageWithLzw(gpa, .{ .width = 2, .height = 1 }, null, &.{ 0x44, 0x0A });
+    try b.appendImageWithLzw(.{ .width = 2, .height = 1 }, null, &.{ 0x44, 0x0A });
 
-    try b.appendTrailer(gpa);
+    try b.appendTrailer();
 
-    var anim = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, b.list.items, .{});
+    var anim = try loadAnimatedFromBytes(Rgba, parallel.inline_io, gpa, b.written(), .{});
     defer anim.deinit(gpa);
 
     // Pixel 0: index 0 is transparent → alpha=0 (canvas was initialized to all transparent).
@@ -1863,33 +1855,33 @@ test "encodeAnimated — mismatched frame dimensions rejected" {
 
 test "loadFromBytes — missing global color table without LCT" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendBytes(gpa, "GIF89a");
-    try writeU16Le(gpa, &b.list, 1);
-    try writeU16Le(gpa, &b.list, 1);
-    try b.appendByte(gpa, 0x00); // no GCT
-    try b.appendByte(gpa, 0); // bg
-    try b.appendByte(gpa, 0); // aspect
-    try b.appendImageWithLzw(gpa, .{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
-    try b.appendTrailer(gpa);
+    try b.appendBytes("GIF89a");
+    try b.appendU16(1);
+    try b.appendU16(1);
+    try b.appendByte(0x00); // no GCT
+    try b.appendByte(0); // bg
+    try b.appendByte(0); // aspect
+    try b.appendImageWithLzw(.{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
+    try b.appendTrailer();
 
-    try expectError(error.MissingGlobalColorTable, loadFromBytes(Rgb, parallel.inline_io, gpa, b.list.items, .{}));
+    try expectError(error.MissingGlobalColorTable, loadFromBytes(Rgb, parallel.inline_io, gpa, b.written(), .{}));
 }
 
 test "getInfo — image descriptor with local color table" {
     const gpa = std.testing.allocator;
-    var b = TestBuilder{};
-    defer b.deinit(gpa);
+    var b: TestBuilder = .init(gpa);
+    defer b.deinit();
 
-    try b.appendHeader(gpa, .{ .gct_size_log = 0 }); // 2-entry GCT
+    try b.appendHeader(.{ .gct_size_log = 0 }); // 2-entry GCT
     // packed_byte: bit 7 = LCT flag, bit 0..2 = log2(LCT size) - 1
     // 0x80 sets LCT flag, lower 3 bits = 2 → 8 entries
-    try b.appendImageDescriptor(gpa, .{ .packed_byte = 0x82, .lct_size_log = 2 });
-    try b.appendTrailer(gpa);
+    try b.appendImageDescriptor(.{ .packed_byte = 0x82, .lct_size_log = 2 });
+    try b.appendTrailer();
 
-    var reader = buildReader(b.list.items);
+    var reader = buildReader(b.written());
     const info = try getInfo(&reader, .{});
     try expectEqual(@as(u32, 1), info.frame_count);
     try expect(info.has_global_color_table);

@@ -54,12 +54,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
             defer file.close(io);
 
             var reader = file.reader(io, &read_buffer);
-            // Short files still get sniffed.
-            const peek = reader.interface.peekGreedy(zignal.ImageFormat.signature_len) catch |err| switch (err) {
-                error.EndOfStream => reader.interface.buffered(),
-                else => break :blk err,
-            };
-            const image_format = zignal.ImageFormat.detectFromBytes(peek) orelse break :blk error.UnsupportedImageFormat;
+            const image_format = zignal.ImageFormat.peek(&reader.interface) catch |err| break :blk err;
             std.log.debug("format detected: {s}", .{@tagName(image_format)});
 
             switch (image_format) {
@@ -96,7 +91,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
                     try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
                     try writer.print("Bit Depth:   {d}\n", .{info.bit_depth});
                     try writer.print("Compression: {s}\n", .{@tagName(info.compression)});
-                    try writer.print("DIB Header:  {s}\n", .{@tagName(info.dib_kind)});
+                    try writer.print("DIB Header:  {s}\n", .{@tagName(info.dib_header)});
                     try writer.print("Top-down:    {s}\n", .{if (info.top_down) "yes" else "no"});
                     if (info.palette_entries > 0) {
                         try writer.print("Palette:     {d} entries\n", .{info.palette_entries});
