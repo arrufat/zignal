@@ -734,10 +734,48 @@ fn declaredSizeLog(palette_len: usize) u3 {
     return s;
 }
 
-/// Emits a color table to `out`, padded with `(0,0,0)` to `declared_entries`.
-fn writeColorTable(writer: *Io.Writer, palette: []const Rgb, declared_entries: u16) !void {
+/// Emits a color table, padded with `(0,0,0)` to its declared power-of-two size.
+fn writeColorTable(writer: *Io.Writer, palette: []const Rgb) !void {
+    const declared_entries = @as(u16, 2) << declaredSizeLog(palette.len);
     for (palette) |c| try writer.writeAll(&.{ c.r, c.g, c.b });
     try writer.splatByteAll(0, 3 * (declared_entries - palette.len));
+}
+
+/// Signature and Logical Screen Descriptor, followed by the global color table if any.
+fn writeScreenDescriptor(writer: *Io.Writer, width: u16, height: u16, palette: ?[]const Rgb) !void {
+    try writer.writeAll("GIF89a");
+    try writer.writeInt(u16, width, .little);
+    try writer.writeInt(u16, height, .little);
+    const gct = palette orelse return writer.writeAll(&.{ 0, 0, 0 });
+    // Packed fields, background color index, pixel aspect ratio.
+    try writer.writeAll(&.{ lsd_flag_global_color_table | lsd_color_resolution_default | @as(u8, declaredSizeLog(gct.len)), 0, 0 });
+    try writeColorTable(writer, gct);
+}
+
+/// Graphic Control Extension.
+fn writeGce(writer: *Io.Writer, disposal: DisposalMethod, delay_cs: u16, transparent_index: ?u8) !void {
+    const flags: u8 = (@as(u8, @backingInt(disposal)) << 2) | if (transparent_index != null) gce_flag_transparent else 0;
+    try writer.writeAll(&.{ block_extension_introducer, ext_label_graphic_control, 0x04, flags });
+    try writer.writeInt(u16, delay_cs, .little);
+    try writer.writeAll(&.{ transparent_index orelse 0, 0 });
+}
+
+/// NETSCAPE2.0 application extension carrying the loop count.
+fn writeNetscape(writer: *Io.Writer, loop_count: u16) !void {
+    try writer.writeAll(&.{ block_extension_introducer, ext_label_application, 0x0B });
+    try writer.writeAll(&netscape_id_auth);
+    try writer.writeAll(&.{ 0x03, 0x01 });
+    try writer.writeInt(u16, loop_count, .little);
+    try writer.writeByte(0);
+}
+
+/// Image Descriptor, followed by the local color table if any. Not interlaced.
+fn writeImageDescriptor(writer: *Io.Writer, rect: Rectangle(u32), palette: ?[]const Rgb) !void {
+    try writer.writeByte(block_image_descriptor);
+    inline for (.{ rect.l, rect.t, rect.width(), rect.height() }) |v| try writer.writeInt(u16, @intCast(v), .little);
+    const lct = palette orelse return writer.writeByte(0);
+    try writer.writeByte(id_flag_local_color_table | @as(u8, declaredSizeLog(lct.len)));
+    try writeColorTable(writer, lct);
 }
 
 /// Emits the LZW data section of an Image block: `min_code_size` byte +
@@ -824,36 +862,9 @@ pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer,
 
     var min_code_size: u4 = 2;
     while ((@as(u16, 1) << min_code_size) < palette.len) min_code_size += 1;
-    const size_log = declaredSizeLog(palette.len);
-    const declared_entries: u16 = @as(u16, 2) << size_log;
-
-    try writer.writeAll("GIF89a");
-    try writer.writeInt(u16, width, .little);
-    try writer.writeInt(u16, height, .little);
-    const lsd_packed: u8 = lsd_flag_global_color_table | lsd_color_resolution_default | @as(u8, size_log);
-    try writer.writeByte(lsd_packed);
-    try writer.writeByte(0); // background color index
-    try writer.writeByte(0); // pixel aspect ratio
-
-    try writeColorTable(writer, palette, declared_entries);
-
-    if (has_transparent) {
-        // Graphic Control Extension naming the transparent index.
-        try writer.writeByte(block_extension_introducer);
-        try writer.writeByte(ext_label_graphic_control);
-        try writer.writeByte(0x04);
-        try writer.writeByte(gce_flag_transparent);
-        try writer.writeInt(u16, 0, .little);
-        try writer.writeByte(transparent_index);
-        try writer.writeByte(0);
-    }
-
-    try writer.writeByte(block_image_descriptor);
-    try writer.writeInt(u16, 0, .little);
-    try writer.writeInt(u16, 0, .little);
-    try writer.writeInt(u16, width, .little);
-    try writer.writeInt(u16, height, .little);
-    try writer.writeByte(0x00); // packed: no LCT, not interlaced
+    try writeScreenDescriptor(writer, width, height, palette);
+    if (has_transparent) try writeGce(writer, .unspecified, 0, transparent_index);
+    try writeImageDescriptor(writer, image.getRectangle(), null);
 
     var encoder = try lzw.Encoder.init(allocator, min_code_size);
     defer encoder.deinit(allocator);
@@ -937,38 +948,13 @@ pub fn writeAnimated(comptime T: type, io: Io, gpa: Allocator, writer: *Io.Write
     const screen_w: u16 = @intCast(screen_w_u32);
     const screen_h: u16 = @intCast(screen_h_u32);
 
-    try writer.writeAll("GIF89a");
-    try writer.writeInt(u16, screen_w, .little);
-    try writer.writeInt(u16, screen_h, .little);
-
     const has_global_palette = options.palette != null;
-    var lsd_packed: u8 = 0;
     if (options.palette) |custom| {
         if (custom.len < 2 or custom.len > 256) return error.PaletteTooSmall;
-        const size_log = declaredSizeLog(custom.len);
-        lsd_packed = lsd_flag_global_color_table | lsd_color_resolution_default | @as(u8, size_log);
     }
-    try writer.writeByte(lsd_packed);
-    try writer.writeByte(0); // background color index
-    try writer.writeByte(0); // pixel aspect ratio
-
-    if (options.palette) |custom| {
-        const declared: u16 = @as(u16, 2) << declaredSizeLog(custom.len);
-        try writeColorTable(writer, custom, declared);
-    }
-
-    // NETSCAPE2.0 application extension carrying the loop count. Always emit
-    // for animations so the loop_count is explicit.
-    if (anim.frames.len >= 2) {
-        try writer.writeByte(block_extension_introducer);
-        try writer.writeByte(ext_label_application);
-        try writer.writeByte(0x0B);
-        try writer.writeAll("NETSCAPE2.0");
-        try writer.writeByte(0x03);
-        try writer.writeByte(0x01);
-        try writer.writeInt(u16, @min(anim.loop_count, std.math.maxInt(u16)), .little);
-        try writer.writeByte(0);
-    }
+    try writeScreenDescriptor(writer, screen_w, screen_h, options.palette);
+    // Always emitted for animations so the loop count is explicit.
+    if (anim.frames.len >= 2) try writeNetscape(writer, @min(anim.loop_count, std.math.maxInt(u16)));
 
     // Transparent pixels show the canvas below, so uncovering one needs a cleared canvas.
     // One encoder for every frame; `reset` keeps its dictionary's memory.
@@ -1069,35 +1055,10 @@ fn emitAnimatedFrame(
 
     var min_code_size: u4 = 2;
     while ((@as(u16, 1) << min_code_size) < palette.len) min_code_size += 1;
-    const size_log = declaredSizeLog(palette.len);
-    const declared_entries: u16 = @as(u16, 2) << size_log;
 
-    // Graphic Control Extension (always emit so delay_cs is explicit).
-    try writer.writeByte(block_extension_introducer);
-    try writer.writeByte(ext_label_graphic_control);
-    try writer.writeByte(0x04);
-    const gce_packed: u8 = (@as(u8, @backingInt(disposal)) << 2) | if (has_transparent) gce_flag_transparent else 0;
-    try writer.writeByte(gce_packed);
-    try writer.writeInt(u16, delay_cs, .little);
-    try writer.writeByte(transparent_index);
-    try writer.writeByte(0);
-
-    // Image Descriptor.
-    try writer.writeByte(block_image_descriptor);
-    try writer.writeInt(u16, @intCast(region.l), .little);
-    try writer.writeInt(u16, @intCast(region.t), .little);
-    try writer.writeInt(u16, @intCast(frame.cols), .little);
-    try writer.writeInt(u16, @intCast(frame.rows), .little);
-    var id_packed: u8 = 0;
-    if (!has_global_palette) {
-        id_packed |= id_flag_local_color_table;
-        id_packed |= @as(u8, size_log);
-    }
-    try writer.writeByte(id_packed);
-
-    if (!has_global_palette) {
-        try writeColorTable(writer, palette, declared_entries);
-    }
+    // The GCE is always emitted so the delay is explicit.
+    try writeGce(writer, disposal, delay_cs, if (has_transparent) transparent_index else null);
+    try writeImageDescriptor(writer, region, if (has_global_palette) null else palette);
 
     try writeLzwImageData(encoder, writer, indices, min_code_size);
 }
@@ -1192,49 +1153,6 @@ const TestBuilder = struct {
         try self.appendByte(0);
     }
 
-    fn appendHeaderWithGct(self: *TestBuilder, w: u16, h: u16, gct: []const Rgb) !void {
-        try self.appendBytes("GIF89a");
-        try self.appendU16(w);
-        try self.appendU16(h);
-        const s = declaredSizeLog(gct.len);
-        const declared: u16 = @as(u16, 2) << s;
-        const packed_byte: u8 = lsd_flag_global_color_table | lsd_color_resolution_default | @as(u8, s);
-        try self.appendByte(packed_byte);
-        try self.appendByte(0); // bg
-        try self.appendByte(0); // aspect
-        try writeColorTable(&self.aw.writer, gct, declared);
-    }
-
-    const GceOpts = struct {
-        disposal: u3 = 0,
-        delay_cs: u16 = 0,
-        has_transparent: bool = false,
-        transparent_index: u8 = 0,
-    };
-
-    fn appendGce(self: *TestBuilder, opts: GceOpts) !void {
-        try self.appendByte(block_extension_introducer);
-        try self.appendByte(ext_label_graphic_control);
-        try self.appendByte(0x04); // block size (always 4)
-        const trans_flag: u8 = if (opts.has_transparent) gce_flag_transparent else 0;
-        const packed_byte: u8 = (@as(u8, opts.disposal) << 2) | trans_flag;
-        try self.appendByte(packed_byte);
-        try self.appendU16(opts.delay_cs);
-        try self.appendByte(opts.transparent_index);
-        try self.appendByte(0); // sub-block terminator
-    }
-
-    fn appendNetscape2(self: *TestBuilder, loop_count: u16) !void {
-        try self.appendByte(block_extension_introducer);
-        try self.appendByte(ext_label_application);
-        try self.appendByte(0x0B); // block size = 11
-        try self.appendBytes("NETSCAPE2.0");
-        try self.appendByte(0x03); // sub-block size = 3
-        try self.appendByte(0x01); // sub-block id
-        try self.appendU16(loop_count);
-        try self.appendByte(0); // terminator
-    }
-
     fn appendComment(self: *TestBuilder, text: []const u8) !void {
         try self.appendByte(block_extension_introducer);
         try self.appendByte(ext_label_comment);
@@ -1295,7 +1213,7 @@ test "getInfo — GIF89a with 1 frame and GCE" {
     defer b.deinit();
 
     try b.appendHeader(.{ .gct_size_log = 1 }); // 4-entry GCT
-    try b.appendGce(.{});
+    try writeGce(&b.aw.writer, .unspecified, 0, null);
     try b.appendImageDescriptor(.{});
     try b.appendTrailer();
 
@@ -1315,7 +1233,7 @@ test "getInfo — NETSCAPE2.0 loop count = 3" {
     defer b.deinit();
 
     try b.appendHeader(.{});
-    try b.appendNetscape2(3);
+    try writeNetscape(&b.aw.writer, 3);
     try b.appendImageDescriptor(.{});
     try b.appendImageDescriptor(.{});
     try b.appendTrailer();
@@ -1397,7 +1315,7 @@ test "loadFromBytes — 1x1 red pixel" {
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
 
-    try b.appendHeaderWithGct(1, 1, &test_palette_4);
+    try writeScreenDescriptor(&b.aw.writer, 1, 1, &test_palette_4);
     // LZW for indices [1]: Clear=4, 1, EOI=5 at min_code_size=2.
     //   bits 0..2 = 100 (Clear), 3..5 = 001 (1), 6..8 = 101 (EOI)
     //   byte 0 = 0b01001100 = 0x4C, byte 1 = 0b00000001 = 0x01
@@ -1417,7 +1335,7 @@ test "loadFromBytes — 2x2 with global palette" {
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
 
-    try b.appendHeaderWithGct(2, 2, &test_palette_4);
+    try writeScreenDescriptor(&b.aw.writer, 2, 2, &test_palette_4);
     // LZW for indices [0, 1, 2, 3]: encoder grows code_size after the third
     // user emission saturates the dict (next_code = 9 > 1<<3), so codes 0,1,2
     // are emitted at 3 bits and 3,EOI at 4 bits → bytes [0x44, 0x34, 0x05].
@@ -1438,7 +1356,7 @@ test "loadFromBytes — local color table overrides global" {
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
 
-    try b.appendHeaderWithGct(1, 1, &test_palette_4); // global red at idx 1
+    try writeScreenDescriptor(&b.aw.writer, 1, 1, &test_palette_4); // global red at idx 1
 
     // LCT: 4 entries, idx 1 = white (different from global red).
     const lct = [_]Rgb{
@@ -1466,7 +1384,7 @@ test "loadFromBytes — frame outside screen rejected via descriptor checks" {
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
 
-    try b.appendHeaderWithGct(4, 4, &test_palette_4);
+    try writeScreenDescriptor(&b.aw.writer, 4, 4, &test_palette_4);
     // Frame width 6 — exceeds screen but per the LSD limit. Should be tolerated
     // by the parser (composition just clips), so this should NOT fail. Let's
     // test the actual oversize-rejection via DecodeLimits.max_width instead.
@@ -1485,14 +1403,14 @@ test "loadAnimated — two frames, do_not_dispose, per-frame delays" {
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
 
-    try b.appendHeaderWithGct(1, 1, &test_palette_4);
+    try writeScreenDescriptor(&b.aw.writer, 1, 1, &test_palette_4);
 
     // Frame 0: red (idx 1), delay 5cs.
-    try b.appendGce(.{ .disposal = 1, .delay_cs = 5 });
+    try writeGce(&b.aw.writer, .do_not_dispose, 5, null);
     try b.appendImageWithLzw(.{ .width = 1, .height = 1 }, null, &.{ 0x4C, 0x01 });
 
     // Frame 1: green (idx 2), delay 10cs.
-    try b.appendGce(.{ .disposal = 1, .delay_cs = 10 });
+    try writeGce(&b.aw.writer, .do_not_dispose, 10, null);
     // LZW for indices [2]: Clear=4, 2, EOI=5 at min_code_size=2.
     //   bits 0..2 = 100, 3..5 = 010, 6..8 = 101
     //   byte 0 = 0,0,1, 0,1,0, 1,0 = 0b01010100 = 0x54
@@ -1518,18 +1436,18 @@ test "loadAnimated — restore_to_background blanks the previous rect" {
 
     // 2x1 screen: frame 0 covers full screen with red, then disposal=2 (RTB).
     // Frame 1 covers only the first column with green; column 1 should be transparent.
-    try b.appendHeaderWithGct(2, 1, &test_palette_4);
+    try writeScreenDescriptor(&b.aw.writer, 2, 1, &test_palette_4);
 
     // Frame 0: 2x1 red. LZW encode indices [1, 1].
     //   Clear=4, 1, 1, EOI=5 (all 3 bits since dict_size never reaches 8).
     //   bits: 100 001 001 101
     //     byte 0 (bits 0..7) = 0,0,1,1,0,0,1,0 = 0x4C
     //     byte 1 (bits 8..11) = 0,1,0,1 + pad = 0,1,0,1,0,0,0,0 = 0x0A
-    try b.appendGce(.{ .disposal = 2 });
+    try writeGce(&b.aw.writer, .restore_to_background, 0, null);
     try b.appendImageWithLzw(.{ .width = 2, .height = 1 }, null, &.{ 0x4C, 0x0A });
 
     // Frame 1: 1x1 green at (0,0). LZW [2] = [0x54, 0x01].
-    try b.appendGce(.{});
+    try writeGce(&b.aw.writer, .unspecified, 0, null);
     try b.appendImageWithLzw(.{ .left = 0, .top = 0, .width = 1, .height = 1 }, null, &.{ 0x54, 0x01 });
 
     try b.appendTrailer();
@@ -1552,9 +1470,9 @@ test "loadAnimated — transparent index → alpha=0 on Rgba" {
     defer b.deinit();
 
     // 2x1 frame, indices [0, 1]. Mark idx 0 transparent.
-    try b.appendHeaderWithGct(2, 1, &test_palette_4);
+    try writeScreenDescriptor(&b.aw.writer, 2, 1, &test_palette_4);
 
-    try b.appendGce(.{ .disposal = 1, .has_transparent = true });
+    try writeGce(&b.aw.writer, .do_not_dispose, 0, 0);
     // LZW for indices [0, 1]: Clear=4, 0, 1, EOI=5 (all 3 bits).
     //   bits: 100 000 001 101
     //     byte 0 = 0,0,1,0,0,0,1,0 = 0x44
