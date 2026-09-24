@@ -102,7 +102,7 @@ fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
         },
         .gif => {
             const kind = "GIF data";
-            var decoded = zignal.gif.decode(allocator, data, default_gif_limits) catch |err| {
+            var decoded = zignal.gif.decode(allocator, data, default_gif_limits, .first) catch |err| {
                 setDecodeError(kind, err);
                 return null;
             };
@@ -232,7 +232,7 @@ fn decodeFile(comptime format: ImageFormat, data: []const u8, path: []const u8, 
             return wrapNativeImage(native);
         },
         .gif => {
-            var decoded = zignal.gif.decode(allocator, data, limits) catch |err| {
+            var decoded = zignal.gif.decode(allocator, data, limits, .first) catch |err| {
                 python.setErrorWithPath(err, path);
                 return null;
             };

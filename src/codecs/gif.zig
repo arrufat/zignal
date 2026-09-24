@@ -69,7 +69,7 @@ pub const Header = struct {
     /// power of two when present (2..256).
     global_color_table_size: u16,
     background_color_index: u8,
-    /// Total Image Descriptor blocks encountered.
+    /// Image Descriptor blocks parsed; `decode(.first)` stops at 1.
     frame_count: u32,
     /// NETSCAPE2.0 loop count. 0 = infinite (also default when absent).
     loop_count: u16,
@@ -312,16 +312,20 @@ pub const GifState = struct {
 // decode
 // ---------------------------------------------------------------------------
 
+/// Which frames `decode` keeps. `.first` stops after frame 0, so later frames are neither
+/// decoded nor validated.
+pub const Frames = enum { first, all };
+
 /// Parses a GIF byte buffer into a `GifState`. The state's frames hold raw
 /// palette indices; composition into Images happens via `loadFromBytes`
 /// (single-frame) or `loadAnimated*` (multi-frame).
-pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits) !GifState {
+pub fn decode(gpa: Allocator, data: []const u8, limits: DecodeLimits, frames: Frames) !GifState {
     var reader: Io.Reader = .fixed(data);
-    return parse(gpa, &reader, limits);
+    return parse(gpa, &reader, limits, frames);
 }
 
 /// `decode` from a stream. The reader's buffer must hold a whole color table (768 bytes).
-fn parse(gpa: Allocator, reader: *Io.Reader, limits: DecodeLimits) !GifState {
+fn parse(gpa: Allocator, reader: *Io.Reader, limits: DecodeLimits, which: Frames) !GifState {
     const sig = try reader.takeArray(6);
     if (!std.mem.eql(u8, sig[0..3], &signature)) return error.InvalidGifSignature;
     const version: Version = if (std.mem.eql(u8, sig[3..6], "87a"))
@@ -385,6 +389,7 @@ fn parse(gpa: Allocator, reader: *Io.Reader, limits: DecodeLimits) !GifState {
                 if (exceeds(limits.max_frames, @intCast(frames.items.len))) {
                     return error.TooManyFrames;
                 }
+                if (which == .first) break :block_loop;
             },
             block_extension_introducer => {
                 const label = try reader.takeByte();
@@ -686,14 +691,14 @@ pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, dat
 
 /// Reads a GIF from `reader`, returning frame 0 only; see `readAnimated`.
 pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
-    var state = try parse(allocator, reader, limits);
+    var state = try parse(allocator, reader, limits, .first);
     defer state.deinit(allocator);
     return composeFirstFrame(T, io, allocator, state);
 }
 
 /// Reads every frame of a GIF from `reader`, fully composed.
 pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnimatedImage(T) {
-    var state = try parse(allocator, reader, limits);
+    var state = try parse(allocator, reader, limits, .all);
     defer state.deinit(allocator);
     return composeAnimated(T, io, allocator, state);
 }
@@ -1693,6 +1698,29 @@ test "encode — getInfo on encoded output is consistent" {
 // ---------------------------------------------------------------------------
 // Animated encode tests
 // ---------------------------------------------------------------------------
+
+test "still loads stop after the first frame" {
+    const gpa = std.testing.allocator;
+
+    const f0 = try Image(Rgb).init(gpa, 2, 2);
+    @memset(f0.data, .{ .r = 255, .g = 0, .b = 0 });
+    const f1 = try Image(Rgb).init(gpa, 2, 2);
+    @memset(f1.data, .{ .r = 0, .g = 255, .b = 0 });
+    var anim = try buildAnimated(Rgb, gpa, &.{ f0, f1 }, &.{ 50, 100 }, 0);
+    defer anim.deinit(gpa);
+    const data = try encodeAnimated(Rgb, parallel.inline_io, gpa, anim, .{});
+    defer gpa.free(data);
+
+    // Cut into the second frame: a still load never reaches it.
+    const truncated = data[0 .. data.len - 3];
+    var still = try loadFromBytes(Rgb, parallel.inline_io, gpa, truncated, .{});
+    defer still.deinit(gpa);
+    try expectEqual(Rgb{ .r = 255, .g = 0, .b = 0 }, still.at(0, 0).*);
+    var state = try decode(gpa, truncated, .{}, .first);
+    defer state.deinit(gpa);
+    try expectEqual(@as(u32, 1), state.header.frame_count);
+    try std.testing.expectError(error.EndOfStream, loadAnimatedFromBytes(Rgb, parallel.inline_io, gpa, truncated, .{}));
+}
 
 fn buildAnimated(comptime T: type, gpa: Allocator, frame_data: []const Image(T), durations_ms: []const u32, loop: u32) !AnimatedImage(T) {
     const frames = try gpa.alloc(Image(T), frame_data.len);
