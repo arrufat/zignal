@@ -645,7 +645,7 @@ fn timingOk(modules: []const u8, dim: u16) bool {
 // -- Tests --------------------------------------------------------------
 
 const encoder = @import("encoder.zig");
-const perlin = @import("../perlin.zig").perlin;
+const perlin = @import("../perlin.zig");
 
 /// Renders a clean QR image into a destination quadrilateral with optional
 /// lighting gradient, perlin shading, blur, and pixel noise — a synthetic
@@ -700,7 +700,7 @@ fn photoSimulate(allocator: Allocator, clean: Image(u8), opts: struct {
             const fy = @as(f32, @floatFromInt(r)) / rows;
             value += opts.ramp * (fx - 0.5) * 2;
             if (opts.perlin_amp != 0) {
-                value += opts.perlin_amp * perlin(f32, 4 * fx, 4 * fy, 0.5, .{});
+                value += opts.perlin_amp * perlin.noise(f32, 4 * fx, 4 * fy, 0.5, .{});
             }
             if (opts.noise != 0) {
                 value += (random.float(f32) - 0.5) * 2 * opts.noise;

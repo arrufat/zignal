@@ -9,7 +9,7 @@ const Allocator = std.mem.Allocator;
 
 const Point2 = @import("../geometry/Point.zig").Point(2, f32);
 const as = @import("../meta.zig").as;
-const VectorFont = @import("VectorFont.zig");
+const VectorFont = @import("Vector.zig");
 const Outline = @import("Outline.zig");
 
 const GlyphCache = @This();

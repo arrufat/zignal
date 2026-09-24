@@ -16,7 +16,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const VarStats = @import("../stats.zig").RunningStats(f64, .variance);
+const VarStats = @import("../stats.zig").Running(f64, .variance);
 const vec = @import("vec.zig");
 
 pub const UpperBound = struct {

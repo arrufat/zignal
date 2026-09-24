@@ -106,7 +106,7 @@ pub fn applyGray(io: Io, gpa: Allocator, img: zignal.Image(u8), out: zignal.Imag
             try img.canny(io, gpa, out, sigma, low, high);
         },
         .shen_castan => {
-            const opts = zignal.ShenCastan{
+            const opts = zignal.image.ShenCastan{
                 .smooth = options.sigma orelse 0.9,
                 .window_size = options.window orelse 7,
                 .high_ratio = options.high orelse 0.99,
@@ -144,7 +144,7 @@ fn processImage(
     input_path: []const u8,
     target: ?common.OutputTarget,
     options: Args,
-    display_format: ?zignal.DisplayFormat,
+    display_format: ?zignal.image.DisplayFormat,
 ) !void {
     std.log.debug("loading image: {s}", .{input_path});
     var img = try zignal.Image(u8).load(io, gpa, input_path);

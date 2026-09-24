@@ -10,7 +10,7 @@ const Image = zignal.Image;
 const Rgba = zignal.Rgba(u8);
 
 const Point = zignal.Point(2, f32);
-const SimilarityTransform = zignal.SimilarityTransform(f32);
+const SimilarityTransform = zignal.geometry.SimilarityTransform(f32);
 
 const js = @import("js.zig");
 

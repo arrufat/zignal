@@ -32,9 +32,8 @@
 pub const version = @import("build_options").version;
 
 pub const Canvas = @import("canvas.zig").Canvas;
-pub const DrawMode = @import("canvas.zig").DrawMode;
-pub const DrawOptions = @import("canvas.zig").DrawOptions;
-pub const FillRule = @import("canvas.zig").FillRule;
+/// Drawing options, modes and fill rules for `Canvas`.
+pub const canvas = @import("canvas.zig");
 
 const color = @import("color.zig");
 pub const convertColor = color.convertColor;
@@ -55,32 +54,15 @@ pub const Oklch = color.Oklch;
 pub const Xyb = color.Xyb;
 pub const Ycbcr = color.Ycbcr;
 
-const geometry = @import("geometry.zig");
+/// Points, rectangles, transforms (similarity, affine, projective) and convex hulls.
+pub const geometry = @import("geometry.zig");
+pub const Point = geometry.Point;
 pub const Rectangle = geometry.Rectangle;
-pub const AffineTransform = geometry.AffineTransform;
-pub const ProjectiveTransform = geometry.ProjectiveTransform;
-pub const SimilarityTransform = geometry.SimilarityTransform;
-pub const ConvexHull = geometry.ConvexHull;
 
 pub const Image = @import("image.zig").Image;
-pub const AnimatedImage = @import("image.zig").AnimatedImage;
-pub const PixelIterator = @import("image.zig").PixelIterator;
-pub const Interpolation = @import("image.zig").Interpolation;
-pub const ImageFormat = @import("image.zig").ImageFormat;
-pub const DisplayFormat = @import("image.zig").DisplayFormat;
-pub const BorderMode = @import("image.zig").BorderMode;
-pub const RotateSize = @import("image.zig").RotateSize;
-pub const FloodFillOptions = @import("image.zig").FloodFillOptions;
-pub const MotionBlur = @import("image.zig").MotionBlur;
-pub const GaussianBlurOptions = @import("image.zig").GaussianBlurOptions;
-pub const GaussianMethod = @import("image.zig").GaussianMethod;
-pub const ShenCastan = @import("image.zig").ShenCastan;
-pub const HoughTransform = @import("image.zig").HoughTransform;
-pub const BinaryKernel = @import("image.zig").BinaryKernel;
-pub const Colormap = @import("image.zig").Colormap;
-pub const colormaps = @import("image/colormaps.zig");
-pub const quantize = @import("image/quantize.zig");
-pub const dither = @import("image/dither.zig");
+pub const Animation = @import("image.zig").Animation;
+/// Image options, formats, filters, colormaps, quantization and dithering.
+pub const image = @import("image.zig");
 
 /// Terminal graphics detection and protocol encoders (Sixel, Kitty, iTerm2).
 pub const terminal = @import("terminal.zig");
@@ -97,58 +79,35 @@ pub const NativeImage = codecs.NativeImage;
 /// QR code encoding and decoding (ISO/IEC 18004).
 pub const qrcode = @import("qrcode.zig");
 
-const matrix = @import("matrix.zig");
+/// Dynamic and compile-time sized matrices, decompositions and `Error`.
+pub const matrix = @import("matrix.zig");
 pub const SMatrix = matrix.SMatrix;
 pub const Matrix = matrix.Matrix;
-pub const MatrixError = matrix.MatrixError;
-pub const Chain = matrix.Chain;
 pub const meta = @import("meta.zig");
 
-const perlin_mod = @import("perlin.zig");
-pub const perlin = perlin_mod.perlin;
-pub const PerlinOptions = perlin_mod.PerlinOptions;
-
-pub const Point = @import("geometry/Point.zig").Point;
+/// 3D Perlin noise.
+pub const perlin = @import("perlin.zig");
 
 pub const FeatureDistributionMatching = @import("fdm.zig").FeatureDistributionMatching;
 
 /// Font loading, text layout, and typography rendering.
 pub const font = @import("font.zig");
-pub const BitmapFont = font.BitmapFont;
-pub const VectorFont = font.VectorFont;
 pub const Font = font.Font;
-pub const TextLayout = font.TextLayout;
-pub const TextAlign = font.TextAlign;
-pub const VerticalAlign = font.VerticalAlign;
-pub const Outline = font.Outline;
 
-// Principal Component Analysis (PCA) for dimensionality reduction.
-const pca = @import("pca.zig");
-pub const Pca = pca.Pca;
+/// Principal Component Analysis (PCA) for dimensionality reduction.
+pub const Pca = @import("pca.zig").Pca;
 
-// Feature detection, description, and matching.
-const features = @import("features.zig");
-pub const KeyPoint = features.KeyPoint;
-pub const BinaryDescriptor = features.BinaryDescriptor;
-pub const Fast = features.Fast;
-pub const Orb = features.Orb;
-pub const Tracer = features.Tracer;
-pub const BruteForceMatcher = features.BruteForceMatcher;
-pub const Match = features.Match;
-pub const MatchStats = features.MatchStats;
+/// Feature detection, description, and matching (FAST, ORB, brute-force matcher).
+pub const features = @import("features.zig");
 
 /// Unsupervised graph-based clustering (Chinese Whispers algorithm).
 pub const clustering = @import("clustering.zig");
 
 /// Optimization algorithms (assignment problem, MaxLIPO global optimization).
 pub const optimization = @import("optimization.zig");
-pub const GlobalOptimizer = optimization.GlobalOptimizer;
-pub const findGlobalOptimum = optimization.findGlobalOptimum;
 
-// Running and covariance statistics for streaming data.
-const stats = @import("stats.zig");
-pub const RunningStats = stats.RunningStats;
-pub const RunningStatsConfig = stats.RunningStatsConfig;
+/// Running and covariance statistics for streaming data.
+pub const stats = @import("stats.zig");
 
 test {
     _ = @import("color.zig");
@@ -167,4 +126,5 @@ test {
     _ = @import("optimization.zig");
     _ = @import("qrcode.zig");
     _ = @import("meta.zig");
+    _ = @import("stats.zig");
 }

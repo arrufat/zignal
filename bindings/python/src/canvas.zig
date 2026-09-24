@@ -4,8 +4,8 @@ const std = @import("std");
 
 const zignal = @import("zignal");
 pub const Canvas = zignal.Canvas;
-const DrawMode = zignal.DrawMode;
-const DrawOptions = zignal.DrawOptions;
+const DrawMode = zignal.canvas.DrawMode;
+const DrawOptions = zignal.canvas.DrawOptions;
 const Blending = zignal.Blending;
 const Font = zignal.Font;
 const Rectangle = zignal.Rectangle;
@@ -170,7 +170,7 @@ pub const PyCanvas = struct {
         }
     }
 
-    pub fn drawTextBox(self: *Self, text: []const u8, box: zignal.Rectangle(f32), color: Rgba, font: Font, size: ?f32, layout: zignal.TextLayout, opts: DrawOptions) !void {
+    pub fn drawTextBox(self: *Self, text: []const u8, box: zignal.Rectangle(f32), color: Rgba, font: Font, size: ?f32, layout: zignal.font.TextLayout, opts: DrawOptions) !void {
         switch (self.data) {
             inline else => |*canvas| try canvas.drawTextBox(text, box, color, font, size, layout, opts),
         }
@@ -182,7 +182,7 @@ pub const PyCanvas = struct {
         }
     }
 
-    pub fn drawTextBoxOutline(self: *Self, text: []const u8, box: zignal.Rectangle(f32), color: Rgba, font: Font, size: ?f32, width: f32, layout: zignal.TextLayout, opts: DrawOptions) !void {
+    pub fn drawTextBoxOutline(self: *Self, text: []const u8, box: zignal.Rectangle(f32), color: Rgba, font: Font, size: ?f32, width: f32, layout: zignal.font.TextLayout, opts: DrawOptions) !void {
         switch (self.data) {
             inline else => |*canvas| try canvas.drawTextBoxOutline(text, box, color, font, size, width, layout, opts),
         }
@@ -907,10 +907,10 @@ const TextArgs = struct {
 };
 
 /// A `TextLayout` from the keyword arguments of the box methods.
-fn parseTextLayout(params: anytype) !zignal.TextLayout {
+fn parseTextLayout(params: anytype) !zignal.font.TextLayout {
     return .{
-        .halign = try enum_utils.longToEnum(zignal.TextAlign, params.halign),
-        .valign = try enum_utils.longToEnum(zignal.VerticalAlign, params.valign),
+        .halign = try enum_utils.longToEnum(zignal.font.TextAlign, params.halign),
+        .valign = try enum_utils.longToEnum(zignal.font.VerticalAlign, params.valign),
         .wrap = params.wrap != 0,
         .line_spacing = @floatCast(params.line_spacing),
         .letter_spacing = @floatCast(params.letter_spacing),

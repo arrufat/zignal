@@ -5,7 +5,7 @@ const Io = std.Io;
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const ImageFormat = zignal.ImageFormat;
+const ImageFormat = zignal.image.Format;
 
 const canvas = @import("../canvas.zig");
 const color_bindings = @import("../color.zig");
@@ -1085,7 +1085,7 @@ pub fn image_flood_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
     const start_row = python.validateNonNegative(u32, params.row, "row") catch return null;
     const start_col = python.validateNonNegative(u32, params.col, "col") catch return null;
 
-    const connectivity: zignal.FloodFillOptions.Connectivity = switch (params.connectivity) {
+    const connectivity: zignal.image.FloodFillOptions.Connectivity = switch (params.connectivity) {
         4 => .four,
         8 => .eight,
         else => {
@@ -1094,19 +1094,19 @@ pub fn image_flood_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
         },
     };
 
-    var mode = zignal.FloodFillOptions.ThresholdMode.seed;
+    var mode = zignal.image.FloodFillOptions.ThresholdMode.seed;
     if (params.mode) |obj| {
         if (obj == c.Py_None()) {
             python.setValueError("mode must be a ThresholdMode enum", .{});
             return null;
         }
-        mode = enum_utils.pyToEnum(zignal.FloodFillOptions.ThresholdMode, obj) catch return null;
+        mode = enum_utils.pyToEnum(zignal.image.FloodFillOptions.ThresholdMode, obj) catch return null;
     }
 
-    const opts = zignal.FloodFillOptions{ .threshold = params.threshold, .connectivity = connectivity, .mode = mode };
+    const opts = zignal.image.FloodFillOptions{ .threshold = params.threshold, .connectivity = connectivity, .mode = mode };
 
     return self.py_image.?.dispatch(.{ start_row, start_col, params.fill_value, opts }, struct {
-        fn apply(img: anytype, row: u32, col: u32, fv_obj: ?*c.PyObject, options: zignal.FloodFillOptions) ?*c.PyObject {
+        fn apply(img: anytype, row: u32, col: u32, fv_obj: ?*c.PyObject, options: zignal.image.FloodFillOptions) ?*c.PyObject {
             const T = @TypeOf(img.data[0]);
             const fill_val = parseColorTo(T, fv_obj) catch return null;
             img.floodFill(allocator, row, col, fill_val, options) catch |err| {

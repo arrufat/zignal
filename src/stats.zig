@@ -1,6 +1,6 @@
 //! Streaming statistics computation using Welford's algorithm for numerical stability.
 //!
-//! Provides single-variable `RunningStats` and multi-variable `CovarianceStats`,
+//! Provides single-variable `Running` and multi-variable `Covariance`,
 //! inspired by dlib's running_stats implementation.
 
 const std = @import("std");
@@ -9,28 +9,28 @@ const testing = std.testing;
 
 const Matrix = @import("matrix.zig").Matrix;
 
-/// Selects which quantities `RunningStats` tracks. Opt out of moments/extrema you don't need to
+/// Selects which quantities `Running` tracks. Opt out of moments/extrema you don't need to
 /// skip the corresponding per-sample work; mean/variance/stdDev are always available.
-pub const RunningStatsConfig = struct {
+pub const RunningConfig = struct {
     /// Track 3rd/4th central moments (required for `skewness`, `exKurtosis`, `combine`).
     higher_moments: bool,
     /// Track running min/max (required for `min`, `max`, `combine`).
     extrema: bool,
 
     /// Track everything: mean, variance, skewness, kurtosis, and extrema.
-    pub const all: RunningStatsConfig = .{ .higher_moments = true, .extrema = true };
+    pub const all: RunningConfig = .{ .higher_moments = true, .extrema = true };
     /// Track only what mean/variance/stdDev need — the cheapest per-sample update.
-    /// Usage: `RunningStats(f64, .variance)`.
-    pub const variance: RunningStatsConfig = .{ .higher_moments = false, .extrema = false };
+    /// Usage: `Running(f64, .variance)`.
+    pub const variance: RunningConfig = .{ .higher_moments = false, .extrema = false };
     /// Track mean/variance/stdDev plus running min/max, but not the higher moments.
-    pub const summary: RunningStatsConfig = .{ .higher_moments = false, .extrema = true };
+    pub const summary: RunningConfig = .{ .higher_moments = false, .extrema = true };
 };
 
 /// Running statistics for streaming data using Welford's algorithm for numerical stability.
 /// `config` selects which quantities are tracked — pass a preset such as `.all` or `.variance`
-/// (see `RunningStatsConfig`). mean/variance/stdDev are always available. Inspired by dlib's
+/// (see `RunningConfig`). mean/variance/stdDev are always available. Inspired by dlib's
 /// running_stats.
-pub fn RunningStats(comptime T: type, comptime config: RunningStatsConfig) type {
+pub fn Running(comptime T: type, comptime config: RunningConfig) type {
     comptime assert(@typeInfo(T) == .float);
 
     return struct {
@@ -55,7 +55,7 @@ pub fn RunningStats(comptime T: type, comptime config: RunningStatsConfig) type 
         min_val: T,
         max_val: T,
 
-        /// Initialize a new RunningStats instance with zero values
+        /// Initialize a new Running instance with zero values
         pub fn init() Self {
             return .{
                 .n = 0,
@@ -131,7 +131,7 @@ pub fn RunningStats(comptime T: type, comptime config: RunningStatsConfig) type 
 
         /// Compute the unbiased sample skewness (requires n > 2)
         pub fn skewness(self: Self) T {
-            if (!config.higher_moments) @compileError("skewness requires RunningStatsConfig.higher_moments = true");
+            if (!config.higher_moments) @compileError("skewness requires RunningConfig.higher_moments = true");
             if (self.n <= 2) return 0;
 
             const variance_val = self.variance();
@@ -144,7 +144,7 @@ pub fn RunningStats(comptime T: type, comptime config: RunningStatsConfig) type 
 
         /// Compute the excess kurtosis (requires n > 3)
         pub fn exKurtosis(self: Self) T {
-            if (!config.higher_moments) @compileError("exKurtosis requires RunningStatsConfig.higher_moments = true");
+            if (!config.higher_moments) @compileError("exKurtosis requires RunningConfig.higher_moments = true");
             if (self.n <= 3) return 0;
 
             const variance_val = self.variance();
@@ -159,14 +159,14 @@ pub fn RunningStats(comptime T: type, comptime config: RunningStatsConfig) type 
 
         /// Get the minimum value seen so far
         pub fn min(self: Self) T {
-            if (!config.extrema) @compileError("min requires RunningStatsConfig.extrema = true");
+            if (!config.extrema) @compileError("min requires RunningConfig.extrema = true");
             if (self.n == 0) return 0;
             return self.min_val;
         }
 
         /// Get the maximum value seen so far
         pub fn max(self: Self) T {
-            if (!config.extrema) @compileError("max requires RunningStatsConfig.extrema = true");
+            if (!config.extrema) @compileError("max requires RunningConfig.extrema = true");
             if (self.n == 0) return 0;
             return self.max_val;
         }
@@ -178,10 +178,10 @@ pub fn RunningStats(comptime T: type, comptime config: RunningStatsConfig) type 
             return (val - self.mean()) / std_dev;
         }
 
-        /// Combine two RunningStats objects
+        /// Combine two Running objects
         pub fn combine(self: Self, other: Self) Self {
             if (!config.higher_moments or !config.extrema)
-                @compileError("combine requires RunningStatsConfig.higher_moments and .extrema = true");
+                @compileError("combine requires RunningConfig.higher_moments and .extrema = true");
             if (self.n == 0) return other;
             if (other.n == 0) return self;
 
@@ -225,11 +225,11 @@ pub fn RunningStats(comptime T: type, comptime config: RunningStatsConfig) type 
 /// Multivariate running statistics for streaming data.
 /// Computes mean vector and full covariance matrix in a single pass.
 /// Supports generic dimensionality `dim`.
-pub fn CovarianceStats(comptime dim: usize, comptime T: type) type {
+pub fn Covariance(comptime dim: usize, comptime T: type) type {
     comptime {
         const info = @typeInfo(T);
         if (info != .float) {
-            @compileError("CovarianceStats only supports floating-point types (f32, f64, f128)");
+            @compileError("Covariance only supports floating-point types (f32, f64, f128)");
         }
     }
 
@@ -319,8 +319,8 @@ pub fn CovarianceStats(comptime dim: usize, comptime T: type) type {
 // TESTS
 // ============================================================================
 
-test "RunningStats: basic operations" {
-    var stats: RunningStats(f64, .all) = .init();
+test "Running: basic operations" {
+    var stats: Running(f64, .all) = .init();
 
     // Test with known values
     stats.add(2.0);
@@ -342,8 +342,8 @@ test "RunningStats: basic operations" {
     try testing.expectEqual(@as(f64, 9.0), stats.max());
 }
 
-test "RunningStats: skewness and kurtosis" {
-    var stats: RunningStats(f64, .all) = .init();
+test "Running: skewness and kurtosis" {
+    var stats: Running(f64, .all) = .init();
 
     // Normal-like distribution
     const values = [_]f64{ 1, 2, 2, 3, 3, 3, 4, 4, 5 };
@@ -358,20 +358,20 @@ test "RunningStats: skewness and kurtosis" {
     try testing.expect(@abs(stats.exKurtosis()) < 1.0);
 }
 
-test "RunningStats: skewness and kurtosis exact values, scale invariant" {
+test "Running: skewness and kurtosis exact values, scale invariant" {
     // {0,0,0,1}: G1 = 2, G2 = 4 (scipy.stats.skew/kurtosis with bias=False).
     for ([_]f64{ 1, 10, 1e-3 }) |scale| {
-        var stats: RunningStats(f64, .all) = .init();
+        var stats: Running(f64, .all) = .init();
         for ([_]f64{ 0, 0, 0, scale }) |v| stats.add(v);
         try testing.expectApproxEqAbs(2.0, stats.skewness(), 1e-12);
         try testing.expectApproxEqAbs(4.0, stats.exKurtosis(), 1e-12);
     }
 }
 
-test "RunningStats: combine" {
-    var stats1: RunningStats(f64, .all) = .init();
-    var stats2: RunningStats(f64, .all) = .init();
-    var combined_direct: RunningStats(f64, .all) = .init();
+test "Running: combine" {
+    var stats1: Running(f64, .all) = .init();
+    var stats2: Running(f64, .all) = .init();
+    var combined_direct: Running(f64, .all) = .init();
 
     // Add to first stats
     stats1.add(1.0);
@@ -400,8 +400,8 @@ test "RunningStats: combine" {
     try testing.expectApproxEqAbs(combined_direct.variance(), combined.variance(), 1e-10);
 }
 
-test "RunningStats: edge cases" {
-    var stats: RunningStats(f64, .all) = .init();
+test "Running: edge cases" {
+    var stats: Running(f64, .all) = .init();
 
     // Empty stats
     try testing.expectEqual(@as(usize, 0), stats.currentN());
@@ -458,8 +458,8 @@ fn referenceMoments(values: []const f64) struct { skew: f64, kurt: f64 } {
     };
 }
 
-test "RunningStats: normal distribution approximation" {
-    var stats: RunningStats(f64, .all) = .init();
+test "Running: normal distribution approximation" {
+    var stats: Running(f64, .all) = .init();
     var prng = std.Random.DefaultPrng.init(42);
     const rand = prng.random();
     var values: [100]f64 = undefined;
@@ -481,8 +481,8 @@ test "RunningStats: normal distribution approximation" {
     try testing.expect(@abs(stats.exKurtosis()) < 1.0);
 }
 
-test "RunningStats: skewed distribution" {
-    var stats: RunningStats(f64, .all) = .init();
+test "Running: skewed distribution" {
+    var stats: Running(f64, .all) = .init();
     var prng = std.Random.DefaultPrng.init(123);
     const rand = prng.random();
     var values: [100]f64 = undefined;
@@ -501,8 +501,8 @@ test "RunningStats: skewed distribution" {
     try testing.expect(stats.exKurtosis() > 1.5);
 }
 
-test "RunningStats: scaling/z-score" {
-    var stats: RunningStats(f64, .all) = .init();
+test "Running: scaling/z-score" {
+    var stats: Running(f64, .all) = .init();
 
     // Add values with known mean and std
     stats.add(10.0);
@@ -521,8 +521,8 @@ test "RunningStats: scaling/z-score" {
     try testing.expectApproxEqAbs(@as(f64, 1.265), stats.scale(18.0), 0.001); // (18-14)/3.162
 }
 
-test "RunningStats: large values for numerical stability" {
-    var stats: RunningStats(f64, .all) = .init();
+test "Running: large values for numerical stability" {
+    var stats: Running(f64, .all) = .init();
 
     // Add large values to test numerical stability
     stats.add(1e10);
@@ -534,8 +534,8 @@ test "RunningStats: large values for numerical stability" {
     try testing.expectApproxEqAbs(@as(f64, 1.0), stats.stdDev(), 1e-4);
 }
 
-test "CovarianceStats: basic" {
-    var stats = CovarianceStats(2, f64).init();
+test "Covariance: basic" {
+    var stats = Covariance(2, f64).init();
 
     stats.add(.{ 1.0, 2.0 });
     stats.add(.{ 2.0, 4.0 });

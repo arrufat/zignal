@@ -34,7 +34,7 @@ test "Shen-Castan edge detection basic functionality" {
     defer edges.deinit(allocator);
 
     const filter = Edges(u8);
-    var opts = @import("../../root.zig").ShenCastan{};
+    var opts = @import("../../image.zig").ShenCastan{};
     opts.smooth = 0.8;
     opts.window_size = 7;
     opts.high_ratio = 0.9; // More sensitive - top 10% instead of top 1%
@@ -111,7 +111,7 @@ test "Shen-Castan on gradient image" {
     defer edges.deinit(allocator);
 
     const filter = Edges(u8);
-    var opts = @import("../../root.zig").ShenCastan{};
+    var opts = @import("../../image.zig").ShenCastan{};
     opts.smooth = 0.85;
     opts.window_size = 7;
     opts.high_ratio = 0.8; // Even more sensitive - top 20% of edges

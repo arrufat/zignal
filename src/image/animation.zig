@@ -9,11 +9,11 @@ const Io = std.Io;
 const codecs = @import("../codecs.zig");
 const Image = @import("../image.zig").Image;
 const Rectangle = @import("../geometry.zig").Rectangle;
-const ImageFormat = @import("format.zig").ImageFormat;
+const Format = @import("format.zig").Format;
 
 /// Animated image with N frames, per-frame display durations, and a loop count.
 /// Each frame owns its pixel buffer; `deinit` walks them all.
-pub fn AnimatedImage(comptime T: type) type {
+pub fn Animation(comptime T: type) type {
     return struct {
         const Self = @This();
 
@@ -32,7 +32,7 @@ pub fn AnimatedImage(comptime T: type) type {
 
         /// Reads every frame from `reader`, detecting the format from its signature.
         pub fn read(io: Io, allocator: Allocator, reader: *Io.Reader) !Self {
-            switch (try ImageFormat.peek(reader)) {
+            switch (try Format.peek(reader)) {
                 inline else => |f| {
                     const codec = @field(codecs, @tagName(f));
                     if (@hasDecl(codec, "readAnimated")) return codec.readAnimated(T, io, allocator, reader, .{});
@@ -43,7 +43,7 @@ pub fn AnimatedImage(comptime T: type) type {
 
         /// `load` for an in-memory encoded image.
         pub fn loadFromBytes(io: Io, allocator: Allocator, data: []const u8) !Self {
-            const format = ImageFormat.detectFromBytes(data) orelse return error.UnsupportedImageFormat;
+            const format = Format.detectFromBytes(data) orelse return error.UnsupportedImageFormat;
             switch (format) {
                 inline else => |f| {
                     const codec = @field(codecs, @tagName(f));
@@ -58,7 +58,7 @@ pub fn AnimatedImage(comptime T: type) type {
         /// Saves by extension. Codecs with `writeAnimated` store every frame; any other
         /// format takes a single frame.
         pub fn save(self: Self, io: Io, allocator: Allocator, file_path: []const u8) !void {
-            const format = ImageFormat.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
+            const format = Format.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
             // Checked before the file is created.
             const animated = switch (format) {
                 inline else => |f| @hasDecl(@field(codecs, @tagName(f)), "writeAnimated"),
@@ -68,7 +68,7 @@ pub fn AnimatedImage(comptime T: type) type {
         }
 
         /// Writes every frame to `writer` as `format`; still formats take a single frame.
-        pub fn write(self: Self, io: Io, allocator: Allocator, writer: *Io.Writer, format: ImageFormat) !void {
+        pub fn write(self: Self, io: Io, allocator: Allocator, writer: *Io.Writer, format: Format) !void {
             switch (format) {
                 inline else => |f| {
                     const codec = @field(codecs, @tagName(f));
@@ -130,46 +130,41 @@ pub fn AnimatedImage(comptime T: type) type {
             for (self.durations_ms) |ms| sum += ms;
             return sum;
         }
+
+        /// Collects frames into an animation, owning them until `finish` hands them over.
+        pub const Builder = struct {
+            frames: std.ArrayList(Image(T)) = .empty,
+            durations_ms: std.ArrayList(u32) = .empty,
+
+            pub fn append(self: *Builder, allocator: Allocator, image: Image(T), duration_ms: u32) !void {
+                var owned = image;
+                errdefer owned.deinit(allocator);
+                try self.frames.ensureUnusedCapacity(allocator, 1);
+                try self.durations_ms.append(allocator, duration_ms);
+                self.frames.appendAssumeCapacity(owned);
+            }
+
+            pub fn finish(self: *Builder, allocator: Allocator, loop_count: u32) !Self {
+                if (self.frames.items.len == 0) return error.NoFrames;
+                const frames = try self.frames.toOwnedSlice(allocator);
+                errdefer allocator.free(frames);
+                return .{
+                    .frames = frames,
+                    .durations_ms = try self.durations_ms.toOwnedSlice(allocator),
+                    .loop_count = loop_count,
+                };
+            }
+
+            pub fn deinit(self: *Builder, allocator: Allocator) void {
+                for (self.frames.items) |*f| f.deinit(allocator);
+                self.frames.deinit(allocator);
+                self.durations_ms.deinit(allocator);
+            }
+        };
     };
 }
 
-/// Collects decoded frames for a codec's `loadAnimatedFromBytes`, owning them until
-/// `finish` hands them over.
-pub fn Builder(comptime T: type) type {
-    return struct {
-        const Self = @This();
-
-        frames: std.ArrayList(Image(T)) = .empty,
-        durations_ms: std.ArrayList(u32) = .empty,
-
-        pub fn append(self: *Self, allocator: Allocator, image: Image(T), duration_ms: u32) !void {
-            var owned = image;
-            errdefer owned.deinit(allocator);
-            try self.frames.ensureUnusedCapacity(allocator, 1);
-            try self.durations_ms.append(allocator, duration_ms);
-            self.frames.appendAssumeCapacity(owned);
-        }
-
-        pub fn finish(self: *Self, allocator: Allocator, loop_count: u32) !AnimatedImage(T) {
-            if (self.frames.items.len == 0) return error.NoFrames;
-            const frames = try self.frames.toOwnedSlice(allocator);
-            errdefer allocator.free(frames);
-            return .{
-                .frames = frames,
-                .durations_ms = try self.durations_ms.toOwnedSlice(allocator),
-                .loop_count = loop_count,
-            };
-        }
-
-        pub fn deinit(self: *Self, allocator: Allocator) void {
-            for (self.frames.items) |*f| f.deinit(allocator);
-            self.frames.deinit(allocator);
-            self.durations_ms.deinit(allocator);
-        }
-    };
-}
-
-test "AnimatedImage(u8) — build, deinit, helpers" {
+test "Animation(u8) — build, deinit, helpers" {
     const gpa = std.testing.allocator;
 
     var frames = try gpa.alloc(Image(u8), 2);
@@ -182,7 +177,7 @@ test "AnimatedImage(u8) — build, deinit, helpers" {
     durations[0] = 100;
     durations[1] = 250;
 
-    var anim = AnimatedImage(u8){
+    var anim = Animation(u8){
         .frames = frames,
         .durations_ms = durations,
         .loop_count = 0,
@@ -205,7 +200,7 @@ test "still formats load as one frame" {
     const png = try codecs.png.encode(u8, io, gpa, img, .default);
     defer gpa.free(png);
 
-    var anim: AnimatedImage(u8) = try .loadFromBytes(io, gpa, png);
+    var anim: Animation(u8) = try .loadFromBytes(io, gpa, png);
     defer anim.deinit(gpa);
     try std.testing.expectEqual(1, anim.frameCount());
     try std.testing.expectEqual(0, anim.durations_ms[0]);
@@ -220,7 +215,7 @@ test "save writes what encode returns" {
     const dir = try tmp.dir.realPathFileAlloc(io, ".", gpa);
     defer gpa.free(dir);
 
-    var anim: AnimatedImage(u8) = try .fromStill(gpa, try .init(gpa, 6, 9));
+    var anim: Animation(u8) = try .fromStill(gpa, try .init(gpa, 6, 9));
     defer anim.deinit(gpa);
     for (anim.frame(0).data, 0..) |*p, i| p.* = @truncate(i * 7);
 

@@ -10,17 +10,17 @@ const args = @import("args.zig");
 const common = @import("common.zig");
 
 /// Comma-separated list of supported display protocols, in CLI-menu order.
-/// Derived from `zignal.DisplayFormat`'s union fields so help text cannot
+/// Derived from `zignal.image.DisplayFormat`'s union fields so help text cannot
 /// drift from the type definition.
-pub const protocol_names: []const u8 = common.joinFieldNames(zignal.DisplayFormat);
+pub const protocol_names: []const u8 = common.joinFieldNames(zignal.image.DisplayFormat);
 
 /// Standard help line for the `--protocol` option, used by every subcommand
 /// that supports terminal display.
 pub const protocol_help: []const u8 = "Display protocol: " ++ protocol_names;
 
-/// The tag enum of `zignal.DisplayFormat` — usable directly as a CLI/ZON option
+/// The tag enum of `zignal.image.DisplayFormat` — usable directly as a CLI/ZON option
 /// field, since the tag names double as the accepted protocol names.
-pub const ProtocolTag = std.meta.Tag(zignal.DisplayFormat);
+pub const ProtocolTag = std.meta.Tag(zignal.image.DisplayFormat);
 
 const Args = struct {
     width: ?u32 = null,
@@ -79,15 +79,15 @@ pub fn resolveDisplayFormat(
     protocol: ?ProtocolTag,
     width: ?u32,
     height: ?u32,
-) zignal.DisplayFormat {
-    var format: zignal.DisplayFormat = switch (protocol orelse .auto) {
-        inline else => |t| @unionInit(zignal.DisplayFormat, @tagName(t), .default),
+) zignal.image.DisplayFormat {
+    var format: zignal.image.DisplayFormat = switch (protocol orelse .auto) {
+        inline else => |t| @unionInit(zignal.image.DisplayFormat, @tagName(t), .default),
     };
     applyOptions(&format, width, height);
     return format;
 }
 
-pub fn applyOptions(protocol: *zignal.DisplayFormat, width: ?u32, height: ?u32) void {
+pub fn applyOptions(protocol: *zignal.image.DisplayFormat, width: ?u32, height: ?u32) void {
     protocol.setSize(width, height);
     protocol.setInterpolation(.bilinear);
 }
@@ -96,7 +96,7 @@ pub fn displayCanvas(
     io: Io,
     writer: *Io.Writer,
     image: anytype,
-    format: zignal.DisplayFormat,
+    format: zignal.image.DisplayFormat,
 ) !void {
     try writer.print("{f}\n", .{image.display(io, format)});
     try writer.flush();
@@ -106,7 +106,7 @@ pub fn displayCanvas(
 /// when the result should only be saved. Display happens when `--display` is set
 /// or no output target was given. `options` is any display-capable command's
 /// `Args` (it must expose `display`/`protocol`/`width`/`height`).
-pub fn displayFormatFor(options: anytype, target: ?common.OutputTarget) ?zignal.DisplayFormat {
+pub fn displayFormatFor(options: anytype, target: ?common.OutputTarget) ?zignal.image.DisplayFormat {
     if (!options.display and target != null) return null;
     return resolveDisplayFormat(options.protocol, options.width, options.height);
 }
@@ -120,7 +120,7 @@ pub fn emit(
     img: anytype,
     input_path: []const u8,
     target: ?common.OutputTarget,
-    display_format: ?zignal.DisplayFormat,
+    display_format: ?zignal.image.DisplayFormat,
 ) !void {
     if (target) |tgt| {
         const resolved = try tgt.resolveOutputPath(gpa, input_path);

@@ -37,10 +37,10 @@ const interpolation = @import("image/interpolation.zig");
 const OrderStatisticBlurOps = @import("image/order_statistic_blur.zig").OrderStatisticBlurOps;
 
 pub const DisplayFormat = @import("image/display.zig").DisplayFormat;
-pub const ImageFormat = @import("image/format.zig").ImageFormat;
+pub const Format = @import("image/format.zig").Format;
 pub const Interpolation = @import("image/interpolation.zig").Interpolation;
 pub const PixelIterator = @import("image/PixelIterator.zig").PixelIterator;
-pub const AnimatedImage = @import("image/animated.zig").AnimatedImage;
+pub const Animation = @import("image/animation.zig").Animation;
 pub const ShenCastan = @import("image/ShenCastan.zig");
 pub const HoughTransform = @import("image/hough.zig").HoughTransform;
 pub const Histogram = @import("image/histogram.zig").Histogram;
@@ -72,7 +72,10 @@ pub const GaussianBlurOptions = struct {
     pub const auto_iir_sigma = iir_gaussian.auto_sigma;
 };
 const MotionBlurOps = @import("image/motion_blur.zig").MotionBlurOps;
-pub const Colormap = @import("image/colormaps.zig").Colormap;
+pub const colormaps = @import("image/colormaps.zig");
+pub const Colormap = colormaps.Colormap;
+pub const quantize = @import("image/quantize.zig");
+pub const dither = @import("image/dither.zig");
 const Blending = @import("blending.zig").Blending;
 pub const FloodFillOptions = @import("image/flood_fill.zig").FloodFillOptions;
 
@@ -258,7 +261,7 @@ pub fn Image(comptime T: type) type {
 
         /// Reads an image from `reader`, detecting the format from its signature.
         pub fn read(io: Io, allocator: Allocator, reader: *Io.Reader) !Self {
-            return switch (try ImageFormat.peek(reader)) {
+            return switch (try Format.peek(reader)) {
                 inline else => |f| @field(codecs, @tagName(f)).read(T, io, allocator, reader, .{}),
             };
         }
@@ -273,7 +276,7 @@ pub fn Image(comptime T: type) type {
         /// defer img.deinit(allocator);
         /// ```
         pub fn loadFromBytes(io: Io, allocator: Allocator, data: []const u8) !Self {
-            const image_format = ImageFormat.detectFromBytes(data) orelse return error.UnsupportedImageFormat;
+            const image_format = Format.detectFromBytes(data) orelse return error.UnsupportedImageFormat;
             return switch (image_format) {
                 inline else => |f| @field(codecs, @tagName(f)).loadFromBytes(T, io, allocator, data, .{}),
             };
@@ -284,12 +287,12 @@ pub fn Image(comptime T: type) type {
         /// `.jxl` and `.webp` need libc linked and the system library at runtime).
         /// Returns `error.UnsupportedImageFormat` for any other extension.
         pub fn save(self: Self, io: Io, allocator: Allocator, file_path: []const u8) !void {
-            const image_format = ImageFormat.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
+            const image_format = Format.fromExtension(file_path) orelse return error.UnsupportedImageFormat;
             return codecs.writeFile(io, file_path, write, .{ self, io, allocator }, .{image_format});
         }
 
         /// Writes the image to `writer` as `image_format` with the codec's default options.
-        pub fn write(self: Self, io: Io, allocator: Allocator, writer: *Io.Writer, image_format: ImageFormat) !void {
+        pub fn write(self: Self, io: Io, allocator: Allocator, writer: *Io.Writer, image_format: Format) !void {
             return switch (image_format) {
                 inline else => |f| @field(codecs, @tagName(f)).write(T, io, allocator, writer, self, .default),
             };
@@ -1239,8 +1242,6 @@ pub fn Image(comptime T: type) type {
             allocator: Allocator,
             map: Colormap,
         ) !Image(Rgb) {
-            const colormaps = @import("image/colormaps.zig");
-
             // Determine range
             var min_val: f64 = 0;
             var max_val: f64 = 0;
@@ -1298,7 +1299,7 @@ pub fn Image(comptime T: type) type {
 // Run all tests
 test {
     _ = @import("image/PixelIterator.zig");
-    _ = @import("image/animated.zig");
+    _ = @import("image/animation.zig");
     _ = @import("image/format.zig");
     _ = @import("image/display.zig");
     _ = @import("image/tests/integral.zig");

@@ -33,7 +33,7 @@ const std = @import("std");
 
 const truetype = @import("../truetype.zig");
 const glyf_mod = @import("glyf.zig");
-const VectorFont = @import("../VectorFont.zig");
+const VectorFont = @import("../Vector.zig");
 
 pub const buffer_size = 16384;
 

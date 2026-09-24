@@ -5,7 +5,7 @@ const Image = zignal.Image;
 const Rgba = zignal.Rgba(u8);
 const Canvas = zignal.Canvas;
 const Point = zignal.Point;
-const HoughTransform = zignal.HoughTransform;
+const HoughTransform = zignal.image.HoughTransform;
 const Rectangle = zignal.Rectangle;
 
 const js = @import("js.zig");
@@ -135,7 +135,7 @@ pub export fn render(img_ptr: [*]Rgba, acc_ptr: [*]Rgba, time_step: f32) void {
         for (0..hough_size) |row| {
             for (0..hough_size) |col| {
                 const val = @as(f64, @floatFromInt(accumulator.at(row, col).*));
-                const rgb = zignal.colormaps.viridis(val, 0, @as(f64, @floatFromInt(max_val)));
+                const rgb = zignal.image.colormaps.viridis(val, 0, @as(f64, @floatFromInt(max_val)));
                 acc_img.at(row, col).* = zignal.convertColor(Rgba, rgb);
             }
         }

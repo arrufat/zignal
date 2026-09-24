@@ -75,13 +75,13 @@ pub fn resolveOutputTarget(
     };
 }
 
-/// The tag enum of `zignal.Interpolation` — usable directly as a CLI/ZON option
+/// The tag enum of `zignal.image.Interpolation` — usable directly as a CLI/ZON option
 /// field, since the tag names double as the accepted filter names.
-pub const InterpolationTag = @typeInfo(zignal.Interpolation).@"union".tag_type.?;
+pub const InterpolationTag = @typeInfo(zignal.image.Interpolation).@"union".tag_type.?;
 
 /// Expands a selected interpolation tag into a full `Interpolation` value,
 /// defaulting to bilinear when unset. The `mitchell` payload uses `.default`.
-pub fn resolveFilter(tag: ?InterpolationTag) zignal.Interpolation {
+pub fn resolveFilter(tag: ?InterpolationTag) zignal.image.Interpolation {
     const t = tag orelse {
         std.log.debug("using default filter: bilinear", .{});
         return .bilinear;
@@ -89,7 +89,7 @@ pub fn resolveFilter(tag: ?InterpolationTag) zignal.Interpolation {
     return switch (t) {
         // The only variant with a payload — every other variant is bare.
         .mitchell => .{ .mitchell = .default },
-        inline else => |x| @unionInit(zignal.Interpolation, @tagName(x), {}),
+        inline else => |x| @unionInit(zignal.image.Interpolation, @tagName(x), {}),
     };
 }
 

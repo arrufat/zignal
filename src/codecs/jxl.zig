@@ -6,8 +6,7 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-const animated = @import("../image/animated.zig");
-const AnimatedImage = animated.AnimatedImage;
+const Animation = @import("../image/animation.zig").Animation;
 const Image = @import("../image.zig").Image;
 const codecs = @import("../codecs.zig");
 const NativeImage = codecs.NativeImage;
@@ -120,12 +119,12 @@ pub fn decode(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimi
 }
 
 /// Loads every displayed frame; a still JPEG XL gives one frame.
-pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
+pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Animation(T) {
     if (!enabled) return error.CodecNotEnabled;
     var reader: FrameReader = undefined;
     try reader.init(io, data, limits);
     defer reader.deinit();
-    var builder: animated.Builder(T) = .{};
+    var builder: Animation(T).Builder = .{};
     defer builder.deinit(allocator);
     const frame_pixels = @as(u64, reader.header.width) * reader.header.height;
     while (try reader.next(allocator)) |frame| {
@@ -141,7 +140,7 @@ pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, dat
 }
 
 /// Reads every frame of a JPEG XL image from `reader`, buffering at most the `DecodeLimits` byte cap.
-pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnimatedImage(T) {
+pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Animation(T) {
     if (!enabled) return error.CodecNotEnabled;
     const data = try reader.allocRemaining(allocator, limits.max_jxl_bytes);
     defer allocator.free(data);
@@ -263,12 +262,12 @@ pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer,
 
 /// Encodes every frame of `anim` at its full size; pixel types map as in `encode`.
 /// A one-frame animation is written as a still.
-pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
+pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: Animation(T), options: EncodeOptions) ![]u8 {
     return codecs.encodeWith(allocator, writeAnimated, .{ T, io, allocator }, .{ anim, options });
 }
 
 /// Writes `anim` as JPEG XL to `writer`; see `encodeAnimated`.
-pub fn writeAnimated(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, anim: AnimatedImage(T), options: EncodeOptions) !void {
+pub fn writeAnimated(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, anim: Animation(T), options: EncodeOptions) !void {
     if (!enabled) return error.CodecNotEnabled;
     try anim.validate();
     const frames = anim.frames;
@@ -676,8 +675,8 @@ test "lossy round trip stays close" {
     try std.testing.expect(try img.psnr(back) > 30);
 }
 
-fn testAnimation(comptime T: type, allocator: Allocator, durations: []const u32, loop_count: u32) !AnimatedImage(T) {
-    var builder: animated.Builder(T) = .{};
+fn testAnimation(comptime T: type, allocator: Allocator, durations: []const u32, loop_count: u32) !Animation(T) {
+    var builder: Animation(T).Builder = .{};
     defer builder.deinit(allocator);
     for (durations, 0..) |ms, i| {
         var img = try testImage(T, allocator);
@@ -735,7 +734,7 @@ test "animated encode rejects bad input" {
     if (!enabled) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
-    const empty: AnimatedImage(Rgb) = .{ .frames = &.{}, .durations_ms = &.{}, .loop_count = 0 };
+    const empty: Animation(Rgb) = .{ .frames = &.{}, .durations_ms = &.{}, .loop_count = 0 };
     try std.testing.expectError(error.NoFrames, encodeAnimated(Rgb, io, allocator, empty, .default));
 
     var a: Image(Rgb) = try .init(allocator, 4, 4);
@@ -744,7 +743,7 @@ test "animated encode rejects bad input" {
     defer b.deinit(allocator);
     var frames = [_]Image(Rgb){ a, b };
     var durations = [_]u32{ 10, 10 };
-    const mismatched: AnimatedImage(Rgb) = .{ .frames = &frames, .durations_ms = &durations, .loop_count = 0 };
+    const mismatched: Animation(Rgb) = .{ .frames = &frames, .durations_ms = &durations, .loop_count = 0 };
     try std.testing.expectError(error.InconsistentFrameDimensions, encodeAnimated(Rgb, io, allocator, mismatched, .default));
 }
 

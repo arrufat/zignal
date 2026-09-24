@@ -217,9 +217,9 @@ fn solve_assignment_problem(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
     }
 
     // Parse policy (default to MIN)
-    var policy = optimization.OptimizationPolicy.min;
+    var policy = optimization.Policy.min;
     if (policy_obj != null) {
-        policy = enum_utils.pyToEnum(optimization.OptimizationPolicy, policy_obj.?) catch return null;
+        policy = enum_utils.pyToEnum(optimization.Policy, policy_obj.?) catch return null;
     }
 
     // Solve the assignment problem
@@ -397,9 +397,9 @@ fn optimize(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv
     const solver_eps = python.validatePositive(f64, params.solver_eps, "solver_eps") catch return null;
 
     // Policy (default MIN).
-    var policy = optimization.OptimizationPolicy.min;
+    var policy = optimization.Policy.min;
     if (params.policy != null and params.policy != c.Py_None()) {
-        policy = enum_utils.pyToEnum(optimization.OptimizationPolicy, params.policy.?) catch return null;
+        policy = enum_utils.pyToEnum(optimization.Policy, params.policy.?) catch return null;
     }
 
     // Optional stop criteria.
@@ -414,7 +414,7 @@ fn optimize(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv
     }
 
     // Build the search space from bounds (+ optional per-dimension integer flags).
-    const Variable = zignal.GlobalOptimizer.Variable;
+    const Variable = zignal.optimization.GlobalOptimizer.Variable;
     if (c.PySequence_Check(params.bounds) == 0) {
         python.setTypeError("sequence of (lower, upper) pairs", params.bounds);
         return null;
@@ -469,7 +469,7 @@ fn optimize(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv
     }
 
     // Initialize the optimizer.
-    var opt = zignal.GlobalOptimizer.init(allocator, dims, .{
+    var opt = zignal.optimization.GlobalOptimizer.init(allocator, dims, .{
         .policy = policy,
         .max_evals = max_evals,
         .target = target_opt,
@@ -492,7 +492,7 @@ fn optimize(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv
     // aborts immediately — opt.optimize would keep running expensive search steps to the budget
     // before surfacing the error. The stop decision reuses GlobalOptimizer.shouldStop.
     var ctx = PyObjective{ .callable = params.objective.? };
-    var stop_state: zignal.GlobalOptimizer.StopState = .{};
+    var stop_state: zignal.optimization.GlobalOptimizer.StopState = .{};
     while (!opt.shouldStop(&stop_state)) {
         const step_res = opt.step(&ctx);
         if (ctx.failed) {

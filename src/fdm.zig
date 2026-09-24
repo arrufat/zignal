@@ -29,10 +29,10 @@ const expectEqual = testing.expectEqual;
 const expectApproxEqAbs = testing.expectApproxEqAbs;
 
 const convertColor = @import("color.zig").convertColor;
-const CovarianceStats = @import("stats.zig").CovarianceStats;
+const CovarianceStats = @import("stats.zig").Covariance;
 const Image = @import("image.zig").Image;
 const Matrix = @import("matrix.zig").Matrix;
-const RunningStats = @import("stats.zig").RunningStats;
+const RunningStats = @import("stats.zig").Running;
 
 const Rgb = @import("color.zig").Rgb(u8);
 const Rgba = @import("color.zig").Rgba(u8);
