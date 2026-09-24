@@ -22,6 +22,8 @@
 - **`jpeg.JpegState` is unmanaged**: `deinit`, `parseSOF` and `parseSOS` take the allocator. ([#478](https://github.com/arrufat/zignal/pull/478))
 - **`Image.rotate` takes a trailing `RotateSize`**: `.expand` keeps the old output bounds and `.crop` keeps the input size, exposed in Python as `expand=True`. ([#484](https://github.com/arrufat/zignal/pull/484))
 - **`ImageFormat.detectFromPath` is removed**: `Image.load` reads the file once, and `detectFromBytes` on the first `ImageFormat.signature_len` bytes replaces it. ([#489](https://github.com/arrufat/zignal/pull/489))
+- **Codecs stream through `std.Io.Reader`/`Writer`**: `Image.read`/`write` back `load`/`save`, per-codec `load`/`save` are removed, `DecodeLimits` fields are `std.Io.Limit`, and GIF, BMP and PNG drop their byte caps. ([#494](https://github.com/arrufat/zignal/pull/494))
+- **`bmp.DibHeaderKind` is renamed `DibHeader`**, and `Header.dib_kind` is `dib_header`. ([#494](https://github.com/arrufat/zignal/pull/494))
 - **Minimum Zig version is 0.17.0-dev.2163.**
 
 ### Features
@@ -39,9 +41,10 @@
 - **Nonzero polygon fills**: `Canvas.fillPolygons` fills several contours as one shape under a `FillRule`. ([#403](https://github.com/arrufat/zignal/pull/403))
 - **Round joins**: thick polygons, Bezier curves and spline polygons stroke as one joined path with round joins and caps. ([#407](https://github.com/arrufat/zignal/pull/407))
 - **BMP codec**: native reader and writer covering all header versions, 1 to 32 bpp and RLE. ([#348](https://github.com/arrufat/zignal/pull/348))
-- **GIF codec**: native reader and animated writer, with `gif.loadAnimated` returning composed frames. ([#349](https://github.com/arrufat/zignal/pull/349))
+- **GIF codec**: native reader and animated writer, with `gif.readAnimated` returning composed frames. ([#349](https://github.com/arrufat/zignal/pull/349))
 - **JPEG XL and WebP**: `jxl` and `webp` codecs load the system libjxl and libwebp at runtime whenever libc is linked, so Python gets both and the CLI does with `-Dlibc`. ([#488](https://github.com/arrufat/zignal/pull/488))
 - **Animated images**: `AnimatedImage.load` reads GIF, WebP and JPEG XL animations (and any still image as one frame) with per-frame `durations_ms`. ([#489](https://github.com/arrufat/zignal/pull/489))
+- **Animated encoding**: `AnimatedImage.save` writes JPEG XL and WebP animations, and JPEG XL and GIF frames store only the region that changed. ([#490](https://github.com/arrufat/zignal/pull/490)-[#493](https://github.com/arrufat/zignal/pull/493))
 - **Quantization and dithering modules**: `image/quantize.zig` and `image/dither.zig` are shared by sixel, braille and GIF.
 - **Terminal output**: iTerm2 inline images and color braille rendering. ([#365](https://github.com/arrufat/zignal/pull/365), [#380](https://github.com/arrufat/zignal/pull/380))
 - **Inferno colormap** in `Image.applyColormap` and Python. ([#378](https://github.com/arrufat/zignal/pull/378))
@@ -53,6 +56,8 @@
 - **JPEG decoding** streams MCU rows through vectorized paths and decodes restart segments in parallel, at or below libjpeg-turbo. ([#451](https://github.com/arrufat/zignal/pull/451)-[#456](https://github.com/arrufat/zignal/pull/456), [#465](https://github.com/arrufat/zignal/pull/465))
 - **JPEG encoding** is rebuilt around MCU rows and vectors and banded across restart intervals (4K: 92 to 5 ms on 8 cores). ([#457](https://github.com/arrufat/zignal/pull/457), [#468](https://github.com/arrufat/zignal/pull/468))
 - **PNG** deflates rows in parallel chunks and defilters with a branchless Paeth and SIMD rows (4K RGB encode: 344 to 77 ms). ([#383](https://github.com/arrufat/zignal/pull/383), [#469](https://github.com/arrufat/zignal/pull/469))
+- **Streaming codec I/O**: files are read and written through fixed buffers, so BMP load and save need no memory beyond the image and a 4K RGBA PNG save peaks at 89 MB instead of 124. ([#494](https://github.com/arrufat/zignal/pull/494))
+- **GIF still loads** decode only the first frame (60-frame 960x540: 102 to 3 ms). ([#495](https://github.com/arrufat/zignal/pull/495))
 - **Filters on the pool**: convolution, the blurs, Sobel and Canny run in row bands, 2.6-4.9x on 8 cores. ([#437](https://github.com/arrufat/zignal/pull/437), [#440](https://github.com/arrufat/zignal/pull/440), [#441](https://github.com/arrufat/zignal/pull/441))
 - **Convolution kernels** use i32 accumulators, a fused separable ring path and folded symmetric taps, and median blur memoizes its fine row. ([#391](https://github.com/arrufat/zignal/pull/391)-[#395](https://github.com/arrufat/zignal/pull/395), [#429](https://github.com/arrufat/zignal/pull/429))
 - **Interleaved struct pixels**: separable convolution, the recursive Gaussian and resize run over `Rgb`/`Rgba` bytes directly, up to 2x faster. ([#460](https://github.com/arrufat/zignal/pull/460), [#461](https://github.com/arrufat/zignal/pull/461), [#463](https://github.com/arrufat/zignal/pull/463))
