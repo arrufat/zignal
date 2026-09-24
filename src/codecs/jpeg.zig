@@ -326,12 +326,12 @@ pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer,
     }
 
     switch (T) {
-        u8 => return writeGrayscale(io, allocator, writer, image, options),
-        Rgb => return writeRgb(io, allocator, writer, image, options),
+        u8 => return writeBaseline(io, allocator, writer, .{ .gray = image }, options),
+        Rgb => return writeBaseline(io, allocator, writer, .{ .rgb = image }, options),
         else => {
             var converted = try image.convert(io, allocator, Rgb);
             defer converted.deinit(allocator);
-            return writeRgb(io, allocator, writer, converted, options);
+            return writeBaseline(io, allocator, writer, .{ .rgb = converted }, options);
         },
     }
 }
@@ -1132,7 +1132,12 @@ fn scanTables(ql: *const [64]u8, qc: *const [64]u8) ScanTables {
     };
 }
 
-fn writeRgb(io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(Rgb), options: EncodeOptions) !void {
+/// Writes a baseline JFIF stream; grayscale sources get one component and luma tables only.
+fn writeBaseline(io: Io, allocator: Allocator, writer: *Io.Writer, source: EncodeSource, options: EncodeOptions) !void {
+    const grayscale = source == .gray;
+    const cols, const rows = switch (source) {
+        inline else => |img| .{ img.cols, img.rows },
+    };
     // SOI
     try writer.writeAll(&.{ 0xFF, 0xD8 });
 
@@ -1142,19 +1147,20 @@ fn writeRgb(io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(Rgb),
     var ql: [64]u8 = undefined;
     var qc: [64]u8 = undefined;
     scaleQuantTables(options.quality, &ql, &qc);
-    try writeDQT(writer, &ql, &qc);
-    try writeSOF0(writer, @intCast(image.cols), @intCast(image.rows), false, options.subsampling);
-    try writeDHT(writer, false);
-    const factors = options.subsampling.lumaFactors();
+    try writeDQT(writer, &ql, if (grayscale) null else &qc);
+    const subsampling: Subsampling = if (grayscale) .yuv444 else options.subsampling;
+    try writeSOF0(writer, @intCast(cols), @intCast(rows), grayscale, subsampling);
+    try writeDHT(writer, grayscale);
+    const factors = subsampling.lumaFactors();
     const h_max: usize = factors >> 4;
     const v_max: usize = factors & 0xF;
     const mcu_width = 8 * h_max;
-    const restart_interval = options.restart_interval.mcusFor((image.cols + mcu_width - 1) / mcu_width);
+    const restart_interval = options.restart_interval.mcusFor((cols + mcu_width - 1) / mcu_width);
     if (restart_interval != 0) try writeDRI(writer, restart_interval);
-    try writeSOS(writer, false);
+    try writeSOS(writer, grayscale);
 
     const tables = scanTables(&ql, &qc);
-    try encodeScan(io, allocator, writer, .{ .rgb = image }, &tables, image.cols, image.rows, h_max, v_max, true, restart_interval);
+    try encodeScan(io, allocator, writer, source, &tables, cols, rows, h_max, v_max, !grayscale, restart_interval);
 
     // EOI
     try writer.writeAll(&.{ 0xFF, 0xD9 });
@@ -1251,31 +1257,6 @@ fn encodeScan(io: Io, allocator: Allocator, writer: *Io.Writer, source: EncodeSo
     };
     try parallel.forRowBandsTry(io, segments, bands, &ctx, Ctx.run);
     for (writers) |w| try writer.writeAll(w.list.items);
-}
-
-fn writeGrayscale(io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(u8), options: EncodeOptions) !void {
-    // SOI
-    try writer.writeAll(&.{ 0xFF, 0xD8 });
-
-    try writeAPP0_JFIF(writer, options.density_dpi);
-    if (options.comment) |c| try writeCOM(writer, c);
-
-    var ql: [64]u8 = undefined;
-    var qc: [64]u8 = undefined;
-    scaleQuantTables(options.quality, &ql, &qc);
-    try writeDQT(writer, &ql, null);
-
-    try writeSOF0(writer, @intCast(image.cols), @intCast(image.rows), true, .yuv444);
-    try writeDHT(writer, true);
-    const restart_interval = options.restart_interval.mcusFor((image.cols + 7) / 8);
-    if (restart_interval != 0) try writeDRI(writer, restart_interval);
-    try writeSOS(writer, true);
-
-    const tables = scanTables(&ql, &qc);
-    try encodeScan(io, allocator, writer, .{ .gray = image }, &tables, image.cols, image.rows, 1, 1, false, restart_interval);
-
-    // EOI
-    try writer.writeAll(&.{ 0xFF, 0xD9 });
 }
 
 // JPEG markers
