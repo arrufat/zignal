@@ -11,7 +11,7 @@ const Animation = @import("../image/animation.zig").Animation;
 const Image = @import("../image.zig").Image;
 const codecs = @import("../codecs.zig");
 const AnyImage = @import("../image/any.zig").Any;
-const dynlib = @import("dynlib.zig");
+const dynlib = @import("../dynlib.zig");
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
 
@@ -444,7 +444,7 @@ const Api = struct {
 const Libwebp = dynlib.Library(Api, switch (builtin.os.tag) {
     .macos => dynlib.macosNames("libwebp.dylib"),
     else => &.{ "libwebp.so.7", "libwebp.so" },
-});
+}, error.CodecUnavailable);
 
 // libwebpdemux, for animations. Only the major byte of `WEBP_DEMUX_ABI_VERSION` must match.
 const demux_abi = 0x0100;
@@ -480,7 +480,7 @@ const DemuxApi = struct {
 const LibwebpDemux = dynlib.Library(DemuxApi, switch (builtin.os.tag) {
     .macos => dynlib.macosNames("libwebpdemux.dylib"),
     else => &.{ "libwebpdemux.so.2", "libwebpdemux.so" },
-});
+}, error.CodecUnavailable);
 
 // libwebpmux, for encoding animations. Only the major byte of `WEBP_MUX_ABI_VERSION` must match.
 const mux_abi = 0x0100;
@@ -508,7 +508,7 @@ const MuxApi = struct {
 const LibwebpMux = dynlib.Library(MuxApi, switch (builtin.os.tag) {
     .macos => dynlib.macosNames("libwebpmux.dylib"),
     else => &.{ "libwebpmux.so.3", "libwebpmux.so" },
-});
+}, error.CodecUnavailable);
 
 test "signature detection" {
     try std.testing.expect(hasSignature("RIFF\x24\x00\x00\x00WEBPVP8 "));
