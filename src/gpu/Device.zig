@@ -110,8 +110,8 @@ pub fn gemm(
         .alpha = alpha,
         .beta = if (accumulate) beta else 0,
     };
-    const tile = params.gemm_tile;
-    try self.dispatch(self.gemm_pipeline, &push, (n + tile - 1) / tile, (m + tile - 1) / tile);
+    const blk = params.gemm_block;
+    try self.dispatch(self.gemm_pipeline, &push, (n + blk - 1) / blk, (m + blk - 1) / blk);
     @memcpy(result.items, buf_c.slice(f32, result.items.len));
     return result;
 }
@@ -223,7 +223,7 @@ fn pickPhysicalDevice(f: *vk.Functions, instance: vk.Instance) ?Pick {
         var features: vk.PhysicalDeviceFeatures2 = .{ .p_next = &bda };
         f.get_physical_device_features2(phys, &features);
         if (bda.buffer_device_address == 0 or features.features.shader_int64 == 0) continue;
-        if (props.limits.max_compute_work_group_invocations < params.gemm_tile * params.gemm_tile) continue;
+        if (props.limits.max_compute_work_group_invocations < params.gemm_threads * params.gemm_threads) continue;
 
         const family = computeQueueFamily(f, phys) orelse continue;
         const rank: u8 = switch (props.device_type) {

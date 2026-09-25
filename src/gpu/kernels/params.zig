@@ -1,7 +1,10 @@
 //! Push-constant layouts shared by the SPIR-V kernels and the host-side `Device`.
 
-/// Workgroup edge for the tiled gemm kernel.
-pub const gemm_tile = 16;
+/// Edge of the C tile one gemm workgroup computes, the workgroup's edge in invocations, and
+/// the depth of the shared-memory tiles it streams per step.
+pub const gemm_block = 64;
+pub const gemm_threads = 16;
+pub const gemm_kstep = 16;
 
 /// C = alpha * op(A) * op(B) + beta * C; `a`, `b`, `c` are buffer device addresses.
 pub const Gemm = extern struct {
