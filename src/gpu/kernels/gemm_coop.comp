@@ -1,0 +1,64 @@
+#version 460
+// Experiment (not built by build.zig; compile with
+// `glslc -O --target-env=vulkan1.3 -fshader-stage=compute gemm_coop.comp -o gemm_coop.spv`):
+// C = alpha * A * B with f16 inputs and f32 accumulation through cooperative
+// matrices (8x16x16 subgroup fragments on Intel Xe). One 32-lane subgroup per workgroup
+// computes a 32x64 tile of C straight from global memory. Assumes m % 32 == 0, n % 64 == 0,
+// k % 16 == 0, no transposes, beta == 0.
+#extension GL_KHR_cooperative_matrix : require
+#extension GL_KHR_memory_scope_semantics : require
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_scalar_block_layout : require
+
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+
+layout(buffer_reference, scalar, buffer_reference_align = 16) readonly buffer HalfBuf { float16_t v[]; };
+layout(buffer_reference, scalar, buffer_reference_align = 16) buffer FloatBuf { float v[]; };
+
+layout(push_constant, scalar) uniform Push {
+    uint64_t a;
+    uint64_t b;
+    uint64_t c;
+    uint m;
+    uint n;
+    uint k;
+    uint flags;
+    float alpha;
+    float beta;
+} p;
+
+const uint TM = 32, TN = 64, TK = 16, CM = 8, CN = 16;
+const uint RI = TM / CM, RJ = TN / CN;
+
+void main() {
+    const uint row0 = gl_WorkGroupID.y * TM;
+    const uint col0 = gl_WorkGroupID.x * TN;
+    HalfBuf A = HalfBuf(p.a);
+    HalfBuf B = HalfBuf(p.b);
+    FloatBuf C = FloatBuf(p.c);
+
+    coopmat<float, gl_ScopeSubgroup, CM, CN, gl_MatrixUseAccumulator> acc[RI][RJ];
+    for (uint i = 0; i < RI; i++)
+        for (uint j = 0; j < RJ; j++)
+            acc[i][j] = coopmat<float, gl_ScopeSubgroup, CM, CN, gl_MatrixUseAccumulator>(0.0);
+
+    for (uint t = 0; t < p.k; t += TK) {
+        coopmat<float16_t, gl_ScopeSubgroup, CM, TK, gl_MatrixUseA> fa[RI];
+        coopmat<float16_t, gl_ScopeSubgroup, TK, CN, gl_MatrixUseB> fb[RJ];
+        for (uint i = 0; i < RI; i++)
+            coopMatLoad(fa[i], A.v, (row0 + i * CM) * p.k + t, p.k, gl_CooperativeMatrixLayoutRowMajor);
+        for (uint j = 0; j < RJ; j++)
+            coopMatLoad(fb[j], B.v, t * p.n + col0 + j * CN, p.n, gl_CooperativeMatrixLayoutRowMajor);
+        for (uint i = 0; i < RI; i++)
+            for (uint j = 0; j < RJ; j++)
+                acc[i][j] = coopMatMulAdd(fa[i], fb[j], acc[i][j]);
+    }
+
+    for (uint i = 0; i < RI; i++)
+        for (uint j = 0; j < RJ; j++) {
+            acc[i][j] = acc[i][j] * p.alpha;
+            coopMatStore(acc[i][j], C.v, (row0 + i * CM) * p.n + col0 + j * CN, p.n, gl_CooperativeMatrixLayoutRowMajor);
+        }
+}
