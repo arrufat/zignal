@@ -442,16 +442,16 @@ inline fn paddedRowBytes(width: u32, bit_depth: u8) usize {
 }
 
 /// Native-format pixel container produced by `toNativeImage`.
-pub const NativeImage = @import("../image/native.zig").Native;
+pub const AnyImage = @import("../image/any.zig").Any;
 
 /// Decodes the pixel buffer into a native-format `Image(T)`.
-pub fn toNativeImage(allocator: Allocator, state: BmpState) !NativeImage {
+pub fn toNativeImage(allocator: Allocator, state: BmpState) !AnyImage {
     var reader = Io.Reader.fixed(state.pixel_data);
     return readPixels(allocator, state.header, state.palette, &reader);
 }
 
 /// Decodes the pixel data that `reader` is positioned at into the image's native type.
-fn readPixels(allocator: Allocator, h: Header, palette: ?[]const Rgba, reader: *Io.Reader) !NativeImage {
+fn readPixels(allocator: Allocator, h: Header, palette: ?[]const Rgba, reader: *Io.Reader) !AnyImage {
     return switch (h.bit_depth) {
         1, 4, 8 => switch (h.compression) {
             .rgb => .{ .rgb = try readRows(Rgb, allocator, h, reader, Indexed{ .palette = palette orelse return error.MissingPalette, .bit_depth = h.bit_depth }) },
@@ -543,7 +543,7 @@ const Bgr = struct {
 };
 
 /// 32bpp BI_RGB, whose alpha is undefined: all-zero alpha (what writers emit) means opaque.
-fn read32BppRgb(allocator: Allocator, h: Header, reader: *Io.Reader) !NativeImage {
+fn read32BppRgb(allocator: Allocator, h: Header, reader: *Io.Reader) !AnyImage {
     const Bgra = struct {
         any_alpha: bool = false,
 

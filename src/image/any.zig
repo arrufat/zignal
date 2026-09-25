@@ -1,4 +1,4 @@
-//! Decoded images whose pixel type follows the file rather than the caller.
+//! Images whose pixel type is picked at runtime.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -8,13 +8,14 @@ const Image = @import("../image.zig").Image;
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
 
-/// A decoded image in the pixel type closest to how the file stores it.
-pub const Native = union(enum) {
+/// An image in any of the common pixel types. Codecs decode into the one closest to how
+/// the file stores it; `into` converts to the type the caller wants.
+pub const Any = union(enum) {
     grayscale: Image(u8),
     rgb: Image(Rgb),
     rgba: Image(Rgba),
 
-    pub fn deinit(self: *Native, allocator: Allocator) void {
+    pub fn deinit(self: *Any, allocator: Allocator) void {
         switch (self.*) {
             inline else => |*img| img.deinit(allocator),
         }
@@ -22,7 +23,7 @@ pub const Native = union(enum) {
 
     /// Hands over the image as `Image(T)`, converting (and freeing the original) only when
     /// the pixel types differ.
-    pub fn into(self: *Native, comptime T: type, io: Io, allocator: Allocator) !Image(T) {
+    pub fn into(self: *Any, comptime T: type, io: Io, allocator: Allocator) !Image(T) {
         switch (self.*) {
             inline else => |*img| {
                 if (@TypeOf(img.*) == Image(T)) return img.*;

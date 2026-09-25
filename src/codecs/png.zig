@@ -12,7 +12,7 @@ const parallel = @import("../parallel.zig");
 const convertColor = @import("../color.zig").convertColor;
 const Image = @import("../image.zig").Image;
 const codecs = @import("../codecs.zig");
-const NativeImage = @import("../image/native.zig").Native;
+const AnyImage = @import("../image/any.zig").Any;
 
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
@@ -856,7 +856,7 @@ fn inflate(gpa: Allocator, png_state: *PngState, chunks: *ChunkStream, first: Ch
 const idat_buffer_len = 16 * 1024;
 
 /// Converts PNG image data to its natural Zignal image type.
-pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !NativeImage {
+pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !AnyImage {
     const decompressed = png_state.scanlines;
 
     const width = png_state.header.width;

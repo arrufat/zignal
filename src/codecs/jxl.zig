@@ -9,7 +9,7 @@ const Io = std.Io;
 const Animation = @import("../image/animation.zig").Animation;
 const Image = @import("../image.zig").Image;
 const codecs = @import("../codecs.zig");
-const NativeImage = @import("../image/native.zig").Native;
+const AnyImage = @import("../image/any.zig").Any;
 const dynlib = @import("dynlib.zig");
 const parallel = @import("../parallel.zig");
 const Rgb = @import("../color.zig").Rgb(u8);
@@ -109,7 +109,7 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
 
 /// Decodes the first frame of `data` into its natural pixel type, converted to sRGB when the
 /// codestream allows it (XYB-encoded images). libjxl's worker tasks run on `io`.
-pub fn decode(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !NativeImage {
+pub fn decode(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnyImage {
     if (!enabled) return error.CodecNotEnabled;
     var reader: FrameReader = undefined;
     try reader.init(io, data, limits);
@@ -186,9 +186,9 @@ const FrameReader = struct {
     }
 
     /// The next displayed frame in its natural pixel type, or null after the last one.
-    fn next(self: *FrameReader, allocator: Allocator) !?struct { image: NativeImage, duration_ms: u32 } {
+    fn next(self: *FrameReader, allocator: Allocator) !?struct { image: AnyImage, duration_ms: u32 } {
         const jxl = self.jxl;
-        var native: ?NativeImage = null;
+        var native: ?AnyImage = null;
         errdefer if (native) |*img| img.deinit(allocator);
         var duration_ms: u32 = 0;
         while (true) {

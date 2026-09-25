@@ -13,6 +13,7 @@ const convertColor = @import("../color.zig").convertColor;
 const bt601 = @import("../color.zig").bt601;
 const codecs = @import("../codecs.zig");
 const Image = @import("../image.zig").Image;
+const AnyImage = @import("../image/any.zig").Any;
 
 const Rgb = @import("../color.zig").Rgb(u8);
 const Ycbcr = @import("../color.zig").Ycbcr(u8);
@@ -3058,10 +3059,7 @@ fn renderProgressive(comptime T: type, io: Io, allocator: Allocator, state: *Jpe
     try parallel.forRowBandsTry(io, mcu_rows, bands, &ctx, Ctx.run);
 }
 
-pub fn toNativeImage(io: Io, allocator: Allocator, state: *JpegState) !union(enum) {
-    grayscale: Image(u8),
-    rgb: Image(Rgb),
-} {
+pub fn toNativeImage(io: Io, allocator: Allocator, state: *JpegState) !AnyImage {
     if (state.header.num_components == 1) {
         var img: Image(u8) = try .init(allocator, state.header.height, state.header.width);
         errdefer img.deinit(allocator);

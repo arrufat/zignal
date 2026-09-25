@@ -1,7 +1,7 @@
 //! Pure Zig GIF codec.
 //!
 //! Public surface mirrors the other codecs in this repo (`png`, `jpeg`, `bmp`):
-//! `signature`, `DecodeLimits`, `Header`, `GifState` (+ `deinit`), `NativeImage`,
+//! `signature`, `DecodeLimits`, `Header`, `GifState` (+ `deinit`),
 //! `getInfo`, `decode`, `toNativeImage`, `loadFromBytes`, `load`, `EncodeOptions`,
 //! `encode`, `save`. Multi-frame access is via `loadAnimated` / `loadAnimatedFromBytes`,
 //! which return an `Animation(T)` of fully-composed frames (disposal, transparency,
@@ -21,6 +21,7 @@ const expectEqual = std.testing.expectEqual;
 const codecs = @import("../codecs.zig");
 const Image = @import("../image.zig").Image;
 const Animation = @import("../image/animation.zig").Animation;
+const AnyImage = @import("../image/any.zig").Any;
 const convertColor = @import("../color.zig").convertColor;
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
@@ -566,17 +567,10 @@ fn composeFirstFrame(comptime T: type, io: Io, allocator: Allocator, state: GifS
     return canvas.convert(io, allocator, T);
 }
 
-/// First-frame composition pre-converted to `Rgb`/`Rgba`. The Rgba variant is
-/// chosen when frame 0 has a transparent index (matches Python's expectation
-/// of `Image.dtype` reflecting the file's true color space).
-pub const NativeImage = union(enum) {
-    rgb: Image(Rgb),
-    rgba: Image(Rgba),
-};
-
-/// Composes the first frame and returns it as `NativeImage`. Used by language
-/// bindings that pick the pixel type based on file metadata.
-pub fn toNativeImage(io: Io, allocator: Allocator, state: GifState) !NativeImage {
+/// Composes the first frame and returns it as `AnyImage`: `.rgba` when frame 0 has a
+/// transparent index, `.rgb` otherwise. Used by language bindings that pick the pixel type
+/// based on file metadata.
+pub fn toNativeImage(io: Io, allocator: Allocator, state: GifState) !AnyImage {
     if (state.frames.len == 0) return error.MissingPixelData;
     const has_transparency = if (state.frames[0].gce) |g| g.has_transparent else false;
     if (has_transparency) {

@@ -10,7 +10,7 @@ const Io = std.Io;
 const Animation = @import("../image/animation.zig").Animation;
 const Image = @import("../image.zig").Image;
 const codecs = @import("../codecs.zig");
-const NativeImage = @import("../image/native.zig").Native;
+const AnyImage = @import("../image/any.zig").Any;
 const dynlib = @import("dynlib.zig");
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
@@ -80,7 +80,7 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
 
 /// Decodes a WebP into RGBA when it has alpha, else RGB (WebP has no grayscale). Animations
 /// give their first composed frame, as RGBA.
-pub fn decode(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !NativeImage {
+pub fn decode(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnyImage {
     if (!enabled) return error.CodecNotEnabled;
     _ = io;
     const webp = try Libwebp.get();
@@ -121,9 +121,9 @@ pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.
     return loadAnimatedFromBytes(T, io, allocator, data, limits);
 }
 
-fn decodeStill(webp: *const Api, allocator: Allocator, data: []const u8, info: Header, limits: DecodeLimits) !NativeImage {
+fn decodeStill(webp: *const Api, allocator: Allocator, data: []const u8, info: Header, limits: DecodeLimits) !AnyImage {
     if (codecs.exceeds(limits.max_pixels, @as(u64, info.width) * info.height)) return error.ImageTooLarge;
-    var native: NativeImage = if (info.has_alpha)
+    var native: AnyImage = if (info.has_alpha)
         .{ .rgba = try .init(allocator, info.height, info.width) }
     else
         .{ .rgb = try .init(allocator, info.height, info.width) };
