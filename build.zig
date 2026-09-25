@@ -80,7 +80,7 @@ pub fn build(b: *Build) void {
         }),
     });
     lib_test.root_module.addOptions("build_options", build_options);
-    // libc lets the tests load libjxl/libwebp (src/codecs/dynlib.zig).
+    // libc lets the tests load libjxl/libwebp (src/dynlib.zig).
     lib_test.root_module.link_libc = !target.result.cpu.arch.isWasm() and target.result.os.tag != .windows;
     test_step.dependOn(&b.addRunArtifact(lib_test).step);
 

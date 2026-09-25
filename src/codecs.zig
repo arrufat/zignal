@@ -71,5 +71,4 @@ test {
     _ = jxl;
     _ = png;
     _ = webp;
-    _ = @import("codecs/dynlib.zig");
 }
