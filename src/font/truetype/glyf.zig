@@ -8,7 +8,7 @@ const Allocator = std.mem.Allocator;
 const truetype = @import("../truetype.zig");
 const Error = truetype.Error;
 const Reader = truetype.Reader;
-const VectorFont = @import("../VectorFont.zig");
+const VectorFont = @import("../Vector.zig");
 const Outline = @import("../Outline.zig");
 
 pub const max_composite_depth = 8;

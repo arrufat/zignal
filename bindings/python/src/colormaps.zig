@@ -361,13 +361,13 @@ pub fn registerColormap(module: *c.PyObject) !void {
 // Helper to convert Python ColormapObject to Zig Colormap union
 // ============================================================================
 
-pub fn toZigColormap(obj: *ColormapObject) zignal.Colormap {
-    const range = zignal.Colormap.Range{
+pub fn toZigColormap(obj: *ColormapObject) zignal.image.Colormap {
+    const range = zignal.image.Colormap.Range{
         .min = if (obj.has_min) obj.min else null,
         .max = if (obj.has_max) obj.max else null,
     };
 
     return switch (obj.map_type) {
-        inline else => |tag| @unionInit(zignal.Colormap, @tagName(tag), range),
+        inline else => |tag| @unionInit(zignal.image.Colormap, @tagName(tag), range),
     };
 }

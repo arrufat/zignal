@@ -441,17 +441,17 @@ inline fn paddedRowBytes(width: u32, bit_depth: u8) usize {
     return @intCast(((bits + 31) / 32) * 4);
 }
 
-/// Native-format pixel container produced by `toNativeImage`.
-pub const NativeImage = codecs.NativeImage;
+/// Native-format pixel container produced by `toAnyImage`.
+pub const AnyImage = @import("../image/any.zig").Any;
 
-/// Decodes the pixel buffer into a native-format `Image(T)`.
-pub fn toNativeImage(allocator: Allocator, state: BmpState) !NativeImage {
+/// Decodes the pixel buffer into the image type closest to the file's pixel format.
+pub fn toAnyImage(allocator: Allocator, state: BmpState) !AnyImage {
     var reader = Io.Reader.fixed(state.pixel_data);
     return readPixels(allocator, state.header, state.palette, &reader);
 }
 
 /// Decodes the pixel data that `reader` is positioned at into the image's native type.
-fn readPixels(allocator: Allocator, h: Header, palette: ?[]const Rgba, reader: *Io.Reader) !NativeImage {
+fn readPixels(allocator: Allocator, h: Header, palette: ?[]const Rgba, reader: *Io.Reader) !AnyImage {
     return switch (h.bit_depth) {
         1, 4, 8 => switch (h.compression) {
             .rgb => .{ .rgb = try readRows(Rgb, allocator, h, reader, Indexed{ .palette = palette orelse return error.MissingPalette, .bit_depth = h.bit_depth }) },
@@ -543,7 +543,7 @@ const Bgr = struct {
 };
 
 /// 32bpp BI_RGB, whose alpha is undefined: all-zero alpha (what writers emit) means opaque.
-fn read32BppRgb(allocator: Allocator, h: Header, reader: *Io.Reader) !NativeImage {
+fn read32BppRgb(allocator: Allocator, h: Header, reader: *Io.Reader) !AnyImage {
     const Bgra = struct {
         any_alpha: bool = false,
 
@@ -685,17 +685,29 @@ fn readRle(allocator: Allocator, h: Header, palette: []const Rgba, reader: *Io.R
 
 /// Reads a BMP from `reader`, one row at a time, converting to the requested pixel type.
 pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
-    const prelude = try readPrelude(allocator, reader, limits);
-    defer if (prelude.palette) |p| allocator.free(p);
-    reader.discardAll(prelude.pixel_offset - prelude.consumed) catch |err| return endAs(err, error.MissingPixelData);
-    var native = try readPixels(allocator, prelude.header, prelude.palette, reader);
-    return native.into(T, io, allocator);
+    var any = try readAny(io, allocator, reader, limits);
+    return any.into(T, io, allocator);
 }
 
 /// Loads a BMP from an in-memory byte buffer, converting to the requested pixel type.
 pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
     var reader = Io.Reader.fixed(data);
     return read(T, io, allocator, &reader, limits);
+}
+
+/// `read` in the pixel type closest to the file's bit depth.
+pub fn readAny(io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnyImage {
+    _ = io;
+    const prelude = try readPrelude(allocator, reader, limits);
+    defer if (prelude.palette) |p| allocator.free(p);
+    reader.discardAll(prelude.pixel_offset - prelude.consumed) catch |err| return endAs(err, error.MissingPixelData);
+    return readPixels(allocator, prelude.header, prelude.palette, reader);
+}
+
+/// `loadFromBytes` in the pixel type closest to the file's bit depth.
+pub fn loadAnyFromBytes(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnyImage {
+    var reader = Io.Reader.fixed(data);
+    return readAny(io, allocator, &reader, limits);
 }
 
 // ---------------------------------------------------------------------------

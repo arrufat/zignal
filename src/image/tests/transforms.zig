@@ -8,7 +8,7 @@ const expectEqualDeep = std.testing.expectEqualDeep;
 const color = @import("../../color.zig");
 const Rectangle = @import("../../geometry.zig").Rectangle;
 const Image = @import("../../image.zig").Image;
-const Interpolation = @import("../../root.zig").Interpolation;
+const Interpolation = @import("../../image.zig").Interpolation;
 const parallel = @import("../../parallel.zig");
 
 const Rgb = color.Rgb(u8);
@@ -354,7 +354,7 @@ test "insert and extract inverse relationship" {
         rect: Rectangle(f32),
         angle: f32,
         size: u32,
-        method: @import("../../root.zig").Interpolation,
+        method: @import("../../image.zig").Interpolation,
     }{
         .{ .rect = Rectangle(f32).init(10, 10, 50, 50), .angle = 0, .size = 40, .method = .bilinear },
         .{ .rect = Rectangle(f32).init(15, 15, 45, 45), .angle = std.math.pi / 4.0, .size = 30, .method = .bilinear },

@@ -5,7 +5,7 @@ const Io = std.Io;
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const ImageFormat = zignal.ImageFormat;
+const ImageFormat = zignal.image.Format;
 
 const canvas = @import("../canvas.zig");
 const color_bindings = @import("../color.zig");
@@ -22,16 +22,10 @@ const c = python.c;
 
 const Rgba = zignal.Rgba(u8);
 const Rgb = zignal.Rgb(u8);
-const default_png_limits: zignal.png.DecodeLimits = .{};
-const default_jpeg_limits: zignal.jpeg.DecodeLimits = .{};
-const file_jpeg_limits: zignal.jpeg.DecodeLimits = .{
+const file_limits: zignal.image.Any.Limits = .{ .jpeg = .{
     .max_jpeg_bytes = .limited(200 * 1024 * 1024),
     .max_marker_bytes = .limited(16 * 1024 * 1024),
-};
-const default_bmp_limits: zignal.bmp.DecodeLimits = .{};
-const default_gif_limits: zignal.gif.DecodeLimits = .{};
-const jxl_limits: zignal.jxl.DecodeLimits = .default;
-const webp_limits: zignal.webp.DecodeLimits = .default;
+} };
 
 fn setDecodeError(kind: []const u8, err: anyerror) void {
     switch (err) {
@@ -51,75 +45,22 @@ fn setRuntimeCodecError(format: ImageFormat, err: anyerror) bool {
     return true;
 }
 
-fn wrapNativeImage(native: anytype) ?*c.PyObject {
-    switch (native) {
-        inline else => |img| {
-            return @ptrCast(moveImageToPython(img) orelse return null);
-        },
-    }
+/// How decode errors name the input, e.g. "PNG data".
+fn decodeKind(format: ImageFormat) []const u8 {
+    return switch (format) {
+        .png => "PNG data",
+        .jpeg => "JPEG data",
+        .bmp => "BMP data",
+        .gif => "GIF data",
+        .jxl => "JPEG XL data",
+        .webp => "WebP data",
+    };
 }
 
-fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
-    switch (format) {
-        .png => {
-            const kind = "PNG data";
-            var decoded = zignal.png.decode(allocator, data, default_png_limits) catch |err| {
-                setDecodeError(kind, err);
-                return null;
-            };
-            defer decoded.deinit(allocator);
-            const native = zignal.png.toNativeImage(allocator, &decoded) catch |err| {
-                setDecodeError(kind, err);
-                return null;
-            };
-            return wrapNativeImage(native);
-        },
-        .jpeg => {
-            const kind = "JPEG data";
-            var decoded = zignal.jpeg.decode(allocator, data, default_jpeg_limits) catch |err| {
-                setDecodeError(kind, err);
-                return null;
-            };
-            defer decoded.deinit(allocator);
-            const native = zignal.jpeg.toNativeImage(python.io, allocator, &decoded) catch |err| {
-                setDecodeError(kind, err);
-                return null;
-            };
-            return wrapNativeImage(native);
-        },
-        .bmp => {
-            const kind = "BMP data";
-            var decoded = zignal.bmp.decode(allocator, data, default_bmp_limits) catch |err| {
-                setDecodeError(kind, err);
-                return null;
-            };
-            defer decoded.deinit(allocator);
-            const native = zignal.bmp.toNativeImage(allocator, decoded) catch |err| {
-                setDecodeError(kind, err);
-                return null;
-            };
-            return wrapNativeImage(native);
-        },
-        .gif => {
-            const kind = "GIF data";
-            var decoded = zignal.gif.decode(allocator, data, default_gif_limits, .first) catch |err| {
-                setDecodeError(kind, err);
-                return null;
-            };
-            defer decoded.deinit(allocator);
-            const native = zignal.gif.toNativeImage(python.io, allocator, decoded) catch |err| {
-                setDecodeError(kind, err);
-                return null;
-            };
-            return wrapNativeImage(native);
-        },
-        .jxl, .webp => {
-            const limits = if (format == .jxl) jxl_limits else webp_limits;
-            const decoded = @field(zignal, @tagName(format)).decode(python.io, allocator, data, limits) catch |err| {
-                if (!setRuntimeCodecError(format, err)) setDecodeError(@tagName(format) ++ " data", err);
-                return null;
-            };
-            return wrapNativeImage(decoded);
+fn wrapAnyImage(image: zignal.image.Any) ?*c.PyObject {
+    switch (image) {
+        inline else => |img| {
+            return @ptrCast(moveImageToPython(img) orelse return null);
         },
     }
 }
@@ -171,7 +112,7 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
     const path_slice = std.mem.span(params.path);
 
     // Read with the most generous per-format cap; the decoders enforce their own below.
-    const read_cap = file_jpeg_limits.max_jpeg_bytes.max(jxl_limits.max_jxl_bytes).max(webp_limits.max_webp_bytes);
+    const read_cap = file_limits.jpeg.max_jpeg_bytes.max(file_limits.jxl.max_jxl_bytes).max(file_limits.webp.max_webp_bytes);
     const data = Io.Dir.cwd().readFileAlloc(python.io, path_slice, allocator, read_cap) catch |err| {
         python.setErrorWithPath(err, path_slice);
         return null;
@@ -183,74 +124,11 @@ pub fn image_load(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         return null;
     };
 
-    return switch (detected) {
-        .png => decodeFile(.png, data, path_slice, default_png_limits),
-        .jpeg => decodeFile(.jpeg, data, path_slice, file_jpeg_limits),
-        .bmp => decodeFile(.bmp, data, path_slice, default_bmp_limits),
-        .gif => decodeFile(.gif, data, path_slice, default_gif_limits),
-        .jxl => decodeFile(.jxl, data, path_slice, jxl_limits),
-        .webp => decodeFile(.webp, data, path_slice, webp_limits),
+    const image = zignal.image.Any.loadFromBytes(python.io, allocator, data, file_limits) catch |err| {
+        if (!setRuntimeCodecError(detected, err)) python.setErrorWithPath(err, path_slice);
+        return null;
     };
-}
-
-fn decodeFile(comptime format: ImageFormat, data: []const u8, path: []const u8, limits: anytype) ?*c.PyObject {
-    switch (format) {
-        .png => {
-            var decoded = zignal.png.decode(allocator, data, limits) catch |err| {
-                python.setErrorWithPath(err, path);
-                return null;
-            };
-            defer decoded.deinit(allocator);
-            const native = zignal.png.toNativeImage(allocator, &decoded) catch |err| {
-                python.setErrorWithPath(err, path);
-                return null;
-            };
-            return wrapNativeImage(native);
-        },
-        .jpeg => {
-            var decoded = zignal.jpeg.decode(allocator, data, limits) catch |err| {
-                python.setErrorWithPath(err, path);
-                return null;
-            };
-            defer decoded.deinit(allocator);
-            const native = zignal.jpeg.toNativeImage(python.io, allocator, &decoded) catch |err| {
-                python.setErrorWithPath(err, path);
-                return null;
-            };
-            return wrapNativeImage(native);
-        },
-        .bmp => {
-            var decoded = zignal.bmp.decode(allocator, data, limits) catch |err| {
-                python.setErrorWithPath(err, path);
-                return null;
-            };
-            defer decoded.deinit(allocator);
-            const native = zignal.bmp.toNativeImage(allocator, decoded) catch |err| {
-                python.setErrorWithPath(err, path);
-                return null;
-            };
-            return wrapNativeImage(native);
-        },
-        .gif => {
-            var decoded = zignal.gif.decode(allocator, data, limits, .first) catch |err| {
-                python.setErrorWithPath(err, path);
-                return null;
-            };
-            defer decoded.deinit(allocator);
-            const native = zignal.gif.toNativeImage(python.io, allocator, decoded) catch |err| {
-                python.setErrorWithPath(err, path);
-                return null;
-            };
-            return wrapNativeImage(native);
-        },
-        .jxl, .webp => {
-            const decoded = @field(zignal, @tagName(format)).decode(python.io, allocator, data, limits) catch |err| {
-                if (!setRuntimeCodecError(format, err)) python.setErrorWithPath(err, path);
-                return null;
-            };
-            return wrapNativeImage(decoded);
-        },
-    }
+    return wrapAnyImage(image);
 }
 
 pub const image_load_from_bytes_doc =
@@ -315,14 +193,11 @@ pub fn image_load_from_bytes(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?
         return null;
     };
 
-    return switch (detected) {
-        .png => loadBytes(.png, data_slice),
-        .jpeg => loadBytes(.jpeg, data_slice),
-        .bmp => loadBytes(.bmp, data_slice),
-        .gif => loadBytes(.gif, data_slice),
-        .jxl => loadBytes(.jxl, data_slice),
-        .webp => loadBytes(.webp, data_slice),
+    const image = zignal.image.Any.loadFromBytes(python.io, allocator, data_slice, .default) catch |err| {
+        if (!setRuntimeCodecError(detected, err)) setDecodeError(decodeKind(detected), err);
+        return null;
     };
+    return wrapAnyImage(image);
 }
 
 // ============================================================================
@@ -1085,7 +960,7 @@ pub fn image_flood_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
     const start_row = python.validateNonNegative(u32, params.row, "row") catch return null;
     const start_col = python.validateNonNegative(u32, params.col, "col") catch return null;
 
-    const connectivity: zignal.FloodFillOptions.Connectivity = switch (params.connectivity) {
+    const connectivity: zignal.image.FloodFillOptions.Connectivity = switch (params.connectivity) {
         4 => .four,
         8 => .eight,
         else => {
@@ -1094,19 +969,19 @@ pub fn image_flood_fill(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
         },
     };
 
-    var mode = zignal.FloodFillOptions.ThresholdMode.seed;
+    var mode = zignal.image.FloodFillOptions.ThresholdMode.seed;
     if (params.mode) |obj| {
         if (obj == c.Py_None()) {
             python.setValueError("mode must be a ThresholdMode enum", .{});
             return null;
         }
-        mode = enum_utils.pyToEnum(zignal.FloodFillOptions.ThresholdMode, obj) catch return null;
+        mode = enum_utils.pyToEnum(zignal.image.FloodFillOptions.ThresholdMode, obj) catch return null;
     }
 
-    const opts = zignal.FloodFillOptions{ .threshold = params.threshold, .connectivity = connectivity, .mode = mode };
+    const opts = zignal.image.FloodFillOptions{ .threshold = params.threshold, .connectivity = connectivity, .mode = mode };
 
     return self.py_image.?.dispatch(.{ start_row, start_col, params.fill_value, opts }, struct {
-        fn apply(img: anytype, row: u32, col: u32, fv_obj: ?*c.PyObject, options: zignal.FloodFillOptions) ?*c.PyObject {
+        fn apply(img: anytype, row: u32, col: u32, fv_obj: ?*c.PyObject, options: zignal.image.FloodFillOptions) ?*c.PyObject {
             const T = @TypeOf(img.data[0]);
             const fill_val = parseColorTo(T, fv_obj) catch return null;
             img.floodFill(allocator, row, col, fill_val, options) catch |err| {

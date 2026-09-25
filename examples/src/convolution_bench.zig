@@ -8,7 +8,7 @@ const zignal = @import("zignal");
 
 const Image = zignal.Image;
 const Rgb = zignal.Rgb(u8);
-const BorderMode = zignal.BorderMode;
+const BorderMode = zignal.image.BorderMode;
 
 const warmup_iters = 2;
 const max_iters = 101;
@@ -74,7 +74,7 @@ fn medianNs(io: std.Io, run_io: std.Io, rows: usize, cols: usize, ctx: anytype) 
     return samples[iters / 2];
 }
 
-fn benchGaussian(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: usize, cols: usize, sigma: f32, options: zignal.GaussianBlurOptions) !void {
+fn benchGaussian(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.Random, filter: ?[]const u8, rows: usize, cols: usize, sigma: f32, options: zignal.image.GaussianBlurOptions) !void {
     var name_buf: [64]u8 = undefined;
     const name = try std.mem.print(&name_buf, "gaussianBlur {s} sigma={d} {t}", .{ @typeName(T), sigma, options.method });
     if (skipped(name, filter)) return;
@@ -89,7 +89,7 @@ fn benchGaussian(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: s
         dst: Image(T),
         gpa: std.mem.Allocator,
         sigma: f32,
-        options: zignal.GaussianBlurOptions,
+        options: zignal.image.GaussianBlurOptions,
         fn run(self: @This(), run_io: std.Io) !void {
             try self.src.gaussianBlur(run_io, self.gpa, self.dst, self.sigma, self.options);
         }

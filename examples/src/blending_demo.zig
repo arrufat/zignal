@@ -48,7 +48,7 @@ pub fn main() !void {
         const gy = @as(f32, @floatFromInt(i / grid_cols)) * tile;
         const center: Point(2, f32) = .init(.{ gx + tile / 2, gy + tile / 2 });
 
-        const opts: zignal.DrawOptions = .{ .mode = .soft, .blending = blending };
+        const opts: zignal.canvas.DrawOptions = .{ .mode = .soft, .blending = blending };
         canvas.fillCircle(center, tile * 0.32, orange, opts);
         canvas.drawCircle(center, tile * 0.40, translucent_white, 3, opts);
 

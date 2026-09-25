@@ -5,7 +5,7 @@ const std = @import("std");
 const zignal = @import("zignal");
 const Image = zignal.Image;
 const Rgb = zignal.Rgb(u8);
-const MotionBlur = zignal.MotionBlur;
+const MotionBlur = zignal.image.MotionBlur;
 
 const moveImageToPython = @import("../image.zig").moveImageToPython;
 const ImageObject = @import("../image.zig").ImageObject;
@@ -66,7 +66,7 @@ pub fn image_apply_colormap(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*
     const map = colormaps.toZigColormap(map_obj);
 
     return self.py_image.?.dispatch(.{map}, struct {
-        fn apply(img: anytype, m: zignal.Colormap) ?*c.PyObject {
+        fn apply(img: anytype, m: zignal.image.Colormap) ?*c.PyObject {
             const colored = img.applyColormap(allocator, m) catch |err| {
                 python.setZigError(err);
                 return null;
@@ -183,17 +183,17 @@ pub fn image_min_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const radius = python.validateNonNegative(u32, params.radius, "radius") catch return null;
-    var border = zignal.BorderMode.mirror;
+    var border = zignal.image.BorderMode.mirror;
     if (params.border) |obj| {
         if (obj == c.Py_None()) {
             python.setValueError("border must be a BorderMode enum", .{});
             return null;
         }
-        border = enum_utils.pyToEnum(zignal.BorderMode, obj) catch return null;
+        border = enum_utils.pyToEnum(zignal.image.BorderMode, obj) catch return null;
     }
 
     return self.py_image.?.dispatch(.{ radius, border }, struct {
-        fn apply(img: anytype, r: u32, b: zignal.BorderMode) ?*c.PyObject {
+        fn apply(img: anytype, r: u32, b: zignal.image.BorderMode) ?*c.PyObject {
             const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
                 python.setMemoryError("image operation");
                 return null;
@@ -234,17 +234,17 @@ pub fn image_max_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyOb
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const radius = python.validateNonNegative(u32, params.radius, "radius") catch return null;
-    var border = zignal.BorderMode.mirror;
+    var border = zignal.image.BorderMode.mirror;
     if (params.border) |obj| {
         if (obj == c.Py_None()) {
             python.setValueError("border must be a BorderMode enum", .{});
             return null;
         }
-        border = enum_utils.pyToEnum(zignal.BorderMode, obj) catch return null;
+        border = enum_utils.pyToEnum(zignal.image.BorderMode, obj) catch return null;
     }
 
     return self.py_image.?.dispatch(.{ radius, border }, struct {
-        fn apply(img: anytype, r: u32, b: zignal.BorderMode) ?*c.PyObject {
+        fn apply(img: anytype, r: u32, b: zignal.image.BorderMode) ?*c.PyObject {
             const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
                 python.setMemoryError("image operation");
                 return null;
@@ -285,17 +285,17 @@ pub fn image_midpoint_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const radius = python.validateNonNegative(u32, params.radius, "radius") catch return null;
-    var border = zignal.BorderMode.mirror;
+    var border = zignal.image.BorderMode.mirror;
     if (params.border) |obj| {
         if (obj == c.Py_None()) {
             python.setValueError("border must be a BorderMode enum", .{});
             return null;
         }
-        border = enum_utils.pyToEnum(zignal.BorderMode, obj) catch return null;
+        border = enum_utils.pyToEnum(zignal.image.BorderMode, obj) catch return null;
     }
 
     return self.py_image.?.dispatch(.{ radius, border }, struct {
-        fn apply(img: anytype, r: u32, b: zignal.BorderMode) ?*c.PyObject {
+        fn apply(img: anytype, r: u32, b: zignal.image.BorderMode) ?*c.PyObject {
             const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
                 python.setMemoryError("image operation");
                 return null;
@@ -346,17 +346,17 @@ pub fn image_percentile_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?
 
     const radius = python.validateNonNegative(u32, params.radius, "radius") catch return null;
     const percentile_value = python.validateRange(f64, params.percentile, 0.0, 1.0, "percentile") catch return null;
-    var border_mode = zignal.BorderMode.mirror;
+    var border_mode = zignal.image.BorderMode.mirror;
     if (params.border) |obj| {
         if (obj == c.Py_None()) {
             python.setValueError("border must be a BorderMode enum", .{});
             return null;
         }
-        border_mode = enum_utils.pyToEnum(zignal.BorderMode, obj) catch return null;
+        border_mode = enum_utils.pyToEnum(zignal.image.BorderMode, obj) catch return null;
     }
 
     return self.py_image.?.dispatch(.{ radius, percentile_value, border_mode }, struct {
-        fn apply(img: anytype, r: u32, p: f64, b: zignal.BorderMode) ?*c.PyObject {
+        fn apply(img: anytype, r: u32, p: f64, b: zignal.image.BorderMode) ?*c.PyObject {
             const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
                 python.setMemoryError("image operation");
                 return null;
@@ -405,17 +405,17 @@ pub fn image_alpha_trimmed_mean_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject,
     }
 
     const radius = python.validateNonNegative(u32, params.radius, "radius") catch return null;
-    var border = zignal.BorderMode.mirror;
+    var border = zignal.image.BorderMode.mirror;
     if (params.border) |obj| {
         if (obj == c.Py_None()) {
             python.setValueError("border must be a BorderMode enum", .{});
             return null;
         }
-        border = enum_utils.pyToEnum(zignal.BorderMode, obj) catch return null;
+        border = enum_utils.pyToEnum(zignal.image.BorderMode, obj) catch return null;
     }
 
     return self.py_image.?.dispatch(.{ radius, params.trim_fraction, border }, struct {
-        fn apply(img: anytype, r: u32, tf: f64, b: zignal.BorderMode) ?*c.PyObject {
+        fn apply(img: anytype, r: u32, tf: f64, b: zignal.image.BorderMode) ?*c.PyObject {
             const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
                 python.setMemoryError("image operation");
                 return null;
@@ -458,7 +458,7 @@ pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
     const Params = struct { sigma: f64, method: c_long = 0 };
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
-    const method = enum_utils.longToEnum(zignal.GaussianMethod, params.method) catch return null;
+    const method = enum_utils.longToEnum(zignal.image.GaussianMethod, params.method) catch return null;
 
     // Validate sigma: must be finite and > 0
     if (!std.math.isFinite(params.sigma)) {
@@ -468,12 +468,12 @@ pub fn image_gaussian_blur(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c
     const sigma_pos = python.validatePositive(f64, params.sigma, "sigma") catch return null;
 
     return self.py_image.?.dispatch(.{ sigma_pos, method }, struct {
-        fn apply(img: anytype, s: f64, m: zignal.GaussianMethod) ?*c.PyObject {
+        fn apply(img: anytype, s: f64, m: zignal.image.GaussianMethod) ?*c.PyObject {
             const out = @TypeOf(img.*).initLike(allocator, img.*) catch {
                 python.setMemoryError("image operation");
                 return null;
             };
-            python.withoutGil(@TypeOf(img.*).gaussianBlur, .{ img.*, python.io, allocator, out, @as(f32, @floatCast(s)), @as(zignal.GaussianBlurOptions, .{ .method = m }) }) catch |err| {
+            python.withoutGil(@TypeOf(img.*).gaussianBlur, .{ img.*, python.io, allocator, out, @as(f32, @floatCast(s)), @as(zignal.image.GaussianBlurOptions, .{ .method = m }) }) catch |err| {
                 if (err == error.InvalidSigma) {
                     python.setValueError("Invalid sigma value", .{});
                 } else {
@@ -892,7 +892,7 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     }
 
     // Create the simplified ShenCastan configuration
-    const opts = zignal.ShenCastan{
+    const opts = zignal.image.ShenCastan{
         .smooth = @floatCast(params.smooth),
         .window_size = @intCast(params.window_size),
         .high_ratio = @floatCast(params.high_ratio),
@@ -902,7 +902,7 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     };
 
     return self.py_image.?.dispatch(.{opts}, struct {
-        fn apply(img: anytype, o: zignal.ShenCastan) ?*c.PyObject {
+        fn apply(img: anytype, o: zignal.image.ShenCastan) ?*c.PyObject {
             const out = Image(u8).initLike(allocator, img.*) catch {
                 python.setMemoryError("image operation");
                 return null;

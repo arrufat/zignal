@@ -543,7 +543,7 @@ test "fillPolygon soft antialiases near-horizontal edges" {
 }
 
 const Outline = @import("../../font.zig").Outline;
-const VectorFont = @import("../../font.zig").VectorFont;
+const VectorFont = @import("../../font.zig").Vector;
 const synthetic = @import("../../font/truetype/synthetic.zig");
 
 fn whiteCanvas(img: Image(Rgba)) Canvas(Rgba) {

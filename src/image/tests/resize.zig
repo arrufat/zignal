@@ -7,7 +7,7 @@ const expectError = std.testing.expectError;
 
 const color = @import("../../color.zig");
 const Image = @import("../../image.zig").Image;
-const Interpolation = @import("../../root.zig").Interpolation;
+const Interpolation = @import("../../image.zig").Interpolation;
 
 const Rgb = color.Rgb(u8);
 

@@ -8,7 +8,7 @@ const assignment = @import("optimization/assignment.zig");
 const global_search = @import("optimization/global_search.zig");
 
 /// Whether an optimizer should minimize or maximize the objective. Shared by every solver here.
-pub const OptimizationPolicy = enum { min, max };
+pub const Policy = enum { min, max };
 
 // Assignment problem
 pub const Assignment = assignment.Assignment;

@@ -7,11 +7,10 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-const animated = @import("../image/animated.zig");
-const AnimatedImage = animated.AnimatedImage;
+const Animation = @import("../image/animation.zig").Animation;
 const Image = @import("../image.zig").Image;
 const codecs = @import("../codecs.zig");
-const NativeImage = codecs.NativeImage;
+const AnyImage = @import("../image/any.zig").Any;
 const dynlib = @import("dynlib.zig");
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
@@ -81,7 +80,7 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
 
 /// Decodes a WebP into RGBA when it has alpha, else RGB (WebP has no grayscale). Animations
 /// give their first composed frame, as RGBA.
-pub fn decode(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !NativeImage {
+pub fn loadAnyFromBytes(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnyImage {
     if (!enabled) return error.CodecNotEnabled;
     _ = io;
     const webp = try Libwebp.get();
@@ -94,7 +93,7 @@ pub fn decode(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimi
 }
 
 /// Loads every frame; a still WebP gives one frame.
-pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
+pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Animation(T) {
     if (!enabled) return error.CodecNotEnabled;
     const webp = try Libwebp.get();
     const info = try readHeader(webp, data);
@@ -104,7 +103,7 @@ pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, dat
     }
     var reader: AnimReader = try .init(data, limits);
     defer reader.deinit();
-    var builder: animated.Builder(T) = .{};
+    var builder: Animation(T).Builder = .{};
     defer builder.deinit(allocator);
     while (try reader.next()) |frame| {
         // The decoder reuses its canvas: copy it out, converting on the way when T isn't RGBA.
@@ -115,16 +114,16 @@ pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, dat
 }
 
 /// Reads every frame of a WebP image from `reader`, buffering at most the `DecodeLimits` byte cap.
-pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnimatedImage(T) {
+pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Animation(T) {
     if (!enabled) return error.CodecNotEnabled;
     const data = try reader.allocRemaining(allocator, limits.max_webp_bytes);
     defer allocator.free(data);
     return loadAnimatedFromBytes(T, io, allocator, data, limits);
 }
 
-fn decodeStill(webp: *const Api, allocator: Allocator, data: []const u8, info: Header, limits: DecodeLimits) !NativeImage {
+fn decodeStill(webp: *const Api, allocator: Allocator, data: []const u8, info: Header, limits: DecodeLimits) !AnyImage {
     if (codecs.exceeds(limits.max_pixels, @as(u64, info.width) * info.height)) return error.ImageTooLarge;
-    var native: NativeImage = if (info.has_alpha)
+    var native: AnyImage = if (info.has_alpha)
         .{ .rgba = try .init(allocator, info.height, info.width) }
     else
         .{ .rgb = try .init(allocator, info.height, info.width) };
@@ -197,16 +196,22 @@ fn readHeader(webp: *const Api, data: []const u8) !Header {
 }
 
 pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
-    var native = try decode(io, allocator, data, limits);
-    return native.into(T, io, allocator);
+    var any = try loadAnyFromBytes(io, allocator, data, limits);
+    return any.into(T, io, allocator);
 }
 
 /// Reads a WebP image from `reader`, buffering at most the `DecodeLimits` byte cap.
 pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
+    var any = try readAny(io, allocator, reader, limits);
+    return any.into(T, io, allocator);
+}
+
+/// `read` in the file's natural pixel type; see `loadAnyFromBytes`.
+pub fn readAny(io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnyImage {
     if (!enabled) return error.CodecNotEnabled;
     const data = try reader.allocRemaining(allocator, limits.max_webp_bytes);
     defer allocator.free(data);
-    return loadFromBytes(T, io, allocator, data, limits);
+    return loadAnyFromBytes(io, allocator, data, limits);
 }
 
 /// Encodes `image` as WebP: `Rgba`→RGBA, everything else→RGB. WebP caps each side at 16383.
@@ -244,12 +249,12 @@ pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer,
 /// since the previous frame. Pixel types map as in `encode`, and a one-frame animation is
 /// written as a still. libwebp folds identical consecutive frames into one longer frame, so
 /// loading the result back can give fewer frames over the same total duration.
-pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
+pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: Animation(T), options: EncodeOptions) ![]u8 {
     return codecs.encodeWith(allocator, writeAnimated, .{ T, io, allocator }, .{ anim, options });
 }
 
 /// Writes `anim` as an animated WebP to `writer`; see `encodeAnimated`.
-pub fn writeAnimated(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, anim: AnimatedImage(T), options: EncodeOptions) !void {
+pub fn writeAnimated(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, anim: Animation(T), options: EncodeOptions) !void {
     if (!enabled) return error.CodecNotEnabled;
     try anim.validate();
     if (anim.frames.len == 1) return write(T, io, allocator, writer, anim.frames[0], options);
@@ -513,7 +518,7 @@ test "signature detection" {
 
 test "disabled build reports CodecNotEnabled" {
     if (enabled) return error.SkipZigTest;
-    try std.testing.expectError(error.CodecNotEnabled, decode(std.testing.io, std.testing.allocator, "RIFF\x00\x00\x00\x00WEBP", .default));
+    try std.testing.expectError(error.CodecNotEnabled, loadAnyFromBytes(std.testing.io, std.testing.allocator, "RIFF\x00\x00\x00\x00WEBP", .default));
 }
 
 test "ABI layout matches libwebp" {
@@ -612,8 +617,8 @@ test "lossy round trip stays close" {
     try std.testing.expect(try img.psnr(back) > 30);
 }
 
-fn testAnimation(comptime T: type, allocator: Allocator, durations: []const u32, loop_count: u32) !AnimatedImage(T) {
-    var builder: animated.Builder(T) = .{};
+fn testAnimation(comptime T: type, allocator: Allocator, durations: []const u32, loop_count: u32) !Animation(T) {
+    var builder: Animation(T).Builder = .{};
     defer builder.deinit(allocator);
     for (durations, 0..) |ms, i| {
         var img = try testImage(T, allocator);

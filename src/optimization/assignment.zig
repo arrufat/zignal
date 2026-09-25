@@ -9,7 +9,7 @@ const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
 const as = @import("../meta.zig").as;
 const Matrix = @import("../matrix.zig").Matrix;
-const OptimizationPolicy = @import("../optimization.zig").OptimizationPolicy;
+const OptimizationPolicy = @import("../optimization.zig").Policy;
 
 /// Result of the assignment problem.
 pub const Assignment = struct {

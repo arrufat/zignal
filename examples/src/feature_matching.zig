@@ -3,10 +3,10 @@ const std = @import("std");
 const serial_io: std.Io = .failing;
 
 const zignal = @import("zignal");
-const BruteForceMatcher = zignal.BruteForceMatcher;
+const BruteForceMatcher = zignal.features.BruteForceMatcher;
 const Canvas = zignal.Canvas;
 const Image = zignal.Image;
-const Orb = zignal.Orb;
+const Orb = zignal.features.Orb;
 const Point = zignal.Point;
 
 const js = @import("js.zig");

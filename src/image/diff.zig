@@ -5,7 +5,7 @@ const meta = @import("../meta.zig");
 const Image = @import("../image.zig").Image;
 const Rectangle = @import("../geometry.zig").Rectangle;
 const Rgb = @import("../color.zig").Rgb(u8);
-const RunningStats = @import("../stats.zig").RunningStats;
+const RunningStats = @import("../stats.zig").Running;
 
 /// Options for computing image differences.
 pub const DiffOptions = struct {

@@ -3,7 +3,7 @@
 const std = @import("std");
 
 const zignal = @import("zignal");
-const Interpolation = zignal.Interpolation;
+const Interpolation = zignal.image.Interpolation;
 const Blending = zignal.Blending;
 
 const enum_utils = @import("../enum_utils.zig");
@@ -288,7 +288,7 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
     const angle = params.angle;
-    const output: zignal.RotateSize = if (params.expand) |obj| blk: {
+    const output: zignal.image.RotateSize = if (params.expand) |obj| blk: {
         const truth = c.PyObject_IsTrue(obj);
         if (truth < 0) return null;
         break :blk if (truth == 1) .expand else .crop;
@@ -299,12 +299,12 @@ pub fn image_rotate(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObje
     const tag_rotate = enum_utils.longToEnum(Interpolation, method_value) catch return null;
     const method = tagToInterpolation(tag_rotate);
 
-    const border = enum_utils.longToEnum(zignal.BorderMode, border_value) catch return null;
+    const border = enum_utils.longToEnum(zignal.image.BorderMode, border_value) catch return null;
 
     if (!validateF32(angle, "Angle")) return null;
 
     return self.py_image.?.dispatch(.{ angle, method, border, output }, struct {
-        fn apply(img: anytype, a: f64, m: Interpolation, b: zignal.BorderMode, o: zignal.RotateSize) ?*c.PyObject {
+        fn apply(img: anytype, a: f64, m: Interpolation, b: zignal.image.BorderMode, o: zignal.image.RotateSize) ?*c.PyObject {
             const out = python.withoutGil(@TypeOf(img.*).rotate, .{ img.*, python.io, allocator, @as(f32, @floatCast(a)), m, b, o }) catch {
                 python.setMemoryError("image rotate");
                 return null;
@@ -395,7 +395,7 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
             // Determine transform type and apply warp
             if (c.PyObject_IsInstance(t_obj, @ptrCast(&transforms.SimilarityTransformType)) > 0) {
                 const transform: *transforms.SimilarityTransformObject = @ptrCast(t_obj);
-                const zignal_transform: zignal.SimilarityTransform(f32) = .{
+                const zignal_transform: zignal.geometry.SimilarityTransform(f32) = .{
                     .matrix = .init(.{
                         .{ @floatCast(transform.matrix[0][0]), @floatCast(transform.matrix[0][1]) },
                         .{ @floatCast(transform.matrix[1][0]), @floatCast(transform.matrix[1][1]) },
@@ -408,7 +408,7 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                 python.withoutGil(@TypeOf(img.*).warp, .{ img.*, python.io, warped_img, zignal_transform, m });
             } else if (c.PyObject_IsInstance(t_obj, @ptrCast(&transforms.AffineTransformType)) > 0) {
                 const transform: *transforms.AffineTransformObject = @ptrCast(t_obj);
-                const zignal_transform: zignal.AffineTransform(f32) = .{
+                const zignal_transform: zignal.geometry.AffineTransform(f32) = .{
                     .matrix = .init(.{
                         .{ @floatCast(transform.matrix[0][0]), @floatCast(transform.matrix[0][1]) },
                         .{ @floatCast(transform.matrix[1][0]), @floatCast(transform.matrix[1][1]) },
@@ -421,7 +421,7 @@ pub fn image_warp(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                 python.withoutGil(@TypeOf(img.*).warp, .{ img.*, python.io, warped_img, zignal_transform, m });
             } else if (c.PyObject_IsInstance(t_obj, @ptrCast(&transforms.ProjectiveTransformType)) > 0) {
                 const transform: *transforms.ProjectiveTransformObject = @ptrCast(t_obj);
-                const zignal_transform: zignal.ProjectiveTransform(f32) = .{
+                const zignal_transform: zignal.geometry.ProjectiveTransform(f32) = .{
                     .matrix = .init(.{
                         .{ @floatCast(transform.matrix[0][0]), @floatCast(transform.matrix[0][1]), @floatCast(transform.matrix[0][2]) },
                         .{ @floatCast(transform.matrix[1][0]), @floatCast(transform.matrix[1][1]), @floatCast(transform.matrix[1][2]) },
@@ -594,7 +594,7 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     const tag_extract = enum_utils.longToEnum(Interpolation, method_value) catch return null;
     const method = tagToInterpolation(tag_extract);
 
-    const border = enum_utils.longToEnum(zignal.BorderMode, border_value) catch return null;
+    const border = enum_utils.longToEnum(zignal.image.BorderMode, border_value) catch return null;
 
     if (!validateF32(angle, "Angle")) return null;
 
@@ -642,7 +642,7 @@ pub fn image_extract(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     }
 
     return self.py_image.?.dispatch(.{ rect, angle, out_rows, out_cols, method, border }, struct {
-        fn apply(img: anytype, r: zignal.Rectangle(f32), a: f64, orows: u32, ocols: u32, m: Interpolation, b: zignal.BorderMode) ?*c.PyObject {
+        fn apply(img: anytype, r: zignal.Rectangle(f32), a: f64, orows: u32, ocols: u32, m: Interpolation, b: zignal.image.BorderMode) ?*c.PyObject {
             const out = @TypeOf(img.*).init(allocator, orows, ocols) catch |err| {
                 python.mapZigError(err, "extract image");
                 return null;

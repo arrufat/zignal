@@ -288,7 +288,7 @@ fn font_measure_text(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
     const wrap_width: ?f32 = if (params.wrap_width == null or params.wrap_width == c.Py_None()) null else python.parse(f32, params.wrap_width) catch return null;
-    const layout: zignal.TextLayout = .{
+    const layout: zignal.font.TextLayout = .{
         .wrap = wrap_width != null,
         .line_spacing = @floatCast(params.line_spacing),
         .letter_spacing = @floatCast(params.letter_spacing),

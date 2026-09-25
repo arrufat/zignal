@@ -13,9 +13,9 @@ const std = @import("std");
 const Io = std.Io;
 
 const zignal = @import("zignal");
-const GlobalOptimizer = zignal.GlobalOptimizer;
+const GlobalOptimizer = zignal.optimization.GlobalOptimizer;
 const Variable = GlobalOptimizer.Variable;
-const findGlobalOptimum = zignal.findGlobalOptimum;
+const findGlobalOptimum = zignal.optimization.findGlobalOptimum;
 
 // ----------------------------------------------------------------------------------------
 // Objective functions (ported from optimization_ex.cpp)

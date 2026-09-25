@@ -6,7 +6,7 @@ const lerp = std.math.lerp;
 const expectEqual = std.testing.expectEqual;
 
 /// Controls how Perlin noise is generated.
-pub fn PerlinOptions(T: type) type {
+pub fn Options(T: type) type {
     return struct {
         /// The amplitude of the generated noise.
         amplitude: T = 1,
@@ -21,10 +21,10 @@ pub fn PerlinOptions(T: type) type {
         /// It should be greater than one, and 2.0 is a good choice.
         lacunarity: T = 2,
 
-        pub const default: PerlinOptions(T) = .{};
+        pub const default: Options(T) = .{};
 
-        /// Initializes PerlinOptions while checking the ranges are correct.
-        pub fn init(amplitude: T, frequency: T, octaves: usize, persistence: T, lacunarity: T) PerlinOptions(T) {
+        /// Initializes the options while checking the ranges are correct.
+        pub fn init(amplitude: T, frequency: T, octaves: usize, persistence: T, lacunarity: T) Options(T) {
             {
                 @setRuntimeSafety(true);
                 assert(amplitude > 0);
@@ -45,13 +45,13 @@ pub fn PerlinOptions(T: type) type {
 }
 
 /// Generates Perlin noise using the specified options.
-pub fn perlin(T: type, x: T, y: T, z: T, opts: PerlinOptions(T)) T {
+pub fn noise(T: type, x: T, y: T, z: T, opts: Options(T)) T {
     var total_noise: T = 0;
     var max_amplitude: T = 0.0;
     var cur_amplitude: T = 1;
     var cur_frequency: T = opts.frequency;
     for (0..opts.octaves) |_| {
-        total_noise += noise(T, x * cur_frequency, y * cur_frequency, z * cur_frequency) * cur_amplitude;
+        total_noise += gradientNoise(T, x * cur_frequency, y * cur_frequency, z * cur_frequency) * cur_amplitude;
         max_amplitude += cur_amplitude;
         cur_amplitude *= opts.persistence;
         cur_frequency *= opts.lacunarity;
@@ -62,18 +62,18 @@ pub fn perlin(T: type, x: T, y: T, z: T, opts: PerlinOptions(T)) T {
 test "perlin: octaves are normalised to the amplitude" {
     const x, const y, const z = .{ 0.1, 0.37, 0.52 };
     // One octave is the raw noise; the ramp must not scale it by 1/persistence.
-    try expectEqual(noise(f64, x, y, z), perlin(f64, x, y, z, .{}));
-    try expectEqual(3 * noise(f64, x, y, z), perlin(f64, x, y, z, .{ .amplitude = 3 }));
+    try expectEqual(gradientNoise(f64, x, y, z), noise(f64, x, y, z, .{}));
+    try expectEqual(3 * gradientNoise(f64, x, y, z), noise(f64, x, y, z, .{ .amplitude = 3 }));
     // Three octaves at persistence 0.5: (n1 + n2/2 + n3/4) / 1.75.
-    const expected = (noise(f64, x, y, z) + 0.5 * noise(f64, 2 * x, 2 * y, 2 * z) + 0.25 * noise(f64, 4 * x, 4 * y, 4 * z)) / 1.75;
-    try std.testing.expectApproxEqAbs(expected, perlin(f64, x, y, z, .{ .octaves = 3 }), 1e-15);
+    const expected = (gradientNoise(f64, x, y, z) + 0.5 * gradientNoise(f64, 2 * x, 2 * y, 2 * z) + 0.25 * gradientNoise(f64, 4 * x, 4 * y, 4 * z)) / 1.75;
+    try std.testing.expectApproxEqAbs(expected, noise(f64, x, y, z, .{ .octaves = 3 }), 1e-15);
     // persistence 0 is a single octave, not NaN.
-    try expectEqual(noise(f64, x, y, z), perlin(f64, x, y, z, .{ .octaves = 4, .persistence = 0 }));
+    try expectEqual(gradientNoise(f64, x, y, z), noise(f64, x, y, z, .{ .octaves = 4, .persistence = 0 }));
 }
 
 // The functions below are ported from: https://mrl.cs.nyu.edu/~perlin/noise/
 
-fn noise(T: type, x: T, y: T, z: T) T {
+fn gradientNoise(T: type, x: T, y: T, z: T) T {
     assert(@typeInfo(T) == .float);
     // Find unit cube that contains the point.
     const x_i: u8 = @intCast(@as(isize, @floor(x)) & 255);
@@ -118,14 +118,14 @@ fn noise(T: type, x: T, y: T, z: T) T {
     ), v), w);
 }
 
-test "noise" {
-    try expectEqual(noise(f64, 0, 0, 0), 0);
-    try expectEqual(noise(f64, 1, 1, 1), 0);
-    try expectEqual(noise(f64, -1, -1, -1), 0);
-    try expectEqual(noise(f64, 0.5, 0.5, 0.5), -0.25);
-    try expectEqual(noise(f64, 0.1, 0.1, 0.1), 0.1861607143544832);
-    try expectEqual(noise(f64, 3.14, 42, 0), 0.13691995878400012);
-    try expectEqual(noise(f64, -4.20, 10, 0), -0.14208000000000043);
+test "gradientNoise" {
+    try expectEqual(gradientNoise(f64, 0, 0, 0), 0);
+    try expectEqual(gradientNoise(f64, 1, 1, 1), 0);
+    try expectEqual(gradientNoise(f64, -1, -1, -1), 0);
+    try expectEqual(gradientNoise(f64, 0.5, 0.5, 0.5), -0.25);
+    try expectEqual(gradientNoise(f64, 0.1, 0.1, 0.1), 0.1861607143544832);
+    try expectEqual(gradientNoise(f64, 3.14, 42, 0), 0.13691995878400012);
+    try expectEqual(gradientNoise(f64, -4.20, 10, 0), -0.14208000000000043);
 }
 
 fn fade(T: type, t: T) T {

@@ -1,10 +1,10 @@
 //! Pure Zig GIF codec.
 //!
 //! Public surface mirrors the other codecs in this repo (`png`, `jpeg`, `bmp`):
-//! `signature`, `DecodeLimits`, `Header`, `GifState` (+ `deinit`), `NativeImage`,
-//! `getInfo`, `decode`, `toNativeImage`, `loadFromBytes`, `load`, `EncodeOptions`,
+//! `signature`, `DecodeLimits`, `Header`, `GifState` (+ `deinit`),
+//! `getInfo`, `decode`, `toAnyImage`, `loadFromBytes`, `load`, `EncodeOptions`,
 //! `encode`, `save`. Multi-frame access is via `loadAnimated` / `loadAnimatedFromBytes`,
-//! which return an `AnimatedImage(T)` of fully-composed frames (disposal, transparency,
+//! which return an `Animation(T)` of fully-composed frames (disposal, transparency,
 //! and interlace are absorbed inside the codec).
 //!
 //! `encodeAnimated` writes multi-frame GIFs.
@@ -20,8 +20,8 @@ const expectEqual = std.testing.expectEqual;
 
 const codecs = @import("../codecs.zig");
 const Image = @import("../image.zig").Image;
-const animated = @import("../image/animated.zig");
-const AnimatedImage = animated.AnimatedImage;
+const Animation = @import("../image/animation.zig").Animation;
+const AnyImage = @import("../image/any.zig").Any;
 const convertColor = @import("../color.zig").convertColor;
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
@@ -567,17 +567,10 @@ fn composeFirstFrame(comptime T: type, io: Io, allocator: Allocator, state: GifS
     return canvas.convert(io, allocator, T);
 }
 
-/// First-frame composition pre-converted to `Rgb`/`Rgba`. The Rgba variant is
-/// chosen when frame 0 has a transparent index (matches Python's expectation
-/// of `Image.dtype` reflecting the file's true color space).
-pub const NativeImage = union(enum) {
-    rgb: Image(Rgb),
-    rgba: Image(Rgba),
-};
-
-/// Composes the first frame and returns it as `NativeImage`. Used by language
-/// bindings that pick the pixel type based on file metadata.
-pub fn toNativeImage(io: Io, allocator: Allocator, state: GifState) !NativeImage {
+/// Composes the first frame and returns it as `AnyImage`: `.rgba` when frame 0 has a
+/// transparent index, `.rgb` otherwise. Used by language bindings that pick the pixel type
+/// based on file metadata.
+pub fn toAnyImage(io: Io, allocator: Allocator, state: GifState) !AnyImage {
     if (state.frames.len == 0) return error.MissingPixelData;
     const has_transparency = if (state.frames[0].gce) |g| g.has_transparent else false;
     if (has_transparency) {
@@ -597,10 +590,10 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []con
 // Multi-frame composition
 // ---------------------------------------------------------------------------
 
-/// Composes all frames into an `AnimatedImage(T)`. Each output frame is the
+/// Composes all frames into an `Animation(T)`. Each output frame is the
 /// fully-rendered canvas at that point in playback, so callers don't have to
 /// know about disposal methods or transparent indices.
-fn composeAnimated(comptime T: type, io: Io, allocator: Allocator, state: GifState) !AnimatedImage(T) {
+fn composeAnimated(comptime T: type, io: Io, allocator: Allocator, state: GifState) !Animation(T) {
     const screen_w: u32 = state.header.width;
     const screen_h: u32 = state.header.height;
 
@@ -621,7 +614,7 @@ fn composeAnimated(comptime T: type, io: Io, allocator: Allocator, state: GifSta
         null;
     defer if (snapshot) |s| allocator.free(s);
 
-    var builder: animated.Builder(T) = .{};
+    var builder: Animation(T).Builder = .{};
     defer builder.deinit(allocator);
 
     var prev_disposal: DisposalMethod = .unspecified;
@@ -681,10 +674,10 @@ fn compositeFrameOntoCanvas(canvas: *Image(Rgba), frame: FrameRecord) !void {
     }
 }
 
-/// Loads all frames from a GIF byte buffer into an `AnimatedImage(T)`.
+/// Loads all frames from a GIF byte buffer into an `Animation(T)`.
 /// Disposal and transparency are absorbed by the decoder — every output frame
 /// is fully composed.
-pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
+pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Animation(T) {
     var reader: Io.Reader = .fixed(data);
     return readAnimated(T, io, allocator, &reader, limits);
 }
@@ -696,8 +689,21 @@ pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, 
     return composeFirstFrame(T, io, allocator, state);
 }
 
+/// `read` as `Rgba` when frame 0 has a transparent index, `Rgb` otherwise.
+pub fn readAny(io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnyImage {
+    var state = try parse(allocator, reader, limits, .first);
+    defer state.deinit(allocator);
+    return toAnyImage(io, allocator, state);
+}
+
+/// `loadFromBytes` as `Rgba` when frame 0 has a transparent index, `Rgb` otherwise.
+pub fn loadAnyFromBytes(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnyImage {
+    var reader: Io.Reader = .fixed(data);
+    return readAny(io, allocator, &reader, limits);
+}
+
 /// Reads every frame of a GIF from `reader`, fully composed.
-pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnimatedImage(T) {
+pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Animation(T) {
     var state = try parse(allocator, reader, limits, .all);
     defer state.deinit(allocator);
     return composeAnimated(T, io, allocator, state);
@@ -931,14 +937,14 @@ fn mapImageToPalette(
 // Animated encode
 // ---------------------------------------------------------------------------
 
-/// Encodes an `AnimatedImage(T)` as an animated GIF, storing only each frame's changed region.
+/// Encodes an `Animation(T)` as an animated GIF, storing only each frame's changed region.
 /// For `T == Rgba`, pixels with `alpha < 128` map to a reserved transparent palette index.
-pub fn encodeAnimated(comptime T: type, io: Io, gpa: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
+pub fn encodeAnimated(comptime T: type, io: Io, gpa: Allocator, anim: Animation(T), options: EncodeOptions) ![]u8 {
     return codecs.encodeWith(gpa, writeAnimated, .{ T, io, gpa }, .{ anim, options });
 }
 
 /// Writes `anim` as an animated GIF to `writer`; see `encodeAnimated`.
-pub fn writeAnimated(comptime T: type, io: Io, gpa: Allocator, writer: *Io.Writer, anim: AnimatedImage(T), options: EncodeOptions) !void {
+pub fn writeAnimated(comptime T: type, io: Io, gpa: Allocator, writer: *Io.Writer, anim: Animation(T), options: EncodeOptions) !void {
     try anim.validate();
 
     const screen_w_u32 = anim.frames[0].cols;
@@ -1640,7 +1646,7 @@ test "still loads stop after the first frame" {
     try std.testing.expectError(error.EndOfStream, loadAnimatedFromBytes(Rgb, parallel.inline_io, gpa, truncated, .{}));
 }
 
-fn buildAnimated(comptime T: type, gpa: Allocator, frame_data: []const Image(T), durations_ms: []const u32, loop: u32) !AnimatedImage(T) {
+fn buildAnimated(comptime T: type, gpa: Allocator, frame_data: []const Image(T), durations_ms: []const u32, loop: u32) !Animation(T) {
     const frames = try gpa.alloc(Image(T), frame_data.len);
     @memcpy(frames, frame_data);
     return .{ .frames = frames, .durations_ms = try gpa.dupe(u32, durations_ms), .loop_count = loop };
@@ -1782,7 +1788,7 @@ test "encodeAnimated — caller-supplied global palette uses GCT, no per-frame L
 
 test "encodeAnimated — empty animation rejected" {
     const gpa = std.testing.allocator;
-    const anim: AnimatedImage(Rgb) = .{ .frames = &.{}, .durations_ms = &.{}, .loop_count = 0 };
+    const anim: Animation(Rgb) = .{ .frames = &.{}, .durations_ms = &.{}, .loop_count = 0 };
     try expectError(error.NoFrames, encodeAnimated(Rgb, parallel.inline_io, gpa, anim, .{}));
 }
 

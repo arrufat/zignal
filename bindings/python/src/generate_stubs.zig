@@ -451,7 +451,7 @@ fn generateStubFile(gpa: std.mem.Allocator) ![]u8 {
 
     inline for (enums.registry) |entry| {
         try generateEnumFromMetadata(&stub, .{
-            .name = comptime zignal.meta.getSimpleTypeName(entry.type),
+            .name = comptime enums.pythonName(entry.type),
             .base = "IntEnum",
             .doc = entry.doc,
             .zig_type = entry.type,
@@ -672,7 +672,7 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
     }
 
     inline for (enums.registry) |entry| {
-        const name = comptime zignal.meta.getSimpleTypeName(entry.type);
+        const name = comptime enums.pythonName(entry.type);
         try stub.writef("    {s} as {s},\n", .{ name, name });
     }
 

@@ -24,7 +24,7 @@ const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 const tr = @import("trust_region.zig");
 const vec = @import("vec.zig");
 const UpperBound = @import("lipschitz.zig").UpperBound;
-const OptimizationPolicy = @import("../optimization.zig").OptimizationPolicy;
+const OptimizationPolicy = @import("../optimization.zig").Policy;
 
 pub const GlobalError = error{
     InvalidBounds,

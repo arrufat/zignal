@@ -14,7 +14,7 @@ const truetype = @import("../truetype.zig");
 const Error = truetype.Error;
 const Reader = truetype.Reader;
 const Table = truetype.Table;
-const VectorFont = @import("../VectorFont.zig");
+const VectorFont = @import("../Vector.zig");
 const Outline = @import("../Outline.zig");
 
 pub const max_subr_depth = 10;

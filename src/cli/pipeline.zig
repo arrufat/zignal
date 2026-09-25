@@ -159,7 +159,7 @@ fn processImage(
     input_path: []const u8,
     steps: []const Step,
     target: ?common.OutputTarget,
-    display_format: ?zignal.DisplayFormat,
+    display_format: ?zignal.image.DisplayFormat,
 ) !void {
     std.log.debug("loading {s}...", .{input_path});
 

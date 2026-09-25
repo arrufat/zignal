@@ -9,7 +9,7 @@ const LoadFilter = @import("../font.zig").LoadFilter;
 const isGzipPath = @import("../font.zig").isGzipPath;
 const readFileMaybeGzip = @import("../font.zig").readFileMaybeGzip;
 const writeFileMaybeGzip = @import("../font.zig").writeFileMaybeGzip;
-const BitmapFont = @import("BitmapFont.zig");
+const BitmapFont = @import("Bitmap.zig");
 const GlyphData = @import("GlyphData.zig");
 
 /// Errors that can occur during BDF font parsing.
