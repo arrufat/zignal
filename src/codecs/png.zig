@@ -12,7 +12,7 @@ const parallel = @import("../parallel.zig");
 const convertColor = @import("../color.zig").convertColor;
 const Image = @import("../image.zig").Image;
 const codecs = @import("../codecs.zig");
-const NativeImage = codecs.NativeImage;
+const NativeImage = @import("../image/native.zig").Native;
 
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);

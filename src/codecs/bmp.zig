@@ -442,7 +442,7 @@ inline fn paddedRowBytes(width: u32, bit_depth: u8) usize {
 }
 
 /// Native-format pixel container produced by `toNativeImage`.
-pub const NativeImage = codecs.NativeImage;
+pub const NativeImage = @import("../image/native.zig").Native;
 
 /// Decodes the pixel buffer into a native-format `Image(T)`.
 pub fn toNativeImage(allocator: Allocator, state: BmpState) !NativeImage {
