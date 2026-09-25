@@ -116,6 +116,139 @@ pub fn gemm(
     return result;
 }
 
+const ScratchCoopFeatures = extern struct { s_type: i32 = 1000506000, p_next: ?*anyopaque = null, cooperative_matrix: u32 = 1, robust: u32 = 0 };
+const ScratchMemoryModel = extern struct { s_type: i32 = 1000211000, p_next: ?*anyopaque = null, model: u32 = 1, device_scope: u32 = 0, chains: u32 = 0 };
+const ScratchFloat16 = extern struct { s_type: i32 = 1000082000, p_next: ?*anyopaque = null, float16: u32 = 1, int8: u32 = 0 };
+const Scratch16BitStorage = extern struct { s_type: i32 = 1000083000, p_next: ?*anyopaque = null, storage_buffer: u32 = 1, uniform: u32 = 0, push: u32 = 0, io: u32 = 0 };
+
+/// Scratch: `layers` products Y = X * W_l (f16 inputs, f32 output) through the cooperative
+/// matrix kernel at `spv_path`, weights resident, one submit. Best of `iters`.
+pub fn benchCoop(self: *Device, io: std.Io, allocator: Allocator, spv_path: []const u8, x: []const f16, w: []const f16, m: u32, k: u32, layers: usize, iters: usize, out: []f32) !ChainTiming {
+    const spv_bytes = try std.Io.Dir.cwd().readFileAlloc(io, spv_path, allocator, .limited(1 << 20));
+    defer allocator.free(spv_bytes);
+    const spv = try allocator.alignedAlloc(u8, .of(u32), spv_bytes.len);
+    defer allocator.free(spv);
+    @memcpy(spv, spv_bytes);
+    var pipeline: Pipeline = try .create(self, spv, @sizeOf(params.Gemm));
+    defer pipeline.destroy(self);
+
+    const wbytes = w.len * @sizeOf(f16);
+    var xbuf: Buffer = .{};
+    defer xbuf.destroy(self);
+    var wbuf: Buffer = .{};
+    defer wbuf.destroy(self);
+    var ybuf: Buffer = .{};
+    defer ybuf.destroy(self);
+    try xbuf.ensure(self, x.len * @sizeOf(f16));
+    try wbuf.ensure(self, wbytes * layers);
+    try ybuf.ensure(self, out.len * @sizeOf(f32));
+    const t_w0 = std.Io.Clock.awake.now(io).toNanoseconds();
+    for (0..layers) |l| @memcpy(wbuf.slice(f16, w.len * layers)[l * w.len ..][0..w.len], w);
+    var timing: ChainTiming = .{ .weights_ns = std.Io.Clock.awake.now(io).toNanoseconds() - t_w0, .input_ns = std.math.maxInt(i96), .run_ns = std.math.maxInt(i96), .download_ns = std.math.maxInt(i96) };
+
+    const f = &self.f;
+    const cb = self.cb;
+    for (0..iters) |_| {
+        const t0 = std.Io.Clock.awake.now(io).toNanoseconds();
+        @memcpy(xbuf.slice(f16, x.len), x);
+        const t1 = std.Io.Clock.awake.now(io).toNanoseconds();
+        try vk.check(f.reset_command_buffer(cb, 0));
+        try vk.check(f.begin_command_buffer(cb, &.{ .flags = vk.command_buffer_usage_one_time_submit_bit }));
+        const before = [_]vk.MemoryBarrier{.{ .src_access_mask = vk.access_host_write_bit, .dst_access_mask = vk.access_shader_read_bit }};
+        f.cmd_pipeline_barrier(cb, vk.pipeline_stage_host_bit, vk.pipeline_stage_compute_shader_bit, 0, 1, &before, 0, null, 0, null);
+        f.cmd_bind_pipeline(cb, vk.pipeline_bind_point_compute, pipeline.pipeline);
+        for (0..layers) |l| {
+            const push: params.Gemm = .{ .a = xbuf.address, .b = wbuf.address + l * wbytes, .c = ybuf.address, .m = m, .n = k, .k = k, .flags = 0, .alpha = 1, .beta = 0 };
+            f.cmd_push_constants(cb, pipeline.layout, vk.shader_stage_compute_bit, 0, pipeline.push_size, &push);
+            f.cmd_dispatch(cb, k / 64, m / 32, 1);
+            const between = [_]vk.MemoryBarrier{.{ .src_access_mask = vk.access_shader_write_bit, .dst_access_mask = vk.access_shader_write_bit | vk.access_shader_read_bit }};
+            f.cmd_pipeline_barrier(cb, vk.pipeline_stage_compute_shader_bit, vk.pipeline_stage_compute_shader_bit, 0, 1, &between, 0, null, 0, null);
+        }
+        const after = [_]vk.MemoryBarrier{.{ .src_access_mask = vk.access_shader_write_bit, .dst_access_mask = vk.access_host_read_bit }};
+        f.cmd_pipeline_barrier(cb, vk.pipeline_stage_compute_shader_bit, vk.pipeline_stage_host_bit, 0, 1, &after, 0, null, 0, null);
+        try vk.check(f.end_command_buffer(cb));
+        const cbs = [_]vk.CommandBuffer{cb};
+        const submit = [_]vk.SubmitInfo{.{ .command_buffer_count = 1, .command_buffers = &cbs }};
+        try vk.check(f.queue_submit(self.queue, 1, &submit, self.fence));
+        try vk.check(f.wait_for_fences(self.dev, 1, @ptrCast(&self.fence), 1, std.math.maxInt(u64)));
+        try vk.check(f.reset_fences(self.dev, 1, @ptrCast(&self.fence)));
+        const t2 = std.Io.Clock.awake.now(io).toNanoseconds();
+        @memcpy(out, ybuf.slice(f32, out.len));
+        const t3 = std.Io.Clock.awake.now(io).toNanoseconds();
+        timing.input_ns = @min(timing.input_ns, t1 - t0);
+        timing.run_ns = @min(timing.run_ns, t2 - t1);
+        timing.download_ns = @min(timing.download_ns, t3 - t2);
+    }
+    return timing;
+}
+
+pub const ChainTiming = struct { weights_ns: i96, input_ns: i96, run_ns: i96, download_ns: i96 };
+
+/// Scratch benchmark: `layers` chained products X <- X * W with `layers` copies of `w`
+/// resident on the device and every dispatch recorded into one submit. Best of `iters`.
+pub fn benchChain(self: *Device, io: std.Io, x: Matrix(f32), w: Matrix(f32), layers: usize, iters: usize, out: []f32) Error!ChainTiming {
+    const m: u32 = @intCast(x.rows);
+    const k: u32 = @intCast(x.cols);
+    const wbytes = w.items.len * @sizeOf(f32);
+    var wbuf: Buffer = .{};
+    defer wbuf.destroy(self);
+    var act: [2]Buffer = .{ .{}, .{} };
+    defer for (&act) |*b| b.destroy(self);
+    try wbuf.ensure(self, wbytes * layers);
+    for (&act) |*b| try b.ensure(self, x.items.len * @sizeOf(f32));
+
+    const t_w0 = std.Io.Clock.awake.now(io).toNanoseconds();
+    for (0..layers) |l| @memcpy(wbuf.slice(f32, w.items.len * layers)[l * w.items.len ..][0..w.items.len], w.items);
+    var timing: ChainTiming = .{ .weights_ns = std.Io.Clock.awake.now(io).toNanoseconds() - t_w0, .input_ns = std.math.maxInt(i96), .run_ns = std.math.maxInt(i96), .download_ns = std.math.maxInt(i96) };
+
+    const f = &self.f;
+    const cb = self.cb;
+    const pipeline = self.gemm_pipeline;
+    const tile = params.gemm_block;
+    for (0..iters) |_| {
+        const t0 = std.Io.Clock.awake.now(io).toNanoseconds();
+        @memcpy(act[0].slice(f32, x.items.len), x.items);
+        const t1 = std.Io.Clock.awake.now(io).toNanoseconds();
+        try vk.check(f.reset_command_buffer(cb, 0));
+        try vk.check(f.begin_command_buffer(cb, &.{ .flags = vk.command_buffer_usage_one_time_submit_bit }));
+        const before = [_]vk.MemoryBarrier{.{ .src_access_mask = vk.access_host_write_bit, .dst_access_mask = vk.access_shader_read_bit }};
+        f.cmd_pipeline_barrier(cb, vk.pipeline_stage_host_bit, vk.pipeline_stage_compute_shader_bit, 0, 1, &before, 0, null, 0, null);
+        f.cmd_bind_pipeline(cb, vk.pipeline_bind_point_compute, pipeline.pipeline);
+        for (0..layers) |l| {
+            const push: params.Gemm = .{
+                .a = act[l % 2].address,
+                .b = wbuf.address + l * wbytes,
+                .c = act[(l + 1) % 2].address,
+                .m = m,
+                .n = k,
+                .k = k,
+                .flags = 0,
+                .alpha = 1,
+                .beta = 0,
+            };
+            f.cmd_push_constants(cb, pipeline.layout, vk.shader_stage_compute_bit, 0, pipeline.push_size, &push);
+            f.cmd_dispatch(cb, (k + tile - 1) / tile, (m + tile - 1) / tile, 1);
+            const between = [_]vk.MemoryBarrier{.{ .src_access_mask = vk.access_shader_write_bit, .dst_access_mask = vk.access_shader_read_bit }};
+            f.cmd_pipeline_barrier(cb, vk.pipeline_stage_compute_shader_bit, vk.pipeline_stage_compute_shader_bit, 0, 1, &between, 0, null, 0, null);
+        }
+        const after = [_]vk.MemoryBarrier{.{ .src_access_mask = vk.access_shader_write_bit, .dst_access_mask = vk.access_host_read_bit }};
+        f.cmd_pipeline_barrier(cb, vk.pipeline_stage_compute_shader_bit, vk.pipeline_stage_host_bit, 0, 1, &after, 0, null, 0, null);
+        try vk.check(f.end_command_buffer(cb));
+        const cbs = [_]vk.CommandBuffer{cb};
+        const submit = [_]vk.SubmitInfo{.{ .command_buffer_count = 1, .command_buffers = &cbs }};
+        try vk.check(f.queue_submit(self.queue, 1, &submit, self.fence));
+        try vk.check(f.wait_for_fences(self.dev, 1, @ptrCast(&self.fence), 1, std.math.maxInt(u64)));
+        try vk.check(f.reset_fences(self.dev, 1, @ptrCast(&self.fence)));
+        const t2 = std.Io.Clock.awake.now(io).toNanoseconds();
+        @memcpy(out, act[layers % 2].slice(f32, x.items.len));
+        const t3 = std.Io.Clock.awake.now(io).toNanoseconds();
+        timing.input_ns = @min(timing.input_ns, t1 - t0);
+        timing.run_ns = @min(timing.run_ns, t2 - t1);
+        timing.download_ns = @min(timing.download_ns, t3 - t2);
+    }
+    return timing;
+}
+
 fn initSupported() Error!Device {
     var f: vk.Functions = .{ .get_instance_proc_addr = (try Vulkan.get()).vkGetInstanceProcAddr };
     f.loadGlobal() catch return error.GpuUnavailable;
@@ -125,15 +258,23 @@ fn initSupported() Error!Device {
 
     const pick = pickPhysicalDevice(&f, instance) orelse return error.GpuUnavailable;
 
-    var bda: vk.PhysicalDeviceBufferDeviceAddressFeatures = .{ .buffer_device_address = 1 };
+    // Scratch: cooperative matrix + f16 storage/arithmetic + Vulkan memory model.
+    var storage16: Scratch16BitStorage = .{};
+    var float16: ScratchFloat16 = .{ .p_next = &storage16 };
+    var mem_model: ScratchMemoryModel = .{ .p_next = &float16 };
+    var coop: ScratchCoopFeatures = .{ .p_next = &mem_model };
+    var bda: vk.PhysicalDeviceBufferDeviceAddressFeatures = .{ .p_next = &coop, .buffer_device_address = 1 };
     const features: vk.PhysicalDeviceFeatures = .{ .shader_int64 = 1 };
     const priority = [_]f32{1.0};
     const queue_info = [_]vk.DeviceQueueCreateInfo{.{ .queue_family_index = pick.family, .queue_priorities = &priority }};
+    const extensions = [_][*:0]const u8{"VK_KHR_cooperative_matrix"};
     var dev_opt: ?vk.Device = null;
     vk.check(f.create_device(pick.phys, &.{
         .p_next = &bda,
         .queue_create_info_count = 1,
         .queue_create_infos = &queue_info,
+        .enabled_extension_count = extensions.len,
+        .enabled_extension_names = &extensions,
         .enabled_features = &features,
     }, null, &dev_opt)) catch return error.GpuUnavailable;
     const dev = dev_opt.?;
