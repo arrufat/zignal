@@ -441,11 +441,11 @@ inline fn paddedRowBytes(width: u32, bit_depth: u8) usize {
     return @intCast(((bits + 31) / 32) * 4);
 }
 
-/// Native-format pixel container produced by `toNativeImage`.
+/// Native-format pixel container produced by `toAnyImage`.
 pub const AnyImage = @import("../image/any.zig").Any;
 
-/// Decodes the pixel buffer into a native-format `Image(T)`.
-pub fn toNativeImage(allocator: Allocator, state: BmpState) !AnyImage {
+/// Decodes the pixel buffer into the image type closest to the file's pixel format.
+pub fn toAnyImage(allocator: Allocator, state: BmpState) !AnyImage {
     var reader = Io.Reader.fixed(state.pixel_data);
     return readPixels(allocator, state.header, state.palette, &reader);
 }

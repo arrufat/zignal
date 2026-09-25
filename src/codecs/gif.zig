@@ -2,7 +2,7 @@
 //!
 //! Public surface mirrors the other codecs in this repo (`png`, `jpeg`, `bmp`):
 //! `signature`, `DecodeLimits`, `Header`, `GifState` (+ `deinit`),
-//! `getInfo`, `decode`, `toNativeImage`, `loadFromBytes`, `load`, `EncodeOptions`,
+//! `getInfo`, `decode`, `toAnyImage`, `loadFromBytes`, `load`, `EncodeOptions`,
 //! `encode`, `save`. Multi-frame access is via `loadAnimated` / `loadAnimatedFromBytes`,
 //! which return an `Animation(T)` of fully-composed frames (disposal, transparency,
 //! and interlace are absorbed inside the codec).
@@ -570,7 +570,7 @@ fn composeFirstFrame(comptime T: type, io: Io, allocator: Allocator, state: GifS
 /// Composes the first frame and returns it as `AnyImage`: `.rgba` when frame 0 has a
 /// transparent index, `.rgb` otherwise. Used by language bindings that pick the pixel type
 /// based on file metadata.
-pub fn toNativeImage(io: Io, allocator: Allocator, state: GifState) !AnyImage {
+pub fn toAnyImage(io: Io, allocator: Allocator, state: GifState) !AnyImage {
     if (state.frames.len == 0) return error.MissingPixelData;
     const has_transparency = if (state.frames[0].gce) |g| g.has_transparent else false;
     if (has_transparency) {

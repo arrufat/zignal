@@ -856,7 +856,7 @@ fn inflate(gpa: Allocator, png_state: *PngState, chunks: *ChunkStream, first: Ch
 const idat_buffer_len = 16 * 1024;
 
 /// Converts PNG image data to its natural Zignal image type.
-pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !AnyImage {
+pub fn toAnyImage(allocator: Allocator, png_state: *PngState) !AnyImage {
     const decompressed = png_state.scanlines;
 
     const width = png_state.header.width;
@@ -1161,7 +1161,7 @@ pub fn toNativeImage(allocator: Allocator, png_state: *PngState) !AnyImage {
 /// Decodes a PNG byte stream into `Image(T)`, converting from the source color format as needed.
 /// Supports grayscale (1/2/4/8/16-bit), RGB (8/16-bit), RGBA (8/16-bit), and palette (1/2/4/8-bit
 /// with transparency), with full Adam7 interlacing.
-/// Truncated pixel data yields a partial image; use `decode` + `toNativeImage`
+/// Truncated pixel data yields a partial image; use `decode` + `toAnyImage`
 /// to observe the `truncated` flag.
 pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, png_data: []const u8, limits: DecodeLimits) !Image(T) {
     var reader: Io.Reader = .fixed(png_data);
@@ -1172,7 +1172,7 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, png_data: [
 pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
     var png_state = try parse(allocator, reader, limits);
     defer png_state.deinit(allocator);
-    var native = try toNativeImage(allocator, &png_state);
+    var native = try toAnyImage(allocator, &png_state);
     return native.into(T, io, allocator);
 }
 
@@ -2171,7 +2171,7 @@ test "PNG missing IEND decodes as truncated" {
     defer state.deinit(gpa);
     try std.testing.expect(state.truncated);
 
-    const native = try toNativeImage(gpa, &state);
+    const native = try toAnyImage(gpa, &state);
     var img = switch (native) {
         .rgb => |*i| i.*,
         else => @panic("expected RGB"),
@@ -2340,7 +2340,7 @@ test "PNG truncated zlib stream drops partial row deterministically" {
     defer state.deinit(gpa);
     try std.testing.expect(state.truncated);
 
-    const native = try toNativeImage(gpa, &state);
+    const native = try toAnyImage(gpa, &state);
     var img = switch (native) {
         .rgb => |*i| i.*,
         else => @panic("expected RGB"),
@@ -2389,7 +2389,7 @@ test "PNG truncated Adam7 keeps complete passes" {
 
     var state = try decode(gpa, data_out.written(), .{});
     defer state.deinit(gpa);
-    const native = try toNativeImage(gpa, &state);
+    const native = try toAnyImage(gpa, &state);
     var img = switch (native) {
         .rgb => |*i| i.*,
         else => @panic("expected RGB"),
@@ -2535,7 +2535,7 @@ test "PNG round-trip encoding/decoding" {
     try std.testing.expectEqual(@as(u8, 8), decoded_png.header.bit_depth);
 
     // Convert back to Image
-    const native_image = try toNativeImage(allocator, &decoded_png);
+    const native_image = try toAnyImage(allocator, &decoded_png);
     var decoded_image = switch (native_image) {
         .rgb => |*img| img.*,
         else => @panic("Expected RGB image for this test"),
@@ -2664,7 +2664,7 @@ test "PNG fixed filters round-trip" {
 
         var state = try decode(allocator, png_data, .{});
         defer state.deinit(allocator);
-        const native = try toNativeImage(allocator, &state);
+        const native = try toAnyImage(allocator, &state);
         var round = switch (native) {
             .rgb => |*i| i.*,
             else => @panic("expected RGB"),

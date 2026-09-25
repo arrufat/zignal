@@ -3059,7 +3059,7 @@ fn renderProgressive(comptime T: type, io: Io, allocator: Allocator, state: *Jpe
     try parallel.forRowBandsTry(io, mcu_rows, bands, &ctx, Ctx.run);
 }
 
-pub fn toNativeImage(io: Io, allocator: Allocator, state: *JpegState) !AnyImage {
+pub fn toAnyImage(io: Io, allocator: Allocator, state: *JpegState) !AnyImage {
     if (state.header.num_components == 1) {
         var img: Image(u8) = try .init(allocator, state.header.height, state.header.width);
         errdefer img.deinit(allocator);

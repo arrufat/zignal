@@ -51,7 +51,7 @@ fn setRuntimeCodecError(format: ImageFormat, err: anyerror) bool {
     return true;
 }
 
-fn wrapNativeImage(native: anytype) ?*c.PyObject {
+fn wrapAnyImage(native: anytype) ?*c.PyObject {
     switch (native) {
         inline else => |img| {
             return @ptrCast(moveImageToPython(img) orelse return null);
@@ -68,11 +68,11 @@ fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
                 return null;
             };
             defer decoded.deinit(allocator);
-            const native = zignal.png.toNativeImage(allocator, &decoded) catch |err| {
+            const native = zignal.png.toAnyImage(allocator, &decoded) catch |err| {
                 setDecodeError(kind, err);
                 return null;
             };
-            return wrapNativeImage(native);
+            return wrapAnyImage(native);
         },
         .jpeg => {
             const kind = "JPEG data";
@@ -81,11 +81,11 @@ fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
                 return null;
             };
             defer decoded.deinit(allocator);
-            const native = zignal.jpeg.toNativeImage(python.io, allocator, &decoded) catch |err| {
+            const native = zignal.jpeg.toAnyImage(python.io, allocator, &decoded) catch |err| {
                 setDecodeError(kind, err);
                 return null;
             };
-            return wrapNativeImage(native);
+            return wrapAnyImage(native);
         },
         .bmp => {
             const kind = "BMP data";
@@ -94,11 +94,11 @@ fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
                 return null;
             };
             defer decoded.deinit(allocator);
-            const native = zignal.bmp.toNativeImage(allocator, decoded) catch |err| {
+            const native = zignal.bmp.toAnyImage(allocator, decoded) catch |err| {
                 setDecodeError(kind, err);
                 return null;
             };
-            return wrapNativeImage(native);
+            return wrapAnyImage(native);
         },
         .gif => {
             const kind = "GIF data";
@@ -107,11 +107,11 @@ fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
                 return null;
             };
             defer decoded.deinit(allocator);
-            const native = zignal.gif.toNativeImage(python.io, allocator, decoded) catch |err| {
+            const native = zignal.gif.toAnyImage(python.io, allocator, decoded) catch |err| {
                 setDecodeError(kind, err);
                 return null;
             };
-            return wrapNativeImage(native);
+            return wrapAnyImage(native);
         },
         .jxl, .webp => {
             const limits = if (format == .jxl) jxl_limits else webp_limits;
@@ -119,7 +119,7 @@ fn loadBytes(comptime format: ImageFormat, data: []const u8) ?*c.PyObject {
                 if (!setRuntimeCodecError(format, err)) setDecodeError(@tagName(format) ++ " data", err);
                 return null;
             };
-            return wrapNativeImage(decoded);
+            return wrapAnyImage(decoded);
         },
     }
 }
@@ -201,11 +201,11 @@ fn decodeFile(comptime format: ImageFormat, data: []const u8, path: []const u8, 
                 return null;
             };
             defer decoded.deinit(allocator);
-            const native = zignal.png.toNativeImage(allocator, &decoded) catch |err| {
+            const native = zignal.png.toAnyImage(allocator, &decoded) catch |err| {
                 python.setErrorWithPath(err, path);
                 return null;
             };
-            return wrapNativeImage(native);
+            return wrapAnyImage(native);
         },
         .jpeg => {
             var decoded = zignal.jpeg.decode(allocator, data, limits) catch |err| {
@@ -213,11 +213,11 @@ fn decodeFile(comptime format: ImageFormat, data: []const u8, path: []const u8, 
                 return null;
             };
             defer decoded.deinit(allocator);
-            const native = zignal.jpeg.toNativeImage(python.io, allocator, &decoded) catch |err| {
+            const native = zignal.jpeg.toAnyImage(python.io, allocator, &decoded) catch |err| {
                 python.setErrorWithPath(err, path);
                 return null;
             };
-            return wrapNativeImage(native);
+            return wrapAnyImage(native);
         },
         .bmp => {
             var decoded = zignal.bmp.decode(allocator, data, limits) catch |err| {
@@ -225,11 +225,11 @@ fn decodeFile(comptime format: ImageFormat, data: []const u8, path: []const u8, 
                 return null;
             };
             defer decoded.deinit(allocator);
-            const native = zignal.bmp.toNativeImage(allocator, decoded) catch |err| {
+            const native = zignal.bmp.toAnyImage(allocator, decoded) catch |err| {
                 python.setErrorWithPath(err, path);
                 return null;
             };
-            return wrapNativeImage(native);
+            return wrapAnyImage(native);
         },
         .gif => {
             var decoded = zignal.gif.decode(allocator, data, limits, .first) catch |err| {
@@ -237,18 +237,18 @@ fn decodeFile(comptime format: ImageFormat, data: []const u8, path: []const u8, 
                 return null;
             };
             defer decoded.deinit(allocator);
-            const native = zignal.gif.toNativeImage(python.io, allocator, decoded) catch |err| {
+            const native = zignal.gif.toAnyImage(python.io, allocator, decoded) catch |err| {
                 python.setErrorWithPath(err, path);
                 return null;
             };
-            return wrapNativeImage(native);
+            return wrapAnyImage(native);
         },
         .jxl, .webp => {
             const decoded = @field(zignal, @tagName(format)).decode(python.io, allocator, data, limits) catch |err| {
                 if (!setRuntimeCodecError(format, err)) python.setErrorWithPath(err, path);
                 return null;
             };
-            return wrapNativeImage(decoded);
+            return wrapAnyImage(decoded);
         },
     }
 }
