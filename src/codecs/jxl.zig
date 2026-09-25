@@ -10,7 +10,7 @@ const Animation = @import("../image/animation.zig").Animation;
 const Image = @import("../image.zig").Image;
 const codecs = @import("../codecs.zig");
 const AnyImage = @import("../image/any.zig").Any;
-const dynlib = @import("dynlib.zig");
+const dynlib = @import("../dynlib.zig");
 const parallel = @import("../parallel.zig");
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
@@ -578,7 +578,7 @@ const Api = struct {
 const Libjxl = dynlib.Library(Api, switch (builtin.os.tag) {
     .macos => dynlib.macosNames("libjxl.dylib"),
     else => &.{ "libjxl.so.1", "libjxl.so.0.13", "libjxl.so.0.12", "libjxl.so.0.11", "libjxl.so.0.10", "libjxl.so.0.9", "libjxl.so.0.8", "libjxl.so.0.7", "libjxl.so" },
-});
+}, error.CodecUnavailable);
 
 test "signature detection" {
     try std.testing.expect(hasSignature(&signature));

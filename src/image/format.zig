@@ -84,7 +84,7 @@ pub const Format = enum {
         return null;
     }
 
-    /// The system library a runtime-loaded codec needs (see `codecs/dynlib.zig`), or null
+    /// The system library a runtime-loaded codec needs (see `dynlib.zig`), or null
     /// for the native codecs.
     pub fn runtimeLibrary(self: Format) ?[]const u8 {
         return switch (self) {

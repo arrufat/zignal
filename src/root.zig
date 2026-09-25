@@ -126,4 +126,5 @@ test {
     _ = @import("qrcode.zig");
     _ = @import("meta.zig");
     _ = @import("stats.zig");
+    _ = @import("dynlib.zig");
 }
