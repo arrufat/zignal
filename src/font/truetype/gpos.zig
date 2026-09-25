@@ -164,7 +164,7 @@ fn classOf(r: Reader, class_def: usize, gid: u16) Error!u16 {
 }
 
 const synthetic = @import("synthetic.zig");
-const VectorFont = @import("../VectorFont.zig");
+const VectorFont = @import("../Vector.zig");
 
 test "pair adjustment: format 1, format 2 via extension, GPOS over kern" {
     var buf: [synthetic.buffer_size]u8 = undefined;

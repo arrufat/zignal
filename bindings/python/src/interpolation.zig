@@ -42,5 +42,5 @@ pub const interpolation_values = [_]stub_metadata.EnumValueDoc{
 pub const interpolation_enum_info = stub_metadata.EnumInfo{
     .name = "Interpolation",
     .doc = "Interpolation methods for image resizing",
-    .zig_type = zignal.Interpolation,
+    .zig_type = zignal.image.Interpolation,
 };

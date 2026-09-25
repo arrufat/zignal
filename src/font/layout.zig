@@ -5,8 +5,8 @@
 const std = @import("std");
 
 const Font = @import("../font.zig").Font;
-const BitmapFont = @import("BitmapFont.zig");
-const VectorFont = @import("VectorFont.zig");
+const BitmapFont = @import("Bitmap.zig");
+const VectorFont = @import("Vector.zig");
 const Rectangle = @import("../geometry.zig").Rectangle;
 
 pub const TextAlign = enum { left, center, right };

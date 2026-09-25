@@ -1,4 +1,4 @@
-//! Python RunningStats type wrapping `zignal.RunningStats`.
+//! Python RunningStats type wrapping `zignal.stats.Running`.
 
 const std = @import("std");
 
@@ -10,7 +10,7 @@ pub const registerType = python.register;
 const c = python.c;
 const stub_metadata = @import("stub_metadata.zig");
 
-const RunningStats = zignal.RunningStats(f64, .all);
+const RunningStats = zignal.stats.Running(f64, .all);
 
 pub const RunningStatsObject = extern struct {
     ob_base: c.PyObject,

@@ -11,7 +11,7 @@
 
 const std = @import("std");
 
-const VectorFont = @import("VectorFont.zig");
+const VectorFont = @import("Vector.zig");
 
 const reader = @import("truetype/reader.zig");
 pub const Reader = reader.Reader;

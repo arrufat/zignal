@@ -13,6 +13,7 @@ const convertColor = @import("../color.zig").convertColor;
 const bt601 = @import("../color.zig").bt601;
 const codecs = @import("../codecs.zig");
 const Image = @import("../image.zig").Image;
+const AnyImage = @import("../image/any.zig").Any;
 
 const Rgb = @import("../color.zig").Rgb(u8);
 const Ycbcr = @import("../color.zig").Ycbcr(u8);
@@ -3058,10 +3059,7 @@ fn renderProgressive(comptime T: type, io: Io, allocator: Allocator, state: *Jpe
     try parallel.forRowBandsTry(io, mcu_rows, bands, &ctx, Ctx.run);
 }
 
-pub fn toNativeImage(io: Io, allocator: Allocator, state: *JpegState) !union(enum) {
-    grayscale: Image(u8),
-    rgb: Image(Rgb),
-} {
+pub fn toAnyImage(io: Io, allocator: Allocator, state: *JpegState) !AnyImage {
     if (state.header.num_components == 1) {
         var img: Image(u8) = try .init(allocator, state.header.height, state.header.width);
         errdefer img.deinit(allocator);
@@ -3088,6 +3086,20 @@ pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, 
     const jpeg_data = try reader.allocRemaining(allocator, limits.max_jpeg_bytes);
     defer allocator.free(jpeg_data);
     return loadFromBytes(T, io, allocator, jpeg_data, limits);
+}
+
+/// `loadFromBytes` as `Gray` or `Rgb`, following the file's component count.
+pub fn loadAnyFromBytes(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnyImage {
+    var state = try decode(allocator, data, limits);
+    defer state.deinit(allocator);
+    return toAnyImage(io, allocator, &state);
+}
+
+/// `read` as `Gray` or `Rgb`, following the file's component count.
+pub fn readAny(io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnyImage {
+    const jpeg_data = try reader.allocRemaining(allocator, limits.max_jpeg_bytes);
+    defer allocator.free(jpeg_data);
+    return loadAnyFromBytes(io, allocator, jpeg_data, limits);
 }
 
 test "quantizer reciprocals match integer division for every table value" {

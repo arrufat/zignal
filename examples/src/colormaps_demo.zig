@@ -35,7 +35,7 @@ pub fn main() !void {
     try gray.save(io, allocator, "grayscale.png");
 
     // Apply and save colormaps
-    const maps = [_]struct { name: []const u8, map: zignal.Colormap }{
+    const maps = [_]struct { name: []const u8, map: zignal.image.Colormap }{
         .{ .name = "colormap_jet.png", .map = .{ .jet = .{} } },
         .{ .name = "colormap_heat.png", .map = .{ .heat = .{} } },
         .{ .name = "colormap_turbo.png", .map = .{ .turbo = .{} } },

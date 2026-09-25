@@ -11,7 +11,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const zignal = @import("zignal");
-const GlobalOptimizer = zignal.GlobalOptimizer;
+const GlobalOptimizer = zignal.optimization.GlobalOptimizer;
 const Variable = GlobalOptimizer.Variable;
 
 const js = @import("js.zig");
@@ -67,7 +67,7 @@ var lut_buf: [256 * 3]u8 = undefined;
 
 /// Fill lut_buf with colormap `id`: 0 jet, 1 heat, 2 turbo, 3 viridis, 4 inferno (else viridis).
 pub export fn colormap_lut(id: u32) [*]const u8 {
-    const cm = zignal.colormaps;
+    const cm = zignal.image.colormaps;
     for (0..256) |i| {
         const v: f64 = @floatFromInt(i);
         const rgb = switch (id) {

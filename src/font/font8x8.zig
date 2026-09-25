@@ -12,7 +12,7 @@
 const std = @import("std");
 
 const LoadFilter = @import("../font.zig").LoadFilter;
-const BitmapFont = @import("BitmapFont.zig");
+const BitmapFont = @import("Bitmap.zig");
 const font_data = @import("font8x8_data.zig");
 const unicode = @import("unicode.zig");
 

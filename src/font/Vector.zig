@@ -7,7 +7,7 @@
 //!
 //! Example:
 //! ```zig
-//! var font: VectorFont = try .load(io, allocator, "DejaVuSans.ttf");
+//! var font: Vector = try .load(io, allocator, "DejaVuSans.ttf");
 //! defer font.deinit(allocator);
 //! try canvas.drawText("Hello", .init(.{ 10, 10 }), Rgb.black, .{ .vector = font }, 24, .soft);
 //! ```
@@ -24,7 +24,7 @@ const truetype = @import("truetype.zig");
 const Outline = @import("Outline.zig");
 const GlyphCache = @import("GlyphCache.zig");
 
-const VectorFont = @This();
+const Vector = @This();
 
 pub const Error = truetype.Error;
 
@@ -72,24 +72,24 @@ cache: ?*GlyphCache = null,
 
 /// Parses the header tables of `data`, which must outlive the font. No allocation, no I/O.
 /// A collection yields its first face; see `loadFromBytesFace`.
-pub fn loadFromBytes(data: []const u8) Error!VectorFont {
+pub fn loadFromBytes(data: []const u8) Error!Vector {
     return truetype.parse(data);
 }
 
 /// `loadFromBytes` for face `face` of a `.ttc` collection; `error.InvalidFormat` past the
 /// last face (a single font has only face 0).
-pub fn loadFromBytesFace(data: []const u8, face: u32) Error!VectorFont {
+pub fn loadFromBytesFace(data: []const u8, face: u32) Error!Vector {
     return truetype.parseFace(data, face);
 }
 
 /// Reads and parses a `.ttf`, `.otf` or `.ttc` (optionally gzipped). The font owns the
 /// bytes; call `deinit`. A collection yields its first face; see `loadFace`.
-pub fn load(io: Io, gpa: Allocator, path: []const u8) !VectorFont {
+pub fn load(io: Io, gpa: Allocator, path: []const u8) !Vector {
     return loadFace(io, gpa, path, 0);
 }
 
 /// `load` for face `face` of a collection.
-pub fn loadFace(io: Io, gpa: Allocator, path: []const u8, face: u32) !VectorFont {
+pub fn loadFace(io: Io, gpa: Allocator, path: []const u8, face: u32) !Vector {
     const data = try font_mod.readFileMaybeGzip(io, gpa, path);
     errdefer gpa.free(data);
     return loadFromBytesFace(data, face);
@@ -97,14 +97,14 @@ pub fn loadFace(io: Io, gpa: Allocator, path: []const u8, face: u32) !VectorFont
 
 /// Frees the bytes of a font from `load`, and its cache. Not for fonts from
 /// `loadFromBytes`, which only need `disableCache`.
-pub fn deinit(self: *VectorFont, gpa: Allocator) void {
+pub fn deinit(self: *Vector, gpa: Allocator) void {
     self.disableCache();
     gpa.free(self.data);
     self.* = undefined;
 }
 
 /// Attaches a glyph cache allocated from `gpa`; a second call keeps the existing one.
-pub fn enableCache(self: *VectorFont, gpa: Allocator) Allocator.Error!void {
+pub fn enableCache(self: *Vector, gpa: Allocator) Allocator.Error!void {
     if (self.cache != null) return;
     const cache = try gpa.create(GlyphCache);
     cache.* = .init(gpa);
@@ -112,7 +112,7 @@ pub fn enableCache(self: *VectorFont, gpa: Allocator) Allocator.Error!void {
 }
 
 /// Frees the cache, if any; other copies of the font must not use it afterwards.
-pub fn disableCache(self: *VectorFont) void {
+pub fn disableCache(self: *Vector) void {
     const cache = self.cache orelse return;
     const gpa = cache.gpa;
     cache.deinit();
@@ -121,40 +121,40 @@ pub fn disableCache(self: *VectorFont) void {
 }
 
 /// Glyph index for `codepoint`; 0 (`.notdef`) when unmapped.
-pub fn glyphIndex(self: VectorFont, codepoint: u21) u16 {
+pub fn glyphIndex(self: Vector, codepoint: u21) u16 {
     const cache = self.cache orelse return self.lookupGlyphIndex(codepoint);
     const slot = cache.codepoints.getOrPut(cache.gpa, codepoint) catch return self.lookupGlyphIndex(codepoint);
     if (!slot.found_existing) slot.value_ptr.* = self.lookupGlyphIndex(codepoint);
     return slot.value_ptr.*;
 }
 
-fn lookupGlyphIndex(self: VectorFont, codepoint: u21) u16 {
+fn lookupGlyphIndex(self: Vector, codepoint: u21) u16 {
     const r: truetype.Reader = .init(self.data);
     const gid = truetype.cmap.lookup(r.table(self.tables.cmap), self.cmap, codepoint);
     return if (gid < self.num_glyphs) gid else 0;
 }
 
 /// Advance and left side bearing; the widest advance for an invalid index.
-pub fn glyphMetrics(self: VectorFont, gid: u16) GlyphMetrics {
+pub fn glyphMetrics(self: Vector, gid: u16) GlyphMetrics {
     if (gid >= self.num_glyphs) return .{ .advance = self.advance_width_max, .lsb = 0 };
     return self.metricsOf(self.cachedGlyph(gid), gid);
 }
 
 /// `glyphMetrics` through the cache entry `g` of a valid `gid`, when there is one.
-fn metricsOf(self: VectorFont, g: ?*GlyphCache.Glyph, gid: u16) GlyphMetrics {
+fn metricsOf(self: Vector, g: ?*GlyphCache.Glyph, gid: u16) GlyphMetrics {
     const entry = g orelse return self.readMetrics(gid);
     if (entry.metrics == null) entry.metrics = self.readMetrics(gid);
     return entry.metrics.?;
 }
 
 /// The cache entry for `gid`; null without a cache, for an invalid id or when out of memory.
-fn cachedGlyph(self: VectorFont, gid: u16) ?*GlyphCache.Glyph {
+fn cachedGlyph(self: Vector, gid: u16) ?*GlyphCache.Glyph {
     const cache = self.cache orelse return null;
     if (gid >= self.num_glyphs) return null;
     return cache.glyph(gid);
 }
 
-fn readMetrics(self: VectorFont, gid: u16) GlyphMetrics {
+fn readMetrics(self: Vector, gid: u16) GlyphMetrics {
     const r: truetype.Reader = .init(self.data);
     const hmtx = r.table(self.tables.hmtx);
     const last = self.num_h_metrics - 1;
@@ -169,12 +169,12 @@ fn readMetrics(self: VectorFont, gid: u16) GlyphMetrics {
 
 /// The glyph's bounding box: from its `glyf` header, or the control box of its CFF
 /// charstring. Null for glyphs without contours (spaces, `.notdef`).
-pub fn glyphBounds(self: VectorFont, gid: u16) ?Bounds {
+pub fn glyphBounds(self: Vector, gid: u16) ?Bounds {
     return self.boundsOf(self.cachedGlyph(gid), gid);
 }
 
 /// `glyphBounds` through the cache entry `g`, when there is one.
-fn boundsOf(self: VectorFont, g: ?*GlyphCache.Glyph, gid: u16) ?Bounds {
+fn boundsOf(self: Vector, g: ?*GlyphCache.Glyph, gid: u16) ?Bounds {
     const entry = g orelse return self.readBounds(gid);
     if (entry.bounds == null) {
         // A CFF box is the charstring interpreted, as its outline is: parse the outline
@@ -206,7 +206,7 @@ fn controlBox(o: Outline) ?Bounds {
     };
 }
 
-fn readBounds(self: VectorFont, gid: u16) ?Bounds {
+fn readBounds(self: Vector, gid: u16) ?Bounds {
     return switch (self.tables.outlines) {
         .glyf => truetype.glyf.bounds(self, gid),
         .cff => truetype.cff.bounds(self, gid),
@@ -215,7 +215,7 @@ fn readBounds(self: VectorFont, gid: u16) ?Bounds {
 
 /// The glyph's outline in font units, composites resolved. Caller owns the result; the
 /// cache is bypassed, see `outlineRef`.
-pub fn outline(self: VectorFont, gpa: Allocator, gid: u16) (Error || Allocator.Error)!Outline {
+pub fn outline(self: Vector, gpa: Allocator, gid: u16) (Error || Allocator.Error)!Outline {
     return switch (self.tables.outlines) {
         .glyf => truetype.glyf.outline(self, gpa, gid),
         .cff => truetype.cff.outline(self, gpa, gid),
@@ -235,7 +235,7 @@ pub const OutlineRef = struct {
 
 /// `outline` through the cache: parsed once and borrowed when one is enabled, owned by the
 /// caller otherwise. Parse failures are not remembered.
-pub fn outlineRef(self: VectorFont, gpa: Allocator, gid: u16) (Error || Allocator.Error)!OutlineRef {
+pub fn outlineRef(self: Vector, gpa: Allocator, gid: u16) (Error || Allocator.Error)!OutlineRef {
     const g = self.cachedGlyph(gid) orelse return .{ .outline = try self.outline(gpa, gid), .owned = true };
     const cache = self.cache.?;
     if (g.outline == null) {
@@ -246,7 +246,7 @@ pub fn outlineRef(self: VectorFont, gpa: Allocator, gid: u16) (Error || Allocato
 }
 
 /// Horizontal kerning to add to `left`'s advance when followed by `right`, in font units.
-pub fn kern(self: VectorFont, left: u16, right: u16) i16 {
+pub fn kern(self: Vector, left: u16, right: u16) i16 {
     if (self.tables.gpos == null and self.tables.kern == null) return 0;
     const cache = self.cache orelse return self.lookupKern(left, right);
     const slot = cache.kerns.getOrPut(cache.gpa, @as(u32, left) << 16 | right) catch return self.lookupKern(left, right);
@@ -254,7 +254,7 @@ pub fn kern(self: VectorFont, left: u16, right: u16) i16 {
     return slot.value_ptr.*;
 }
 
-fn lookupKern(self: VectorFont, left: u16, right: u16) i16 {
+fn lookupKern(self: Vector, left: u16, right: u16) i16 {
     const r: truetype.Reader = .init(self.data);
     if (self.tables.gpos) |pairs| return truetype.gpos.pairAdjust(r.table(pairs.table), pairs, left, right);
     if (self.tables.kern) |t| return truetype.kern.lookup(r.table(t), left, right);
@@ -262,12 +262,12 @@ fn lookupKern(self: VectorFont, left: u16, right: u16) i16 {
 }
 
 /// Device pixels per font unit at `size` pixels per em.
-pub fn scaleFor(self: VectorFont, size: f32) f32 {
+pub fn scaleFor(self: Vector, size: f32) f32 {
     return size / as(f32, self.units_per_em);
 }
 
 /// Baseline-to-baseline distance at `size` pixels per em.
-pub fn lineHeight(self: VectorFont, size: f32) f32 {
+pub fn lineHeight(self: Vector, size: f32) f32 {
     return as(f32, @as(i32, self.ascent) - self.descent + self.line_gap) * self.scaleFor(size);
 }
 
@@ -283,7 +283,7 @@ pub const Layout = struct {
         bounds: ?Bounds,
     };
 
-    font: VectorFont,
+    font: Vector,
     scale: f32,
     iter: std.unicode.Utf8Iterator,
     x: f32 = 0,
@@ -295,7 +295,7 @@ pub const Layout = struct {
     /// an interpretation per glyph; the bearing shift still reads them when it needs to.
     with_bounds: bool = true,
 
-    pub fn init(font: VectorFont, text: []const u8, size: f32) Layout {
+    pub fn init(font: Vector, text: []const u8, size: f32) Layout {
         const scale = font.scaleFor(size);
         return .{
             .font = font,
@@ -349,7 +349,7 @@ pub const Layout = struct {
     }
 };
 
-pub fn format(self: VectorFont, writer: *Io.Writer) Io.Writer.Error!void {
+pub fn format(self: Vector, writer: *Io.Writer) Io.Writer.Error!void {
     try writer.print("VectorFont{{ .units_per_em = {d}, .glyphs = {d}, .ascent = {d}, .descent = {d}", .{
         self.units_per_em,
         self.num_glyphs,
@@ -363,7 +363,7 @@ pub fn format(self: VectorFont, writer: *Io.Writer) Io.Writer.Error!void {
 const testing = std.testing;
 const synthetic = @import("truetype/synthetic.zig");
 
-fn lineWidth(font: VectorFont, text: []const u8, size: f32) f32 {
+fn lineWidth(font: Vector, text: []const u8, size: f32) f32 {
     return font_mod.layout.lineWidth(.{ .vector = font }, text, size, 0);
 }
 
@@ -414,20 +414,20 @@ test "rejects other formats and truncation without panicking" {
     @memcpy(otto[0..64], full[0..64]);
     // A collection header claiming zero faces.
     @memcpy(otto[0..4], "ttcf");
-    try testing.expectError(error.InvalidFormat, VectorFont.loadFromBytes(&otto));
+    try testing.expectError(error.InvalidFormat, Vector.loadFromBytes(&otto));
     @memcpy(otto[0..4], "abcd");
-    try testing.expectError(error.InvalidFormat, VectorFont.loadFromBytes(&otto));
-    try testing.expectError(error.UnexpectedEof, VectorFont.loadFromBytes(""));
+    try testing.expectError(error.InvalidFormat, Vector.loadFromBytes(&otto));
+    try testing.expectError(error.UnexpectedEof, Vector.loadFromBytes(""));
 
     // An OTTO tag on a font without a `CFF ` table.
     var cff_less: [synthetic.buffer_size]u8 = undefined;
     @memcpy(cff_less[0..full.len], full);
     @memcpy(cff_less[0..4], "OTTO");
-    try testing.expectError(error.MissingTable, VectorFont.loadFromBytes(cff_less[0..full.len]));
+    try testing.expectError(error.MissingTable, Vector.loadFromBytes(cff_less[0..full.len]));
 
     var len: usize = 0;
     while (len < full.len) : (len += 7) {
-        if (VectorFont.loadFromBytes(full[0..len])) |font| {
+        if (Vector.loadFromBytes(full[0..len])) |font| {
             // Loadable prefixes must still answer every query safely.
             _ = font.glyphIndex('A');
             _ = font.kern(1, 2);
@@ -444,18 +444,18 @@ test "rejects other formats and truncation without panicking" {
 test "collections" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const bytes = synthetic.build(&buf, .{ .collection = true });
-    try testing.expectEqual(.ttc, font_mod.FontFormat.detectFromBytes(bytes));
-    const first = try VectorFont.loadFromBytes(bytes);
-    const second = try VectorFont.loadFromBytesFace(bytes, 1);
+    try testing.expectEqual(.ttc, font_mod.Format.detectFromBytes(bytes));
+    const first = try Vector.loadFromBytes(bytes);
+    const second = try Vector.loadFromBytesFace(bytes, 1);
     try testing.expectEqual(2, first.num_faces);
     try testing.expectEqual(first.tables, second.tables);
     try testing.expectEqual(first.glyphIndex('B'), second.glyphIndex('B'));
-    try testing.expectError(error.InvalidFormat, VectorFont.loadFromBytesFace(bytes, 2));
+    try testing.expectError(error.InvalidFormat, Vector.loadFromBytesFace(bytes, 2));
 
     var single: [synthetic.buffer_size]u8 = undefined;
     const plain = synthetic.build(&single, .{});
-    try testing.expectEqual(1, (try VectorFont.loadFromBytes(plain)).num_faces);
-    try testing.expectError(error.InvalidFormat, VectorFont.loadFromBytesFace(plain, 1));
+    try testing.expectEqual(1, (try Vector.loadFromBytes(plain)).num_faces);
+    try testing.expectError(error.InvalidFormat, Vector.loadFromBytesFace(plain, 1));
 
     var text: [128]u8 = undefined;
     const printed = try std.mem.print(&text, "{f}", .{first});
@@ -464,7 +464,7 @@ test "collections" {
     // Truncated collections fail cleanly too.
     var len: usize = 0;
     while (len < bytes.len) : (len += 7) {
-        if (VectorFont.loadFromBytesFace(bytes[0..len], 1)) |font| {
+        if (Vector.loadFromBytesFace(bytes[0..len], 1)) |font| {
             _ = font.glyphIndex('A');
             _ = font.glyphBounds(4);
         } else |_| {}
@@ -480,7 +480,7 @@ test "loading from a file" {
     const path = try tmp.dir.realPathFileAlloc(testing.io, "synth.ttf", testing.allocator);
     defer testing.allocator.free(path);
 
-    var font: VectorFont = try .load(testing.io, testing.allocator, path);
+    var font: Vector = try .load(testing.io, testing.allocator, path);
     defer font.deinit(testing.allocator);
     try testing.expectEqual(@as(u16, 2), font.glyphIndex('B'));
 
@@ -496,8 +496,8 @@ test "system font, when one is installed" {
         "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
         "/usr/share/fonts/TTF/Roboto-Regular.ttf",
     };
-    var font: VectorFont = for (candidates) |path| {
-        break VectorFont.load(testing.io, testing.allocator, path) catch continue;
+    var font: Vector = for (candidates) |path| {
+        break Vector.load(testing.io, testing.allocator, path) catch continue;
     } else return error.SkipZigTest;
     defer font.deinit(testing.allocator);
 
@@ -522,7 +522,7 @@ test "system collection, when one is installed" {
         Io.Dir.cwd().access(testing.io, path, .{}) catch continue;
         break path;
     } else return error.SkipZigTest;
-    var font: VectorFont = try .load(testing.io, testing.allocator, path);
+    var font: Vector = try .load(testing.io, testing.allocator, path);
     defer font.deinit(testing.allocator);
 
     try testing.expect(font.num_faces > 1);
@@ -540,10 +540,10 @@ test "system collection, when one is installed" {
     try testing.expect(cubics > 0);
     try testing.expect(lineWidth(font, "中文", 24) > 24);
 
-    var last: VectorFont = try .loadFace(testing.io, testing.allocator, path, font.num_faces - 1);
+    var last: Vector = try .loadFace(testing.io, testing.allocator, path, font.num_faces - 1);
     defer last.deinit(testing.allocator);
     try testing.expectEqual(font.num_glyphs, last.num_glyphs);
-    try testing.expectError(error.InvalidFormat, VectorFont.loadFace(testing.io, testing.allocator, path, font.num_faces));
+    try testing.expectError(error.InvalidFormat, Vector.loadFace(testing.io, testing.allocator, path, font.num_faces));
 }
 
 test "system CFF font, when one is installed" {
@@ -552,8 +552,8 @@ test "system CFF font, when one is installed" {
         "/usr/share/fonts/opentype/freefont/FreeSans.otf",
         "/usr/share/fonts/OTF/FreeSans.otf",
     };
-    var font: VectorFont = for (candidates) |path| {
-        break VectorFont.load(testing.io, testing.allocator, path) catch continue;
+    var font: Vector = for (candidates) |path| {
+        break Vector.load(testing.io, testing.allocator, path) catch continue;
     } else return error.SkipZigTest;
     defer font.deinit(testing.allocator);
 

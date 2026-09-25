@@ -3,9 +3,9 @@
 const std = @import("std");
 
 const zignal = @import("zignal");
-const SimilarityTransform = zignal.SimilarityTransform;
-const AffineTransform = zignal.AffineTransform;
-const ProjectiveTransform = zignal.ProjectiveTransform;
+const SimilarityTransform = zignal.geometry.SimilarityTransform;
+const AffineTransform = zignal.geometry.AffineTransform;
+const ProjectiveTransform = zignal.geometry.ProjectiveTransform;
 
 const python = @import("python.zig");
 const c = python.c;

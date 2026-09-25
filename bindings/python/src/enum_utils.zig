@@ -3,8 +3,7 @@
 const std = @import("std");
 const BuiltinEnum = std.builtin.Type.Enum;
 
-const zignal = @import("zignal");
-
+const enums = @import("enums.zig");
 const python = @import("python.zig");
 const c = python.c;
 
@@ -56,7 +55,7 @@ pub fn registerEnum(
     }
 
     // Create IntEnum(Name, values) using simple type name
-    const name = zignal.meta.getSimpleTypeName(E);
+    const name = enums.pythonName(E);
     const name_uni = python.create(name) orelse return error.TupleCreationFailed;
     defer c.Py_DecRef(name_uni);
     const args = c.PyTuple_Pack(2, name_uni, values) orelse return error.TupleCreationFailed;
@@ -134,7 +133,7 @@ pub fn pyToEnum(comptime E: type, obj: *c.PyObject) !E {
     }
     if (!matched) {
         var buf: [128]u8 = undefined;
-        const name = zignal.meta.getSimpleTypeName(E);
+        const name = enums.pythonName(E);
         const msg = std.mem.printSentinel(&buf, "Invalid {s} value", .{name}, 0) catch "Invalid enum value";
         c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
         return error.InvalidValue;
@@ -176,7 +175,7 @@ pub fn pyToUnionTag(comptime U: type, obj: *c.PyObject) !TagOf(U) {
         }
     }
     var buf: [128]u8 = undefined;
-    const name = zignal.meta.getSimpleTypeName(U);
+    const name = enums.pythonName(U);
     const msg = std.mem.printSentinel(&buf, "Invalid {s} value", .{name}, 0) catch "Invalid enum value";
     c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
     return error.InvalidValue;
@@ -208,7 +207,7 @@ pub fn longToEnum(comptime T: type, value: c_long) !ResolvedEnum(T) {
         }
     }
     var buf: [128]u8 = undefined;
-    const name = zignal.meta.getSimpleTypeName(T);
+    const name = enums.pythonName(T);
     const msg = std.mem.printSentinel(&buf, "Invalid {s} value", .{name}, 0) catch "Invalid enum value";
     c.PyErr_SetString(c.PyExc_ValueError, msg.ptr);
     return error.InvalidValue;

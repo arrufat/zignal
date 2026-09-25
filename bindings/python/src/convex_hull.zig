@@ -1,7 +1,7 @@
-//! Python ConvexHull type wrapping `zignal.ConvexHull(f64)`.
+//! Python ConvexHull type wrapping `zignal.geometry.ConvexHull(f64)`.
 
 const zignal = @import("zignal");
-const ConvexHull = zignal.ConvexHull(f64);
+const ConvexHull = zignal.geometry.ConvexHull(f64);
 const Point2F = zignal.Point(2, f64);
 
 const python = @import("python.zig");

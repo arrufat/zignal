@@ -49,7 +49,7 @@ fn perlin_function(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) call
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const options = zignal.PerlinOptions(f64){
+    const options = zignal.perlin.Options(f64){
         .amplitude = python.validatePositive(f64, params.amplitude, "amplitude") catch return null,
         .frequency = python.validatePositive(f64, params.frequency, "frequency") catch return null,
         .octaves = @intCast(python.validateRange(c_long, params.octaves, 1, max_octaves, "octaves") catch return null),
@@ -57,7 +57,7 @@ fn perlin_function(_: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) call
         .lacunarity = python.validateRange(f64, params.lacunarity, 1.0, max_lacunarity, "lacunarity") catch return null,
     };
 
-    const value = zignal.perlin(f64, params.x, params.y, params.z, options);
+    const value = zignal.perlin.noise(f64, params.x, params.y, params.z, options);
     return python.create(value);
 }
 

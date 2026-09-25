@@ -54,7 +54,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
             defer file.close(io);
 
             var reader = file.reader(io, &read_buffer);
-            const image_format = zignal.ImageFormat.peek(&reader.interface) catch |err| break :blk err;
+            const image_format = zignal.image.Format.peek(&reader.interface) catch |err| break :blk err;
             std.log.debug("format detected: {s}", .{@tagName(image_format)});
 
             switch (image_format) {
@@ -147,9 +147,9 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
                 defer image.deinit(gpa);
 
                 const timer = common.Timer.begin(io);
-                var r_stats: zignal.RunningStats(f64, .summary) = .init();
-                var g_stats: zignal.RunningStats(f64, .summary) = .init();
-                var b_stats: zignal.RunningStats(f64, .summary) = .init();
+                var r_stats: zignal.stats.Running(f64, .summary) = .init();
+                var g_stats: zignal.stats.Running(f64, .summary) = .init();
+                var b_stats: zignal.stats.Running(f64, .summary) = .init();
 
                 for (image.data) |pixel| {
                     r_stats.add(pixel.r);

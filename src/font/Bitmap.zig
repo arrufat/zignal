@@ -13,7 +13,7 @@ const FontFormat = @import("format.zig").FontFormat;
 const GlyphData = @import("GlyphData.zig");
 const pcf = @import("pcf.zig");
 
-const BitmapFont = @This();
+const Bitmap = @This();
 
 /// Name of the font (e.g., "Unifont", "Fixed", etc.)
 name: []const u8,
@@ -45,15 +45,15 @@ pub const Entry = struct {
 /// Example:
 /// ```zig
 /// // Load entire font:
-/// const font = try BitmapFont.load(io, allocator, "unifont.bdf", .all);
+/// const font = try Bitmap.load(io, allocator, "unifont.bdf", .all);
 /// defer font.deinit(allocator);
 ///
 /// // Load specific ranges:
-/// const font = try BitmapFont.load(
+/// const font = try Bitmap.load(
 ///     io, allocator, "font.bdf", .{ .ranges = &unicode.ranges.japanese },
 /// );
 /// ```
-pub fn load(io: Io, allocator: Allocator, file_path: []const u8, filter: LoadFilter) !BitmapFont {
+pub fn load(io: Io, allocator: Allocator, file_path: []const u8, filter: LoadFilter) !Bitmap {
     const font_format = try FontFormat.detectFromPath(io, file_path) orelse return error.UnsupportedFontFormat;
     return switch (font_format) {
         .bdf => bdf.load(io, allocator, file_path, filter),
@@ -63,27 +63,27 @@ pub fn load(io: Io, allocator: Allocator, file_path: []const u8, filter: LoadFil
 }
 
 /// Get number of bytes per row for this font
-pub fn bytesPerRow(self: BitmapFont) u32 {
+pub fn bytesPerRow(self: Bitmap) u32 {
     return GlyphData.bytesForWidth(self.char_width);
 }
 
 /// Font ascent, falling back to the character height when the source file didn't record one
-pub fn ascent(self: BitmapFont) i16 {
+pub fn ascent(self: Bitmap) i16 {
     return self.font_ascent orelse self.char_height;
 }
 
 /// Scale that renders the font `size` pixels tall.
-pub fn scaleFor(self: BitmapFont, size: f32) f32 {
+pub fn scaleFor(self: Bitmap, size: f32) f32 {
     return size / @as(f32, @floatFromInt(self.char_height));
 }
 
 /// Glyphs in the font.
-pub fn glyphCount(self: BitmapFont) usize {
+pub fn glyphCount(self: Bitmap) usize {
     return self.glyphs.len;
 }
 
 /// Whether every glyph has the same width and advance.
-pub fn isMonospace(self: BitmapFont) bool {
+pub fn isMonospace(self: Bitmap) bool {
     for (self.glyphs) |entry| {
         const first = self.glyphs[0].info;
         if (entry.info.width != first.width or entry.info.device_width != first.device_width) return false;
@@ -128,7 +128,7 @@ pub const Glyph = struct {
 
 /// The table entry of `codepoint`, null if the font lacks it. A contiguous table answers by
 /// index, inline so the text loops pay only that; any other falls back to the search.
-pub inline fn getEntry(self: BitmapFont, codepoint: u21) ?*const Entry {
+pub inline fn getEntry(self: Bitmap, codepoint: u21) ?*const Entry {
     const glyphs = self.glyphs;
     if (glyphs.len == 0) return null;
     // A codepoint below the first wraps past the length and misses like any other.
@@ -149,20 +149,20 @@ fn search(glyphs: []const Entry, codepoint: u21) ?*const Entry {
 }
 
 /// The bitmap of a glyph of this font.
-pub fn bitmap(self: BitmapFont, info: GlyphData) []const u8 {
+pub fn bitmap(self: Bitmap, info: GlyphData) []const u8 {
     return self.data[info.bitmap_offset..][0..info.bitmapSize()];
 }
 
 /// Resolve a codepoint to its glyph info and bitmap data with a single lookup.
 /// Returns null if the character is not in the font.
-pub fn getGlyph(self: BitmapFont, codepoint: u21) ?Glyph {
+pub fn getGlyph(self: Bitmap, codepoint: u21) ?Glyph {
     const info = (self.getEntry(codepoint) orelse return null).info;
     return .{ .info = info, .data = self.bitmap(info) };
 }
 
 /// Get the bitmap data for a specific character
 /// Returns null if the character is not in the font
-pub fn getCharData(self: BitmapFont, codepoint: u21) ?[]const u8 {
+pub fn getCharData(self: Bitmap, codepoint: u21) ?[]const u8 {
     const glyph = self.getGlyph(codepoint) orelse return null;
     return glyph.data;
 }
@@ -177,7 +177,7 @@ pub const Layout = struct {
         x: f32,
     };
 
-    font: BitmapFont,
+    font: Bitmap,
     scale: f32,
     iter: std.unicode.Utf8Iterator,
     /// The pen; set it before the first glyph to lay out from elsewhere than 0.
@@ -185,7 +185,7 @@ pub const Layout = struct {
     /// Extra device pixels after every glyph's advance.
     letter_spacing: f32 = 0,
 
-    pub fn init(font: BitmapFont, text: []const u8, scale: f32) Layout {
+    pub fn init(font: Bitmap, text: []const u8, scale: f32) Layout {
         return .{ .font = font, .scale = scale, .iter = .{ .bytes = text, .i = 0 } };
     }
 
@@ -222,7 +222,7 @@ pub const Layout = struct {
 /// Saves the font to a file.
 /// Supports BDF (`.bdf`, `.bdf.gz`) and PCF (`.pcf`, `.pcf.gz`) formats.
 /// The format is determined by the file extension.
-pub fn save(self: BitmapFont, io: Io, allocator: Allocator, file_path: []const u8) !void {
+pub fn save(self: Bitmap, io: Io, allocator: Allocator, file_path: []const u8) !void {
     const font_format = FontFormat.detectFromExtension(file_path) orelse return error.UnsupportedFontFormat;
     return switch (font_format) {
         .bdf => bdf.save(io, allocator, self, file_path),
@@ -232,7 +232,7 @@ pub fn save(self: BitmapFont, io: Io, allocator: Allocator, file_path: []const u
 }
 
 /// Displays the font information: name, dimensions, glyph count and spacing.
-pub fn format(self: BitmapFont, writer: *Io.Writer) Io.Writer.Error!void {
+pub fn format(self: Bitmap, writer: *Io.Writer) Io.Writer.Error!void {
     try writer.print("BitmapFont{{ .name = \"{s}\", .char_width = {d}, .char_height = {d}, .glyphs = {d}, .spacing = {s} }}", .{
         self.name,
         self.char_width,
@@ -243,14 +243,14 @@ pub fn format(self: BitmapFont, writer: *Io.Writer) Io.Writer.Error!void {
 }
 
 /// Free resources (if owned)
-pub fn deinit(self: *BitmapFont, allocator: std.mem.Allocator) void {
+pub fn deinit(self: *Bitmap, allocator: std.mem.Allocator) void {
     allocator.free(self.name);
     allocator.free(self.glyphs);
     allocator.free(self.data);
 }
 
 /// A three-glyph (`A`–`C`) 8x8 font for tests; static, so never `deinit` it.
-pub const test_font: BitmapFont = .{
+pub const test_font: Bitmap = .{
     .name = "TestFont",
     .char_width = 8,
     .char_height = 8,
@@ -265,7 +265,7 @@ pub const test_font: BitmapFont = .{
 
 test "getEntry over a sparse table" {
     const testing = std.testing;
-    const font: BitmapFont = .{
+    const font: Bitmap = .{
         .name = "Sparse",
         .char_width = 8,
         .char_height = 8,
@@ -280,7 +280,7 @@ test "getEntry over a sparse table" {
     try testing.expectEqual(3, font.glyphCount());
     try testing.expect(font.isMonospace());
 
-    const empty: BitmapFont = .{ .name = "", .char_width = 8, .char_height = 8, .glyphs = &.{}, .data = &.{} };
+    const empty: Bitmap = .{ .name = "", .char_width = 8, .char_height = 8, .glyphs = &.{}, .data = &.{} };
     try testing.expectEqual(null, empty.getEntry('A'));
     try testing.expect(empty.isMonospace());
 }

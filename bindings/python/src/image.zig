@@ -4,7 +4,7 @@ const std = @import("std");
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const DisplayFormat = zignal.DisplayFormat;
+const DisplayFormat = zignal.image.DisplayFormat;
 
 const color_bindings = @import("color.zig");
 const color_utils = @import("color_utils.zig");

@@ -2,7 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const zignal = @import("zignal");
 const perlin = zignal.perlin;
-const PerlinOptions = zignal.PerlinOptions;
 const Rgba = zignal.Rgba(u8);
 const Image = zignal.Image;
 
@@ -18,7 +17,7 @@ comptime {
     _ = js.free;
 }
 
-var opts: PerlinOptions(f32) = .{
+var opts: perlin.Options(f32) = .{
     .amplitude = 1,
     .frequency = 1,
     .octaves = 1,
@@ -59,7 +58,7 @@ pub export fn generate(rgba_ptr: [*]Rgba, rows: u32, cols: u32) void {
             const x: f32 = @as(f32, @floatFromInt(c)) / @as(f32, @floatFromInt(image.cols));
             const val: u8 = @trunc(
                 @max(0, @min(255, @round(
-                    255 * (opts.amplitude / 2 * (perlin(f32, x, y, 0, opts) + opts.amplitude)),
+                    255 * (opts.amplitude / 2 * (perlin.noise(f32, x, y, 0, opts) + opts.amplitude)),
                 ))),
             );
             image.at(r, c).* = (zignal.Gray(u8){ .y = val }).to(.rgb).withAlpha(255);
