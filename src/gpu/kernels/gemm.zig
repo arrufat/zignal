@@ -12,10 +12,13 @@ const threads = params_mod.gemm_threads;
 const micro = block / threads;
 const kstep = params_mod.gemm_kstep;
 
-// Buffers are addressed through device pointers; the array length is only a type bound.
+// Buffers are addressed through device pointers; the array lengths are only type bounds.
 const Buf = [1 << 28]f32;
 const ConstPtr = *addrspace(.physical_storage_buffer) const Buf;
 const Ptr = *addrspace(.physical_storage_buffer) Buf;
+const V = @Vector(4, f32);
+/// The same buffer as 16-byte vectors, for loads along a contiguous axis.
+const ConstVecPtr = *addrspace(.physical_storage_buffer) const [1 << 26]V;
 
 extern const params: Params addrspace(.push_constant);
 
@@ -24,6 +27,11 @@ var tile_a: [kstep][block]f32 addrspace(.shared) = undefined;
 var tile_b: [kstep][block]f32 addrspace(.shared) = undefined;
 
 const loads = block * kstep / (threads * threads);
+
+// The vector mappings hand exactly one 4-wide load per invocation and tile.
+comptime {
+    std.debug.assert(loads == 4);
+}
 
 export fn main() callconv(.{ .spirv_kernel = .{ .x = threads, .y = threads, .z = 1 } }) void {
     const lx = spirv.local_invocation_id[0];
@@ -45,38 +53,84 @@ export fn main() callconv(.{ .spirv_kernel = .{ .x = threads, .y = threads, .z =
         acc[r][s] = 0;
     };
 
+    // Along a contiguous axis whose length is a multiple of four, one invocation loads four
+    // elements at once; the whole tile is still one load per invocation.
+    const vec_a = if (trans_a) m % 4 == 0 else k % 4 == 0;
+    const vec_b = if (trans_b) k % 4 == 0 else n % 4 == 0;
+    const a4: ConstVecPtr = @ptrFromInt(params.a);
+    const b4: ConstVecPtr = @ptrFromInt(params.b);
+
     var t: u32 = 0;
     // Every invocation runs the whole loop (barriers need uniform control flow); out-of-range
     // elements load zeros and skip the final store. Each load mapping walks the contiguous
     // axis of the source with consecutive invocations.
     while (t < k) : (t += kstep) {
-        inline for (0..loads) |j| {
-            const idx = tid + j * threads * threads;
+        if (vec_a) {
             if (trans_a) {
-                const rr = idx % block;
-                const kk = idx / block;
+                const rr = (tid % (block / 4)) * 4;
+                const kk = tid / (block / 4);
                 const row = row0 + rr;
                 const ka = t + kk;
-                tile_a[kk][rr] = if (row < m and ka < k) a[ka * m + row] else 0;
+                const v: V = if (row < m and ka < k) a4[(ka * m + row) / 4] else @splat(0);
+                inline for (0..4) |j| tile_a[kk][rr + j] = v[j];
             } else {
-                const kk = idx % kstep;
-                const rr = idx / kstep;
+                const kk = (tid % (kstep / 4)) * 4;
+                const rr = tid / (kstep / 4);
                 const row = row0 + rr;
                 const ka = t + kk;
-                tile_a[kk][rr] = if (row < m and ka < k) a[row * k + ka] else 0;
+                const v: V = if (row < m and ka < k) a4[(row * k + ka) / 4] else @splat(0);
+                inline for (0..4) |j| tile_a[kk + j][rr] = v[j];
             }
+        } else {
+            inline for (0..loads) |j| {
+                const idx = tid + j * threads * threads;
+                if (trans_a) {
+                    const rr = idx % block;
+                    const kk = idx / block;
+                    const row = row0 + rr;
+                    const ka = t + kk;
+                    tile_a[kk][rr] = if (row < m and ka < k) a[ka * m + row] else 0;
+                } else {
+                    const kk = idx % kstep;
+                    const rr = idx / kstep;
+                    const row = row0 + rr;
+                    const ka = t + kk;
+                    tile_a[kk][rr] = if (row < m and ka < k) a[row * k + ka] else 0;
+                }
+            }
+        }
+        if (vec_b) {
             if (trans_b) {
-                const kk = idx % kstep;
-                const cc = idx / kstep;
+                const kk = (tid % (kstep / 4)) * 4;
+                const cc = tid / (kstep / 4);
                 const col = col0 + cc;
                 const kb = t + kk;
-                tile_b[kk][cc] = if (kb < k and col < n) b[col * k + kb] else 0;
+                const v: V = if (kb < k and col < n) b4[(col * k + kb) / 4] else @splat(0);
+                inline for (0..4) |j| tile_b[kk + j][cc] = v[j];
             } else {
-                const cc = idx % block;
-                const kk = idx / block;
+                const cc = (tid % (block / 4)) * 4;
+                const kk = tid / (block / 4);
                 const col = col0 + cc;
                 const kb = t + kk;
-                tile_b[kk][cc] = if (kb < k and col < n) b[kb * n + col] else 0;
+                const v: V = if (kb < k and col < n) b4[(kb * n + col) / 4] else @splat(0);
+                inline for (0..4) |j| tile_b[kk][cc + j] = v[j];
+            }
+        } else {
+            inline for (0..loads) |j| {
+                const idx = tid + j * threads * threads;
+                if (trans_b) {
+                    const kk = idx % kstep;
+                    const cc = idx / kstep;
+                    const col = col0 + cc;
+                    const kb = t + kk;
+                    tile_b[kk][cc] = if (kb < k and col < n) b[col * k + kb] else 0;
+                } else {
+                    const cc = idx % block;
+                    const kk = idx / block;
+                    const col = col0 + cc;
+                    const kb = t + kk;
+                    tile_b[kk][cc] = if (kb < k and col < n) b[kb * n + col] else 0;
+                }
             }
         }
         spirv.workgroupBarrier();
