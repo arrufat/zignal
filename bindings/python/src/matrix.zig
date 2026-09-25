@@ -614,7 +614,7 @@ fn dispatchMatrixOp(
     return python.notImplemented();
 }
 
-const MatrixError = zignal.MatrixError;
+const MatrixError = zignal.matrix.Error;
 const MatrixResult = MatrixError!Matrix(f64);
 
 fn op_add(a: *Matrix(f64), b: *Matrix(f64)) MatrixResult {

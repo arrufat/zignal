@@ -22,7 +22,7 @@ pub const Args = struct {
         .scale = .{ .help = "Scale factor (e.g. 0.5 for 50%, 2.0 for 200%)", .metavar = "float" },
         .width = .{ .help = "Target width in pixels", .metavar = "pixels" },
         .height = .{ .help = "Target height in pixels", .metavar = "pixels" },
-        .filter = .{ .help = "Interpolation filter (" ++ common.joinFieldNames(zignal.Interpolation) ++ ")", .metavar = "name" },
+        .filter = .{ .help = "Interpolation filter (" ++ common.joinFieldNames(zignal.image.Interpolation) ++ ")", .metavar = "name" },
         .output = .{ .help = "Output file or directory path (mandatory)", .metavar = "path", .short = 'o' },
     };
 

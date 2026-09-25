@@ -170,7 +170,7 @@ pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options
                 return error.InvalidArguments;
             }
 
-            const motion: zignal.MotionBlur = if (blur_type == .motion_zoom)
+            const motion: zignal.image.MotionBlur = if (blur_type == .motion_zoom)
                 .{ .radial_zoom = .{ .center_x = cx, .center_y = cy, .strength = strength } }
             else
                 .{ .radial_spin = .{ .center_x = cx, .center_y = cy, .strength = strength } };
@@ -190,7 +190,7 @@ fn processImage(
     input_path: []const u8,
     target: ?common.OutputTarget,
     options: Args,
-    display_format: ?zignal.DisplayFormat,
+    display_format: ?zignal.image.DisplayFormat,
 ) !void {
     std.log.debug("loading {s}...", .{input_path});
 

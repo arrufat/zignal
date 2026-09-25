@@ -3,7 +3,7 @@
 const std = @import("std");
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const BinaryKernel = zignal.BinaryKernel;
+const BinaryKernel = zignal.image.BinaryKernel;
 
 const python = @import("../python.zig");
 const allocator = python.allocator;

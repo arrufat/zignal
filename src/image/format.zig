@@ -12,7 +12,7 @@ const png = codecs.png;
 
 /// Supported image formats for automatic detection and loading. Each tag names its module in
 /// `codecs.zig`.
-pub const ImageFormat = enum {
+pub const Format = enum {
     png,
     jpeg,
     bmp,
@@ -26,7 +26,7 @@ pub const ImageFormat = enum {
 
     /// Detects image format from the first few bytes of file data.
     /// The format named by the signature at the start of `reader`, without consuming it.
-    pub fn peek(reader: *std.Io.Reader) !ImageFormat {
+    pub fn peek(reader: *std.Io.Reader) !Format {
         // Files shorter than a signature can still match a shorter one.
         const head = reader.peekGreedy(signature_len) catch |err| switch (err) {
             error.EndOfStream => reader.buffered(),
@@ -35,7 +35,7 @@ pub const ImageFormat = enum {
         return detectFromBytes(head) orelse error.UnsupportedImageFormat;
     }
 
-    pub fn detectFromBytes(data: []const u8) ?ImageFormat {
+    pub fn detectFromBytes(data: []const u8) ?Format {
         // PNG signature
         if (data.len >= 8) {
             if (std.mem.eql(u8, data[0..8], &png.signature)) {
@@ -73,7 +73,7 @@ pub const ImageFormat = enum {
     /// Map a file path's extension to a format. Used by `save`, where the file
     /// doesn't yet exist so signature sniffing isn't an option. Comparison is
     /// case-insensitive.
-    pub fn fromExtension(file_path: []const u8) ?ImageFormat {
+    pub fn fromExtension(file_path: []const u8) ?Format {
         const matches = std.ascii.endsWithIgnoreCase;
         if (matches(file_path, ".png")) return .png;
         if (matches(file_path, ".jpg") or matches(file_path, ".jpeg")) return .jpeg;
@@ -86,7 +86,7 @@ pub const ImageFormat = enum {
 
     /// The system library a runtime-loaded codec needs (see `codecs/dynlib.zig`), or null
     /// for the native codecs.
-    pub fn runtimeLibrary(self: ImageFormat) ?[]const u8 {
+    pub fn runtimeLibrary(self: Format) ?[]const u8 {
         return switch (self) {
             .png, .jpeg, .bmp, .gif => null,
             .jxl => "libjxl",

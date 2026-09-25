@@ -7,7 +7,7 @@ const Image = zignal.Image;
 const Rgb = zignal.Rgb(u8);
 const Rgba = zignal.Rgba(u8);
 const Rectangle = zignal.Rectangle;
-const Interpolation = zignal.Interpolation;
+const Interpolation = zignal.image.Interpolation;
 const Point = zignal.Point;
 
 const warmup_iters = 2;
@@ -112,7 +112,7 @@ fn benchWarp(comptime T: type, io: std.Io, gpa: std.mem.Allocator, random: std.R
     defer dst.deinit(gpa);
     const from = [_]Point(2, f32){ .init(.{ 0, 0 }), .init(.{ 100, 0 }), .init(.{ 0, 100 }) };
     const to = [_]Point(2, f32){ .init(.{ 10, 20 }), .init(.{ 95, 30 }), .init(.{ -8, 108 }) };
-    const transform = try zignal.SimilarityTransform(f32).init(&from, &to);
+    const transform = try zignal.geometry.SimilarityTransform(f32).init(&from, &to);
     const Ctx = struct {
         src: Image(T),
         dst: Image(T),

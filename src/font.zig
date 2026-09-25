@@ -16,8 +16,8 @@ const Rectangle = @import("geometry.zig").Rectangle;
 pub const max_file_size = 256 * 1024 * 1024;
 
 // Core font types
-pub const BitmapFont = @import("font/BitmapFont.zig");
-pub const VectorFont = @import("font/VectorFont.zig");
+pub const Bitmap = @import("font/Bitmap.zig");
+pub const Vector = @import("font/Vector.zig");
 pub const Outline = @import("font/Outline.zig");
 pub const GlyphCache = @import("font/GlyphCache.zig");
 pub const truetype = @import("font/truetype.zig");
@@ -29,8 +29,8 @@ pub const VerticalAlign = layout.VerticalAlign;
 /// A font of either kind, so text APIs can take one transparently. `size` is always
 /// the pixel size: the em height for vector fonts, the character height for bitmap fonts.
 pub const Font = union(enum) {
-    bitmap: BitmapFont,
-    vector: VectorFont,
+    bitmap: Bitmap,
+    vector: Vector,
 
     /// Size a vector font is drawn at when none is given; bitmap fonts use their own.
     pub const default_vector_size: f32 = 16;
@@ -43,12 +43,12 @@ pub const Font = union(enum) {
 
     /// `load` for face `face` of a `.ttc` collection. Only face 0 exists otherwise.
     pub fn loadFace(io: Io, gpa: Allocator, path: []const u8, face: u32) !Font {
-        const format = try FontFormat.detectFromPath(io, path) orelse return error.UnsupportedFontFormat;
+        const format = try Format.detectFromPath(io, path) orelse return error.UnsupportedFontFormat;
         if (face != 0 and format != .ttc) return error.InvalidFormat;
         return switch (format) {
             .bdf => .{ .bitmap = try bdf.load(io, gpa, path, .all) },
             .pcf => .{ .bitmap = try pcf.load(io, gpa, path, .all) },
-            .ttf, .otf, .ttc => .{ .vector = try VectorFont.loadFace(io, gpa, path, face) },
+            .ttf, .otf, .ttc => .{ .vector = try Vector.loadFace(io, gpa, path, face) },
         };
     }
 
@@ -59,7 +59,7 @@ pub const Font = union(enum) {
         }
     }
 
-    /// Attaches a `GlyphCache` to a vector font (see `VectorFont.enableCache`); bitmap
+    /// Attaches a `GlyphCache` to a vector font (see `Vector.enableCache`); bitmap
     /// fonts have nothing to cache.
     pub fn enableCache(self: *Font, gpa: Allocator) Allocator.Error!void {
         switch (self.*) {
@@ -207,7 +207,7 @@ pub const font8x8 = @import("font/font8x8.zig");
 pub const unicode = @import("font/unicode.zig");
 
 // Format detection
-pub const FontFormat = @import("font/format.zig").FontFormat;
+pub const Format = @import("font/format.zig").FontFormat;
 
 // BDF font support
 pub const bdf = @import("font/bdf.zig");
@@ -219,7 +219,7 @@ test {
     _ = font8x8;
     _ = bdf;
     _ = pcf;
-    _ = VectorFont;
+    _ = Vector;
     _ = Outline;
     _ = GlyphCache;
     _ = truetype;
@@ -246,7 +246,7 @@ test "Font.load dispatches on the format" {
     try font.enableCache(std.testing.allocator);
     try std.testing.expect(font.vector.cache != null);
     try std.testing.expect(font.hasGlyph('A'));
-    try std.testing.expectError(error.UnsupportedFontFormat, BitmapFont.load(std.testing.io, std.testing.allocator, path, .all));
+    try std.testing.expectError(error.UnsupportedFontFormat, Bitmap.load(std.testing.io, std.testing.allocator, path, .all));
 
     try std.testing.expectEqual(@as(f32, 16), font.defaultSize());
     const bitmap: Font = .{ .bitmap = font8x8.basic };
@@ -263,7 +263,7 @@ test "Font.load dispatches on the format" {
     defer otf.deinit(std.testing.allocator);
     try std.testing.expect(otf == .vector and otf.vector.tables.outlines == .cff);
     try std.testing.expect(otf.hasGlyph('C'));
-    try std.testing.expectError(error.UnsupportedFontFormat, BitmapFont.load(std.testing.io, std.testing.allocator, otf_path, .all));
+    try std.testing.expectError(error.UnsupportedFontFormat, Bitmap.load(std.testing.io, std.testing.allocator, otf_path, .all));
 
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "synth.ttc", .data = synthetic.build(&buf, .{ .collection = true }) });
     const ttc_path = try tmp.dir.realPathFileAlloc(std.testing.io, "synth.ttc", std.testing.allocator);

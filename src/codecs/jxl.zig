@@ -6,11 +6,10 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-const animated = @import("../image/animated.zig");
-const AnimatedImage = animated.AnimatedImage;
+const Animation = @import("../image/animation.zig").Animation;
 const Image = @import("../image.zig").Image;
 const codecs = @import("../codecs.zig");
-const NativeImage = codecs.NativeImage;
+const AnyImage = @import("../image/any.zig").Any;
 const dynlib = @import("dynlib.zig");
 const parallel = @import("../parallel.zig");
 const Rgb = @import("../color.zig").Rgb(u8);
@@ -110,7 +109,7 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
 
 /// Decodes the first frame of `data` into its natural pixel type, converted to sRGB when the
 /// codestream allows it (XYB-encoded images). libjxl's worker tasks run on `io`.
-pub fn decode(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !NativeImage {
+pub fn loadAnyFromBytes(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnyImage {
     if (!enabled) return error.CodecNotEnabled;
     var reader: FrameReader = undefined;
     try reader.init(io, data, limits);
@@ -120,12 +119,12 @@ pub fn decode(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimi
 }
 
 /// Loads every displayed frame; a still JPEG XL gives one frame.
-pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnimatedImage(T) {
+pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Animation(T) {
     if (!enabled) return error.CodecNotEnabled;
     var reader: FrameReader = undefined;
     try reader.init(io, data, limits);
     defer reader.deinit();
-    var builder: animated.Builder(T) = .{};
+    var builder: Animation(T).Builder = .{};
     defer builder.deinit(allocator);
     const frame_pixels = @as(u64, reader.header.width) * reader.header.height;
     while (try reader.next(allocator)) |frame| {
@@ -141,7 +140,7 @@ pub fn loadAnimatedFromBytes(comptime T: type, io: Io, allocator: Allocator, dat
 }
 
 /// Reads every frame of a JPEG XL image from `reader`, buffering at most the `DecodeLimits` byte cap.
-pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnimatedImage(T) {
+pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Animation(T) {
     if (!enabled) return error.CodecNotEnabled;
     const data = try reader.allocRemaining(allocator, limits.max_jxl_bytes);
     defer allocator.free(data);
@@ -187,9 +186,9 @@ const FrameReader = struct {
     }
 
     /// The next displayed frame in its natural pixel type, or null after the last one.
-    fn next(self: *FrameReader, allocator: Allocator) !?struct { image: NativeImage, duration_ms: u32 } {
+    fn next(self: *FrameReader, allocator: Allocator) !?struct { image: AnyImage, duration_ms: u32 } {
         const jxl = self.jxl;
-        var native: ?NativeImage = null;
+        var native: ?AnyImage = null;
         errdefer if (native) |*img| img.deinit(allocator);
         var duration_ms: u32 = 0;
         while (true) {
@@ -237,16 +236,22 @@ fn ticksToMs(ticks: u32, tps_numerator: u32, tps_denominator: u32) u32 {
 
 /// Decodes a JPEG XL byte stream into `Image(T)`, converting from the natural pixel type as needed.
 pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
-    var native = try decode(io, allocator, data, limits);
-    return native.into(T, io, allocator);
+    var any = try loadAnyFromBytes(io, allocator, data, limits);
+    return any.into(T, io, allocator);
 }
 
 /// Reads a JPEG XL image from `reader`, buffering at most the `DecodeLimits` byte cap.
 pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
+    var any = try readAny(io, allocator, reader, limits);
+    return any.into(T, io, allocator);
+}
+
+/// `read` in the file's natural pixel type; see `loadAnyFromBytes`.
+pub fn readAny(io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnyImage {
     if (!enabled) return error.CodecNotEnabled;
     const data = try reader.allocRemaining(allocator, limits.max_jxl_bytes);
     defer allocator.free(data);
-    return loadFromBytes(T, io, allocator, data, limits);
+    return loadAnyFromBytes(io, allocator, data, limits);
 }
 
 /// Encodes `image` as sRGB JPEG XL. `u8`→grayscale, `Rgb`→RGB, `Rgba`→RGBA, others→RGB.
@@ -263,12 +268,12 @@ pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer,
 
 /// Encodes every frame of `anim` at its full size; pixel types map as in `encode`.
 /// A one-frame animation is written as a still.
-pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: AnimatedImage(T), options: EncodeOptions) ![]u8 {
+pub fn encodeAnimated(comptime T: type, io: Io, allocator: Allocator, anim: Animation(T), options: EncodeOptions) ![]u8 {
     return codecs.encodeWith(allocator, writeAnimated, .{ T, io, allocator }, .{ anim, options });
 }
 
 /// Writes `anim` as JPEG XL to `writer`; see `encodeAnimated`.
-pub fn writeAnimated(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, anim: AnimatedImage(T), options: EncodeOptions) !void {
+pub fn writeAnimated(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, anim: Animation(T), options: EncodeOptions) !void {
     if (!enabled) return error.CodecNotEnabled;
     try anim.validate();
     const frames = anim.frames;
@@ -583,7 +588,7 @@ test "signature detection" {
 
 test "disabled build reports CodecNotEnabled" {
     if (enabled) return error.SkipZigTest;
-    try std.testing.expectError(error.CodecNotEnabled, decode(std.testing.io, std.testing.allocator, &signature, .default));
+    try std.testing.expectError(error.CodecNotEnabled, loadAnyFromBytes(std.testing.io, std.testing.allocator, &signature, .default));
 }
 
 test "ABI layout matches libjxl" {
@@ -676,8 +681,8 @@ test "lossy round trip stays close" {
     try std.testing.expect(try img.psnr(back) > 30);
 }
 
-fn testAnimation(comptime T: type, allocator: Allocator, durations: []const u32, loop_count: u32) !AnimatedImage(T) {
-    var builder: animated.Builder(T) = .{};
+fn testAnimation(comptime T: type, allocator: Allocator, durations: []const u32, loop_count: u32) !Animation(T) {
+    var builder: Animation(T).Builder = .{};
     defer builder.deinit(allocator);
     for (durations, 0..) |ms, i| {
         var img = try testImage(T, allocator);
@@ -735,7 +740,7 @@ test "animated encode rejects bad input" {
     if (!enabled) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
-    const empty: AnimatedImage(Rgb) = .{ .frames = &.{}, .durations_ms = &.{}, .loop_count = 0 };
+    const empty: Animation(Rgb) = .{ .frames = &.{}, .durations_ms = &.{}, .loop_count = 0 };
     try std.testing.expectError(error.NoFrames, encodeAnimated(Rgb, io, allocator, empty, .default));
 
     var a: Image(Rgb) = try .init(allocator, 4, 4);
@@ -744,7 +749,7 @@ test "animated encode rejects bad input" {
     defer b.deinit(allocator);
     var frames = [_]Image(Rgb){ a, b };
     var durations = [_]u32{ 10, 10 };
-    const mismatched: AnimatedImage(Rgb) = .{ .frames = &frames, .durations_ms = &durations, .loop_count = 0 };
+    const mismatched: Animation(Rgb) = .{ .frames = &frames, .durations_ms = &durations, .loop_count = 0 };
     try std.testing.expectError(error.InconsistentFrameDimensions, encodeAnimated(Rgb, io, allocator, mismatched, .default));
 }
 

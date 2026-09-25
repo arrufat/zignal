@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const ImageFormat = zignal.ImageFormat;
+const ImageFormat = zignal.image.Format;
 const png = zignal.png;
 const jpeg = zignal.jpeg;
 const bmp = zignal.bmp;
