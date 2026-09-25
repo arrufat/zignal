@@ -685,17 +685,29 @@ fn readRle(allocator: Allocator, h: Header, palette: []const Rgba, reader: *Io.R
 
 /// Reads a BMP from `reader`, one row at a time, converting to the requested pixel type.
 pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
-    const prelude = try readPrelude(allocator, reader, limits);
-    defer if (prelude.palette) |p| allocator.free(p);
-    reader.discardAll(prelude.pixel_offset - prelude.consumed) catch |err| return endAs(err, error.MissingPixelData);
-    var native = try readPixels(allocator, prelude.header, prelude.palette, reader);
-    return native.into(T, io, allocator);
+    var any = try readAny(io, allocator, reader, limits);
+    return any.into(T, io, allocator);
 }
 
 /// Loads a BMP from an in-memory byte buffer, converting to the requested pixel type.
 pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
     var reader = Io.Reader.fixed(data);
     return read(T, io, allocator, &reader, limits);
+}
+
+/// `read` in the pixel type closest to the file's bit depth.
+pub fn readAny(io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnyImage {
+    _ = io;
+    const prelude = try readPrelude(allocator, reader, limits);
+    defer if (prelude.palette) |p| allocator.free(p);
+    reader.discardAll(prelude.pixel_offset - prelude.consumed) catch |err| return endAs(err, error.MissingPixelData);
+    return readPixels(allocator, prelude.header, prelude.palette, reader);
+}
+
+/// `loadFromBytes` in the pixel type closest to the file's bit depth.
+pub fn loadAnyFromBytes(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnyImage {
+    var reader = Io.Reader.fixed(data);
+    return readAny(io, allocator, &reader, limits);
 }
 
 // ---------------------------------------------------------------------------

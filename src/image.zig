@@ -1301,6 +1301,7 @@ pub fn Image(comptime T: type) type {
 test {
     _ = @import("image/PixelIterator.zig");
     _ = @import("image/animation.zig");
+    _ = @import("image/any.zig");
     _ = @import("image/format.zig");
     _ = @import("image/display.zig");
     _ = @import("image/tests/integral.zig");

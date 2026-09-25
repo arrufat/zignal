@@ -1170,10 +1170,22 @@ pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, png_data: [
 
 /// Reads a PNG from `reader`, inflating the image data straight from the stream.
 pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
+    var any = try readAny(io, allocator, reader, limits);
+    return any.into(T, io, allocator);
+}
+
+/// `loadFromBytes` in the pixel type closest to the file's color type.
+pub fn loadAnyFromBytes(io: Io, allocator: Allocator, png_data: []const u8, limits: DecodeLimits) !AnyImage {
+    var reader: Io.Reader = .fixed(png_data);
+    return readAny(io, allocator, &reader, limits);
+}
+
+/// `read` in the pixel type closest to the file's color type.
+pub fn readAny(io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnyImage {
+    _ = io;
     var png_state = try parse(allocator, reader, limits);
     defer png_state.deinit(allocator);
-    var native = try toAnyImage(allocator, &png_state);
-    return native.into(T, io, allocator);
+    return toAnyImage(allocator, &png_state);
 }
 
 // PNG Encoder functionality

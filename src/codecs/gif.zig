@@ -689,6 +689,19 @@ pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, 
     return composeFirstFrame(T, io, allocator, state);
 }
 
+/// `read` as `Rgba` when frame 0 has a transparent index, `Rgb` otherwise.
+pub fn readAny(io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnyImage {
+    var state = try parse(allocator, reader, limits, .first);
+    defer state.deinit(allocator);
+    return toAnyImage(io, allocator, state);
+}
+
+/// `loadFromBytes` as `Rgba` when frame 0 has a transparent index, `Rgb` otherwise.
+pub fn loadAnyFromBytes(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnyImage {
+    var reader: Io.Reader = .fixed(data);
+    return readAny(io, allocator, &reader, limits);
+}
+
 /// Reads every frame of a GIF from `reader`, fully composed.
 pub fn readAnimated(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Animation(T) {
     var state = try parse(allocator, reader, limits, .all);

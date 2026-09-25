@@ -109,7 +109,7 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
 
 /// Decodes the first frame of `data` into its natural pixel type, converted to sRGB when the
 /// codestream allows it (XYB-encoded images). libjxl's worker tasks run on `io`.
-pub fn decode(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnyImage {
+pub fn loadAnyFromBytes(io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !AnyImage {
     if (!enabled) return error.CodecNotEnabled;
     var reader: FrameReader = undefined;
     try reader.init(io, data, limits);
@@ -236,16 +236,22 @@ fn ticksToMs(ticks: u32, tps_numerator: u32, tps_denominator: u32) u32 {
 
 /// Decodes a JPEG XL byte stream into `Image(T)`, converting from the natural pixel type as needed.
 pub fn loadFromBytes(comptime T: type, io: Io, allocator: Allocator, data: []const u8, limits: DecodeLimits) !Image(T) {
-    var native = try decode(io, allocator, data, limits);
-    return native.into(T, io, allocator);
+    var any = try loadAnyFromBytes(io, allocator, data, limits);
+    return any.into(T, io, allocator);
 }
 
 /// Reads a JPEG XL image from `reader`, buffering at most the `DecodeLimits` byte cap.
 pub fn read(comptime T: type, io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !Image(T) {
+    var any = try readAny(io, allocator, reader, limits);
+    return any.into(T, io, allocator);
+}
+
+/// `read` in the file's natural pixel type; see `loadAnyFromBytes`.
+pub fn readAny(io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnyImage {
     if (!enabled) return error.CodecNotEnabled;
     const data = try reader.allocRemaining(allocator, limits.max_jxl_bytes);
     defer allocator.free(data);
-    return loadFromBytes(T, io, allocator, data, limits);
+    return loadAnyFromBytes(io, allocator, data, limits);
 }
 
 /// Encodes `image` as sRGB JPEG XL. `u8`→grayscale, `Rgb`→RGB, `Rgba`→RGBA, others→RGB.
@@ -582,7 +588,7 @@ test "signature detection" {
 
 test "disabled build reports CodecNotEnabled" {
     if (enabled) return error.SkipZigTest;
-    try std.testing.expectError(error.CodecNotEnabled, decode(std.testing.io, std.testing.allocator, &signature, .default));
+    try std.testing.expectError(error.CodecNotEnabled, loadAnyFromBytes(std.testing.io, std.testing.allocator, &signature, .default));
 }
 
 test "ABI layout matches libjxl" {
