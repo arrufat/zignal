@@ -37,6 +37,8 @@ pub fn build(b: *std.Build) void {
         "codec_bench",
         "transform_bench",
         "gemm_bench",
+        "gemm_chain",
+        "gemm_coop",
         "trace_edges",
         "colormaps_demo",
         "optimization_example",
@@ -65,6 +67,8 @@ pub fn build(b: *std.Build) void {
                 }),
             });
             exe.root_module.addImport("zignal", zignal.module("zignal"));
+            // The GPU benches open the Vulkan loader, which needs libc.
+            if (std.mem.startsWith(u8, example_name, "gemm_c")) exe.root_module.link_libc = true;
             b.installArtifact(exe);
 
             // Add to check step
