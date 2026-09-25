@@ -74,7 +74,6 @@ pub const bmp = codecs.bmp;
 pub const gif = codecs.gif;
 pub const jxl = codecs.jxl;
 pub const webp = codecs.webp;
-pub const NativeImage = codecs.NativeImage;
 
 /// QR code encoding and decoding (ISO/IEC 18004).
 pub const qrcode = @import("qrcode.zig");

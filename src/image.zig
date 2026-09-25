@@ -38,6 +38,7 @@ const OrderStatisticBlurOps = @import("image/order_statistic_blur.zig").OrderSta
 
 pub const DisplayFormat = @import("image/display.zig").DisplayFormat;
 pub const Format = @import("image/format.zig").Format;
+pub const Native = codecs.NativeImage;
 pub const Interpolation = @import("image/interpolation.zig").Interpolation;
 pub const PixelIterator = @import("image/PixelIterator.zig").PixelIterator;
 pub const Animation = @import("image/animation.zig").Animation;
