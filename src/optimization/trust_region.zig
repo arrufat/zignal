@@ -529,7 +529,7 @@ pub fn evalQuad(h: []const f64, g: []const f64, c: f64, dims: usize, x: []const 
 // Tests
 // ---------------------------------------------------------------------------------------
 
-test "cholesky + solve" {
+test "cholesky: solve with solveLower and solveLowerT" {
     // A = [[4,2],[2,3]] (SPD), solve A x = b with b = [10, 8] -> x = [...]
     var a = [_]f64{ 4, 2, 2, 3 };
     try std.testing.expect(cholesky(f64, &a, 2));
@@ -545,7 +545,7 @@ test "cholesky + solve" {
     try expectApproxEqAbs(@as(f64, 8), ax1, 1e-9);
 }
 
-test "trust region: interior solution" {
+test "solveTrustRegionSubproblem: interior solution" {
     // B = I, g = [-0.5, 0]. Unconstrained min at -B^-1 g = [0.5, 0], norm 0.5 < radius.
     const b = [_]f64{ 1, 0, 0, 1 };
     const g = [_]f64{ -0.5, 0 };
@@ -555,7 +555,7 @@ test "trust region: interior solution" {
     try expectApproxEqAbs(@as(f64, 0.0), p[1], 1e-6);
 }
 
-test "trust region: boundary solution" {
+test "solveTrustRegionSubproblem: boundary solution" {
     // B = I, g = [-10, 0]. Unconstrained min at [10,0] (norm 10) but radius 1 -> p ~ [1, 0].
     const b = [_]f64{ 1, 0, 0, 1 };
     const g = [_]f64{ -10, 0 };
@@ -566,7 +566,7 @@ test "trust region: boundary solution" {
     try expectApproxEqAbs(@as(f64, 0.0), p[1], 1e-3);
 }
 
-test "trust region: n==1 hard case (negative curvature, ~zero gradient)" {
+test "solveTrustRegionSubproblem: n==1 hard case (negative curvature, ~zero gradient)" {
     // A 1-D subproblem with non-positive curvature and a ~zero gradient takes the eigen-decomposition
     // ("hard case") fallback. Regression: that path reuses scratch as two length-n views (p_hard and
     // vt_g), needing 2*n slots, which exceeds the n*n Newton scratch when n == 1. minimize
@@ -578,7 +578,7 @@ test "trust region: n==1 hard case (negative curvature, ~zero gradient)" {
     try expectApproxEqAbs(@as(f64, 1.0), @abs(p[0]), 1e-9);
 }
 
-test "trust region: n==2 hard case follows the min eigenvector of an indefinite B" {
+test "solveTrustRegionSubproblem: n==2 hard case follows the min eigenvector of an indefinite B" {
     // Indefinite B = [[1,2],[2,1]] (eigenvalues 3 and -1) with a ~zero gradient drives the eigen
     // ("hard case") fallback for n>=2 — the path that actually depends on eigh returning eigenvalues
     // ascending so the consumer reads the most-negative one and its eigenvector at index 0.
@@ -592,7 +592,7 @@ test "trust region: n==2 hard case follows the min eigenvector of an indefinite 
     try std.testing.expect(p[0] * p[1] < 0);
 }
 
-test "trust region bounded: box clips a variable" {
+test "solveTrustRegionSubproblemBounded: box clips a variable" {
     // Same as boundary case but cap p[0] <= 0.3. Then p[0] should lock to 0.3.
     const b = [_]f64{ 1, 0, 0, 1 };
     const g = [_]f64{ -10, -10 };
@@ -605,7 +605,7 @@ test "trust region bounded: box clips a variable" {
     try std.testing.expect(norm(&p) <= 1.0 + 1e-6);
 }
 
-test "trust region bounded: active set empties (every variable locks to a bound)" {
+test "solveTrustRegionSubproblemBounded: active set empties (every variable locks to a bound)" {
     // Both coords are pushed past their upper bound, so the active set locks every variable.
     // Regression: the empty-active-set exit used to overwrite the last lock with a stale value.
     const b = [_]f64{ 1, 0, 0, 1 };

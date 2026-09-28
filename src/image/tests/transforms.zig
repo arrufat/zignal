@@ -14,7 +14,7 @@ const parallel = @import("../../parallel.zig");
 const Rgb = color.Rgb(u8);
 const Rgba = color.Rgba(u8);
 
-test "getRectangle" {
+test "Image.getRectangle: full image rectangle" {
     var image: Image(Rgba) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     const rect = image.getRectangle();
@@ -22,7 +22,7 @@ test "getRectangle" {
     try expectEqual(rect.height(), image.rows);
 }
 
-test "copy function with views" {
+test "Image.copy: with views" {
     var image: Image(u8) = try .init(std.testing.allocator, 5, 7);
     defer image.deinit(std.testing.allocator);
 
@@ -78,7 +78,7 @@ test "copy function with views" {
     try expectEqual(@as(u8, 99), target.at(5, 7).*);
 }
 
-test "copy function in-place behavior" {
+test "Image.copy: in-place behavior" {
     var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
@@ -107,7 +107,7 @@ test "copy function in-place behavior" {
         }
     }
 }
-test "view" {
+test "Image.view: rectangle and contiguity" {
     var image: Image(Rgba) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     const rect: Rectangle(u32) = .{ .l = 0, .t = 0, .r = 8, .b = 10 };
@@ -119,7 +119,7 @@ test "view" {
     try expectEqualDeep(Rectangle(u32){ .l = 0, .t = 0, .r = 8, .b = 10 }, view.getRectangle());
 }
 
-test "view with getRectangle returns full image" {
+test "Image.view: getRectangle returns full image" {
     var image: Image(u8) = try .init(std.testing.allocator, 100, 200);
     defer image.deinit(std.testing.allocator);
 
@@ -160,7 +160,7 @@ test "view with getRectangle returns full image" {
     try expectEqual(@as(u32, 100), full_rect.b);
 }
 
-test "rotate orthogonal fast paths" {
+test "Image.rotate: orthogonal fast paths" {
     var image: Image(u8) = try .init(std.testing.allocator, 3, 4);
     defer image.deinit(std.testing.allocator);
 
@@ -211,7 +211,7 @@ test "rotate orthogonal fast paths" {
     try expectEqual(@as(u32, 3), rotated_270.cols);
 }
 
-test "rotate crop keeps the input size and the same centre" {
+test "Image.rotate: crop keeps the input size and the same centre" {
     // 8x6 expands to 10x10 at 45°, an even margin on both axes, so the two outputs share pixel centres.
     var image: Image(u8) = try .init(std.testing.allocator, 8, 6);
     defer image.deinit(std.testing.allocator);
@@ -231,7 +231,7 @@ test "rotate crop keeps the input size and the same centre" {
     try std.testing.expect(try middle.meanPixelError(cropped) < 0.05);
 }
 
-test "rotate arbitrary angle" {
+test "Image.rotate: arbitrary angle" {
     var image: Image(u8) = try .init(std.testing.allocator, 10, 10);
     defer image.deinit(std.testing.allocator);
 
@@ -251,7 +251,7 @@ test "rotate arbitrary angle" {
     try expectEqual(rotated.cols > 10, true);
 }
 
-test "extract rotated rectangle basic and 90deg" {
+test "Image.extract: rotated rectangle basic and 90deg" {
     const allocator = std.testing.allocator;
     var image: Image(u8) = try .init(allocator, 5, 5);
     defer image.deinit(allocator);
@@ -300,7 +300,7 @@ test "extract rotated rectangle basic and 90deg" {
     try expectEqual(@as(u8, 31), out90.at(2, 2).*);
 }
 
-test "extract single-pixel axis handling centers correctly" {
+test "Image.extract: single-pixel axis handling centers correctly" {
     const allocator = std.testing.allocator;
     var image: Image(u8) = try .init(allocator, 5, 5);
     defer image.deinit(allocator);
@@ -337,7 +337,7 @@ test "extract single-pixel axis handling centers correctly" {
     try expectEqual(@as(u8, 32), out_col1.at(2, 0).*);
 }
 
-test "insert and extract inverse relationship" {
+test "Image.insert: inverse of extract" {
     const allocator = std.testing.allocator;
 
     // Create source with gradient pattern
@@ -402,7 +402,7 @@ test "insert and extract inverse relationship" {
     }
 }
 
-test "insert applies blending when requested" {
+test "Image.insert: applies blending when requested" {
     const allocator = std.testing.allocator;
 
     var dest = try Image(Rgba).init(allocator, 1, 1);
@@ -428,7 +428,7 @@ test "insert applies blending when requested" {
     try expectEqualDeep(expected, dest.at(0, 0).*);
 }
 
-test "extract from empty image regression" {
+test "Image.extract: from empty image regression" {
     const allocator = std.testing.allocator;
     var empty = try Image(u8).init(allocator, 0, 0);
     defer empty.deinit(allocator);
@@ -447,7 +447,7 @@ test "extract from empty image regression" {
     try expectEqual(@as(u8, 0), out.at(0, 0).*);
 }
 
-test "flipLeftRight" {
+test "Image.flipLeftRight: mirrors columns" {
     var data = [_]u8{
         1, 2, 3,
         4, 5, 6,
@@ -462,7 +462,7 @@ test "flipLeftRight" {
     try expectEqualDeep(expected, data);
 }
 
-test "flipTopBottom" {
+test "Image.flipTopBottom: mirrors rows" {
     var data = [_]u8{
         1, 2,
         3, 4,
@@ -478,7 +478,7 @@ test "flipTopBottom" {
     try expectEqualDeep(expected, data);
 }
 
-test "flipLeftRightInto and flipTopBottomInto match the in-place flips through views" {
+test "Image.flipLeftRightInto: matches the in-place flips through views, with flipTopBottomInto" {
     const gpa = std.testing.allocator;
     var base: Image(Rgb) = try .init(gpa, 9, 11);
     defer base.deinit(gpa);
@@ -503,7 +503,7 @@ test "flipLeftRightInto and flipTopBottomInto match the in-place flips through v
     try expectEqual(0, try expected.meanPixelError(dst));
 }
 
-test "insert with a rectangle outside the image or a NaN angle is a no-op" {
+test "Image.insert: rectangle outside the image or NaN angle is a no-op" {
     const allocator = std.testing.allocator;
     var dest = try Image(u8).init(allocator, 10, 10);
     defer dest.deinit(allocator);
@@ -516,7 +516,7 @@ test "insert with a rectangle outside the image or a NaN angle is a no-op" {
     for (dest.data) |px| try std.testing.expectEqual(@as(u8, 0), px);
 }
 
-test "extract, crop and insert agree on the half-open rect" {
+test "Image.extract: agrees with crop and insert on the half-open rect" {
     const allocator = std.testing.allocator;
     var image: Image(u8) = try .init(allocator, 6, 7);
     defer image.deinit(allocator);
@@ -555,7 +555,7 @@ test "extract, crop and insert agree on the half-open rect" {
 }
 
 // Every banded transform must produce the same bytes on a thread pool as serially.
-test "transforms are identical on a thread pool" {
+test "Image: transforms are identical on a thread pool" {
     const allocator = std.testing.allocator;
     var pool: std.Io.Threaded = .init(allocator, .{});
     defer pool.deinit();

@@ -1577,7 +1577,7 @@ pub fn Matrix(comptime T: type) type {
     };
 }
 
-test "Matrix as" {
+test "Matrix.as: converts element type" {
     const allocator = std.testing.allocator;
     var a: Matrix(f32) = try .random(allocator, 3, 4, 1234);
     defer a.deinit();
@@ -1590,7 +1590,7 @@ test "Matrix as" {
     }
 }
 
-test "Matrix diagonal" {
+test "Matrix.diagonal: builds a diagonal matrix" {
     const allocator = std.testing.allocator;
     var d: Matrix(f64) = try .diagonal(allocator, &.{ 2, -3, 5 });
     defer d.deinit();
@@ -1605,7 +1605,7 @@ test "Matrix diagonal" {
 }
 
 // Tests for dynamic Matrix functionality
-test "matrix surfaces errors at the source op" {
+test "Matrix: surfaces errors at the source op" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -1635,7 +1635,7 @@ test "matrix surfaces errors at the source op" {
     try expectError(MatrixError.DimensionMismatch, p.add(b).scale(2.0).toOwned());
 }
 
-test "matrix elementNorm invalid exponent" {
+test "Matrix.elementNorm: rejects invalid exponent" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -1647,7 +1647,7 @@ test "matrix elementNorm invalid exponent" {
     try std.testing.expectError(MatrixError.InvalidArgument, m.elementNorm(std.math.nan(f64)));
 }
 
-test "dynamic matrix format" {
+test "Matrix.format: scientific and decimal" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -1701,7 +1701,7 @@ test "dynamic matrix format" {
     try expectEqualStrings(expected_scientific, result_scientific);
 }
 
-test "Matrix(T).sumRows and sumCols" {
+test "Matrix.sumRows: sumRows and sumCols" {
     const allocator = std.testing.allocator;
     var a: Matrix(f64) = try .init(allocator, 2, 3);
     defer a.deinit();
@@ -1728,7 +1728,7 @@ test "Matrix(T).sumRows and sumCols" {
     try std.testing.expectEqual(@as(f64, 15), cols_sum.at(1, 0).*);
 }
 
-test "Matrix(T).By operations (in-place)" {
+test "Matrix.addBy: in-place By operations" {
     const allocator = std.testing.allocator;
     var a: Matrix(f64) = try .initAll(allocator, 2, 2, 10.0);
     defer a.deinit();
@@ -1754,7 +1754,7 @@ test "Matrix(T).By operations (in-place)" {
     try std.testing.expectEqual(@as(f64, 10201.0), a.at(0, 0).*);
 }
 
-test "matrix conversions" {
+test "Matrix.toSMatrix: round-trips with SMatrix.toMatrix" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -1778,7 +1778,7 @@ test "matrix conversions" {
     }
 }
 
-test "Matrix fromSlice" {
+test "Matrix.fromSlice: row-major data" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 

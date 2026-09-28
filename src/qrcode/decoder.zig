@@ -178,7 +178,7 @@ pub fn decodeModules(allocator: Allocator, version: u8, modules: []const u8) !De
     return last_err;
 }
 
-test "matrix roundtrip across versions, levels, and modes" {
+test "decodeMatrix: roundtrip across versions, levels, and modes" {
     const allocator = std.testing.allocator;
     var prng: std.Random.DefaultPrng = .init(0xdecafbad);
     const random = prng.random();
@@ -220,7 +220,7 @@ test "matrix roundtrip across versions, levels, and modes" {
     }
 }
 
-test "decoding survives codeword damage up to capacity" {
+test "decodeMatrix: survives codeword damage up to capacity" {
     const allocator = std.testing.allocator;
     var prng: std.Random.DefaultPrng = .init(0xfeedface);
     const random = prng.random();
@@ -251,7 +251,7 @@ test "decoding survives codeword damage up to capacity" {
     try std.testing.expectEqual(@as(u32, @intCast(damaged)), result.corrected_errors);
 }
 
-test "format info damage up to 3 bits is corrected" {
+test "decodeMatrix: corrects format info damage up to 3 bits" {
     const allocator = std.testing.allocator;
     var m = try encoder.encodeMatrix(allocator, "FORMAT DAMAGE", .{ .ec_level = .high });
     defer m.deinit(allocator);
@@ -268,7 +268,7 @@ test "format info damage up to 3 bits is corrected" {
     try std.testing.expectEqualSlices(u8, "FORMAT DAMAGE", result.data);
 }
 
-test "decodeModules recovers every orientation" {
+test "decodeModules: recovers every orientation" {
     const allocator = std.testing.allocator;
     var m = try encoder.encodeMatrix(allocator, "ORIENTATION", .{});
     defer m.deinit(allocator);
@@ -283,7 +283,7 @@ test "decodeModules recovers every orientation" {
     }
 }
 
-test "readVersion through all orientations" {
+test "readVersion: all orientations" {
     const allocator = std.testing.allocator;
     var m = try encoder.encodeMatrix(allocator, "VERSION INFO", .{ .version = 9 });
     defer m.deinit(allocator);

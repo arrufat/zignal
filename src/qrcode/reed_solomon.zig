@@ -141,7 +141,7 @@ pub fn decode(codeword: []u8, ecc_len: usize) !usize {
     return count;
 }
 
-test "generator polynomial degree 7" {
+test "generator: polynomial degree 7" {
     // ISO/IEC 18004: g(x) = x^7 + a^87 x^6 + a^229 x^5 + a^146 x^4 + a^149 x^3
     //                + a^238 x^2 + a^102 x + a^21.
     const gen = generator(7);
@@ -151,7 +151,7 @@ test "generator polynomial degree 7" {
     }
 }
 
-test "ISO 18004 Annex I error correction codewords" {
+test "encode: ISO 18004 Annex I error correction codewords" {
     // "01234567", version 1-M: 16 data codewords, 10 ecc codewords.
     const data = [_]u8{ 0x10, 0x20, 0x0c, 0x56, 0x61, 0x80, 0xec, 0x11, 0xec, 0x11, 0xec, 0x11, 0xec, 0x11, 0xec, 0x11 };
     const expected = [_]u8{ 0xa5, 0x24, 0xd4, 0xc1, 0xed, 0x36, 0xc7, 0x87, 0x2c, 0x55 };
@@ -160,7 +160,7 @@ test "ISO 18004 Annex I error correction codewords" {
     try std.testing.expectEqualSlices(u8, &expected, &ecc);
 }
 
-test "decode corrects injected errors" {
+test "decode: corrects injected errors" {
     var prng: std.Random.DefaultPrng = .init(0x9e3779b9);
     const random = prng.random();
     for (0..2000) |_| {
@@ -189,7 +189,7 @@ test "decode corrects injected errors" {
     }
 }
 
-test "decode rejects or detects excess errors" {
+test "decode: rejects or detects excess errors" {
     var prng: std.Random.DefaultPrng = .init(0x517cc1b7);
     const random = prng.random();
     for (0..500) |_| {

@@ -2,7 +2,7 @@ const std = @import("std");
 const expectEqual = std.testing.expectEqual;
 const Matrix = @import("Matrix.zig").Matrix;
 
-test "Matrix determinant - small matrices" {
+test "Matrix.det: small matrices" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -37,7 +37,7 @@ test "Matrix determinant - small matrices" {
     try expectEqual(@as(f64, 1.0), try mat3.det());
 }
 
-test "Matrix determinant - large matrices using LU" {
+test "Matrix.det: large matrices using LU" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 

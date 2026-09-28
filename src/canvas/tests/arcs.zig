@@ -9,7 +9,7 @@ const Rgba = @import("../../color.zig").Rgba(u8);
 const Point = @import("../../geometry/Point.zig").Point;
 const as = @import("../../meta.zig").as;
 
-test "arc drawing - basic angles" {
+test "Canvas.drawArc: basic angles" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
@@ -63,7 +63,7 @@ test "arc drawing - basic angles" {
     try expect(found_pixel);
 }
 
-test "arc drawing - full circle optimization" {
+test "Canvas.drawArc: full circle optimization" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
@@ -94,7 +94,7 @@ test "arc drawing - full circle optimization" {
     try expect(black_count < expected * 5 / 4);
 }
 
-test "arc drawing - angle wrapping" {
+test "Canvas.drawArc: angle wrapping" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
@@ -136,7 +136,7 @@ test "arc drawing - angle wrapping" {
     try expect(diff < @max(total_black1, total_black2) / 10); // Less than 10% difference
 }
 
-test "fillArc - pie slices" {
+test "Canvas.fillArc: pie slices" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
@@ -180,7 +180,7 @@ test "fillArc - pie slices" {
     try expect(opposite_pixel.r == 255 and opposite_pixel.g == 255 and opposite_pixel.b == 255);
 }
 
-test "arc drawing - soft vs fast mode" {
+test "Canvas.drawArc: soft vs fast mode" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
@@ -225,7 +225,7 @@ test "arc drawing - soft vs fast mode" {
     try expect(fast_partial_count < soft_partial_count / 2);
 }
 
-test "arc drawing - zero and negative radius" {
+test "Canvas.drawArc: zero and negative radius" {
     const allocator = testing.allocator;
     const width = 100;
     const height = 100;
@@ -250,7 +250,7 @@ test "arc drawing - zero and negative radius" {
     }
 }
 
-test "arc drawing - NaN and Inf angles" {
+test "Canvas.drawArc: NaN and Inf angles" {
     const allocator = testing.allocator;
     const width = 100;
     const height = 100;
@@ -280,7 +280,7 @@ test "arc drawing - NaN and Inf angles" {
     }
 }
 
-test "arc drawing - soft arcs match soft circles away from the rays" {
+test "Canvas.drawArc: soft arcs match soft circles away from the rays" {
     const allocator = testing.allocator;
     var img_circle: Image(Rgb) = try .init(allocator, 200, 200);
     defer img_circle.deinit(allocator);
@@ -319,7 +319,7 @@ test "arc drawing - soft arcs match soft circles away from the rays" {
     try expect(compared > 0);
 }
 
-test "fillArc - soft rays are antialiased and stop at the center" {
+test "Canvas.fillArc: soft rays are antialiased and stop at the center" {
     const allocator = testing.allocator;
     var img: Image(Rgb) = try .init(allocator, 200, 200);
     defer img.deinit(allocator);

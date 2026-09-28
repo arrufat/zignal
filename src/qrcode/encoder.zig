@@ -121,7 +121,7 @@ pub fn encode(allocator: Allocator, data: []const u8, options: EncodeOptions) !I
     return toImage(allocator, m, options.module_size, options.quiet_zone);
 }
 
-test "interleaving is the identity for a single block" {
+test "interleave: identity for a single block" {
     const blocks = tables.ecBlocks(1, .medium);
     const data = [_]u8{ 0x10, 0x20, 0x0c, 0x56, 0x61, 0x80, 0xec, 0x11, 0xec, 0x11, 0xec, 0x11, 0xec, 0x11, 0xec, 0x11 };
     const out = try interleave(std.testing.allocator, &data, blocks);
@@ -131,7 +131,7 @@ test "interleaving is the identity for a single block" {
     try std.testing.expectEqualSlices(u8, &expected_ecc, out[16..]);
 }
 
-test "interleaving order with two groups" {
+test "interleave: order with two groups" {
     // Version 5-Q: 2 blocks of 15 data + 2 blocks of 16 data codewords.
     const blocks = tables.ecBlocks(5, .quartile);
     const data_len = blocks.dataCodewords();
@@ -148,14 +148,14 @@ test "interleaving order with two groups" {
     try std.testing.expectEqual(@as(u8, 61), data_part[data_len - 1]); // last of block 4
 }
 
-test "encodeMatrix produces a valid version 1 matrix" {
+test "encodeMatrix: produces a valid version 1 matrix" {
     var m = try encodeMatrix(std.testing.allocator, "HELLO WORLD", .{ .ec_level = .quartile });
     defer m.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(u8, 1), m.version);
     try std.testing.expectEqual(@as(u16, 21), m.dim);
 }
 
-test "encode dimensions" {
+test "encode: dimensions" {
     var image = try encode(std.testing.allocator, "hello", .{ .module_size = 2, .quiet_zone = 4 });
     defer image.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(u32, (21 + 8) * 2), image.rows);

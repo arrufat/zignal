@@ -1560,7 +1560,7 @@ fn testRoundTripConversion(from: Rgb(u8), to: anytype) !void {
     try expectEqualDeep(recovered, from);
 }
 
-test "convert grayscale" {
+test "Rgb.to: grayscale" {
     try expectEqual((Rgb(u8){ .r = 128, .g = 128, .b = 128 }).to(.gray), Gray(u8){ .y = 128 });
     try expectEqual((Rgb(u8){ .r = 255, .g = 0, .b = 0 }).to(.gray), Gray(u8){ .y = 54 });
     try expectEqual((Hsl(f64){ .h = 0, .s = 100, .l = 50 }).to(.gray).as(u8), Gray(u8){ .y = 54 });
@@ -1568,14 +1568,14 @@ test "convert grayscale" {
     try expectEqual((Lab(f64){ .l = 50, .a = 0, .b = 0 }).to(.gray).as(u8), Gray(u8){ .y = 119 });
 }
 
-test "Gray invert" {
+test "Gray.invert: inverts luminance" {
     const gray = Gray(u8){ .y = 100 };
     try expectEqual(gray.invert(), Gray(u8){ .y = 155 });
     const gray_f = Gray(f32){ .y = 0.2 };
     try expectApproxEqAbs(gray_f.invert().y, 0.8, 0.00001);
 }
 
-test "scalar colors" {
+test "isColor: scalar colors" {
     try expect(isColor(u8));
     try expect(isColor(f32));
     try expect(isColor(f64));
@@ -1589,7 +1589,7 @@ test "scalar colors" {
     try expectApproxEqAbs(convertColor(f64, @as(f32, 0.25)), 0.25, 0.0000001);
 }
 
-test "Rgb fromHex and toHex" {
+test "Rgb.initHex: round-trips with hex" {
     try expectEqualDeep(Rgb(u8).initHex(0x4e008e), Rgb(u8){ .r = 78, .g = 0, .b = 142 });
     try expectEqualDeep(Rgb(u8).initHex(0x000000), Rgb(u8){ .r = 0, .g = 0, .b = 0 });
     try expectEqualDeep(Rgb(u8).initHex(0xffffff), Rgb(u8){ .r = 255, .g = 255, .b = 255 });
@@ -1617,7 +1617,7 @@ test "Rgb fromHex and toHex" {
     try expectEqualDeep(Rgb(u8).initHex(0xffffff), Rgb(u8).white);
 }
 
-test "Rgba fromHex and toHex" {
+test "Rgba.initHex: round-trips with hex" {
     try expectEqualDeep(Rgba(u8).initHex(0x4e008eff), Rgba(u8){ .r = 78, .g = 0, .b = 142, .a = 255 });
     try expectEqualDeep(Rgba(u8).initHex(0x000000ff), Rgba(u8){ .r = 0, .g = 0, .b = 0, .a = 255 });
     try expectEqualDeep(Rgba(u8).initHex(0xffffff00), Rgba(u8){ .r = 255, .g = 255, .b = 255, .a = 0 });
@@ -1645,7 +1645,7 @@ test "Rgba fromHex and toHex" {
     try expectEqualDeep(Rgba(u8).initHex(0xffffffff), Rgba(u8).white);
 }
 
-test "primary colors" {
+test "Rgb.to: primary colors" {
     // red: 0xff0000
     try testRoundTripConversion(.{ .r = 255, .g = 0, .b = 0 }, Hsl(f64){ .h = 0, .s = 100, .l = 50 });
     try testRoundTripConversion(.{ .r = 255, .g = 0, .b = 0 }, Hsv(f64){ .h = 0, .s = 100, .v = 100 });
@@ -1660,7 +1660,7 @@ test "primary colors" {
     try testRoundTripConversion(.{ .r = 0, .g = 0, .b = 255 }, Lab(f64){ .l = 32.302586667249486, .a = 79.19666178930935, .b = -107.86368104495168 });
 }
 
-test "secondary colors" {
+test "Rgb.to: secondary colors" {
     // cyan: 0x00ffff
     try testRoundTripConversion(.{ .r = 0, .g = 255, .b = 255 }, Hsl(f64){ .h = 180, .s = 100, .l = 50 });
     try testRoundTripConversion(.{ .r = 0, .g = 255, .b = 255 }, Hsv(f64){ .h = 180, .s = 100, .v = 100 });
@@ -1675,7 +1675,7 @@ test "secondary colors" {
     try testRoundTripConversion(.{ .r = 255, .g = 255, .b = 0 }, Lab(f64){ .l = 97.13824698129729, .a = -21.555908334832285, .b = 94.48248544644461 });
 }
 
-test "complementary colors" {
+test "Rgb.to: complementary colors" {
     // orange: 0xff8800
     try testRoundTripConversion(.{ .r = 255, .g = 136, .b = 0 }, Hsl(f64){ .h = 32, .s = 100, .l = 50 });
     try testRoundTripConversion(.{ .r = 255, .g = 136, .b = 0 }, Hsv(f64){ .h = 32, .s = 100, .v = 100 });
@@ -1686,7 +1686,7 @@ test "complementary colors" {
     try testRoundTripConversion(.{ .r = 128, .g = 0, .b = 128 }, Lab(f64){ .l = 29.782100092098077, .a = 58.93983731904206, .b = -36.49792996282386 });
 }
 
-test "neutral colors" {
+test "Rgb.to: neutral colors" {
     // white: 0xffffff
     try testRoundTripConversion(.{ .r = 255, .g = 255, .b = 255 }, Hsl(f64){ .h = 0, .s = 0, .l = 100 });
     try testRoundTripConversion(.{ .r = 255, .g = 255, .b = 255 }, Hsv(f64){ .h = 0, .s = 0, .v = 100 });
@@ -1701,7 +1701,7 @@ test "neutral colors" {
     try testRoundTripConversion(.{ .r = 0, .g = 0, .b = 0 }, Lab(f64){ .l = 0, .a = 0, .b = 0 });
 }
 
-test "pastel colors" {
+test "Rgb.to: pastel colors" {
     // pale_pink: 0xffd3ba
     try testRoundTripConversion(.{ .r = 255, .g = 211, .b = 186 }, Hsl(f64){ .h = 21.739130434782602, .s = 100, .l = 86.47058823529412 });
     try testRoundTripConversion(.{ .r = 255, .g = 211, .b = 186 }, Hsv(f64){ .h = 21.739130434782602, .s = 27.058823529411768, .v = 100 });
@@ -1716,7 +1716,7 @@ test "pastel colors" {
     try testRoundTripConversion(.{ .r = 138, .g = 209, .b = 237 }, Lab(f64){ .l = 80.24627015828005, .a = -15.11865203941365, .b = -20.767024460106565 });
 }
 
-test "vivid colors" {
+test "Rgb.to: vivid colors" {
     // hot_pink: #ff66b3
     try testRoundTripConversion(.{ .r = 255, .g = 102, .b = 179 }, Hsl(f64){ .h = 329.80392156862746, .s = 99.99999999999997, .l = 70 });
     try testRoundTripConversion(.{ .r = 255, .g = 102, .b = 179 }, Hsv(f64){ .h = 329.80392156862746, .s = 60, .v = 100 });
@@ -1731,7 +1731,7 @@ test "vivid colors" {
     try testRoundTripConversion(.{ .r = 128, .g = 223, .b = 255 }, Lab(f64){ .l = 84.26919487615707, .a = -19.773688316136685, .b = -24.252061008370738 });
 }
 
-test "Color formatting" {
+test "Rgb.format: colored output" {
     const red: Rgb(u8) = .{ .r = 255, .g = 0, .b = 0 };
     var buffer: [512]u8 = undefined;
     var stream: Io.Writer = .fixed(&buffer);
@@ -1742,7 +1742,7 @@ test "Color formatting" {
     try expectEqualStrings(expected_red, result_red);
 }
 
-test "100 random colors" {
+test "Rgb.to: 100 random colors round-trip" {
     const io = std.testing.io;
     const rng_impl: std.Random.IoSource = .{ .io = io };
     const seed = rng_impl.interface().int(u64);
@@ -1779,7 +1779,7 @@ test "100 random colors" {
     }
 }
 
-test "Xyz blend matches RGB blend" {
+test "Rgba.blend: Xyz blend matches RGB blend" {
     const base_rgb = Rgb(f32){ .r = 0.47, .g = 0.39, .b = 0.31 };
     const overlay = Rgba(f32){ .r = 0.78, .g = 0.20, .b = 0.59, .a = 0.5 };
 
@@ -1791,7 +1791,7 @@ test "Xyz blend matches RGB blend" {
     try expectApproxEqAbs(blended_rgb.b, blended_xyz.to(.rgb).b, 0.001);
 }
 
-test "ColorSpace.convert" {
+test "Hsv.to: round-trips with rgb" {
     const red_hsv: Hsv(f32) = .{ .h = 0, .s = 100, .v = 100 };
     const red_rgb_u8: Rgb(u8) = red_hsv.to(.rgb).as(u8);
     try expectEqualDeep(red_rgb_u8, Rgb(u8){ .r = 255, .g = 0, .b = 0 });
@@ -1804,7 +1804,7 @@ test "ColorSpace.convert" {
     try expectEqualDeep(red_hsv_recovered, red_hsv);
 }
 
-test "Rgba fade" {
+test "Rgba.fade: scales alpha" {
     const red = Rgba(u8){ .r = 255, .g = 0, .b = 0, .a = 255 };
     try expectEqualDeep(red.fade(0.5), Rgba(u8){ .r = 255, .g = 0, .b = 0, .a = 127 });
     try expectEqualDeep(red.fade(0), Rgba(u8){ .r = 255, .g = 0, .b = 0, .a = 0 });
@@ -1817,7 +1817,7 @@ test "Rgba fade" {
     try expectEqual(faded_blue.b, 1);
 }
 
-test "Luma calculation" {
+test "Rgb.luma: known values" {
     // Test known luma values
     const white = Rgb(u8).white;
     try expectApproxEqAbs(white.luma(), 1.0, 0.001);
@@ -1839,7 +1839,7 @@ test "Luma calculation" {
     try expectApproxEqAbs(red_alpha.luma(), 0.2126, 0.001);
 }
 
-test "Rgba invert" {
+test "Rgba.invert: keeps alpha" {
     const white_transparent = Rgba(u8){ .r = 255, .g = 255, .b = 255, .a = 0 };
     try expectEqualDeep(white_transparent.invert(), Rgba(u8){ .r = 0, .g = 0, .b = 0, .a = 0 });
 
@@ -1847,7 +1847,7 @@ test "Rgba invert" {
     try expectEqualDeep(mixed.invert(), Rgba(u8){ .r = 155, .g = 105, .b = 55, .a = 255 });
 }
 
-test "Color union float" {
+test "Color.to: float union" {
     const red_rgb = Rgb(f32).red;
     const any_color = Color(f32){ .rgb = red_rgb };
 
@@ -1858,7 +1858,7 @@ test "Color union float" {
     try expectApproxEqAbs(as_hsv.v, 100, 0.001);
 }
 
-test "clamping out-of-range inputs" {
+test "convertColor: clamps out-of-range inputs" {
     // Negative float should clamp to 0
     try expectEqual(convertColor(u8, @as(f32, -0.5)), @as(u8, 0));
     // Float > 1 should clamp to 255

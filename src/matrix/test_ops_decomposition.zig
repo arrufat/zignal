@@ -3,7 +3,7 @@ const io = std.Io.Threaded.global_single_threaded.io();
 const expectEqual = std.testing.expectEqual;
 const Matrix = @import("Matrix.zig").Matrix;
 
-test "Matrix LU decomposition" {
+test "Matrix.lu: LU decomposition" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -91,7 +91,7 @@ test "Matrix LU decomposition" {
     }
 }
 
-test "Matrix QR decomposition simple" {
+test "Matrix.qr: simple" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -114,7 +114,7 @@ test "Matrix QR decomposition simple" {
     try expectEqual(@as(usize, 2), qr_result.perm.indices[0]);
 }
 
-test "Matrix QR decomposition" {
+test "Matrix.qr: QR decomposition" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -300,7 +300,7 @@ test "Matrix QR decomposition" {
     try expectEqual(@as(usize, 3), rect_qr.rank);
 }
 
-test "Matrix QR decomposition with rank-deficient matrix" {
+test "Matrix.qr: rank-deficient matrix" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -377,7 +377,7 @@ test "Matrix QR decomposition with rank-deficient matrix" {
     try expectEqual(@as(usize, 0), zero_qr.rank);
 }
 
-test "Matrix rank computation" {
+test "Matrix.rank: rank computation" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -468,7 +468,7 @@ test "Matrix rank computation" {
     try expectEqual(@as(usize, 1), try row_vec.rank());
 }
 
-test "Matrix Cholesky decomposition" {
+test "Matrix.chol: Cholesky decomposition" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
     const MatrixError = @import("Matrix.zig").MatrixError;
@@ -529,7 +529,7 @@ test "Matrix Cholesky decomposition" {
     try std.testing.expectError(MatrixError.NotPositiveDefinite, non_spd.chol());
 }
 
-test "Matrix solve single right-hand side" {
+test "Matrix.solve: single right-hand side" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -552,7 +552,7 @@ test "Matrix solve single right-hand side" {
     for (0..3) |i| try std.testing.expectApproxEqAbs(b.at(i, 0).*, recon.at(i, 0).*, eps);
 }
 
-test "Matrix solve multiple right-hand sides via reused factorization" {
+test "Matrix.solve: multiple right-hand sides via reused factorization" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -581,7 +581,7 @@ test "Matrix solve multiple right-hand sides via reused factorization" {
     }
 }
 
-test "Matrix solve reports singular systems" {
+test "Matrix.solve: reports singular systems" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();

@@ -587,7 +587,7 @@ pub fn font(buf: *[buffer_size]u8, opts: Options) VectorFont {
     return VectorFont.loadFromBytes(build(buf, opts)) catch unreachable;
 }
 
-test "builds within the buffer" {
+test "build: fits within the buffer" {
     var buf: [buffer_size]u8 = undefined;
     const plain = build(&buf, .{});
     try std.testing.expect(plain.len > 512 and plain.len < buffer_size);

@@ -510,18 +510,18 @@ const LibwebpMux = dynlib.Library(MuxApi, switch (builtin.os.tag) {
     else => &.{ "libwebpmux.so.3", "libwebpmux.so" },
 }, error.CodecUnavailable);
 
-test "signature detection" {
+test "hasSignature: detects the RIFF WEBP signature" {
     try std.testing.expect(hasSignature("RIFF\x24\x00\x00\x00WEBPVP8 "));
     try std.testing.expect(!hasSignature("RIFF\x24\x00\x00\x00WAVEfmt "));
     try std.testing.expect(!hasSignature("RIFF"));
 }
 
-test "disabled build reports CodecNotEnabled" {
+test "loadAnyFromBytes: disabled build reports CodecNotEnabled" {
     if (enabled) return error.SkipZigTest;
     try std.testing.expectError(error.CodecNotEnabled, loadAnyFromBytes(std.testing.io, std.testing.allocator, "RIFF\x00\x00\x00\x00WEBP", .default));
 }
 
-test "ABI layout matches libwebp" {
+test "Api: extern layouts match libwebp" {
     try std.testing.expectEqual(40, @sizeOf(Features));
     try std.testing.expectEqual(36, @sizeOf(AnimDecoderOptions));
     try std.testing.expectEqual(36, @sizeOf(AnimInfo));
@@ -551,7 +551,7 @@ fn testImage(comptime T: type, allocator: Allocator) !Image(T) {
     return img;
 }
 
-test "lossless round trip" {
+test "encode: lossless round trip" {
     if (!enabled or !Libwebp.available()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
@@ -574,7 +574,7 @@ test "lossless round trip" {
     }
 }
 
-test "views encode without a copy" {
+test "encode: views encode without a copy" {
     if (!enabled or !Libwebp.available()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
@@ -590,7 +590,7 @@ test "views encode without a copy" {
     try std.testing.expectEqualSlices(u8, expected.asBytes(), back.asBytes());
 }
 
-test "a still loads as a one-frame animation" {
+test "loadAnimatedFromBytes: a still loads as a one-frame animation" {
     if (!enabled or !Libwebp.available()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
@@ -604,7 +604,7 @@ test "a still loads as a one-frame animation" {
     try std.testing.expectEqualSlices(u8, img.asBytes(), anim.frame(0).asBytes());
 }
 
-test "lossy round trip stays close" {
+test "encode: lossy round trip stays close" {
     if (!enabled or !Libwebp.available()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
@@ -638,7 +638,7 @@ fn animationAvailable() bool {
     return enabled and Libwebp.available() and LibwebpMux.available() and LibwebpDemux.available();
 }
 
-test "animated lossless round trip" {
+test "encodeAnimated: lossless round trip" {
     if (!animationAvailable()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
@@ -660,7 +660,7 @@ test "animated lossless round trip" {
     }
 }
 
-test "animated encode converts other pixel types" {
+test "encodeAnimated: converts other pixel types" {
     if (!animationAvailable()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
@@ -674,7 +674,7 @@ test "animated encode converts other pixel types" {
     try std.testing.expectEqual(0, back.loop_count);
 }
 
-test "a one-frame animation encodes as a still" {
+test "encodeAnimated: a one-frame animation encodes as a still" {
     if (!enabled or !Libwebp.available()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;

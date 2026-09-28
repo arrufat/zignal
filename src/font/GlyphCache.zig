@@ -162,7 +162,7 @@ fn clearMasks(self: *GlyphCache) void {
 const testing = std.testing;
 const synthetic = @import("truetype/synthetic.zig");
 
-test "enable and disable" {
+test "Vector.enableCache: enable and disable" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     var font = synthetic.font(&buf, .{});
     try testing.expect(font.cache == null);
@@ -178,7 +178,7 @@ test "enable and disable" {
     font.disableCache();
 }
 
-test "level 1 matches the uncached font" {
+test "GlyphCache: level 1 matches the uncached font" {
     for ([_]synthetic.Options{ .{}, .{ .cff = true } }) |opts| {
         var plain_buf: [synthetic.buffer_size]u8 = undefined;
         const plain = synthetic.font(&plain_buf, opts);
@@ -233,7 +233,7 @@ test "level 1 matches the uncached font" {
     }
 }
 
-test "placement snaps the origin to a quarter pixel" {
+test "GlyphCache.place: snaps the origin to a quarter pixel" {
     const placed = place(7, .{ .scale = 0.5, .origin = .init(.{ 10.3, -0.9 }) });
     try testing.expectEqual(MaskKey{ .scale_bits = @bitCast(@as(f32, 0.5)), .gid = 7, .bx = 1, .by = 0 }, placed.key);
     try testing.expectEqual(@as(i32, 10), placed.x);
@@ -244,7 +244,7 @@ test "placement snaps the origin to a quarter pixel" {
     try testing.expectEqual(@as(u2, 3), phase(0.9999999));
 }
 
-test "mask store honors the budget" {
+test "GlyphCache.reserve: mask store honors the budget" {
     var cache: GlyphCache = .init(testing.allocator);
     defer cache.deinit();
     cache.max_mask_bytes = 160;
