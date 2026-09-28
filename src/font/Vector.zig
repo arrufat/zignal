@@ -367,7 +367,7 @@ fn lineWidth(font: Vector, text: []const u8, size: f32) f32 {
     return font_mod.layout.lineWidth(.{ .vector = font }, text, size, 0);
 }
 
-test "header metrics" {
+test "Vector.loadFromBytes: header metrics" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font = synthetic.font(&buf, .{});
     try testing.expectEqual(@as(u16, 1000), font.units_per_em);
@@ -396,7 +396,7 @@ test "header metrics" {
     try testing.expectEqual(@as(f32, 0), unshifted.next().?.origin.x());
 }
 
-test "glyph metrics incl. the hmtx tail" {
+test "Vector.glyphMetrics: includes the hmtx tail" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font = synthetic.font(&buf, .{});
     try testing.expectEqual(GlyphMetrics{ .advance = 500, .lsb = 0 }, font.glyphMetrics(0));
@@ -407,7 +407,7 @@ test "glyph metrics incl. the hmtx tail" {
     try testing.expectEqual(GlyphMetrics{ .advance = 800, .lsb = 0 }, font.glyphMetrics(7));
 }
 
-test "rejects other formats and truncation without panicking" {
+test "Vector.loadFromBytes: rejects other formats and truncation without panicking" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const full = synthetic.build(&buf, .{});
     var otto: [64]u8 = undefined;
@@ -441,7 +441,7 @@ test "rejects other formats and truncation without panicking" {
     }
 }
 
-test "collections" {
+test "Vector.loadFromBytesFace: collections" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const bytes = synthetic.build(&buf, .{ .collection = true });
     try testing.expectEqual(.ttc, font_mod.Format.detectFromBytes(bytes));
@@ -471,7 +471,7 @@ test "collections" {
     }
 }
 
-test "loading from a file" {
+test "Vector.load: from a file" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const bytes = synthetic.build(&buf, .{});
     var tmp = testing.tmpDir(.{});
@@ -489,7 +489,7 @@ test "loading from a file" {
     try testing.expectEqualStrings("VectorFont{ .units_per_em = 1000, .glyphs = 7, .ascent = 900, .descent = -250 }", printed);
 }
 
-test "system font, when one is installed" {
+test "Vector.load: system font, when one is installed" {
     const candidates = [_][]const u8{
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -512,7 +512,7 @@ test "system font, when one is installed" {
     try testing.expect(lineWidth(font, "Hello", 24) > 24);
 }
 
-test "system collection, when one is installed" {
+test "Vector.loadFace: system collection, when one is installed" {
     const candidates = [_][]const u8{
         "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -546,7 +546,7 @@ test "system collection, when one is installed" {
     try testing.expectError(error.InvalidFormat, Vector.loadFace(testing.io, testing.allocator, path, font.num_faces));
 }
 
-test "system CFF font, when one is installed" {
+test "Vector.load: system CFF font, when one is installed" {
     const candidates = [_][]const u8{
         "/usr/share/fonts/gnu-free/FreeSans.otf",
         "/usr/share/fonts/opentype/freefont/FreeSans.otf",

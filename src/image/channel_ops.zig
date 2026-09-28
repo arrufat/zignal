@@ -370,7 +370,7 @@ pub fn blendRows(comptime P: type, rows: []const [*]const Accum(P), weights: []c
     }
 }
 
-test "axis taps sum to unit gain and stay in bounds" {
+test "AxisTaps: taps sum to unit gain and stay in bounds" {
     const allocator = std.testing.allocator;
     for ([_]Interpolation{ .bilinear, .bicubic, .catmull_rom, .{ .mitchell = .default }, .lanczos }) |method| {
         for ([_][2]u32{ .{ 640, 97 }, .{ 13, 401 }, .{ 5, 5 } }) |lens| {

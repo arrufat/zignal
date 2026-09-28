@@ -4,7 +4,7 @@ const expectEqual = std.testing.expectEqual;
 const Matrix = @import("Matrix.zig").Matrix;
 const SMatrix = @import("SMatrix.zig").SMatrix;
 
-test "complex operation chaining" {
+test "Matrix.chain: complex operation chaining" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -35,7 +35,7 @@ test "complex operation chaining" {
     }
 }
 
-test "row and column extraction with Matrix" {
+test "Matrix.row: row and column extraction" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -63,7 +63,7 @@ test "row and column extraction with Matrix" {
     try expectEqual(@as(f32, 6.0), dynamic_col.at(2, 0).*);
 }
 
-test "Matrix operations: add, sub, scale, transpose" {
+test "Matrix: add, sub, scale and transpose" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 

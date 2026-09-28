@@ -226,7 +226,7 @@ test {
     _ = layout;
 }
 
-test "Font.load dispatches on the format" {
+test "Font.load: dispatches on the format" {
     const synthetic = @import("font/truetype/synthetic.zig");
     var buf: [synthetic.buffer_size]u8 = undefined;
     var tmp = std.testing.tmpDir(.{});
@@ -275,7 +275,7 @@ test "Font.load dispatches on the format" {
     try std.testing.expectError(error.InvalidFormat, Font.loadFace(std.testing.io, std.testing.allocator, path, 1));
 }
 
-test "Font.enableCache is a no-op for bitmap fonts" {
+test "Font.enableCache: no-op for bitmap fonts" {
     var font: Font = .{ .bitmap = font8x8.basic };
     try font.enableCache(std.testing.allocator);
     font.disableCache();

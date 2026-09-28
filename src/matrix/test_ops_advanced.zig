@@ -2,7 +2,7 @@ const std = @import("std");
 const expectEqual = std.testing.expectEqual;
 const Matrix = @import("Matrix.zig").Matrix;
 
-test "Matrix apply method" {
+test "Matrix.apply: maps every element" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -57,7 +57,7 @@ test "Matrix apply method" {
     try expectEqual(@as(f64, 1.0 / 3.0), result3.at(0, 2).*);
 }
 
-test "Matrix statistical operations" {
+test "Matrix.mean: statistical operations" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -92,7 +92,7 @@ test "Matrix statistical operations" {
     try std.testing.expect(@abs(std_dev - @sqrt(2.916666666666667)) < 1e-10);
 }
 
-test "Matrix norms" {
+test "Matrix.frobeniusNorm: norms" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -117,7 +117,7 @@ test "Matrix norms" {
     try expectEqual(@as(f64, 5.0), mat.trace());
 }
 
-test "Matrix dimension errors surface at the failing op" {
+test "Matrix.add: dimension errors surface at the failing op" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -130,7 +130,7 @@ test "Matrix dimension errors surface at the failing op" {
     try std.testing.expectError(error.DimensionMismatch, a.hadamard(b));
 }
 
-test "Matrix offset and pow" {
+test "Matrix.offset: offset and pow" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 

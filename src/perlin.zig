@@ -59,7 +59,7 @@ pub fn noise(T: type, x: T, y: T, z: T, opts: Options(T)) T {
     return total_noise / max_amplitude * opts.amplitude;
 }
 
-test "perlin: octaves are normalised to the amplitude" {
+test "noise: octaves are normalised to the amplitude" {
     const x, const y, const z = .{ 0.1, 0.37, 0.52 };
     // One octave is the raw noise; the ramp must not scale it by 1/persistence.
     try expectEqual(gradientNoise(f64, x, y, z), noise(f64, x, y, z, .{}));
@@ -118,7 +118,7 @@ fn gradientNoise(T: type, x: T, y: T, z: T) T {
     ), v), w);
 }
 
-test "gradientNoise" {
+test "gradientNoise: known values" {
     try expectEqual(gradientNoise(f64, 0, 0, 0), 0);
     try expectEqual(gradientNoise(f64, 1, 1, 1), 0);
     try expectEqual(gradientNoise(f64, -1, -1, -1), 0);
@@ -132,7 +132,7 @@ fn fade(T: type, t: T) T {
     return t * t * t * (t * (t * 6 - 15) + 10);
 }
 
-test "fade" {
+test "fade: known values" {
     try expectEqual(fade(f64, 0.75), 0.896484375);
 }
 
@@ -154,13 +154,13 @@ fn grad(T: type, hash: u8, x: T, y: T, z: T) T {
     };
 }
 
-test "grad" {
+test "grad: known value" {
     try expectEqual(grad(f64, 69, 3.14, 42, 0), -3.14);
 }
 
 // Just to make sure the switch implementation matches the original one, directly ported from:
 // https://mrl.cs.nyu.edu/~perlin/noise/
-test "grad perlin" {
+test "grad: matches the reference implementation" {
     const gp = struct {
         fn lambda(T: type, hash: u8, x: T, y: T, z: T) T {
             const h: u4 = @truncate(hash);

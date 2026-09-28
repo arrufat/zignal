@@ -8,7 +8,7 @@ const Orb = @import("orb.zig");
 
 // Import all ORB components
 // Test helpers
-test "ORB full pipeline - detection, description, and matching" {
+test "Orb.detectAndCompute: full pipeline with matching" {
     const allocator = std.testing.allocator;
 
     // Create two test images with similar patterns
@@ -62,7 +62,7 @@ test "ORB full pipeline - detection, description, and matching" {
     }
 }
 
-test "ORB rotation invariance" {
+test "Orb.detectAndCompute: rotation invariance" {
     const allocator = std.testing.allocator;
 
     // Create original image
@@ -108,7 +108,7 @@ test "ORB rotation invariance" {
     }
 }
 
-test "ORB scale invariance" {
+test "Orb.detectAndCompute: scale invariance" {
     const allocator = std.testing.allocator;
 
     // Create original image
@@ -148,7 +148,7 @@ test "ORB scale invariance" {
     }
 }
 
-test "ORB kNN matching" {
+test "Orb.detectAndCompute: kNN matching" {
     const allocator = std.testing.allocator;
 
     // Create test images

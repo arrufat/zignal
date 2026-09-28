@@ -8,7 +8,7 @@ const Matrix = @import("Matrix.zig").Matrix;
 const SMatrix = @import("SMatrix.zig").SMatrix;
 const svd_dynamic = @import("svd.zig").svd;
 
-test "SVD comparison: basic 5x4 matrix" {
+test "svd: static vs dynamic, basic 5x4 matrix" {
     const allocator = testing.allocator;
     const m: usize = 5;
     const n: usize = 4;
@@ -72,7 +72,7 @@ test "SVD comparison: basic 5x4 matrix" {
     }
 }
 
-test "SVD comparison: identity matrix" {
+test "svd: static vs dynamic, identity matrix" {
     const allocator = testing.allocator;
     const n: usize = 3;
 
@@ -101,7 +101,7 @@ test "SVD comparison: identity matrix" {
     }
 }
 
-test "SVD comparison: singular matrix" {
+test "svd: static vs dynamic, singular matrix" {
     const allocator = testing.allocator;
     const m: usize = 3;
     const n: usize = 3;
@@ -153,7 +153,7 @@ test "SVD comparison: singular matrix" {
     try expectEqual(@as(usize, 2), static_zero_count);
 }
 
-test "SVD comparison: skinny_u mode" {
+test "svd: static vs dynamic, skinny_u mode" {
     const allocator = testing.allocator;
     const m: usize = 4;
     const n: usize = 3;
@@ -194,7 +194,7 @@ test "SVD comparison: skinny_u mode" {
     }
 }
 
-test "SVD comparison: rectangular matrix" {
+test "svd: static vs dynamic, rectangular matrix" {
     const allocator = testing.allocator;
     const m: usize = 6;
     const n: usize = 3;
@@ -245,7 +245,7 @@ test "SVD comparison: rectangular matrix" {
     }
 }
 
-test "SVD comparison: reconstruction accuracy" {
+test "svd: static vs dynamic, reconstruction accuracy" {
     const allocator = testing.allocator;
     const m: usize = 4;
     const n: usize = 3;

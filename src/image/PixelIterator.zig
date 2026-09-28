@@ -59,7 +59,7 @@ pub fn PixelIterator(comptime T: type) type {
     };
 }
 
-test "PixelIterator basic functionality" {
+test "PixelIterator: basic functionality" {
     const allocator = std.testing.allocator;
 
     // Create a simple 3x3 image
@@ -93,7 +93,7 @@ test "PixelIterator basic functionality" {
     try std.testing.expectEqual(@as(u8, 0), pixel_iter.next().?.*);
 }
 
-test "PixelIterator with views" {
+test "PixelIterator: with views" {
     const allocator = std.testing.allocator;
 
     // Create a 4x4 image
@@ -138,7 +138,7 @@ test "PixelIterator with views" {
     try std.testing.expectEqual(@as(u8, 5), pixel_iter.next().?.*);
 }
 
-test "PixelIterator reuse with init" {
+test "PixelIterator.init: reuse" {
     const allocator = std.testing.allocator;
 
     // Create two different images

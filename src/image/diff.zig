@@ -234,7 +234,7 @@ pub fn bounds(comptime T: type, previous: Image(T), current: Image(T)) ?Rectangl
     return .init(@intCast(left), @intCast(top), @intCast(right), @intCast(bottom));
 }
 
-test "bounds of the differing pixels" {
+test "Image.diffBounds: bounds of the differing pixels" {
     const allocator = std.testing.allocator;
     var a: Image(Rgb) = try .init(allocator, 6, 8);
     defer a.deinit(allocator);

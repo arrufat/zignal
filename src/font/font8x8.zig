@@ -76,7 +76,7 @@ pub fn create(gpa: std.mem.Allocator, filter: LoadFilter) !BitmapFont {
     };
 }
 
-test "static font is available" {
+test "basic: static font is available" {
     const testing = std.testing;
 
     // Static font should be directly usable without allocation
@@ -94,7 +94,7 @@ test "static font is available" {
     try testing.expectEqual(null, basic.getCharData(0x7F));
 }
 
-test "create ASCII font dynamically" {
+test "create: ASCII font" {
     const testing = std.testing;
 
     var dynamic_font = try create(testing.allocator, .{ .ranges = &[_]unicode.Range{unicode.ranges.ascii} });
@@ -109,7 +109,7 @@ test "create ASCII font dynamically" {
     try testing.expectEqual(@as(u32, 8), char_data.?.len);
 }
 
-test "create extended Latin font" {
+test "extended: covers ASCII and Latin-1" {
     const testing = std.testing;
 
     var extended_font = try extended(testing.allocator);
@@ -125,7 +125,7 @@ test "create extended Latin font" {
     try testing.expectEqual(@as(u32, 8), extended_char.?.len);
 }
 
-test "create box drawing font" {
+test "create: box drawing font" {
     const testing = std.testing;
 
     var box_font = try create(testing.allocator, .{ .ranges = &[_]unicode.Range{
@@ -149,7 +149,7 @@ test "create box drawing font" {
     try testing.expect(block_char != null);
 }
 
-test "create font with all available ranges" {
+test "create: all available ranges" {
     const testing = std.testing;
 
     var all_font = try create(testing.allocator, .all);
@@ -165,7 +165,7 @@ test "create font with all available ranges" {
     try testing.expect(all_font.getCharData(0x2580) != null); // Block elements
 }
 
-test "create font with custom ranges" {
+test "create: custom ranges" {
     const testing = std.testing;
 
     // Create font with just box drawing, no ASCII

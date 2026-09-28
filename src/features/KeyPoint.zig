@@ -101,7 +101,7 @@ pub fn overlaps(self: KeyPoint, other: KeyPoint, overlap_threshold: f32) bool {
 }
 
 // Tests
-test "KeyPoint basic properties" {
+test "KeyPoint: basic properties" {
     const kp = KeyPoint{
         .x = 100.5,
         .y = 200.3,
@@ -120,7 +120,7 @@ test "KeyPoint basic properties" {
     try expectEqual(@as(i32, -1), kp.class_id);
 }
 
-test "KeyPoint scale space conversion" {
+test "KeyPoint.toScaleSpace: scale space conversion" {
     const kp = KeyPoint{
         .x = 100,
         .y = 200,
@@ -145,7 +145,7 @@ test "KeyPoint scale space conversion" {
     try expectApproxEqAbs(kp.size, unscaled.size, 0.01);
 }
 
-test "KeyPoint bounds checking" {
+test "KeyPoint.isInBounds: bounds checking" {
     const kp = KeyPoint{
         .x = 50,
         .y = 50,
@@ -160,7 +160,7 @@ test "KeyPoint bounds checking" {
     try expectEqual(false, kp.isInBounds(40, 100, 10)); // Out of bounds
 }
 
-test "KeyPoint distance and overlap" {
+test "KeyPoint.overlaps: distance and overlap" {
     const kp1 = KeyPoint{
         .x = 100,
         .y = 100,
@@ -184,7 +184,7 @@ test "KeyPoint distance and overlap" {
     try expectEqual(false, kp1.overlaps(kp2, 0.4)); // 10 >= 20 * 0.4
 }
 
-test "KeyPoint sorting" {
+test "KeyPoint.compareResponse: sorting" {
     var keypoints = [_]KeyPoint{
         .{ .x = 0, .y = 0, .size = 1, .angle = 0, .response = 0.5, .octave = 0 },
         .{ .x = 0, .y = 0, .size = 1, .angle = 0, .response = 0.9, .octave = 0 },

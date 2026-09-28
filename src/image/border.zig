@@ -67,7 +67,7 @@ pub fn getPixel(comptime T: type, img: Image(T), row: isize, col: isize, border:
     return if (coords) |c| img.at(c.row, c.col).* else 0;
 }
 
-test "getPixel border resolution" {
+test "getPixel: border resolution" {
     const testing = std.testing;
     var data = [_]u8{ 1, 2, 3, 4 };
     const img = Image(u8).initFromSlice(2, 2, &data);
@@ -79,7 +79,7 @@ test "getPixel border resolution" {
     try testing.expectEqual(@as(u8, 4), getPixel(u8, img, -1, -1, .wrap));
 }
 
-test "resolveIndex basic" {
+test "resolveIndex: basic" {
     const testing = std.testing;
 
     // Test in-bounds (fast path)
@@ -95,7 +95,7 @@ test "resolveIndex basic" {
     try testing.expectEqual(@as(?usize, null), resolveIndex(0, 0, .wrap));
 }
 
-test "resolveIndex zero mode" {
+test "resolveIndex: zero mode" {
     const testing = std.testing;
     const len: isize = 10;
 
@@ -108,7 +108,7 @@ test "resolveIndex zero mode" {
     try testing.expectEqual(@as(?usize, null), resolveIndex(15, len, .zero));
 }
 
-test "resolveIndex replicate mode" {
+test "resolveIndex: replicate mode" {
     const testing = std.testing;
     const len: isize = 10;
 
@@ -121,7 +121,7 @@ test "resolveIndex replicate mode" {
     try testing.expectEqual(@as(?usize, 9), resolveIndex(15, len, .replicate));
 }
 
-test "resolveIndex mirror mode" {
+test "resolveIndex: mirror mode" {
     const testing = std.testing;
     const len: isize = 5; // Indices: 0, 1, 2, 3, 4
     // Mirror pattern: 0 1 2 3 4 3 2 1 0 1 ...
@@ -141,7 +141,7 @@ test "resolveIndex mirror mode" {
     try testing.expectEqual(@as(?usize, 0), resolveIndex(5, 1, .mirror));
 }
 
-test "resolveIndex wrap mode" {
+test "resolveIndex: wrap mode" {
     const testing = std.testing;
     const len: isize = 5;
 

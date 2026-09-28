@@ -261,7 +261,7 @@ fn cubic(t: Transform, p0: Point, c1: Point, c2: Point, p1: Point, closing: bool
 const testing = std.testing;
 const synthetic = @import("truetype/synthetic.zig");
 
-test "transform" {
+test "Outline.Transform.apply: scale, shear and origin" {
     const t: Transform = .{ .scale = 0.1, .origin = .init(.{ 10.25, 80 }), .shear = 0.25 };
     const above = t.apply(100, 400);
     try testing.expectEqual(@as(f32, 10.25 + 0.1 * (100 + 100)), above.x());
@@ -271,7 +271,7 @@ test "transform" {
     try testing.expectEqual(@as(f32, 120), below.y());
 }
 
-test "flatten a polygonal glyph" {
+test "Outline.flatten: polygonal glyph" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font = synthetic.font(&buf, .{});
     var o = try font.outline(testing.allocator, 1);
@@ -288,7 +288,7 @@ test "flatten a polygonal glyph" {
     try testing.expectEqual(Point2.init(.{ 40, 60 }), polys[1][0]);
 }
 
-test "flatten curves: count matches, grows with size, stays closed" {
+test "Outline.flatten: curves count matches, grow with size, stay closed" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font = synthetic.font(&buf, .{});
     var o = try font.outline(testing.allocator, 3);
@@ -314,7 +314,7 @@ test "flatten curves: count matches, grows with size, stays closed" {
     try testing.expect(prev <= 4 * max_curve_segments);
 }
 
-test "flatten cubics: count matches, grows with size, stays closed" {
+test "Outline.flatten: cubics count matches, grow with size, stay closed" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font = synthetic.font(&buf, .{ .cff = true });
     var o = try font.outline(testing.allocator, 3);
@@ -342,7 +342,7 @@ test "flatten cubics: count matches, grows with size, stays closed" {
     try testing.expect(prev <= 4 * max_curve_segments);
 }
 
-test "fractional origin moves the polygon exactly" {
+test "Outline.flatten: fractional origin moves the polygon exactly" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font = synthetic.font(&buf, .{});
     var o = try font.outline(testing.allocator, 6);

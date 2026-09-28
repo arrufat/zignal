@@ -389,7 +389,7 @@ const DataIterator = struct {
     }
 };
 
-test "data module count matches capacity for version 1" {
+test "DataIterator: module count matches capacity for version 1" {
     var m = try BitMatrix.init(std.testing.allocator, 1);
     defer m.deinit(std.testing.allocator);
     var it: DataIterator = .init(&m);
@@ -399,7 +399,7 @@ test "data module count matches capacity for version 1" {
     try std.testing.expectEqual(@as(usize, 26 * 8), count);
 }
 
-test "placeData and extractCodewords roundtrip" {
+test "BitMatrix.placeData: roundtrip with extractCodewords" {
     var m = try BitMatrix.init(std.testing.allocator, 7);
     defer m.deinit(std.testing.allocator);
     const total = tables.ecBlocks(7, .low).totalCodewords();
@@ -414,7 +414,7 @@ test "placeData and extractCodewords roundtrip" {
     try std.testing.expectEqualSlices(u8, codewords, out);
 }
 
-test "format info write/read roundtrip" {
+test "BitMatrix.writeFormatInfo: roundtrip with readFormatInfo" {
     var m = try BitMatrix.init(std.testing.allocator, 1);
     defer m.deinit(std.testing.allocator);
     m.writeFormatInfo(0b101010000010010);
@@ -422,7 +422,7 @@ test "format info write/read roundtrip" {
     try std.testing.expectEqual(@as(u15, 0b101010000010010), m.readFormatInfo(1));
 }
 
-test "version info write/read roundtrip" {
+test "BitMatrix.writeVersionInfo: roundtrip with readVersionInfo" {
     var m = try BitMatrix.init(std.testing.allocator, 7);
     defer m.deinit(std.testing.allocator);
     m.writeVersionInfo(tables.versionInfo(7));
@@ -430,7 +430,7 @@ test "version info write/read roundtrip" {
     try std.testing.expectEqual(tables.versionInfo(7), m.readVersionInfo(1));
 }
 
-test "penalty rule N1 counts runs" {
+test "BitMatrix.penaltyRuns: rule N1 counts runs" {
     // A 21x21 matrix that alternates every module scores 0 for N1.
     var m = try BitMatrix.init(std.testing.allocator, 1);
     defer m.deinit(std.testing.allocator);
@@ -441,7 +441,7 @@ test "penalty rule N1 counts runs" {
     try std.testing.expectEqual(@as(u32, 19 * 42), m.penaltyRuns());
 }
 
-test "penalty rule N2 counts blocks" {
+test "BitMatrix.penaltyBlocks: rule N2 counts blocks" {
     var m = try BitMatrix.init(std.testing.allocator, 1);
     defer m.deinit(std.testing.allocator);
     for (0..21) |r| for (0..21) |c| m.set(r, c, @intCast((r + c) % 2));
@@ -450,7 +450,7 @@ test "penalty rule N2 counts blocks" {
     try std.testing.expectEqual(@as(u32, 3 * 20 * 20), m.penaltyBlocks());
 }
 
-test "penalty rule N3 finder-like patterns" {
+test "BitMatrix.penaltyFinderLike: rule N3 finder-like patterns" {
     var m = try BitMatrix.init(std.testing.allocator, 1);
     defer m.deinit(std.testing.allocator);
     for (0..21) |r| for (0..21) |c| m.set(r, c, @intCast((r + c) % 2));
@@ -465,7 +465,7 @@ test "penalty rule N3 finder-like patterns" {
     try std.testing.expect(score >= 40);
 }
 
-test "penalty rule N4 balance" {
+test "BitMatrix.penaltyBalance: rule N4 balance" {
     var m = try BitMatrix.init(std.testing.allocator, 1);
     defer m.deinit(std.testing.allocator);
     for (0..21) |r| for (0..21) |c| m.set(r, c, 1);
@@ -476,7 +476,7 @@ test "penalty rule N4 balance" {
     try std.testing.expectEqual(@as(u32, 0), m.penaltyBalance());
 }
 
-test "function patterns for version 1" {
+test "BitMatrix.placeFunctionPatterns: version 1" {
     var m = try BitMatrix.init(std.testing.allocator, 1);
     defer m.deinit(std.testing.allocator);
     // Finder corners are dark, separator ring is light.

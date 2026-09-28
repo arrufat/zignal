@@ -229,7 +229,7 @@ pub fn safeCast(comptime T: type, value: anytype) !T {
     }
 }
 
-test "meta.narrowToBytes keeps lanes above 127" {
+test "narrowToBytes: keeps lanes above 127" {
     var lanes: [16]i32 = undefined;
     for (&lanes, 0..) |*lane, i| lane.* = @intCast(120 + 9 * i);
     std.mem.doNotOptimizeAway(&lanes);
@@ -239,7 +239,7 @@ test "meta.narrowToBytes keeps lanes above 127" {
     try std.testing.expectEqualSlices(u8, &.{ 0, 1, 127, 128, 129, 200, 254, 255 }, &wide);
 }
 
-test "meta.clamp" {
+test "clamp: float and integer ranges" {
     const expect = std.testing.expect;
 
     // Int to Int

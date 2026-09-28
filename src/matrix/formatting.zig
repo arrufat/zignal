@@ -91,7 +91,7 @@ pub fn ScientificFormatter(comptime MatrixType: type) type {
 const expectEqualStrings = std.testing.expectEqualStrings;
 const SMatrix = @import("SMatrix.zig").SMatrix;
 
-test "static matrix format" {
+test "SMatrix.format: scientific and decimal" {
     // Test 2x3 matrix with known values
     var m: SMatrix(f32, 2, 3) = .{};
     m.at(0, 0).* = 1.23;

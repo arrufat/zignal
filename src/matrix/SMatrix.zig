@@ -848,7 +848,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
     };
 }
 
-test "SMatrix identity" {
+test "SMatrix.identity: ones on the diagonal" {
     const eye: SMatrix(f32, 3, 3) = .identity();
     try expectEqual(eye.sum(), 3);
     for (0..eye.rows) |r| {
@@ -862,7 +862,7 @@ test "SMatrix identity" {
     }
 }
 
-test "SMatrix initAll" {
+test "SMatrix.initAll: fills every element" {
     const zeros: SMatrix(f32, 3, 3) = .initAll(0);
     try expectEqual(zeros.sum(), 0);
     const ones: SMatrix(f32, 3, 3) = .initAll(1);
@@ -870,14 +870,14 @@ test "SMatrix initAll" {
     try expectEqual(ones.sum(), @as(f32, @floatFromInt(shape[0] * shape[1])));
 }
 
-test "SMatrix shape" {
+test "SMatrix.shape: rows and cols" {
     const matrix: SMatrix(f32, 4, 5) = .{};
     const shape = matrix.shape();
     try expectEqual(shape[0], 4);
     try expectEqual(shape[1], 5);
 }
 
-test "SMatrix as" {
+test "SMatrix.as: converts element type" {
     const a: SMatrix(f32, 4, 3) = .random(1234);
     const b = a.as(f64);
     for (0..a.rows) |r| {
@@ -887,7 +887,7 @@ test "SMatrix as" {
     }
 }
 
-test "SMatrix scale" {
+test "SMatrix.scale: scales every element" {
     const io = std.testing.io;
     const rng_impl: std.Random.IoSource = .{ .io = io };
     const seed = rng_impl.interface().int(u64);
@@ -901,7 +901,7 @@ test "SMatrix scale" {
     }
 }
 
-test "SMatrix apply" {
+test "SMatrix.apply: maps every element" {
     var a: SMatrix(f32, 3, 4) = .random(1234);
 
     const f = struct {
@@ -919,7 +919,7 @@ test "SMatrix apply" {
     }
 }
 
-test "SMatrix norm" {
+test "SMatrix.frobeniusNorm: norms" {
     var matrix: SMatrix(f32, 3, 4) = .random(5678);
     try expectEqual(matrix.frobeniusNorm(), @sqrt(matrix.hadamard(matrix).sum()));
 
@@ -953,7 +953,7 @@ test "SMatrix norm" {
     try expectApproxEqAbs(@as(f32, 4.0), diag_matrix.inducedNorm(@as(f32, 2.0)), 1e-4);
 }
 
-test "SMatrix sum" {
+test "SMatrix.sum: sum, sumRows and sumCols" {
     var matrix: SMatrix(f32, 3, 4) = .initAll(1);
     const col_sums: SMatrix(f32, 1, 4) = .initAll(3);
     const row_sums: SMatrix(f32, 3, 1) = .initAll(4);
@@ -962,7 +962,7 @@ test "SMatrix sum" {
     try expectEqual(matrix.sumCols().sumRows().item(), matrix.sum());
 }
 
-test "SMatrix inverse" {
+test "SMatrix.inv: 2x2 and 3x3" {
     var a: SMatrix(f32, 2, 2) = .{};
     a.at(0, 0).* = -1;
     a.at(0, 1).* = 1.5;
@@ -999,7 +999,7 @@ test "SMatrix inverse" {
     try expectEqualDeep(b.inv().?, b_i);
 }
 
-test "SMatrix solve" {
+test "SMatrix.solve: linear system" {
     // A well-conditioned 4x4 system with a known solution.
     const a: SMatrix(f64, 4, 4) = .init(.{
         .{ 4, 1, 0, 2 },
@@ -1032,7 +1032,7 @@ test "SMatrix solve" {
     try expectEqual(@as(?SMatrix(f64, 2, 1), null), zero.solve(rhs));
 }
 
-test "SMatrix row and column extraction" {
+test "SMatrix.row: row and column extraction" {
     // Test data
     const test_matrix: SMatrix(f32, 3, 2) = .init(.{
         .{ 1.0, 2.0 },
@@ -1050,7 +1050,7 @@ test "SMatrix row and column extraction" {
     try expectEqual(@as(f32, 6.0), static_col.at(2, 0).*);
 }
 
-test "SMatrix matrix multiplication (dot product)" {
+test "SMatrix.dot: matrix multiplication" {
     // Test matrices
     const static_a: SMatrix(f32, 2, 3) = .init(.{
         .{ 1.0, 2.0, 3.0 },
@@ -1070,7 +1070,7 @@ test "SMatrix matrix multiplication (dot product)" {
     try expectEqual(@as(f32, 154.0), static_result.at(1, 1).*); // 4*8 + 5*10 + 6*12 = 154
 }
 
-test "SMatrix operations: add, sub, scale, transpose" {
+test "SMatrix: add, sub, scale and transpose" {
     // Test data
     const static_matrix: SMatrix(f32, 2, 3) = .init(.{
         .{ 1.0, 2.0, 3.0 },
@@ -1101,7 +1101,7 @@ test "SMatrix operations: add, sub, scale, transpose" {
     try expectEqual(@as(f32, 3.0), static_subtracted.at(1, 2).*); // 6.0 - 3.0
 }
 
-test "SMatrix gram and covariance matrices" {
+test "SMatrix.gram: gram and covariance matrices" {
     // Create test matrix (3 samples × 2 features)
     const data: SMatrix(f64, 3, 2) = .init(.{
         .{ 1.0, 2.0 },
@@ -1134,7 +1134,7 @@ test "SMatrix gram and covariance matrices" {
     try expectEqual(@as(f64, 56.0), cov_result.at(1, 1).*);
 }
 
-test "SMatrix GEMM operations" {
+test "SMatrix.gemm: GEMM operations" {
     // Test matrices
     const a: SMatrix(f32, 2, 3) = .init(.{
         .{ 1.0, 2.0, 3.0 },
@@ -1187,7 +1187,7 @@ test "SMatrix GEMM operations" {
     try expectEqual(@as(f32, 0.0), zero_result.at(1, 1).*);
 }
 
-test "SMatrix fromSlice" {
+test "SMatrix.fromSlice: row-major data" {
     const data = [_]f32{ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 };
     const mat: SMatrix(f32, 2, 3) = try .fromSlice(&data);
 
@@ -1199,7 +1199,7 @@ test "SMatrix fromSlice" {
     try expectEqual(@as(f32, 6.0), mat.at(1, 2).*);
 }
 
-test "SMatrix Cholesky" {
+test "SMatrix.chol: L times its transpose is A" {
     const mat: SMatrix(f64, 3, 3) = .init(.{
         .{ 4.0, 2.0, 2.0 },
         .{ 2.0, 5.0, 3.0 },
@@ -1232,7 +1232,7 @@ test "SMatrix Cholesky" {
     }
 }
 
-test "SMatrix svd basic" {
+test "SMatrix.svd: basic" {
     const m: usize = 5;
     const n: usize = 4;
     // Example matrix taken from Wikipedia
@@ -1268,7 +1268,7 @@ test "SMatrix svd basic" {
     }
 }
 
-test "SMatrix det and inv beyond 3x3" {
+test "SMatrix.det: det and inv beyond 3x3" {
     const a: SMatrix(f64, 4, 4) = .init(.{
         .{ 4, 1, 2, 0 },
         .{ 1, 5, 0, 3 },
