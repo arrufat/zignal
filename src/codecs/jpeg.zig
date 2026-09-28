@@ -178,7 +178,7 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
         bytes_read += try reader.discard(.limited(skip));
     }
 }
-test "JPEG getInfo" {
+test "getInfo: reads JFIF header" {
     const gpa = std.testing.allocator;
 
     var data: std.ArrayList(u8) = .empty;
@@ -219,7 +219,7 @@ test "JPEG getInfo" {
     try std.testing.expectEqual(Subsampling.yuv444, header.subsampling);
 }
 
-test "JPEG getInfo subsampling" {
+test "getInfo: subsampling" {
     const gpa = std.testing.allocator;
 
     const cases = [_]struct { luma: u8, expected: ?Subsampling }{
@@ -3102,7 +3102,7 @@ pub fn readAny(io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeL
     return loadAnyFromBytes(io, allocator, jpeg_data, limits);
 }
 
-test "quantizer reciprocals match integer division for every table value" {
+test "QuantDivisor: reciprocals match integer division for every table value" {
     // (|x| + corr) * recip >> shift must equal (|x| + d / 2) / d over the DCT's 15-bit range.
     for (1..256) |q| {
         const d: u32 = @intCast(q * 8);
@@ -3115,7 +3115,7 @@ test "quantizer reciprocals match integer division for every table value" {
     }
 }
 
-test "forward DCT matches a floating-point reference" {
+test "Fdct.pairInto: matches a floating-point reference" {
     var prng = std.Random.DefaultPrng.init(7);
     const rnd = prng.random();
     var samples: [2][64]u8 = undefined;
@@ -3143,7 +3143,7 @@ test "forward DCT matches a floating-point reference" {
     }
 }
 
-test "JPEG encode -> decode RGB roundtrip" {
+test "encode: RGB roundtrip" {
     const gpa = std.testing.allocator;
 
     var img: Image(Rgb) = try .init(gpa, 16, 16);
@@ -3171,7 +3171,7 @@ test "JPEG encode -> decode RGB roundtrip" {
     try std.testing.expect(psnr > 38.0);
 }
 
-test "JPEG encode -> decode grayscale roundtrip" {
+test "encode: grayscale roundtrip" {
     const gpa = std.testing.allocator;
     var img: Image(u8) = try .init(gpa, 16, 16);
     defer img.deinit(gpa);
@@ -3196,7 +3196,7 @@ test "JPEG encode -> decode grayscale roundtrip" {
     try std.testing.expect(psnr > 45);
 }
 
-test "JPEG subsampling 4:2:2 roundtrip" {
+test "encode: 4:2:2 subsampling roundtrip" {
     const gpa = std.testing.allocator;
 
     // Non-multiple-of-MCU dimensions to exercise padding
@@ -3227,7 +3227,7 @@ test "JPEG subsampling 4:2:2 roundtrip" {
     try std.testing.expect(psnr > 40);
 }
 
-test "JPEG subsampling 4:2:0 roundtrip" {
+test "encode: 4:2:0 subsampling roundtrip" {
     const gpa = std.testing.allocator;
 
     // Non-multiple-of-MCU dimensions (MCU is 16x16 for 4:2:0)
@@ -3258,7 +3258,7 @@ test "JPEG subsampling 4:2:0 roundtrip" {
     try std.testing.expect(psnr > 45);
 }
 
-test "JPEG 4:2:0 odd-size roundtrip (non-multiple-of-MCU)" {
+test "encode: 4:2:0 odd-size roundtrip (non-multiple-of-MCU)" {
     const gpa = std.testing.allocator;
 
     // Choose dimensions that are not multiples of 16 to force partial MCUs on both axes
@@ -3292,21 +3292,21 @@ test "JPEG 4:2:0 odd-size roundtrip (non-multiple-of-MCU)" {
     try std.testing.expect(psnr > 35.0);
 }
 
-test "JPEG max_jpeg_bytes limit" {
+test "decode: enforces max_jpeg_bytes" {
     const data = [_]u8{ 0xFF, 0xD8 };
     const limits: DecodeLimits = .{ .max_jpeg_bytes = .limited(1) };
     const result = decode(std.testing.allocator, &data, limits);
     try std.testing.expectError(error.JpegDataTooLarge, result);
 }
 
-test "JPEG marker byte limit" {
+test "decode: enforces max_marker_bytes" {
     const jpeg = [_]u8{ 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0x00, 0x00, 0xFF, 0xD9 };
     const limits: DecodeLimits = .{ .max_jpeg_bytes = .unlimited, .max_marker_bytes = .limited(2) };
     const result = decode(std.testing.allocator, &jpeg, limits);
     try std.testing.expectError(error.MarkerDataLimitExceeded, result);
 }
 
-test "JPEG block limit prevents excessive allocation" {
+test "JpegState.parseSOF: block limit prevents excessive allocation" {
     var state: JpegState = .empty;
     defer state.deinit(std.testing.allocator);
 
@@ -3333,7 +3333,7 @@ const test_progressive_jpeg = signature ++ test_progressive_dqt ++ test_progress
     test_progressive_dht ++ test_progressive_scan1 ++ test_progressive_scan2 ++ test_progressive_scan3 ++
     test_progressive_eoi;
 
-test "JPEG progressive full decode of hand-built stream" {
+test "loadFromBytes: progressive full decode of hand-built stream" {
     var img = try loadFromBytes(u8, parallel.inline_io, std.testing.allocator, &test_progressive_jpeg, .{});
     defer img.deinit(std.testing.allocator);
     try std.testing.expectEqual(8, img.rows);
@@ -3341,7 +3341,7 @@ test "JPEG progressive full decode of hand-built stream" {
     for (img.data) |px| try std.testing.expectEqual(143, px);
 }
 
-test "JPEG progressive scan limit returns partial image" {
+test "loadFromBytes: progressive scan limit returns partial image" {
     // Only the first two of three DC scans are decoded: DC = 14 -> pixel 142.
     var img = try loadFromBytes(u8, parallel.inline_io, std.testing.allocator, &test_progressive_jpeg, .{ .max_scans = .limited(2) });
     defer img.deinit(std.testing.allocator);
@@ -3352,13 +3352,13 @@ test "JPEG progressive scan limit returns partial image" {
     try std.testing.expect(state.scan_limit_reached);
 }
 
-test "JPEG duplicate SOF is rejected" {
+test "decode: rejects duplicate SOF" {
     const sof0 = [_]u8{ 0xFF, 0xC0 } ++ test_progressive_sof2[2..].*;
     const data = signature ++ sof0 ++ sof0 ++ test_progressive_eoi;
     try std.testing.expectError(error.DuplicateSOF, decode(std.testing.allocator, &data, .{}));
 }
 
-test "JPEG truncated progressive stream decodes partially" {
+test "loadFromBytes: truncated progressive stream decodes partially" {
     // Scan 3 loses its entropy data (and EOI): refinement hits EOF, DC stays at 14.
     var img = try loadFromBytes(u8, parallel.inline_io, std.testing.allocator, test_progressive_jpeg[0 .. test_progressive_jpeg.len - 4], .{});
     defer img.deinit(std.testing.allocator);
@@ -3373,7 +3373,7 @@ test "JPEG truncated progressive stream decodes partially" {
     for (img2.data) |px| try std.testing.expectEqual(128, px);
 }
 
-test "JPEG DC-only progressive scan decodes" {
+test "loadFromBytes: DC-only progressive scan decodes" {
     // Single DC scan at Al=2: DC = 12 -> flat image of value 140.
     const dc_only = signature ++ test_progressive_dqt ++ test_progressive_sof2 ++
         test_progressive_dht ++ test_progressive_scan1 ++ test_progressive_eoi;
@@ -3383,7 +3383,7 @@ test "JPEG DC-only progressive scan decodes" {
 }
 
 // Basic tests
-test "JPEG marker parsing" {
+test "Marker.fromBytes: parses marker bytes" {
     const testing = std.testing;
 
     // Test marker conversion
@@ -3396,7 +3396,7 @@ test "JPEG marker parsing" {
     try testing.expect(sof0 == .SOF0);
 }
 
-test "BitReader basic operations" {
+test "BitReader: basic operations" {
     const testing = std.testing;
 
     const data = [_]u8{ 0b10110011, 0b01010101 };
@@ -3415,7 +3415,7 @@ test "BitReader basic operations" {
     try testing.expectEqual(@as(u16, 0b01010101), bits3);
 }
 
-test "Ycbcr to RGB conversion" {
+test "Ycbcr.to: converts to RGB" {
     const testing = std.testing;
 
     // Test grayscale - standard Y=128
@@ -3454,7 +3454,7 @@ fn gradientImage(gpa: Allocator, rows: u32, cols: u32) !Image(Rgb) {
     return img;
 }
 
-test "banded restart-interval decode matches the single sweep" {
+test "loadFromBytes: banded restart-interval decode matches the single sweep" {
     const gpa = std.testing.allocator;
     var pool: std.Io.Threaded = .init(gpa, .{});
     defer pool.deinit();
@@ -3504,7 +3504,7 @@ test "banded restart-interval decode matches the single sweep" {
     try std.testing.expectEqualSlices(u8, want.data, got.data);
 }
 
-test "banded encode is byte-identical to the single sweep" {
+test "encode: banded output is byte-identical to the single sweep" {
     const gpa = std.testing.allocator;
     var pool: std.Io.Threaded = .init(gpa, .{});
     defer pool.deinit();
@@ -3535,7 +3535,7 @@ test "banded encode is byte-identical to the single sweep" {
     }
 }
 
-test "default encode writes one MCU row per restart interval" {
+test "encode: default writes one MCU row per restart interval" {
     const gpa = std.testing.allocator;
     // 37 columns: 5 MCUs at 4:4:4, 3 at 4:2:2 and 4:2:0 (16-wide MCUs), 5 blocks in gray.
     var img = try gradientImage(gpa, 21, 37);
@@ -3564,7 +3564,7 @@ test "default encode writes one MCU row per restart interval" {
     try std.testing.expectEqual(5, std.mem.readInt(u16, bytes[dri + 4 ..][0..2], .big));
 }
 
-test "JPEG restart intervals decode identically to a single interval" {
+test "loadFromBytes: restart intervals decode identically to a single interval" {
     const gpa = std.testing.allocator;
     var img = try gradientImage(gpa, 37, 29);
     defer img.deinit(gpa);
@@ -3610,7 +3610,7 @@ test "JPEG restart intervals decode identically to a single interval" {
     }
 }
 
-test "JPEG malformed SOS/SOF fields are rejected" {
+test "loadFromBytes: rejects malformed SOS/SOF fields" {
     const gpa = std.testing.allocator;
     var img = try gradientImage(gpa, 8, 8);
     defer img.deinit(gpa);
@@ -3633,7 +3633,7 @@ test "JPEG malformed SOS/SOF fields are rejected" {
     }
 }
 
-test "JPEG Adobe APP14 transform 0 decodes the planes as RGB" {
+test "loadFromBytes: Adobe APP14 transform 0 decodes the planes as RGB" {
     const gpa = std.testing.allocator;
     var img = try gradientImage(gpa, 16, 16);
     defer img.deinit(gpa);

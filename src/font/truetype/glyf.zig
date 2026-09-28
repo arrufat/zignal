@@ -262,7 +262,7 @@ fn expectPoint(p: Outline.Point, x: f32, y: f32, on_curve: bool) !void {
     try testing.expectEqual(on_curve, p.kind == .on_curve);
 }
 
-test "simple glyph with a hole" {
+test "outline: simple glyph with a hole" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     for ([_]bool{ false, true }) |long_loca| {
         const font = synthetic.font(&buf, .{ .long_loca = long_loca });
@@ -279,7 +279,7 @@ test "simple glyph with a hole" {
     }
 }
 
-test "empty glyph" {
+test "outline: empty glyph" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font = synthetic.font(&buf, .{});
     var o = try font.outline(testing.allocator, 0);
@@ -289,7 +289,7 @@ test "empty glyph" {
     try testing.expectError(error.InvalidGlyph, font.outline(testing.allocator, 7));
 }
 
-test "all off-curve contour" {
+test "outline: all off-curve contour" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font = synthetic.font(&buf, .{});
     var o = try font.outline(testing.allocator, 3);
@@ -298,7 +298,7 @@ test "all off-curve contour" {
     for (o.contour(0)) |p| try testing.expectEqual(.quad_control, p.kind);
 }
 
-test "composite glyphs" {
+test "outline: composite glyphs" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font = synthetic.font(&buf, .{});
     var d = try font.outline(testing.allocator, 4);
@@ -315,7 +315,7 @@ test "composite glyphs" {
     for (d.points, e.points) |a, b| try expectPoint(b, a.x, a.y, a.kind == .on_curve);
 }
 
-test "composite limits" {
+test "outline: composite limits" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const looping = synthetic.font(&buf, .{ .self_referencing = true });
     try testing.expectError(error.CompositeTooDeep, looping.outline(testing.allocator, 5));
@@ -324,7 +324,7 @@ test "composite limits" {
     try testing.expectError(error.CompositeTooDeep, fanout.outline(testing.allocator, 5));
 }
 
-test "truncated glyph data" {
+test "outline: truncated glyph data" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     var font = synthetic.font(&buf, .{});
     font.tables.outlines.glyf.glyf.len = 40;

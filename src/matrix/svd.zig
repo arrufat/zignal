@@ -499,7 +499,7 @@ pub fn kernel(
     return retval;
 }
 
-test "svd basic" {
+test "svd: basic" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -547,7 +547,7 @@ test "svd basic" {
     }
 }
 
-test "svd modes" {
+test "svd: modes" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -592,7 +592,7 @@ test "svd modes" {
     try std.testing.expect(u_full.rows == m and u_full.cols == m);
 }
 
-test "svd identity matrix" {
+test "svd: identity matrix" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -611,7 +611,7 @@ test "svd identity matrix" {
     }
 }
 
-test "svd singular matrix" {
+test "svd: singular matrix" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();

@@ -2,7 +2,7 @@ const std = @import("std");
 const io = std.Io.Threaded.global_single_threaded.io();
 const Matrix = @import("Matrix.zig").Matrix;
 
-test "Matrix inverse - small matrices" {
+test "Matrix.inv: small matrices" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -49,7 +49,7 @@ test "Matrix inverse - small matrices" {
     }
 }
 
-test "Matrix inverse - large matrices using Gauss-Jordan" {
+test "Matrix.inv: large matrices using Gauss-Jordan" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -112,7 +112,7 @@ test "Matrix inverse - large matrices using Gauss-Jordan" {
     }
 }
 
-test "Matrix inverse - singular matrix error" {
+test "Matrix.inv: singular matrix error" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -148,7 +148,7 @@ test "Matrix inverse - singular matrix error" {
     try std.testing.expectError(error.Singular, sing4.inv());
 }
 
-test "Matrix pseudo-inverse handles tall and wide matrices" {
+test "Matrix.pinv: tall and wide matrices" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -239,7 +239,7 @@ test "Matrix pseudo-inverse handles tall and wide matrices" {
     }
 }
 
-test "Matrix pseudo-inverse zero matrix" {
+test "Matrix.pinv: zero matrix" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
@@ -259,7 +259,7 @@ test "Matrix pseudo-inverse zero matrix" {
     try std.testing.expectEqual(@as(u32, 0), rank);
 }
 
-test "Matrix inverse/solve - singularity is relative to the matrix scale" {
+test "Matrix.inv: singularity is relative to the matrix scale" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
     const gpa = arena.allocator();

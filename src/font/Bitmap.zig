@@ -263,7 +263,7 @@ pub const test_font: Bitmap = .{
     .font_ascent = 7,
 };
 
-test "getEntry over a sparse table" {
+test "Bitmap.getEntry: sparse table" {
     const testing = std.testing;
     const font: Bitmap = .{
         .name = "Sparse",

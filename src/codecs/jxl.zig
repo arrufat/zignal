@@ -580,18 +580,18 @@ const Libjxl = dynlib.Library(Api, switch (builtin.os.tag) {
     else => &.{ "libjxl.so.1", "libjxl.so.0.13", "libjxl.so.0.12", "libjxl.so.0.11", "libjxl.so.0.10", "libjxl.so.0.9", "libjxl.so.0.8", "libjxl.so.0.7", "libjxl.so" },
 }, error.CodecUnavailable);
 
-test "signature detection" {
+test "hasSignature: detects bare and container signatures" {
     try std.testing.expect(hasSignature(&signature));
     try std.testing.expect(hasSignature(&container_signature));
     try std.testing.expect(!hasSignature(&.{ 0xFF, 0xD8 }));
 }
 
-test "disabled build reports CodecNotEnabled" {
+test "loadAnyFromBytes: disabled build reports CodecNotEnabled" {
     if (enabled) return error.SkipZigTest;
     try std.testing.expectError(error.CodecNotEnabled, loadAnyFromBytes(std.testing.io, std.testing.allocator, &signature, .default));
 }
 
-test "ABI layout matches libjxl" {
+test "Api: extern layouts match libjxl" {
     // sizeof/offsetof from the libjxl headers on 64-bit targets.
     if (@sizeOf(usize) != 8) return error.SkipZigTest;
     try std.testing.expectEqual(204, @sizeOf(BasicInfo));
@@ -603,7 +603,7 @@ test "ABI layout matches libjxl" {
     try std.testing.expectEqual(96, @offsetOf(ColorEncoding, "rendering_intent"));
 }
 
-test "animation ticks convert to milliseconds" {
+test "ticksToMs: converts animation ticks to milliseconds" {
     try std.testing.expectEqual(100, ticksToMs(10, 100, 1));
     try std.testing.expectEqual(40, ticksToMs(1, 25, 1));
     try std.testing.expectEqual(1001, ticksToMs(30, 30000, 1001));
@@ -611,7 +611,7 @@ test "animation ticks convert to milliseconds" {
     try std.testing.expectEqual(std.math.maxInt(u32), ticksToMs(std.math.maxInt(u32), 1, 1000));
 }
 
-test "a still loads as a one-frame animation" {
+test "loadAnimatedFromBytes: a still loads as a one-frame animation" {
     if (!enabled or !Libjxl.available()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
@@ -626,7 +626,7 @@ test "a still loads as a one-frame animation" {
     try std.testing.expectEqualSlices(u8, img.asBytes(), anim.frame(0).asBytes());
 }
 
-test "quality maps to libjxl distances" {
+test "distanceFromQuality: maps quality to libjxl distances" {
     try std.testing.expectEqual(0, distanceFromQuality(100));
     try std.testing.expectApproxEqAbs(1.0, distanceFromQuality(90), 1e-6);
     try std.testing.expectApproxEqAbs(25.0, distanceFromQuality(0), 1e-6);
@@ -646,7 +646,7 @@ fn testImage(comptime T: type, allocator: Allocator) !Image(T) {
     return img;
 }
 
-test "lossless round trip" {
+test "encode: lossless round trip" {
     if (!enabled or !Libjxl.available()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
@@ -668,7 +668,7 @@ test "lossless round trip" {
     }
 }
 
-test "lossy round trip stays close" {
+test "encode: lossy round trip stays close" {
     if (!enabled or !Libjxl.available()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
@@ -701,7 +701,7 @@ fn testAnimation(comptime T: type, allocator: Allocator, durations: []const u32,
     return builder.finish(allocator, loop_count);
 }
 
-test "animated lossless round trip" {
+test "encodeAnimated: lossless round trip" {
     if (!enabled or !Libjxl.available()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
@@ -723,7 +723,7 @@ test "animated lossless round trip" {
     }
 }
 
-test "a one-frame animation encodes as a still" {
+test "encodeAnimated: a one-frame animation encodes as a still" {
     if (!enabled or !Libjxl.available()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
@@ -736,7 +736,7 @@ test "a one-frame animation encodes as a still" {
     try std.testing.expectEqualSlices(u8, still_bytes, animated_bytes);
 }
 
-test "animated encode rejects bad input" {
+test "encodeAnimated: rejects bad input" {
     if (!enabled) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;
@@ -753,7 +753,7 @@ test "animated encode rejects bad input" {
     try std.testing.expectError(error.InconsistentFrameDimensions, encodeAnimated(Rgb, io, allocator, mismatched, .default));
 }
 
-test "changed-region frames decode to the full frames" {
+test "encodeAnimated: changed-region frames decode to the full frames" {
     if (!enabled or !Libjxl.available()) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const io = std.testing.io;

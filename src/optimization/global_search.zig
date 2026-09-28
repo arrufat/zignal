@@ -787,7 +787,7 @@ fn holderTable(x: []const f64) f64 {
     return -@abs(@sin(x[0]) * @cos(x[1]) * e);
 }
 
-test "end-to-end: Rosenbrock valley (minimization)" {
+test "GlobalOptimizer.optimize: Rosenbrock valley (minimization)" {
     const allocator = std.testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();
     const variables = box2(-2, 2);
@@ -804,7 +804,7 @@ test "end-to-end: Rosenbrock valley (minimization)" {
     try expectApproxEqAbs(@as(f64, 1), b.x[1], 5e-2);
 }
 
-test "end-to-end: Holder table (multimodal minimization)" {
+test "GlobalOptimizer.optimize: Holder table (multimodal minimization)" {
     const allocator = std.testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();
     const variables = box2(-10, 10);

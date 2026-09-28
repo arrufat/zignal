@@ -7,7 +7,7 @@ const Image = @import("../../image.zig").Image;
 const color = @import("../../color.zig");
 const Rgb = color.Rgb(u8);
 
-test "flood fill connectivity" {
+test "Image.floodFill: connectivity" {
     const allocator = std.testing.allocator;
 
     // Create a 5x5 image where we have a cross pattern of 5s and one diagonal element.
@@ -52,7 +52,7 @@ test "flood fill connectivity" {
     try expectEqual(@as(u8, 9), img8.at(2, 2).*); // Filled
 }
 
-test "flood fill relative threshold modes" {
+test "Image.floodFill: relative threshold modes" {
     const allocator = std.testing.allocator;
 
     // Create a 1x5 gradient image: [0, 1, 2, 3, 4]
@@ -94,7 +94,7 @@ test "flood fill relative threshold modes" {
     try expectEqual(@as(u8, 9), img_parent.at(0, 4).*);
 }
 
-test "flood fill RGB color images" {
+test "Image.floodFill: RGB color images" {
     const allocator = std.testing.allocator;
 
     var img = try Image(Rgb).init(allocator, 1, 3);
@@ -125,7 +125,7 @@ test "flood fill RGB color images" {
     try expectEqual(fill_val, img_8.at(0, 2).*);
 }
 
-test "flood fill error bounds" {
+test "Image.floodFill: error bounds" {
     const allocator = std.testing.allocator;
 
     var img = try Image(u8).init(allocator, 3, 3);

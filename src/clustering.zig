@@ -253,13 +253,13 @@ fn cluster(embeddings: []const []const f64, threshold: f64, labels: []u32) !u32 
     return chineseWhispers(f64, parallel.inline_io, std.testing.allocator, embeddings, labels, .{ .threshold = threshold });
 }
 
-test "chineseWhispers separates two blobs" {
+test "chineseWhispers: separates two blobs" {
     var labels: [6]u32 = undefined;
     try expectEqual(2, try cluster(blobs, 1.0, &labels));
     try expectEqualSlices(u32, &.{ 0, 0, 0, 1, 1, 1 }, &labels);
 }
 
-test "chineseWhispers leaves lone embeddings in their own cluster" {
+test "chineseWhispers: leaves lone embeddings in their own cluster" {
     var labels: [6]u32 = undefined;
     try expectEqual(6, try cluster(blobs, 0.01, &labels));
     try expectEqualSlices(u32, &.{ 0, 1, 2, 3, 4, 5 }, &labels);
@@ -270,13 +270,13 @@ test "chineseWhispers leaves lone embeddings in their own cluster" {
     try expectEqualSlices(u32, &.{ 0, 0, 1 }, &three);
 }
 
-test "chineseWhispers merges everything above the largest distance" {
+test "chineseWhispers: merges everything above the largest distance" {
     var labels: [6]u32 = undefined;
     try expectEqual(1, try cluster(blobs, 100.0, &labels));
     try expectEqualSlices(u32, &.{ 0, 0, 0, 0, 0, 0 }, &labels);
 }
 
-test "chineseWhispers handles the empty and single-embedding cases" {
+test "chineseWhispers: handles the empty and single-embedding cases" {
     var none: [0]u32 = undefined;
     try expectEqual(0, try cluster(&.{}, 1.0, &none));
 
@@ -285,7 +285,7 @@ test "chineseWhispers handles the empty and single-embedding cases" {
     try expectEqual(0, one[0]);
 }
 
-test "chineseWhispers rejects malformed input" {
+test "chineseWhispers: rejects malformed input" {
     var labels: [6]u32 = undefined;
     try expectError(error.InvalidThreshold, cluster(blobs, -1, &labels));
     try expectError(error.InvalidThreshold, cluster(blobs, std.math.inf(f64), &labels));
@@ -298,7 +298,7 @@ test "chineseWhispers rejects malformed input" {
     try expectError(error.DimensionMismatch, cluster(ragged, 1.0, &two));
 }
 
-test "chineseWhispers connects strictly closer than threshold" {
+test "chineseWhispers: connects strictly closer than threshold" {
     // Distance between (0, 0) and (1, 0) is exactly 1.0.
     const pair: []const []const f64 = &.{ &.{ 0.0, 0.0 }, &.{ 1.0, 0.0 } };
     var labels: [2]u32 = undefined;
@@ -312,7 +312,7 @@ test "chineseWhispers connects strictly closer than threshold" {
     try expectEqualSlices(u32, &.{ 0, 0 }, &labels);
 }
 
-test "chineseWhispers supports f16 embeddings" {
+test "chineseWhispers: supports f16 embeddings" {
     const p1 = [_]f16{ 0.0, 0.0 };
     const p2 = [_]f16{ 0.1, 0.1 };
     const embs: []const []const f16 = &.{ &p1, &p2 };
@@ -322,7 +322,7 @@ test "chineseWhispers supports f16 embeddings" {
     try expectEqualSlices(u32, &.{ 0, 0 }, &labels);
 }
 
-test "chineseWhispers clusters f32 embeddings of realistic width" {
+test "chineseWhispers: clusters f32 embeddings of realistic width" {
     const allocator = std.testing.allocator;
     const dim = 128;
     const per_cluster = 40;

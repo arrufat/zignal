@@ -357,7 +357,7 @@ pub fn Point(comptime dim: usize, comptime T: type) type {
 }
 
 // Tests
-test "Point creation and accessors" {
+test "Point.init: creation and accessors" {
     const Point2 = Point(2, f64);
     const Point3 = Point(3, f64);
     const Point5 = Point(5, f64);
@@ -387,7 +387,7 @@ test "Point creation and accessors" {
     try std.testing.expectEqual(@as(f64, 15.0), p_mut.x());
 }
 
-test "Point with integer types" {
+test "Point: integer types" {
     const p2: Point(2, i32) = .init(.{ 10, 20 });
     try std.testing.expectEqual(@as(i32, 10), p2.x());
     try std.testing.expectEqual(@as(i32, 20), p2.y());
@@ -399,7 +399,7 @@ test "Point with integer types" {
     try std.testing.expectEqual(@as(i32, 33), sum.z());
 }
 
-test "Point arithmetic operations" {
+test "Point.add: arithmetic operations" {
     const p1: Point(2, f64) = .init(.{ 1.0, 2.0 });
     const p2: Point(2, f64) = .init(.{ 3.0, 4.0 });
 
@@ -427,7 +427,7 @@ test "Point arithmetic operations" {
     try std.testing.expectEqual(@as(f64, 5.0), norm); // 3-4-5 triangle
 }
 
-test "Point advanced operations" {
+test "Point.normalize: advanced operations" {
 
     // Normalize
     const p: Point(2, f64) = .init(.{ 3.0, 4.0 });
@@ -460,7 +460,7 @@ test "Point advanced operations" {
     try std.testing.expectEqual(@as(f64, 10.0), clamped.y());
 }
 
-test "Point dimension conversion" {
+test "Point.extendTo3d: dimension conversion" {
     const p2: Point(2, f64) = .init(.{ 1.0, 2.0 });
     const p3 = p2.extendTo3d(3.0);
 
@@ -473,7 +473,7 @@ test "Point dimension conversion" {
     try std.testing.expectEqual(@as(f64, 2.0), back_to_2d.y());
 }
 
-test "Point creation with tuple" {
+test "Point.init: tuple" {
     const p: Point(3, f64) = .init(.{ 1.0, 2.0, 3.0 });
     try std.testing.expectEqual(@as(usize, 3), @TypeOf(p).dimension);
     try std.testing.expectEqual(@as(f64, 1.0), p.x());
@@ -481,7 +481,7 @@ test "Point creation with tuple" {
     try std.testing.expectEqual(@as(f64, 3.0), p.z());
 }
 
-test "3D cross product" {
+test "Point.cross: 3D" {
     const i: Point(3, f64) = .init(.{ 1.0, 0.0, 0.0 });
     const j: Point(3, f64) = .init(.{ 0.0, 1.0, 0.0 });
     const k = i.cross(j);
@@ -491,7 +491,7 @@ test "3D cross product" {
     try std.testing.expectEqual(@as(f64, 1.0), k.z());
 }
 
-test "Point distanceToSegment" {
+test "Point.distanceToSegment: points around a segment" {
     const a: Point(2, f64) = .init(.{ 0.0, 0.0 });
     const b: Point(2, f64) = .init(.{ 10.0, 0.0 });
 
@@ -516,7 +516,7 @@ test "Point distanceToSegment" {
     try std.testing.expectApproxEqAbs(@as(f64, 5.0), p5.distanceToSegment(a, a), 1e-9);
 }
 
-test "Point orientation" {
+test "Point.orientation: clockwise, counter-clockwise and collinear" {
     const a: Point(2, f64) = .init(.{ 0.0, 0.0 });
     const b: Point(2, f64) = .init(.{ 1.0, 0.0 });
     const c: Point(2, f64) = .init(.{ 1.0, 1.0 });
@@ -527,7 +527,7 @@ test "Point orientation" {
     try std.testing.expectEqual(Orientation.collinear, a.orientation(b, d));
 }
 
-test "Point orientation precision" {
+test "Point.orientation: precision" {
     // These three points can have different orientations due to floating point precision.
     // The robust check ensures they are consistently treated (e.g., as collinear).
     const a: Point(2, f32) = .init(.{ 4.9171928e-1, 6.473901e-1 });
@@ -540,7 +540,7 @@ test "Point orientation precision" {
     try std.testing.expectEqual(orientation_abc, orientation_acb);
 }
 
-test "Point inTriangle" {
+test "Point.inTriangle: inside and outside" {
     const tri = [_]Point(2, f32){
         .init(.{ 0.0, 0.0 }),
         .init(.{ 2.0, 0.0 }),
@@ -559,7 +559,7 @@ test "Point inTriangle" {
     try std.testing.expect(p.inTriangle(tri[0], tri[1], tri[2]));
 }
 
-test "Point areAllCollinear" {
+test "Point.areAllCollinear: collinear and non-collinear points" {
     const P2 = Point(2, f32);
     const pts_collinear: []const P2 = &.{
         .init(.{ 0, 0 }),
@@ -577,7 +577,7 @@ test "Point areAllCollinear" {
     try std.testing.expect(!P2.areAllCollinear(pts_non_collinear));
 }
 
-test "2D cross product" {
+test "Point.cross: 2D" {
     const i: Point(2, f64) = .init(.{ 1.0, 0.0 });
     const j: Point(2, f64) = .init(.{ 0.0, 1.0 });
     try std.testing.expectEqual(@as(f64, 1.0), i.cross(j));

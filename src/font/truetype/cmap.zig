@@ -106,7 +106,7 @@ fn lookup12(r: Reader, st: Subtable, codepoint: u21) Error!u16 {
 
 const synthetic = @import("synthetic.zig");
 
-test "format 4: delta and glyphIdArray segments" {
+test "lookup: format 4 delta and glyphIdArray segments" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font = synthetic.font(&buf, .{});
     try std.testing.expectEqual(.format4, font.cmap.format);
@@ -118,7 +118,7 @@ test "format 4: delta and glyphIdArray segments" {
     try std.testing.expectEqual(@as(u16, 0), font.glyphIndex(0x1F600));
 }
 
-test "format 12 is preferred and still resolves the BMP" {
+test "select: format 12 is preferred and still resolves the BMP" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font = synthetic.font(&buf, .{ .with_format12 = true });
     try std.testing.expectEqual(.format12, font.cmap.format);
@@ -127,7 +127,7 @@ test "format 12 is preferred and still resolves the BMP" {
     try std.testing.expectEqual(@as(u16, 0), font.glyphIndex('a'));
 }
 
-test "glyph ids past maxp map to notdef" {
+test "lookup: glyph ids past maxp map to notdef" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     var font = synthetic.font(&buf, .{});
     font.num_glyphs = 3;

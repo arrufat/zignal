@@ -252,7 +252,7 @@ fn suppressNonMaximal(self: Fast, allocator: Allocator, keypoints: []const KeyPo
 }
 
 // Tests
-test "FAST detector initialization" {
+test "Fast: initialization" {
     const fast = Fast{
         .threshold = 25,
         .nonmax_suppression = false,
@@ -264,7 +264,7 @@ test "FAST detector initialization" {
     try expectEqual(@as(u8, 12), fast.min_contiguous);
 }
 
-test "FAST detector on synthetic corner" {
+test "Fast.detect: synthetic corner" {
     const allocator = std.testing.allocator;
 
     // Create a simple image with a corner pattern
@@ -314,7 +314,7 @@ test "FAST detector on synthetic corner" {
     try expectEqual(true, found_corner);
 }
 
-test "FAST non-maximal suppression" {
+test "Fast.detect: non-maximal suppression" {
     const allocator = std.testing.allocator;
 
     // Create a simple image

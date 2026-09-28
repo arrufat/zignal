@@ -4,7 +4,7 @@ const testing = std.testing;
 const Image = @import("../../image.zig").Image;
 const BinaryKernel = @import("../../image.zig").BinaryKernel;
 
-test "threshold otsu binarizes bimodal image" {
+test "Image.thresholdOtsu: binarizes bimodal image" {
     var data = [_]u8{ 10, 10, 10, 10, 200, 200, 200, 200 };
     const image: Image(u8) = .initFromSlice(2, 4, &data);
 
@@ -23,7 +23,7 @@ test "threshold otsu binarizes bimodal image" {
     }
 }
 
-test "adaptive mean threshold isolates bright center" {
+test "Image.thresholdAdaptiveMean: isolates bright center" {
     var data = [_]u8{
         50, 50,  50,
         50, 200, 50,
@@ -44,7 +44,7 @@ test "adaptive mean threshold isolates bright center" {
     }
 }
 
-test "adaptive mean threshold rejects zero radius" {
+test "Image.thresholdAdaptiveMean: rejects zero radius" {
     var data = [_]u8{
         10, 20,
         30, 40,
@@ -57,7 +57,7 @@ test "adaptive mean threshold rejects zero radius" {
     try testing.expectError(error.InvalidRadius, image.thresholdAdaptiveMean(testing.allocator, out, 0, 0.0));
 }
 
-test "binary dilation expands single pixel" {
+test "Image.dilateBinary: expands single pixel" {
     var data = [_]u8{
         0, 0, 0,   0, 0,
         0, 0, 0,   0, 0,
@@ -88,7 +88,7 @@ test "binary dilation expands single pixel" {
     }
 }
 
-test "binary open removes isolated noise" {
+test "Image.openBinary: removes isolated noise" {
     var data = [_]u8{
         0, 0,   0,   0,   0,
         0, 255, 255, 255, 255,
@@ -114,7 +114,7 @@ test "binary open removes isolated noise" {
     }
 }
 
-test "binary close fills holes" {
+test "Image.closeBinary: fills holes" {
     var data = [_]u8{
         0, 0,   0,   0,   0,
         0, 255, 255, 255, 0,
@@ -140,7 +140,7 @@ test "binary close fills holes" {
     }
 }
 
-test "binary erosion shrinks block across iterations" {
+test "Image.erodeBinary: shrinks block across iterations" {
     var data = [_]u8{
         255, 255, 255, 255, 255,
         255, 255, 255, 255, 255,

@@ -11,7 +11,7 @@ const Interpolation = @import("../../image.zig").Interpolation;
 
 const Rgb = color.Rgb(u8);
 
-test "letterbox maintains aspect ratio with padding" {
+test "Image.letterbox: maintains aspect ratio with padding" {
     const allocator = std.testing.allocator;
 
     // Test 1: Wide image to square - should add vertical padding
@@ -95,7 +95,7 @@ test "letterbox maintains aspect ratio with padding" {
     }
 }
 
-test "letterbox edge cases" {
+test "Image.letterbox: edge cases" {
     const allocator = std.testing.allocator;
 
     // Test zero dimension handling
@@ -163,7 +163,7 @@ test "letterbox edge cases" {
     }
 }
 
-test "letterbox interpolation methods comparison" {
+test "Image.letterbox: interpolation methods comparison" {
     const allocator = std.testing.allocator;
 
     // Create a gradient pattern to ensure interpolation produces intermediate values
@@ -201,7 +201,7 @@ test "letterbox interpolation methods comparison" {
     }
 }
 
-test "letterbox extreme aspect ratios" {
+test "Image.letterbox: extreme aspect ratios" {
     const allocator = std.testing.allocator;
 
     // Test very wide image (16:1)
@@ -257,7 +257,7 @@ test "letterbox extreme aspect ratios" {
     }
 }
 
-test "scale image" {
+test "Image.scale: halves and doubles dimensions" {
     const allocator = std.testing.allocator;
 
     // Create a test image
@@ -300,7 +300,7 @@ test "scale image" {
 }
 
 // The separable fixed-point u8 resizers must stay within rounding of the float per-pixel path.
-test "separable u8 resize matches the float path" {
+test "Image.resize: separable u8 matches the float path" {
     const allocator = std.testing.allocator;
     var prng = std.Random.DefaultPrng.init(0xc0ffee);
     const random = prng.random();
@@ -335,7 +335,7 @@ test "separable u8 resize matches the float path" {
 
 // f32 planes take the separable float passes; against the per-pixel 2-D kernel the only
 // difference is float summation order.
-test "separable f32 resize matches the per-pixel kernel" {
+test "Image.resize: separable f32 matches the per-pixel kernel" {
     const allocator = std.testing.allocator;
     const interpolation = @import("../interpolation.zig");
     var prng = std.Random.DefaultPrng.init(0xf10a7);
@@ -365,7 +365,7 @@ test "separable f32 resize matches the per-pixel kernel" {
 }
 
 // Struct pixels resize interleaved; every channel must match the u8 plane path bit for bit.
-test "interleaved struct resize matches per-channel planes" {
+test "Image.resize: interleaved struct matches per-channel planes" {
     const allocator = std.testing.allocator;
     const Rgba = @import("../../color.zig").Rgba(u8);
     var prng = std.Random.DefaultPrng.init(0x1e4);
@@ -401,7 +401,7 @@ test "interleaved struct resize matches per-channel planes" {
 // is float summation order, the exact Lanczos kernel against the per-pixel LUT, and integer
 // rounding. Bilinear u16 is checked against the f32 plane instead: `interpolate` quantizes
 // the bilinear fraction to 1/256, which is coarser than a 16-bit sample.
-test "tapped generic resize matches the per-pixel kernel" {
+test "Image.resize: tapped generic matches the per-pixel kernel" {
     const allocator = std.testing.allocator;
     const interpolation = @import("../interpolation.zig");
     const Rgbf = color.Rgb(f32);

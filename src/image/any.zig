@@ -68,7 +68,7 @@ pub const Any = union(enum) {
     }
 };
 
-test "loaders keep the file's pixel type" {
+test "Any: loaders keep the file's pixel type" {
     const io = std.testing.io;
     const gpa = std.testing.allocator;
 
