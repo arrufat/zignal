@@ -67,7 +67,7 @@ pub fn isSupported(io: std.Io) bool {
 }
 
 // Tests
-test "imageToIterm2 basic functionality" {
+test "fromImage: basic functionality" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -91,7 +91,7 @@ test "imageToIterm2 basic functionality" {
     try testing.expect(std.mem.endsWith(u8, data, "\x07"));
 }
 
-test "imageToIterm2 with scaling" {
+test "fromImage: scaling" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -114,7 +114,7 @@ test "imageToIterm2 with scaling" {
     try testing.expect(data.len > 100);
 }
 
-test "imageToIterm2 declared size matches decoded payload" {
+test "fromImage: declared size matches decoded payload" {
     const testing = std.testing;
     const allocator = testing.allocator;
 

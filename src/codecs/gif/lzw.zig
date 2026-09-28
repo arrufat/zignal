@@ -343,7 +343,7 @@ pub fn deinterlace(src: []const u8, dst: []u8, width: usize, height: usize) void
 // Tests
 // ---------------------------------------------------------------------------
 
-test "LZW decoder — 4-color sequence with code-size growth" {
+test "Decoder: 4-color sequence with code-size growth" {
     // Indices [0, 1, 2, 3], min_code_size = 2.
     // Encoder emits Clear@3, 0@3, 1@3, 2@3, then grows after the third user
     // emission saturates dict at slot 8, so 3@4 and EOI@4. Total 4*3 + 2*4 = 20
@@ -369,7 +369,7 @@ test "LZW decoder — 4-color sequence with code-size growth" {
     try expectEqual(@as(u8, 3), out[3]);
 }
 
-test "LZW decoder — repeated literal forms a longer dictionary entry" {
+test "Decoder: repeated literal forms a longer dictionary entry" {
     // Stream: Clear=4, 0, 0, EOI=5 at min_code_size=2 (code_size=3 throughout).
     // Total bits: 4*3 = 12 → 2 bytes.
     // Codes: 100, 000, 000, 101 → bits 0..11
@@ -386,7 +386,7 @@ test "LZW decoder — repeated literal forms a longer dictionary entry" {
     try expectEqual(@as(u8, 0), out[1]);
 }
 
-test "LZW decoder — special K[0]wK pattern" {
+test "Decoder: special K[0]wK pattern" {
     // Three-zero input: encoder emits [Clear=4, 0, 6, EOI=5].
     //   Code 6 references dict[6] which is being added at decode time
     //   (the K[0]wK case): decoder must reconstruct it as prev_string + prev_string[0].
@@ -409,7 +409,7 @@ test "LZW decoder — special K[0]wK pattern" {
     try expectEqual(@as(u8, 0), out[2]);
 }
 
-test "LZW decoder — empty input returns immediately, not done" {
+test "Decoder: empty input returns immediately and is not done" {
     var dec = try Decoder.init(2);
     var out: [4]u8 = undefined;
     const r = try dec.decodeChunk(&[_]u8{}, &out);
@@ -418,14 +418,14 @@ test "LZW decoder — empty input returns immediately, not done" {
     try expect(!dec.isDone());
 }
 
-test "LZW decoder — output buffer overflow rejected" {
+test "Decoder: rejects output buffer overflow" {
     const in = [_]u8{ 0x44, 0x34, 0x05 };
     var dec = try Decoder.init(2);
     var out: [2]u8 = undefined;
     try expectError(error.LzwOutputOverflow, dec.decodeChunk(&in, &out));
 }
 
-test "LZW decoder — chunk boundary mid-code" {
+test "Decoder: chunk boundary mid-code" {
     var dec = try Decoder.init(2);
     var out: [16]u8 = undefined;
     var written_total: usize = 0;
@@ -444,7 +444,7 @@ test "LZW decoder — chunk boundary mid-code" {
     try expectEqual(@as(u8, 3), out[3]);
 }
 
-test "LZW decoder — invalid min_code_size rejected" {
+test "Decoder: rejects invalid min_code_size" {
     try expectError(error.InvalidMinCodeSize, Decoder.init(1));
     try expectError(error.InvalidMinCodeSize, Decoder.init(9));
 }
@@ -480,45 +480,45 @@ fn roundTrip(gpa: std.mem.Allocator, min_code_size: u4, indices: []const u8) !vo
     try std.testing.expectEqualSlices(u8, indices, decoded);
 }
 
-test "LZW encoder — empty input round-trips" {
+test "Encoder: empty input round-trips" {
     const gpa = std.testing.allocator;
     try roundTrip(gpa, 2, &[_]u8{});
 }
 
-test "LZW encoder — round-trip [0, 1, 2, 3] at min_code_size=2" {
+test "Encoder: round-trip [0, 1, 2, 3] at min_code_size=2" {
     const gpa = std.testing.allocator;
     try roundTrip(gpa, 2, &[_]u8{ 0, 1, 2, 3 });
 }
 
-test "LZW encoder — round-trip repeated zeros" {
+test "Encoder: round-trip repeated zeros" {
     const gpa = std.testing.allocator;
     try roundTrip(gpa, 2, &[_]u8{ 0, 0, 0, 0 });
     try roundTrip(gpa, 2, &[_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 });
 }
 
-test "LZW encoder — round-trip alternating 0,1 length 4" {
+test "Encoder: round-trip alternating 0,1 length 4" {
     const gpa = std.testing.allocator;
     try roundTrip(gpa, 2, &.{ 0, 1, 0, 1 });
 }
 
-test "LZW encoder — round-trip alternating 0,1 length 6" {
+test "Encoder: round-trip alternating 0,1 length 6" {
     const gpa = std.testing.allocator;
     try roundTrip(gpa, 2, &.{ 0, 1, 0, 1, 0, 1 });
 }
 
-test "LZW encoder — round-trip alternating 0,1 length 8" {
+test "Encoder: round-trip alternating 0,1 length 8" {
     const gpa = std.testing.allocator;
     try roundTrip(gpa, 2, &.{ 0, 1, 0, 1, 0, 1, 0, 1 });
 }
 
-test "LZW encoder — round-trip alternating 0,1 length 256" {
+test "Encoder: round-trip alternating 0,1 length 256" {
     const gpa = std.testing.allocator;
     var indices: [256]u8 = undefined;
     for (&indices, 0..) |*p, i| p.* = if (i % 2 == 0) 0 else 1;
     try roundTrip(gpa, 2, &indices);
 }
 
-test "LZW encoder — round-trip 8-bit min_code_size with 256 colors" {
+test "Encoder: round-trip 8-bit min_code_size with 256 colors" {
     const gpa = std.testing.allocator;
     var indices: [1024]u8 = undefined;
     var rng = std.Random.DefaultPrng.init(0xC0FFEE);
@@ -526,7 +526,7 @@ test "LZW encoder — round-trip 8-bit min_code_size with 256 colors" {
     try roundTrip(gpa, 8, &indices);
 }
 
-test "LZW encoder — long stream forces dictionary reset" {
+test "Encoder: long stream forces dictionary reset" {
     const gpa = std.testing.allocator;
     // Long pseudo-random sequence at small palette to push past 4096 entries.
     var indices: [16384]u8 = undefined;
@@ -535,7 +535,7 @@ test "LZW encoder — long stream forces dictionary reset" {
     try roundTrip(gpa, 4, &indices);
 }
 
-test "deinterlace — 8x8 round-trip via pass order" {
+test "deinterlace: 8x8 round-trip via pass order" {
     // Fill src in pass order: row 0 of pass 1, row 1, row 2, ... row 7.
     // After deinterlacing, dst should have rows in display order 0..7 with
     // values matching the canonical pass→display mapping.

@@ -590,7 +590,7 @@ pub fn OrderStatisticBlurOps(comptime T: type) type {
     };
 }
 
-test "two-level rank filter matches flat histogram path" {
+test "applyScalarOpTwoLevel: matches flat histogram path" {
     const testing = std.testing;
     const allocator = testing.allocator;
     var prng = std.Random.DefaultPrng.init(0x9E3779B97F4A7C15);

@@ -431,7 +431,7 @@ pub fn Pca(
 
 // Tests
 
-test "PCA initialization and cleanup" {
+test "Pca.init: starts empty" {
     const allocator = std.testing.allocator;
 
     var pca: Pca(f64) = try .init(allocator);
@@ -441,7 +441,7 @@ test "PCA initialization and cleanup" {
     try std.testing.expectEqual(@as(u32, 0), pca.dim);
 }
 
-test "PCA on 2D vectors" {
+test "Pca.fit: 2D vectors" {
     const allocator = std.testing.allocator;
 
     // Create data matrix with 4 samples of 2D points
@@ -477,7 +477,7 @@ test "PCA on 2D vectors" {
     try std.testing.expect(@abs(reconstructed[1] - 5.0) < 1e-10);
 }
 
-test "PCA on image color data using Point conversion" {
+test "Pca.fit: image color data using Point conversion" {
     const allocator = std.testing.allocator;
 
     // Create a simple gradient image
@@ -519,7 +519,7 @@ test "PCA on image color data using Point conversion" {
     // Just verify it works - reconstruction is used in defer above
 }
 
-test "PCA Gram path normalization and direction" {
+test "Pca.fit: Gram path normalization and direction" {
     const allocator = std.testing.allocator;
 
     // Two 3D samples along x-axis -> triggers Gram path (n_samples <= dim)
@@ -559,7 +559,7 @@ test "PCA Gram path normalization and direction" {
     try std.testing.expect(@abs(coeffs0[0] - coeffs_matrix.at(0, 0).*) < 1e-12);
 }
 
-test "PCA SIMD path on larger dimensions" {
+test "Pca.fit: SIMD path on larger dimensions" {
     const allocator = std.testing.allocator;
 
     // 10D data with 5 samples to trigger SIMD (if vec_len <=10)
@@ -590,7 +590,7 @@ test "PCA SIMD path on larger dimensions" {
     }
 }
 
-test "PCA edge case: minimum samples (n=2)" {
+test "Pca.fit: minimum samples (n=2)" {
     const allocator = std.testing.allocator;
 
     // Two 2D samples
@@ -614,7 +614,7 @@ test "PCA edge case: minimum samples (n=2)" {
     try std.testing.expectEqual(@as(u32, 1), coeffs.len);
 }
 
-test "PCA edge case: zero variance data" {
+test "Pca.fit: zero variance data" {
     const allocator = std.testing.allocator;
 
     // All identical 2D points
@@ -645,7 +645,7 @@ test "PCA edge case: zero variance data" {
     }
 }
 
-test "PCA error cases: invalid inputs" {
+test "Pca: rejects invalid inputs" {
     const allocator = std.testing.allocator;
 
     var pca: Pca(f64) = try .init(allocator);

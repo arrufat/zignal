@@ -909,7 +909,7 @@ pub fn save(io: Io, gpa: Allocator, font: BitmapFont, path: []const u8) !void {
     try writeFileMaybeGzip(io, gpa, path, aw.written());
 }
 
-test "FormatFlags decoding" {
+test "FormatFlags.decode: decoding" {
     try testing.expectEqual(FormatFlags{ .glyph_pad = 0, .byte_order_msb = false, .bit_order_msb = false, .compressed_metrics = false }, FormatFlags.decode(0));
     // Typical compressed metrics format.
     try testing.expectEqual(FormatFlags{ .glyph_pad = 0, .byte_order_msb = true, .bit_order_msb = true, .compressed_metrics = true }, FormatFlags.decode(0x10C));
@@ -919,7 +919,7 @@ test "FormatFlags decoding" {
     try testing.expectEqual(2, padded.padBytes());
 }
 
-test "Table bounds validation" {
+test "validateTableBounds: table bounds validation" {
     const data: [100]u8 = @splat(0);
 
     // Valid table
@@ -950,7 +950,7 @@ test "Table bounds validation" {
     try testing.expectError(PcfError.TableOffsetOutOfBounds, validateTableBounds(&data, invalid_size_table));
 }
 
-test "Metric reading" {
+test "readMetric: compressed metric" {
     var buffer: [64]u8 = undefined;
     var writer = Io.Writer.fixed(&buffer);
 
@@ -971,7 +971,7 @@ test "Metric reading" {
     try testing.expectEqual(@as(i16, 2), metric.descent);
 }
 
-test "Properties parsing" {
+test "parseProperties: properties parsing" {
     const allocator = testing.allocator;
 
     // Create a minimal properties table with just one integer property for simplicity
@@ -1046,10 +1046,10 @@ fn expectRoundtrip(file_name: []const u8) !void {
     }
 }
 
-test "PCF save and load roundtrip" {
+test "save: roundtrip with load" {
     try expectRoundtrip("test.pcf");
 }
 
-test "PCF save and load compressed roundtrip" {
+test "save: compressed roundtrip with load" {
     try expectRoundtrip("test.pcf.gz");
 }

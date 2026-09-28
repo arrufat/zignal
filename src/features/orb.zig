@@ -488,7 +488,7 @@ fn computeAdaptiveThreshold(self: Orb, level: usize) u8 {
 }
 
 // Tests
-test "ORB initialization" {
+test "Orb: initialization" {
     const orb = Orb{
         .n_features = 1000,
         .scale_factor = 1.5,
@@ -500,7 +500,7 @@ test "ORB initialization" {
     try expectEqual(@as(u8, 6), orb.n_levels);
 }
 
-test "ORB feature distribution" {
+test "Orb.computeFeaturesPerLevel: feature distribution" {
     const allocator = std.testing.allocator;
 
     const orb = Orb{
@@ -529,7 +529,7 @@ test "ORB feature distribution" {
     try expectEqual(true, features_per_level[0] > features_per_level[1]);
 }
 
-test "ORB detect and compute on synthetic image" {
+test "Orb.detectAndCompute: synthetic image" {
     const allocator = std.testing.allocator;
 
     // Create test image with strong corner patterns
@@ -600,7 +600,7 @@ test "ORB detect and compute on synthetic image" {
     try expectEqual(true, non_zero_found);
 }
 
-test "ORB feature distribution respects budget" {
+test "Orb.computeFeaturesPerLevel: respects budget" {
     const allocator = std.testing.allocator;
 
     const orb = Orb{
@@ -621,7 +621,7 @@ test "ORB feature distribution respects budget" {
     try expectEqual(@as(usize, 5), total);
 }
 
-test "ORB adaptive FAST threshold stays within bounds" {
+test "Orb.computeAdaptiveThreshold: stays within bounds" {
     const orb = Orb{
         .fast_threshold = 20,
         .scale_factor = 1.2,
@@ -633,7 +633,7 @@ test "ORB adaptive FAST threshold stays within bounds" {
     try expectEqual(true, orb.computeAdaptiveThreshold(11) >= 5);
 }
 
-test "ORB on an image smaller than the requested pyramid" {
+test "Orb.detectAndCompute: image smaller than the requested pyramid" {
     const allocator = std.testing.allocator;
     // 25 px: the default 8-level pyramid at 1.2 truncates before its last level.
     var image = try Image(u8).init(allocator, 25, 25);

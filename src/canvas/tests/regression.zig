@@ -422,7 +422,7 @@ const md5_checksums = [_]DrawTestCase{
     .{ .name = "drawTextBitmapHalo", .md5sum = "2cfd43cc906ccf59dd373fd533064e36", .draw_fn = drawTextBitmapHalo },
 };
 
-test "MD5 checksum regression tests" {
+test "Canvas: MD5 checksum regression" {
     const allocator = testing.allocator;
     const build_options = @import("build_options");
     const print_md5sums = build_options.print_md5sums;

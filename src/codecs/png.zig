@@ -365,7 +365,7 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
     return header;
 }
 
-test "PNG getInfo" {
+test "getInfo: reads IHDR" {
     const gpa = std.testing.allocator;
     var data_out: Io.Writer.Allocating = .init(gpa);
     defer data_out.deinit();
@@ -2033,13 +2033,13 @@ fn extractPalettePixel(
 }
 
 // Simple test for the PNG structure
-test "PNG signature validation" {
+test "decode: rejects invalid signature" {
     const invalid_sig = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
     const result = decode(std.testing.allocator, &invalid_sig, .{});
     try std.testing.expectError(error.InvalidPngSignature, result);
 }
 
-test "PNG rejects chunks before IHDR" {
+test "decode: rejects chunks before IHDR" {
     const gpa = std.testing.allocator;
     var data_out: Io.Writer.Allocating = .init(gpa);
     defer data_out.deinit();
@@ -2053,7 +2053,7 @@ test "PNG rejects chunks before IHDR" {
     try std.testing.expectError(error.ChunkBeforeHeader, decode(gpa, data_out.written(), .{}));
 }
 
-test "PNG palette images require PLTE before IDAT" {
+test "decode: palette images require PLTE before IDAT" {
     const gpa = std.testing.allocator;
     var data_out: Io.Writer.Allocating = .init(gpa);
     defer data_out.deinit();
@@ -2069,7 +2069,7 @@ test "PNG palette images require PLTE before IDAT" {
     try std.testing.expectError(error.MissingPalette, decode(gpa, data_out.written(), .{}));
 }
 
-test "PNG palette transparency requires PLTE first" {
+test "decode: palette transparency requires PLTE first" {
     const gpa = std.testing.allocator;
     var data_out: Io.Writer.Allocating = .init(gpa);
     defer data_out.deinit();
@@ -2090,7 +2090,7 @@ test "PNG palette transparency requires PLTE first" {
     try std.testing.expectError(error.TransparencyBeforePalette, decode(gpa, data_out.written(), .{}));
 }
 
-test "PNG rejects PLTE for grayscale" {
+test "decode: rejects PLTE for grayscale" {
     const gpa = std.testing.allocator;
     var data_out: Io.Writer.Allocating = .init(gpa);
     defer data_out.deinit();
@@ -2107,7 +2107,7 @@ test "PNG rejects PLTE for grayscale" {
     try std.testing.expectError(error.PaletteForbiddenForColorType, decode(gpa, data_out.written(), .{}));
 }
 
-test "PNG IDAT chunks must be consecutive" {
+test "decode: IDAT chunks must be consecutive" {
     const gpa = std.testing.allocator;
     var data_out: Io.Writer.Allocating = .init(gpa);
     defer data_out.deinit();
@@ -2128,7 +2128,7 @@ test "PNG IDAT chunks must be consecutive" {
     try std.testing.expectError(error.NonConsecutiveIdatChunks, decode(gpa, data_out.written(), .{}));
 }
 
-test "PNG gamma chunk must precede PLTE" {
+test "decode: gamma chunk must precede PLTE" {
     const gpa = std.testing.allocator;
     var data_out: Io.Writer.Allocating = .init(gpa);
     defer data_out.deinit();
@@ -2148,7 +2148,7 @@ test "PNG gamma chunk must precede PLTE" {
     try std.testing.expectError(error.GammaAfterPalette, decode(gpa, data_out.written(), .{}));
 }
 
-test "PNG sRGB chunk must precede IDAT" {
+test "decode: sRGB chunk must precede IDAT" {
     const gpa = std.testing.allocator;
     var data_out: Io.Writer.Allocating = .init(gpa);
     defer data_out.deinit();
@@ -2167,7 +2167,7 @@ test "PNG sRGB chunk must precede IDAT" {
     try std.testing.expectError(error.SrgbAfterImageData, decode(gpa, data_out.written(), .{}));
 }
 
-test "PNG missing IEND decodes as truncated" {
+test "decode: missing IEND decodes as truncated" {
     const gpa = std.testing.allocator;
     var data_out: Io.Writer.Allocating = .init(gpa);
     defer data_out.deinit();
@@ -2245,7 +2245,7 @@ fn expectPrefixOrZero(full: Image(Rgb), partial: Image(Rgb)) !void {
     }
 }
 
-test "PNG truncated mid-IDAT decodes partially" {
+test "decode: truncated mid-IDAT decodes partially" {
     const gpa = std.testing.allocator;
     const png_data = try makeTruncationTestPng(gpa);
     defer gpa.free(png_data);
@@ -2264,7 +2264,7 @@ test "PNG truncated mid-IDAT decodes partially" {
     try expectPrefixOrZero(full, partial);
 }
 
-test "PNG missing IEND with complete IDAT decodes fully" {
+test "decode: missing IEND with complete IDAT decodes fully" {
     const gpa = std.testing.allocator;
     const png_data = try makeTruncationTestPng(gpa);
     defer gpa.free(png_data);
@@ -2282,7 +2282,7 @@ test "PNG missing IEND with complete IDAT decodes fully" {
     try std.testing.expectEqualSlices(Rgb, full.data, partial.data);
 }
 
-test "PNG truncated mid-chunk-header decodes fully" {
+test "decode: truncated mid-chunk-header decodes fully" {
     const gpa = std.testing.allocator;
     const png_data = try makeTruncationTestPng(gpa);
     defer gpa.free(png_data);
@@ -2296,7 +2296,7 @@ test "PNG truncated mid-chunk-header decodes fully" {
     try std.testing.expectEqualSlices(Rgb, full.data, partial.data);
 }
 
-test "PNG truncated ancillary chunk after IDAT decodes fully" {
+test "decode: truncated ancillary chunk after IDAT decodes fully" {
     const gpa = std.testing.allocator;
     const png_data = try makeTruncationTestPng(gpa);
     defer gpa.free(png_data);
@@ -2319,7 +2319,7 @@ test "PNG truncated ancillary chunk after IDAT decodes fully" {
     try std.testing.expectEqualSlices(Rgb, full.data, partial.data);
 }
 
-test "PNG truncated zlib stream drops partial row deterministically" {
+test "decode: truncated zlib stream drops partial row deterministically" {
     const gpa = std.testing.allocator;
     // 4x4 RGB: stride = 4*3 + 1 = 13, full scan data = 52 bytes.
     // Provide 32 bytes (rows 0-1 complete + 6 bytes of row 2).
@@ -2378,7 +2378,7 @@ test "PNG truncated zlib stream drops partial row deterministically" {
     }
 }
 
-test "PNG truncated Adam7 keeps complete passes" {
+test "decode: truncated Adam7 keeps complete passes" {
     const gpa = std.testing.allocator;
     // 8x8 RGB interlaced. Pass sizes (stride * height): 4, 4, 7, 14, 26, 52, 100 = 207.
     // Provide 68 bytes: passes 1-5 (55) plus exactly one row of pass 6 (13).
@@ -2419,7 +2419,7 @@ test "PNG truncated Adam7 keeps complete passes" {
     for (img.data) |px| try std.testing.expect(std.meta.eql(px, filled) or std.meta.eql(px, zero));
 }
 
-test "PNG structural corruption still errors" {
+test "decode: structural corruption still errors" {
     const gpa = std.testing.allocator;
 
     // Declared length past EOF on a non-IDAT chunk.
@@ -2442,7 +2442,7 @@ test "PNG structural corruption still errors" {
     try std.testing.expectError(error.ReadFailed, decode(gpa, corrupt_out.written(), .{}));
 }
 
-test "PNG enforces chunk count limit" {
+test "decode: enforces chunk count limit" {
     const gpa = std.testing.allocator;
     var data_out: Io.Writer.Allocating = .init(gpa);
     defer data_out.deinit();
@@ -2458,7 +2458,7 @@ test "PNG enforces chunk count limit" {
     try std.testing.expectError(error.TooManyChunks, decode(gpa, data_out.written(), limits));
 }
 
-test "PNG enforces decompressed byte limit" {
+test "decode: enforces decompressed byte limit" {
     const gpa = std.testing.allocator;
     var data_out: Io.Writer.Allocating = .init(gpa);
     defer data_out.deinit();
@@ -2478,7 +2478,7 @@ test "PNG enforces decompressed byte limit" {
     try std.testing.expectError(error.ImageTooLarge, decode(gpa, data_out.written(), limits));
 }
 
-test "PNG default decompressed limit covers 8K RGBA 16-bit" {
+test "DecodeLimits: default decompressed limit covers 8K RGBA 16-bit" {
     const header: Header = .{
         .width = max_dimensions_default,
         .height = max_dimensions_default,
@@ -2493,7 +2493,7 @@ test "PNG default decompressed limit covers 8K RGBA 16-bit" {
     try std.testing.expect(!exceeds(limits.max_decompressed_bytes, inflated));
 }
 
-test "CRC calculation" {
+test "crc: calculation" {
     // Test with known values
     const test_data = "IHDR";
     const expected_chunk_type_crc = crc(test_data);
@@ -2501,14 +2501,14 @@ test "CRC calculation" {
     try std.testing.expect(expected_chunk_type_crc != 0);
 }
 
-test "Paeth predictor" {
+test "paethPredictor: picks the closest neighbor" {
     // Test cases - verify the Paeth predictor algorithm
     try std.testing.expectEqual(@as(u8, 15), paethPredictor(10, 20, 15)); // p=15, pa=5, pb=5, pc=0 -> c=15
     try std.testing.expectEqual(@as(u8, 5), paethPredictor(5, 20, 15)); // p=10, pa=5, pb=10, pc=5 -> a=5
     try std.testing.expectEqual(@as(u8, 10), paethPredictor(10, 5, 6)); // p=9, pa=1, pb=4, pc=3 -> a=10
 }
 
-test "PNG round-trip encoding/decoding" {
+test "encode: round-trips through decode" {
     const allocator = std.testing.allocator;
 
     // Create a simple test image (4x4 RGB)
@@ -2566,7 +2566,7 @@ test "PNG round-trip encoding/decoding" {
     }
 }
 
-test "PNG adaptive filter selection" {
+test "filterRows: adaptive filter selection" {
     const allocator = std.testing.allocator;
 
     // Create a tiny 2-row RGB image where the first row is constant
@@ -2609,7 +2609,7 @@ test "PNG adaptive filter selection" {
     try std.testing.expectEqualSlices(u8, raw[scanline_bytes .. scanline_bytes * 2], roundtrip[stride + 1 .. stride + 1 + scanline_bytes]);
 }
 
-test "chunked PNG encode is identical on a thread pool and round-trips" {
+test "encode: chunked output is identical on a thread pool and round-trips" {
     const gpa = std.testing.allocator;
     var pool: std.Io.Threaded = .init(gpa, .{});
     defer pool.deinit();
@@ -2636,7 +2636,7 @@ test "chunked PNG encode is identical on a thread pool and round-trips" {
     }
 }
 
-test "adler32 combine matches the checksum of the concatenation" {
+test "adlerCombine: matches the checksum of the concatenation" {
     var prng = std.Random.DefaultPrng.init(4);
     const random = prng.random();
     var buf: [70000]u8 = undefined;
@@ -2649,7 +2649,7 @@ test "adler32 combine matches the checksum of the concatenation" {
     }
 }
 
-test "PNG fixed filters round-trip" {
+test "encode: fixed filters round-trip" {
     const allocator = std.testing.allocator;
 
     // Build a small RGB gradient that exercises left/above predictors
@@ -2693,7 +2693,7 @@ test "PNG fixed filters round-trip" {
     }
 }
 
-test "PNG bit unpacking - 1-bit grayscale" {
+test "extractGrayscalePixel: 1-bit grayscale unpacking" {
 
     // Test data with bits: 10110010 = 0xB2
     const test_byte: u8 = 0b10110010;
@@ -2727,7 +2727,7 @@ test "PNG bit unpacking - 1-bit grayscale" {
     try std.testing.expectEqual(@as(u8, 0), dst_row[7]);
 }
 
-test "PNG bit unpacking - 2-bit grayscale" {
+test "extractGrayscalePixel: 2-bit grayscale unpacking" {
     const allocator = std.testing.allocator;
     _ = allocator;
 
@@ -2759,7 +2759,7 @@ test "PNG bit unpacking - 2-bit grayscale" {
     try std.testing.expectEqual(@as(u8, 0), dst_row[3]);
 }
 
-test "PNG bit unpacking - 4-bit grayscale" {
+test "extractGrayscalePixel: 4-bit grayscale unpacking" {
     const allocator = std.testing.allocator;
     _ = allocator;
 
@@ -2789,7 +2789,7 @@ test "PNG bit unpacking - 4-bit grayscale" {
     try std.testing.expectEqual(@as(u8, 85), dst_row[1]);
 }
 
-test "PNG encode with color management chunks" {
+test "encode: writes color management chunks" {
     const allocator = std.testing.allocator;
 
     // Create test image
@@ -2844,7 +2844,7 @@ test "PNG encode with color management chunks" {
     try std.testing.expect(found_gama);
 }
 
-test "PNG CRC validation" {
+test "crc: validation" {
     // Test IHDR chunk CRC
     const ihdr_type = "IHDR";
     const ihdr_data = [_]u8{
@@ -2869,7 +2869,7 @@ test "PNG CRC validation" {
     try std.testing.expect(calculated_crc != different_crc);
 }
 
-test "PNG 16-bit to 8-bit conversion" {
+test "extractGrayscalePixel: 16-bit to 8-bit conversion" {
     // Test 16-bit value conversion
     const test_values = [_]u16{ 0x0000, 0x00FF, 0xFF00, 0xFFFF, 0x8080, 0x1234 };
     const expected_8bit = [_]u8{ 0, 0, 255, 255, 128, 18 }; // Simple >>8 conversion
@@ -2881,7 +2881,7 @@ test "PNG 16-bit to 8-bit conversion" {
     }
 }
 
-test "PNG filter types" {
+test "FilterType: byte values" {
     // Test filter type validation
     const valid_filters = [_]u8{ 0, 1, 2, 3, 4 };
     const invalid_filter: u8 = 5;
@@ -2910,7 +2910,7 @@ test "PNG filter types" {
     try std.testing.expect(result == null);
 }
 
-test "PNG bounds checking - large image dimensions" {
+test "decode: bounds checking of large image dimensions" {
     const gpa = std.testing.allocator;
 
     // Create a malformed PNG with excessively large dimensions
@@ -2929,7 +2929,7 @@ test "PNG bounds checking - large image dimensions" {
     try std.testing.expectError(error.ImageTooLarge, result);
 }
 
-test "PNG bounds checking - malformed palette" {
+test "decode: bounds checking of malformed palette" {
     const gpa = std.testing.allocator;
 
     // Test malformed palette chunk that's too short
@@ -2967,7 +2967,7 @@ test "PNG bounds checking - malformed palette" {
     try std.testing.expect(false); // Should not reach here
 }
 
-test "PNG 16-bit bounds checking" {
+test "extractGrayscalePixel: 16-bit bounds checking" {
     // Test 16-bit conversion with insufficient data
     const short_data = [_]u8{0xFF}; // Only 1 byte, but 16-bit needs 2
     const samples_per_row = short_data.len / 2; // Will be 0
@@ -2988,7 +2988,7 @@ test "PNG 16-bit bounds checking" {
     try std.testing.expectEqual(@as(usize, 0), samples_per_row);
 }
 
-test "PNG integer overflow protection" {
+test "enforceHeaderLimits: integer overflow protection" {
     // Test that large dimensions are caught before overflow
     const large_width: u32 = 65536;
     const large_height: u32 = 65536;
@@ -3005,7 +3005,7 @@ test "PNG integer overflow protection" {
     }
 }
 
-test "Adam7 interlaced PNG support" {
+test "adam7TotalSize: interlaced header support" {
     // Test that we can create an interlaced header
     const interlaced_header: Header = .{
         .width = 4,
@@ -3035,7 +3035,7 @@ test "Adam7 interlaced PNG support" {
     try std.testing.expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 128 }, rgba_pixel);
 }
 
-test "Adam7 palette deinterlace with transparency" {
+test "deinterlaceAdam7: palette with transparency" {
     const allocator = std.testing.allocator;
 
     const header: Header = .{
@@ -3062,7 +3062,7 @@ test "Adam7 palette deinterlace with transparency" {
     try std.testing.expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 64 }, image.at(0, 0).*);
 }
 
-test "extractPalettePixel handles 4-bit indices" {
+test "extractPalettePixel: handles 4-bit indices" {
     const header: Header = .{
         .width = 2,
         .height = 1,
@@ -3087,7 +3087,7 @@ test "extractPalettePixel handles 4-bit indices" {
     try std.testing.expectEqual(Rgb{ .r = 40, .g = 50, .b = 60 }, pixel1);
 }
 
-test "PNG palette transparency support" {
+test "PngState: palette transparency support" {
     const allocator = std.testing.allocator;
 
     // Create a palette PNG with transparency
@@ -3141,7 +3141,7 @@ test "PNG palette transparency support" {
     try std.testing.expectEqual([3]u8{ 255, 255, 255 }, palette[3]);
 }
 
-test "PNG grayscale transparency support" {
+test "extractGrayscalePixel: transparency support" {
     // Test grayscale 8-bit transparency
     const gray_trans_data = [_]u8{ 0x00, 0x80 }; // Transparent value is 128 (0x80)
     const gray_header: Header = .{
@@ -3167,7 +3167,7 @@ test "PNG grayscale transparency support" {
     try std.testing.expectEqual(Rgba{ .r = 64, .g = 64, .b = 64, .a = 255 }, pixel_gray);
 }
 
-test "PNG RGB transparency support" {
+test "extractRgbPixel: transparency support" {
     // Test RGB transparency - transparent color is white (255, 255, 255)
     const rgb_trans_data = [_]u8{ 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF }; // White in 16-bit format
     const rgb_header: Header = .{
@@ -3191,7 +3191,7 @@ test "PNG RGB transparency support" {
     try std.testing.expectEqual(Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 }, pixel_blue);
 }
 
-test "PNG transparency error cases" {
+test "PngState: transparency error cases" {
     const allocator = std.testing.allocator;
 
     // Test invalid tRNS chunk for grayscale_alpha (should error)
@@ -3215,7 +3215,7 @@ test "PNG transparency error cases" {
     // This should fail during chunk parsing (tested in integration tests)
 }
 
-test "PNG 16-bit transparency" {
+test "extractGrayscalePixel: 16-bit transparency" {
     // Test 16-bit grayscale transparency
     const gray16_trans_data = [_]u8{ 0x80, 0x00 }; // Transparent value is 0x8000 (32768)
     const gray16_header: Header = .{
@@ -3236,7 +3236,7 @@ test "PNG 16-bit transparency" {
     try std.testing.expectEqual(Rgba{ .r = 64, .g = 64, .b = 64, .a = 255 }, pixel_opaque);
 }
 
-test "PNG gAMA chunk parsing" {
+test "parse: gAMA chunk" {
     const allocator = std.testing.allocator;
 
     // Test gAMA chunk with gamma 1/2.2 (45455)
@@ -3268,7 +3268,7 @@ test "PNG gAMA chunk parsing" {
     try std.testing.expect(@abs(expected_gamma - expected_value) < 0.001);
 }
 
-test "PNG sRGB chunk parsing" {
+test "parse: sRGB chunk" {
     const allocator = std.testing.allocator;
 
     // Test sRGB chunk with perceptual rendering intent
@@ -3304,7 +3304,7 @@ test "PNG sRGB chunk parsing" {
     try std.testing.expectEqual(SrgbRenderingIntent.perceptual, expected_intent);
 }
 
-test "PNG pixel extraction with transparency" {
+test "extractRgbPixel: with and without transparency" {
     // Test extraction functions with transparency
     const header: Header = .{
         .width = 4,
@@ -3326,7 +3326,7 @@ test "PNG pixel extraction with transparency" {
     try std.testing.expectEqual(Rgba{ .r = 255, .g = 0, .b = 0, .a = 0 }, pixel_with_trans);
 }
 
-test "PNG Header helpers" {
+test "Header: helpers" {
     // 8-bit RGB
     const h1: Header = .{
         .width = 100,
@@ -3363,7 +3363,7 @@ test "PNG Header helpers" {
     try std.testing.expect(h3.isGrayscale());
 }
 
-test "PNG grayscale-alpha pixel extraction" {
+test "extractGrayscalePixel: grayscale-alpha" {
     const header: Header = .{
         .width = 4,
         .height = 4,
@@ -3382,7 +3382,7 @@ test "PNG grayscale-alpha pixel extraction" {
     try std.testing.expectEqual(Rgba{ .r = 255, .g = 255, .b = 255, .a = 127 }, pixel1);
 }
 
-test "PNG grayscale-alpha 16-bit pixel extraction" {
+test "extractGrayscalePixel: 16-bit grayscale-alpha" {
     const header: Header = .{
         .width = 4,
         .height = 4,
@@ -3405,7 +3405,7 @@ test "PNG grayscale-alpha 16-bit pixel extraction" {
     try std.testing.expectEqual(Rgba{ .r = 0xAB, .g = 0xAB, .b = 0xAB, .a = 0xEF }, pixel1);
 }
 
-test "PNG grayscale with transparency chunk (tRNS)" {
+test "extractGrayscalePixel: tRNS chunk" {
     const header: Header = .{
         .width = 4,
         .height = 4,
@@ -3424,7 +3424,7 @@ test "PNG grayscale with transparency chunk (tRNS)" {
     try std.testing.expectEqual(Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 }, pixel1);
 }
 
-test "PNG encode of a view packs only the visible pixels" {
+test "encode: a view packs only the visible pixels" {
     const gpa = std.testing.allocator;
     var img: Image(Rgb) = try .init(gpa, 8, 8);
     defer img.deinit(gpa);
@@ -3443,7 +3443,7 @@ test "PNG encode of a view packs only the visible pixels" {
     };
 }
 
-test "PNG grayscale tRNS matches the raw sample at every bit depth" {
+test "extractGrayscalePixel: tRNS matches the raw sample at every bit depth" {
     // 4-bit: samples 0x3 and 0xA; tRNS names sample 3.
     const h4: Header = .{ .width = 2, .height = 1, .bit_depth = 4, .color_type = .grayscale };
     const row4 = [_]u8{0x3A};

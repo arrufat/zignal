@@ -700,7 +700,7 @@ const inferno_lut = [_][3]u8{
     .{ 252, 255, 164 },
 };
 
-test "colormaps" {
+test "Image.applyColormap: maps a gradient" {
     const allocator = testing.allocator;
     // Create a horizontal gradient 0..255
     var gradient: Image(u8) = try .init(allocator, 1, 256);
@@ -803,7 +803,7 @@ test "colormaps" {
     }
 }
 
-test "nan safety" {
+test "Colormap: nan safety" {
     const nan = std.math.nan(f64);
 
     // These calls should not panic
@@ -814,7 +814,7 @@ test "nan safety" {
     _ = inferno(nan, 0, 1);
 }
 
-test "colormap on view" {
+test "Image.applyColormap: on view" {
     const allocator = testing.allocator;
 
     // Underlying image: 10x10, mostly 0, one 255

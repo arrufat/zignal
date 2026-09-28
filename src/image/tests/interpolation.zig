@@ -34,7 +34,7 @@ fn createCheckerboard(allocator: std.mem.Allocator, rows: u32, cols: u32) !Image
     return img;
 }
 
-test "nearest neighbor interpolation - exact pixels" {
+test "Image.interpolate: nearest neighbor exact pixels" {
     const allocator = std.testing.allocator;
     var img = try createGradientImage(allocator, 10, 10);
     defer img.deinit(allocator);
@@ -50,7 +50,7 @@ test "nearest neighbor interpolation - exact pixels" {
     try expectEqual(img.at(9, 9).*, val3.?);
 }
 
-test "nearest neighbor interpolation - rounding" {
+test "Image.interpolate: nearest neighbor rounding" {
     const allocator = std.testing.allocator;
     var img = try createCheckerboard(allocator, 10, 10);
     defer img.deinit(allocator);
@@ -70,7 +70,7 @@ test "nearest neighbor interpolation - rounding" {
     try expectEqual(@as(u8, 255), val3.?);
 }
 
-test "bilinear interpolation - exact pixels" {
+test "Image.interpolate: bilinear exact pixels" {
     const allocator = std.testing.allocator;
     var img = try createGradientImage(allocator, 10, 10);
     defer img.deinit(allocator);
@@ -83,7 +83,7 @@ test "bilinear interpolation - exact pixels" {
     try expectEqual(img.at(5, 5).*, val2.?);
 }
 
-test "bilinear interpolation - midpoints" {
+test "Image.interpolate: bilinear midpoints" {
     const allocator = std.testing.allocator;
     var img = try Image(u8).init(allocator, 3, 3);
     defer img.deinit(allocator);
@@ -108,7 +108,7 @@ test "bilinear interpolation - midpoints" {
     try expectEqual(@as(u8, 50), center.?); // Average of 0, 100, 0, 100
 }
 
-test "bicubic interpolation - exact pixels" {
+test "Image.interpolate: bicubic exact pixels" {
     const allocator = std.testing.allocator;
     var img = try createGradientImage(allocator, 10, 10);
     defer img.deinit(allocator);
@@ -121,7 +121,7 @@ test "bicubic interpolation - exact pixels" {
     try expectEqual(img.at(5, 5).*, val2.?);
 }
 
-test "catmull-rom interpolation - exact pixels" {
+test "Image.interpolate: catmull-rom exact pixels" {
     const allocator = std.testing.allocator;
     var img = try createGradientImage(allocator, 10, 10);
     defer img.deinit(allocator);
@@ -134,7 +134,7 @@ test "catmull-rom interpolation - exact pixels" {
     try expectEqual(img.at(5, 5).*, val2.?);
 }
 
-test "lanczos interpolation - exact pixels" {
+test "Image.interpolate: lanczos exact pixels" {
     const allocator = std.testing.allocator;
     var img = try createGradientImage(allocator, 10, 10);
     defer img.deinit(allocator);
@@ -147,7 +147,7 @@ test "lanczos interpolation - exact pixels" {
     try expectApproxEqAbs(@as(f32, img.at(5, 5).*), @as(f32, val2.?), 1.0);
 }
 
-test "mitchell interpolation - default parameters" {
+test "Image.interpolate: mitchell default parameters" {
     const allocator = std.testing.allocator;
     var img = try createGradientImage(allocator, 10, 10);
     defer img.deinit(allocator);
@@ -162,7 +162,7 @@ test "mitchell interpolation - default parameters" {
     try expectApproxEqAbs(@as(f32, img.at(5, 5).*), @as(f32, val2.?), 1.0);
 }
 
-test "mitchell interpolation - custom parameters" {
+test "Image.interpolate: mitchell custom parameters" {
     const allocator = std.testing.allocator;
     var img = try createGradientImage(allocator, 10, 10);
     defer img.deinit(allocator);
@@ -180,7 +180,7 @@ test "mitchell interpolation - custom parameters" {
     try std.testing.expect(val_sharp != null);
 }
 
-test "boundary conditions - nearest neighbor" {
+test "Image.interpolate: nearest neighbor boundary conditions" {
     const allocator = std.testing.allocator;
     var img = try createGradientImage(allocator, 10, 10);
     defer img.deinit(allocator);
@@ -196,7 +196,7 @@ test "boundary conditions - nearest neighbor" {
     try std.testing.expect(img.interpolate(0, 10, .nearest, .mirror) != null);
 }
 
-test "boundary conditions - bilinear" {
+test "Image.interpolate: bilinear boundary conditions" {
     const allocator = std.testing.allocator;
     var img = try createGradientImage(allocator, 10, 10);
     defer img.deinit(allocator);
@@ -208,7 +208,7 @@ test "boundary conditions - bilinear" {
     try std.testing.expect(img.interpolate(-0.1, 0, .bilinear, .mirror) != null);
 }
 
-test "boundary conditions - bicubic" {
+test "Image.interpolate: bicubic boundary conditions" {
     const allocator = std.testing.allocator;
     var img = try createGradientImage(allocator, 10, 10);
     defer img.deinit(allocator);
@@ -220,7 +220,7 @@ test "boundary conditions - bicubic" {
     try std.testing.expect(img.interpolate(8.1, 8.1, .bicubic, .mirror) != null);
 }
 
-test "boundary conditions - lanczos" {
+test "Image.interpolate: lanczos boundary conditions" {
     const allocator = std.testing.allocator;
     var img = try createGradientImage(allocator, 10, 10);
     defer img.deinit(allocator);
@@ -232,7 +232,7 @@ test "boundary conditions - lanczos" {
     try std.testing.expect(img.interpolate(7.1, 7.1, .lanczos, .mirror) != null);
 }
 
-test "RGB image interpolation" {
+test "Image.interpolate: RGB image" {
     const allocator = std.testing.allocator;
     const Rgb = color.Rgb(u8);
 
@@ -268,7 +268,7 @@ test "RGB image interpolation" {
     try std.testing.expect(val_mitchell != null);
 }
 
-test "resize preserves value range" {
+test "Image.resize: preserves value range" {
     const allocator = std.testing.allocator;
 
     // Create a simple gradient image
@@ -305,7 +305,7 @@ test "resize preserves value range" {
     try std.testing.expect(max_val <= 240);
 }
 
-test "catmull-rom no overshoot property" {
+test "Image.interpolate: catmull-rom no overshoot property" {
     const allocator = std.testing.allocator;
     var img: Image(u8) = try .init(allocator, 5, 5);
     defer img.deinit(allocator);
@@ -331,7 +331,7 @@ test "catmull-rom no overshoot property" {
     }
 }
 
-test "float image interpolation" {
+test "Image.interpolate: float image" {
     const allocator = std.testing.allocator;
     var img = try Image(f32).init(allocator, 4, 4);
     defer img.deinit(allocator);
@@ -353,7 +353,7 @@ test "float image interpolation" {
     try std.testing.expect(val_cubic != null);
 }
 
-test "clamping stress test - sharp edge with bicubic" {
+test "Image.interpolate: clamping stress test with bicubic sharp edge" {
     const allocator = std.testing.allocator;
     var img = try Image(u8).init(allocator, 6, 6);
     defer img.deinit(allocator);
@@ -384,7 +384,7 @@ test "clamping stress test - sharp edge with bicubic" {
     }
 }
 
-test "clamping stress test - all kernel methods" {
+test "Image.interpolate: clamping stress test on all kernel methods" {
     const allocator = std.testing.allocator;
     var img = try Image(u8).init(allocator, 8, 8);
     defer img.deinit(allocator);
@@ -420,7 +420,7 @@ test "clamping stress test - all kernel methods" {
     }
 }
 
-test "bilinear exact linear interpolation" {
+test "Image.interpolate: bilinear exact linear interpolation" {
     const allocator = std.testing.allocator;
     var img = try Image(u8).init(allocator, 2, 2);
     defer img.deinit(allocator);
@@ -449,7 +449,7 @@ test "bilinear exact linear interpolation" {
     try expectEqual(@as(u8, 25), val4.?); // 0.75 * 0 + 0.25 * 100
 }
 
-test "nearest neighbor discontinuity" {
+test "Image.interpolate: nearest neighbor discontinuity" {
     const allocator = std.testing.allocator;
     var img = try Image(u8).init(allocator, 2, 2);
     defer img.deinit(allocator);
@@ -470,7 +470,7 @@ test "nearest neighbor discontinuity" {
     try std.testing.expect(val_after.? - val_before.? == 255);
 }
 
-test "interpolation symmetry" {
+test "Image.interpolate: symmetry" {
     const allocator = std.testing.allocator;
     var img = try Image(u8).init(allocator, 5, 5);
     defer img.deinit(allocator);
@@ -493,7 +493,7 @@ test "interpolation symmetry" {
     try expectEqual(val3, val4);
 }
 
-test "mitchell parameter effects" {
+test "Image.interpolate: mitchell parameter effects" {
     const allocator = std.testing.allocator;
     var img = try Image(u8).init(allocator, 6, 6);
     defer img.deinit(allocator);
@@ -529,7 +529,7 @@ test "mitchell parameter effects" {
     try std.testing.expect(!all_equal); // At least one should be different
 }
 
-test "lanczos weight normalization" {
+test "Image.interpolate: lanczos weight normalization" {
     const allocator = std.testing.allocator;
     var img = try Image(u8).init(allocator, 8, 8);
     defer img.deinit(allocator);
@@ -548,7 +548,7 @@ test "lanczos weight normalization" {
     try expectEqual(@as(u8, 128), val.?);
 }
 
-test "extreme value edge cases" {
+test "Image.interpolate: extreme value edge cases" {
     const allocator = std.testing.allocator;
     var img = try Image(u8).init(allocator, 4, 4);
     defer img.deinit(allocator);
@@ -585,7 +585,7 @@ test "extreme value edge cases" {
     }
 }
 
-test "single pixel image handling" {
+test "Image.interpolate: single pixel image handling" {
     const allocator = std.testing.allocator;
     var img = try Image(u8).init(allocator, 1, 1);
     defer img.deinit(allocator);
@@ -601,7 +601,7 @@ test "single pixel image handling" {
     try expectEqual(@as(u8, 42), img.interpolate(0, 0, .{ .mitchell = .default }, .mirror).?);
 }
 
-test "RGB clamping stress test" {
+test "Image.interpolate: RGB clamping stress test" {
     const allocator = std.testing.allocator;
     const Rgb = color.Rgb(u8);
     var img = try Image(Rgb).init(allocator, 4, 4);

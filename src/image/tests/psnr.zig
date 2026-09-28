@@ -10,7 +10,7 @@ const Rgb = color.Rgb(u8);
 const Rgba = color.Rgba(u8);
 const Image = @import("../../image.zig").Image;
 
-test "PSNR identical images returns inf" {
+test "Image.psnr: identical images returns inf" {
     // Test with u8 scalar type
     var img1 = try Image(u8).init(std.testing.allocator, 10, 10);
     defer img1.deinit(std.testing.allocator);
@@ -28,7 +28,7 @@ test "PSNR identical images returns inf" {
     try expectEqual(std.math.inf(f64), psnr);
 }
 
-test "PSNR dimension mismatch error" {
+test "Image.psnr: dimension mismatch error" {
     var img1 = try Image(u8).init(std.testing.allocator, 10, 10);
     defer img1.deinit(std.testing.allocator);
 
@@ -38,7 +38,7 @@ test "PSNR dimension mismatch error" {
     try expectError(error.DimensionMismatch, img1.psnr(img2));
 }
 
-test "PSNR with known values for u8" {
+test "Image.psnr: known values for u8" {
     var img1 = try Image(u8).init(std.testing.allocator, 2, 2);
     defer img1.deinit(std.testing.allocator);
     img1.at(0, 0).* = 100;
@@ -59,7 +59,7 @@ test "PSNR with known values for u8" {
     try expectApproxEqAbs(30.171, psnr, 0.01);
 }
 
-test "PSNR with RGB struct type" {
+test "Image.psnr: RGB struct type" {
     var img1 = try Image(Rgb).init(std.testing.allocator, 2, 2);
     defer img1.deinit(std.testing.allocator);
     img1.fill(Rgb{ .r = 100, .g = 150, .b = 200 });
@@ -76,7 +76,7 @@ test "PSNR with RGB struct type" {
     try expectApproxEqAbs(29.38, psnr, 0.01);
 }
 
-test "PSNR with RGBA struct type" {
+test "Image.psnr: RGBA struct type" {
     var img1 = try Image(Rgba).init(std.testing.allocator, 1, 2);
     defer img1.deinit(std.testing.allocator);
     img1.at(0, 0).* = Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 };
@@ -93,7 +93,7 @@ test "PSNR with RGBA struct type" {
     try expectApproxEqAbs(37.16, psnr, 0.01);
 }
 
-test "PSNR with f32 scalar type" {
+test "Image.psnr: f32 scalar type" {
     var img1 = try Image(f32).init(std.testing.allocator, 2, 2);
     defer img1.deinit(std.testing.allocator);
     img1.at(0, 0).* = 0.5;
@@ -114,7 +114,7 @@ test "PSNR with f32 scalar type" {
     try expectApproxEqAbs(20.0, psnr, 0.01);
 }
 
-test "PSNR with array type [3]u8" {
+test "Image.psnr: array type [3]u8" {
     var img1 = try Image([3]u8).init(std.testing.allocator, 1, 2);
     defer img1.deinit(std.testing.allocator);
     img1.at(0, 0).* = .{ 100, 150, 200 };
@@ -131,7 +131,7 @@ test "PSNR with array type [3]u8" {
     try expectApproxEqAbs(34.15, psnr, 0.01);
 }
 
-test "PSNR extreme case: black vs white" {
+test "Image.psnr: extreme case black vs white" {
     var img1 = try Image(u8).init(std.testing.allocator, 10, 10);
     defer img1.deinit(std.testing.allocator);
     for (img1.data) |*pixel| {
@@ -150,7 +150,7 @@ test "PSNR extreme case: black vs white" {
     try expectApproxEqAbs(0.0, psnr, 0.01);
 }
 
-test "PSNR with slight noise" {
+test "Image.psnr: slight noise" {
     var img1 = try Image(u8).init(std.testing.allocator, 100, 100);
     defer img1.deinit(std.testing.allocator);
     for (img1.data) |*pixel| {

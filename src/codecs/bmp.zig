@@ -899,7 +899,7 @@ fn writeCoreHeader(fixture: *Io.Writer, opts: TestCoreHeaderOpts) !void {
     try fixture.writeInt(u16, opts.bit_depth, .little);
 }
 
-test "BMP getInfo: 24bpp BITMAPINFOHEADER" {
+test "getInfo: 24bpp BITMAPINFOHEADER" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -923,7 +923,7 @@ test "BMP getInfo: 24bpp BITMAPINFOHEADER" {
     try std.testing.expect(header.masks == null);
 }
 
-test "BMP getInfo: top-down (negative biHeight)" {
+test "getInfo: top-down (negative biHeight)" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -941,7 +941,7 @@ test "BMP getInfo: top-down (negative biHeight)" {
     try std.testing.expect(header.top_down);
 }
 
-test "BMP getInfo: BITMAPCOREHEADER (OS/2 v1)" {
+test "getInfo: BITMAPCOREHEADER (OS/2 v1)" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -961,7 +961,7 @@ test "BMP getInfo: BITMAPCOREHEADER (OS/2 v1)" {
     try std.testing.expectEqual(@as(u32, 256), header.palette_entries);
 }
 
-test "BMP getInfo: 32bpp BI_BITFIELDS reads masks" {
+test "getInfo: 32bpp BI_BITFIELDS reads masks" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -988,7 +988,7 @@ test "BMP getInfo: 32bpp BI_BITFIELDS reads masks" {
     try std.testing.expect(!header.hasAlpha());
 }
 
-test "BMP getInfo: BI_ALPHABITFIELDS reads RGBA masks" {
+test "getInfo: BI_ALPHABITFIELDS reads RGBA masks" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1010,7 +1010,7 @@ test "BMP getInfo: BI_ALPHABITFIELDS reads RGBA masks" {
     try std.testing.expect(header.hasAlpha());
 }
 
-test "BMP getInfo: BITMAPV4HEADER" {
+test "getInfo: BITMAPV4HEADER" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1052,7 +1052,7 @@ test "BMP getInfo: BITMAPV4HEADER" {
     try std.testing.expect(header.hasAlpha());
 }
 
-test "BMP getInfo rejects bad signature" {
+test "getInfo: rejects bad signature" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1067,7 +1067,7 @@ test "BMP getInfo rejects bad signature" {
     try std.testing.expectError(error.InvalidBmpSignature, getInfo(&reader, .{}));
 }
 
-test "BMP getInfo rejects BI_JPEG / BI_PNG" {
+test "getInfo: rejects BI_JPEG and BI_PNG" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1079,7 +1079,7 @@ test "BMP getInfo rejects BI_JPEG / BI_PNG" {
     try std.testing.expectError(error.UnsupportedCompression, getInfo(&reader, .{}));
 }
 
-test "BMP getInfo rejects unsupported bit depth" {
+test "getInfo: rejects unsupported bit depth" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1091,7 +1091,7 @@ test "BMP getInfo rejects unsupported bit depth" {
     try std.testing.expectError(error.UnsupportedBitDepth, getInfo(&reader, .{}));
 }
 
-test "BMP getInfo enforces max_pixels" {
+test "getInfo: enforces max_pixels" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1103,7 +1103,7 @@ test "BMP getInfo enforces max_pixels" {
     try std.testing.expectError(error.ImageTooLarge, getInfo(&reader, .{ .max_pixels = .limited(1000) }));
 }
 
-test "BMP getInfo rejects pixel_offset before header end" {
+test "getInfo: rejects pixel_offset before header end" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1115,7 +1115,7 @@ test "BMP getInfo rejects pixel_offset before header end" {
     try std.testing.expectError(error.InvalidPixelDataOffset, getInfo(&reader, .{}));
 }
 
-test "BMP decode 24bpp BI_RGB bottom-up" {
+test "loadFromBytes: 24bpp BI_RGB bottom-up" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1151,7 +1151,7 @@ test "BMP decode 24bpp BI_RGB bottom-up" {
     try std.testing.expectEqual(Rgb{ .r = 0, .g = 0, .b = 255 }, image.data[2 * w]);
 }
 
-test "BMP decode 24bpp BI_RGB top-down" {
+test "loadFromBytes: 24bpp BI_RGB top-down" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1181,7 +1181,7 @@ test "BMP decode 24bpp BI_RGB top-down" {
     try std.testing.expectEqual(Rgb{ .r = 0, .g = 0, .b = 255 }, image.data[2 * w]);
 }
 
-test "BMP decode 24bpp BI_RGB respects row padding" {
+test "loadFromBytes: 24bpp BI_RGB respects row padding" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1216,7 +1216,7 @@ test "BMP decode 24bpp BI_RGB respects row padding" {
     try std.testing.expectEqual(Rgb{ .r = 7, .g = 8, .b = 9 }, image.data[5]);
 }
 
-test "BMP decode 24bpp rejects truncated pixel data" {
+test "loadFromBytes: 24bpp rejects truncated pixel data" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1231,7 +1231,7 @@ test "BMP decode 24bpp rejects truncated pixel data" {
     try std.testing.expectError(error.MissingPixelData, loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{}));
 }
 
-test "BMP round-trip Rgb 24bpp gradient" {
+test "encode: round-trips Rgb 24bpp gradient" {
     const gpa = std.testing.allocator;
 
     var src = try Image(Rgb).init(gpa, 8, 16);
@@ -1261,7 +1261,7 @@ test "BMP round-trip Rgb 24bpp gradient" {
     }
 }
 
-test "BMP round-trip Rgb 24bpp top-down option" {
+test "encode: round-trips Rgb 24bpp with top_down" {
     const gpa = std.testing.allocator;
 
     var src = try Image(Rgb).init(gpa, 4, 5);
@@ -1290,7 +1290,7 @@ test "BMP round-trip Rgb 24bpp top-down option" {
     try std.testing.expect(info.top_down);
 }
 
-test "BMP round-trip width=3 (padding required)" {
+test "encode: round-trips width=3 (padding required)" {
     const gpa = std.testing.allocator;
 
     var src = try Image(Rgb).init(gpa, 2, 3);
@@ -1315,7 +1315,7 @@ test "BMP round-trip width=3 (padding required)" {
     }
 }
 
-test "BMP round-trip Rgba 32bpp BI_BITFIELDS preserves alpha" {
+test "encode: Rgba 32bpp BI_BITFIELDS round-trip preserves alpha" {
     const gpa = std.testing.allocator;
 
     var src = try Image(Rgba).init(gpa, 8, 8);
@@ -1346,7 +1346,7 @@ test "BMP round-trip Rgba 32bpp BI_BITFIELDS preserves alpha" {
     }
 }
 
-test "BMP decode 16bpp BI_BITFIELDS 5-6-5" {
+test "loadFromBytes: 16bpp BI_BITFIELDS 5-6-5" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1389,7 +1389,7 @@ test "BMP decode 16bpp BI_BITFIELDS 5-6-5" {
     try std.testing.expectEqual(@as(u8, 255), image.data[3].b);
 }
 
-test "BMP decode 32bpp BI_RGB heuristic: all-zero alpha → opaque Rgb" {
+test "loadFromBytes: 32bpp BI_RGB with all-zero alpha decodes as opaque Rgb" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1413,7 +1413,7 @@ test "BMP decode 32bpp BI_RGB heuristic: all-zero alpha → opaque Rgb" {
     try std.testing.expectEqual(Rgb{ .r = 0, .g = 255, .b = 0 }, image.data[1]);
 }
 
-test "BMP decode 32bpp BI_RGB: nonzero alpha is honoured as Rgba" {
+test "loadFromBytes: 32bpp BI_RGB nonzero alpha is honoured as Rgba" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1435,7 +1435,7 @@ test "BMP decode 32bpp BI_RGB: nonzero alpha is honoured as Rgba" {
     try std.testing.expectEqual(@as(u8, 0xFF), image.data[1].a);
 }
 
-test "BMP decode 8bpp indexed (gradient palette)" {
+test "loadFromBytes: 8bpp indexed (gradient palette)" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1466,7 +1466,7 @@ test "BMP decode 8bpp indexed (gradient palette)" {
     try std.testing.expectEqual(Rgb{ .r = 255, .g = 255, .b = 255 }, image.data[3]);
 }
 
-test "BMP decode 1bpp indexed (checkerboard)" {
+test "loadFromBytes: 1bpp indexed (checkerboard)" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1500,7 +1500,7 @@ test "BMP decode 1bpp indexed (checkerboard)" {
     try std.testing.expectEqual(Rgb{ .r = 0, .g = 0, .b = 0 }, image.data[w + 1]);
 }
 
-test "BMP decode 4bpp indexed" {
+test "loadFromBytes: 4bpp indexed" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1531,7 +1531,7 @@ test "BMP decode 4bpp indexed" {
     try std.testing.expectEqual(@as(u8, 255), image.data[3].r); // 15*17
 }
 
-test "BMP decode 8bpp BITMAPCOREHEADER (3-byte palette entries)" {
+test "loadFromBytes: 8bpp BITMAPCOREHEADER (3-byte palette entries)" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1594,7 +1594,7 @@ fn buildRleBmp(
     try fixture.writeAll(rle_stream);
 }
 
-test "BMP decode RLE8 with encoded + literal + EOL + EOI" {
+test "loadFromBytes: RLE8 with encoded + literal + EOL + EOI" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1626,7 +1626,7 @@ test "BMP decode RLE8 with encoded + literal + EOL + EOI" {
     try std.testing.expectEqual(@as(u8, 128), image.at(1, 3).*.r);
 }
 
-test "BMP decode RLE8 absolute mode pads to 16-bit boundary" {
+test "loadFromBytes: RLE8 absolute mode pads to 16-bit boundary" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1649,7 +1649,7 @@ test "BMP decode RLE8 absolute mode pads to 16-bit boundary" {
     try std.testing.expectEqual(@as(u8, 80), image.at(0, 4).*.r);
 }
 
-test "BMP decode RLE4 alternating nibbles" {
+test "loadFromBytes: RLE4 alternating nibbles" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1671,7 +1671,7 @@ test "BMP decode RLE4 alternating nibbles" {
     try std.testing.expectEqual(@as(u8, 32), image.at(0, 3).*.r);
 }
 
-test "BMP decode RLE8 rejects overflow" {
+test "loadFromBytes: RLE8 rejects overflow" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1687,7 +1687,7 @@ test "BMP decode RLE8 rejects overflow" {
     try std.testing.expectError(error.RleOverflow, loadFromBytes(Rgb, parallel.inline_io, gpa, aw.written(), .{}));
 }
 
-test "BMP decode RLE delta escape" {
+test "loadFromBytes: RLE delta escape" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1718,7 +1718,7 @@ test "BMP decode RLE delta escape" {
     try std.testing.expectEqual(@as(u8, 0), image.at(0, 2).*.r);
 }
 
-test "BMP round-trip Image(u8) with use_palette_for_grayscale" {
+test "encode: Image(u8) round-trip with use_palette_for_grayscale" {
     const gpa = std.testing.allocator;
 
     var src = try Image(u8).init(gpa, 4, 6);
@@ -1748,7 +1748,7 @@ test "BMP round-trip Image(u8) with use_palette_for_grayscale" {
     }
 }
 
-test "BMP round-trip Image(u8) without flag → 24bpp BGR" {
+test "encode: Image(u8) without use_palette_for_grayscale writes 24bpp BGR" {
     const gpa = std.testing.allocator;
 
     var src = try Image(u8).init(gpa, 3, 5);
@@ -1776,7 +1776,7 @@ test "BMP round-trip Image(u8) without flag → 24bpp BGR" {
     }
 }
 
-test "BMP getInfo: 8bpp uses default 256 palette entries when colors_used=0" {
+test "getInfo: 8bpp uses default 256 palette entries when colors_used=0" {
     const gpa = std.testing.allocator;
     var aw: Io.Writer.Allocating = .init(gpa);
     defer aw.deinit();
@@ -1790,7 +1790,7 @@ test "BMP getInfo: 8bpp uses default 256 palette entries when colors_used=0" {
     try std.testing.expectEqual(@as(u32, 256), header.palette_entries);
 }
 
-test "rows wider than one conversion batch round-trip" {
+test "encode: rows wider than one conversion batch round-trip" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     var img: Image(Rgb) = try .init(gpa, 3, 2500);

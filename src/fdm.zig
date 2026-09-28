@@ -321,7 +321,7 @@ fn populationVariance(stats: RunningStats(f64, .variance)) f64 {
     return stats.variance() * correction;
 }
 
-test "FDM mean and covariance matching" {
+test "FeatureDistributionMatching.match: mean and covariance matching" {
     const allocator = testing.allocator;
 
     // Create source image with known statistics
@@ -425,7 +425,7 @@ test "FDM mean and covariance matching" {
     try expectApproxEqAbs(result_var_b, target_var_b, 1);
 }
 
-test "FDM grayscale mean and variance matching" {
+test "FeatureDistributionMatching.match: grayscale mean and variance matching" {
     const allocator = testing.allocator;
 
     // Create source image with known statistics
@@ -462,7 +462,7 @@ test "FDM grayscale mean and variance matching" {
     try expectEqual(actual_mean, 149.5);
 }
 
-test "FDM batch processing with reused target" {
+test "FeatureDistributionMatching.update: batch processing with reused target" {
     const allocator = testing.allocator;
 
     // Create a target style image
@@ -527,7 +527,7 @@ test "FDM batch processing with reused target" {
     }
 }
 
-test "FDM grayscale target applied to color source" {
+test "FeatureDistributionMatching.match: grayscale target applied to color source" {
     const allocator = testing.allocator;
 
     // Build a color source image with distinct RGB patterns.
@@ -579,7 +579,7 @@ test "FDM grayscale target applied to color source" {
     try expectApproxEqAbs(result_var, target_var, 2.0);
 }
 
-test "FDM error handling" {
+test "FeatureDistributionMatching.update: error handling" {
     const allocator = testing.allocator;
 
     var fdm: FeatureDistributionMatching(Rgb) = .init(allocator);

@@ -725,7 +725,7 @@ fn expectDecodes(allocator: Allocator, image: Image(u8), expected: []const u8) !
     try std.testing.expectEqualSlices(u8, expected, result.data);
 }
 
-test "image roundtrip across module sizes and quiet zones" {
+test "decode: image roundtrip across module sizes and quiet zones" {
     const allocator = std.testing.allocator;
     const cases = [_]struct { module_size: u32, quiet_zone: u32 }{
         .{ .module_size = 1, .quiet_zone = 4 },
@@ -750,7 +750,7 @@ test "image roundtrip across module sizes and quiet zones" {
     }
 }
 
-test "decode accepts color images" {
+test "decode: accepts color images" {
     const Rgba = @import("../color.zig").Rgba(u8);
     const allocator = std.testing.allocator;
     var clean = try encoder.encode(allocator, "COLOR INPUT", .{ .module_size = 4 });
@@ -762,7 +762,7 @@ test "decode accepts color images" {
     try std.testing.expectEqualSlices(u8, "COLOR INPUT", result.data);
 }
 
-test "decode returns null on blank and noise images" {
+test "decode: returns null on blank and noise images" {
     const allocator = std.testing.allocator;
     var blank = try Image(u8).init(allocator, 64, 64);
     defer blank.deinit(allocator);
@@ -778,7 +778,7 @@ test "decode returns null on blank and noise images" {
     }
 }
 
-test "decode rotated 30 degrees" {
+test "decode: rotated 30 degrees" {
     const allocator = std.testing.allocator;
     var clean = try encoder.encode(allocator, "ROTATED THIRTY", .{ .module_size = 6 });
     defer clean.deinit(allocator);
@@ -806,7 +806,7 @@ test "decode rotated 30 degrees" {
     try expectDecodes(allocator, photo, "ROTATED THIRTY");
 }
 
-test "decode under perspective distortion" {
+test "decode: perspective distortion" {
     const allocator = std.testing.allocator;
     // v7 exercises the alignment-pattern fourth corner and version info.
     // Versions are forced: v1 (no alignment pattern) cannot correct this
@@ -838,7 +838,7 @@ test "decode under perspective distortion" {
     }
 }
 
-test "decode mirrored perspective" {
+test "decode: mirrored perspective" {
     const allocator = std.testing.allocator;
     var clean = try encoder.encode(allocator, "MIRRORED", .{ .module_size = 8, .version = 2 });
     defer clean.deinit(allocator);
@@ -858,7 +858,7 @@ test "decode mirrored perspective" {
     try expectDecodes(allocator, photo, "MIRRORED");
 }
 
-test "decode under uneven lighting" {
+test "decode: uneven lighting" {
     const allocator = std.testing.allocator;
     var clean = try encoder.encode(allocator, "UNEVEN LIGHTING", .{ .module_size = 6 });
     defer clean.deinit(allocator);
@@ -881,7 +881,7 @@ test "decode under uneven lighting" {
     try expectDecodes(allocator, photo, "UNEVEN LIGHTING");
 }
 
-test "decode under blur and noise" {
+test "decode: blur and noise" {
     const allocator = std.testing.allocator;
     var clean = try encoder.encode(allocator, "BLUR AND NOISE", .{ .module_size = 6 });
     defer clean.deinit(allocator);
@@ -902,7 +902,7 @@ test "decode under blur and noise" {
     try expectDecodes(allocator, photo, "BLUR AND NOISE");
 }
 
-test "decode combined photo distortions" {
+test "decode: combined photo distortions" {
     const allocator = std.testing.allocator;
     const versions = [_]?u8{ 1, 4, 10 }; // v1 exercises the parallelogram fallback
     for (versions) |version| {
@@ -934,7 +934,7 @@ test "decode combined photo distortions" {
     }
 }
 
-test "decode version 40 at three pixels per module" {
+test "decode: version 40 at three pixels per module" {
     const allocator = std.testing.allocator;
     var clean = try encoder.encode(allocator, "V40 SUBPIXEL BUDGET CANARY", .{
         .module_size = 3,
@@ -956,7 +956,7 @@ test "decode version 40 at three pixels per module" {
     try expectDecodes(allocator, photo, "V40 SUBPIXEL BUDGET CANARY");
 }
 
-test "pickFinderTriple labels rotated centers" {
+test "pickFinderTriple: labels rotated centers" {
     // Centers of a symbol rotated 40 degrees; TL must be the right-angle
     // vertex and TR/BL must follow the cross-product convention.
     const cos = @cos(std.math.pi / 4.5);
@@ -980,7 +980,7 @@ test "pickFinderTriple labels rotated centers" {
     try std.testing.expectApproxEqAbs(bl.center.x(), triple.bottom_left.center.x(), 0.01);
 }
 
-test "alignment pattern search on a rendered symbol" {
+test "fourthCandidates: alignment pattern search on a rendered symbol" {
     const allocator = std.testing.allocator;
     const ms = 6;
     const qz = 4;

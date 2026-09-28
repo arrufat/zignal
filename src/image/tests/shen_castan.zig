@@ -8,7 +8,7 @@ const Edges = @import("../edges.zig").Edges;
 
 const Rgb = color.Rgb(u8);
 
-test "Shen-Castan edge detection basic functionality" {
+test "Image.shenCastan: basic functionality" {
     const allocator = testing.allocator;
 
     // Create a simple test image with clear edges
@@ -58,7 +58,7 @@ test "Shen-Castan edge detection basic functionality" {
     try testing.expect(edge_count < 500); // Should not fill the entire image
 }
 
-test "Shen-Castan parameter validation" {
+test "Image.shenCastan: parameter validation" {
     const allocator = testing.allocator;
 
     var img = try Image(u8).init(allocator, 10, 10);
@@ -86,7 +86,7 @@ test "Shen-Castan parameter validation" {
     try testing.expectError(error.WindowSizeTooSmall, filter.shenCastan(img, io, allocator, edges, .{ .window_size = 1 }));
 }
 
-test "Shen-Castan on gradient image" {
+test "Image.shenCastan: on gradient image" {
     const allocator = testing.allocator;
 
     // Create a gradient image
@@ -130,7 +130,7 @@ test "Shen-Castan on gradient image" {
     try testing.expect(edge_at_boundary);
 }
 
-test "Shen-Castan with different b parameters" {
+test "Image.shenCastan: with different b parameters" {
     const allocator = testing.allocator;
 
     // Create a noisy test image
@@ -185,7 +185,7 @@ test "Shen-Castan with different b parameters" {
     try testing.expect(count_high_b > 0);
 }
 
-test "Shen-Castan on RGB image" {
+test "Image.shenCastan: on RGB image" {
     const allocator = testing.allocator;
 
     // Create an RGB image with edges
@@ -233,7 +233,7 @@ test "Shen-Castan on RGB image" {
     try testing.expect(edge_count > 0);
 }
 
-test "Shen-Castan threshold monotonicity" {
+test "Image.shenCastan: threshold monotonicity" {
     const allocator = testing.allocator;
 
     // Create test image with edges
@@ -280,7 +280,7 @@ test "Shen-Castan threshold monotonicity" {
     try testing.expect(count_low > 0);
 }
 
-test "Shen-Castan diagonal edge detection" {
+test "Image.shenCastan: diagonal edge detection" {
     const allocator = testing.allocator;
 
     // Create image with diagonal edge
@@ -325,7 +325,7 @@ test "Shen-Castan diagonal edge detection" {
     try testing.expect(diagonal_detected);
 }
 
-test "Shen-Castan window size effect" {
+test "Image.shenCastan: window size effect" {
     const allocator = testing.allocator;
 
     // Create noisy test image

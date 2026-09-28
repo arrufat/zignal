@@ -198,7 +198,7 @@ pub fn solveAssignmentProblem(
 }
 
 // Tests
-test "Hungarian algorithm - simple 3x3" {
+test "solveAssignmentProblem: simple 3x3" {
     const allocator = std.testing.allocator;
 
     // Create cost matrix
@@ -217,7 +217,7 @@ test "Hungarian algorithm - simple 3x3" {
     try expectEqual(@as(f64, 10), result.total_cost);
 }
 
-test "Hungarian algorithm - integer matrix" {
+test "solveAssignmentProblem: integer matrix" {
     const allocator = std.testing.allocator;
 
     // Test with integer cost matrix
@@ -243,7 +243,7 @@ test "Hungarian algorithm - integer matrix" {
     try expectEqual(@as(f64, 75), result.total_cost);
 }
 
-test "Hungarian algorithm - rectangular matrix" {
+test "solveAssignmentProblem: rectangular matrix" {
     const allocator = std.testing.allocator;
 
     // 2x3 cost matrix
@@ -265,7 +265,7 @@ test "Hungarian algorithm - rectangular matrix" {
     try expectEqual(@as(f64, 2), result.total_cost);
 }
 
-test "Hungarian algorithm - tiny costs keep relative scale" {
+test "solveAssignmentProblem: tiny costs keep relative scale" {
     const allocator = std.testing.allocator;
 
     // Costs ~1e-8: the old decimal-place scaling rounded them all to 0 and returned an arbitrary
@@ -298,7 +298,7 @@ fn bruteForceAssignment(cost: Matrix(i32), n: usize, row: usize, used: *[8]bool,
     }
 }
 
-test "Hungarian algorithm - matches brute force on random square matrices" {
+test "solveAssignmentProblem: matches brute force on random square matrices" {
     const allocator = std.testing.allocator;
     var prng: std.Random.DefaultPrng = .init(0xA55E7);
     const rand = prng.random();
@@ -324,7 +324,7 @@ test "Hungarian algorithm - matches brute force on random square matrices" {
     }
 }
 
-test "Hungarian algorithm - empty matrix" {
+test "solveAssignmentProblem: empty matrix" {
     const allocator = std.testing.allocator;
 
     var cost: Matrix(f32) = try .init(allocator, 0, 0);

@@ -415,7 +415,7 @@ fn ColumnLanes(comptime T: type, comptime W: usize, comptime masked: bool) type 
     };
 }
 
-test "register transpose" {
+test "transpose: register transpose" {
     var m: [lanes]@Vector(lanes, f32) = undefined;
     for (&m, 0..) |*row, i| {
         var v: [lanes]f32 = undefined;
@@ -432,7 +432,7 @@ test "register transpose" {
     }
 }
 
-test "iir gaussian approximates the exact kernel" {
+test "blur: approximates the exact kernel" {
     const allocator = std.testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();
     var prng = std.Random.DefaultPrng.init(3);
@@ -473,7 +473,7 @@ test "iir gaussian approximates the exact kernel" {
     }
 }
 
-test "auto method picks the filter by sigma" {
+test "Image.gaussianBlur: auto method picks the filter by sigma" {
     const allocator = std.testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();
     const Options = @import("../image.zig").GaussianBlurOptions;
@@ -499,7 +499,7 @@ test "auto method picks the filter by sigma" {
     }
 }
 
-test "iir gaussian struct pixels match per-plane u8" {
+test "blur: struct pixels match per-plane u8" {
     const allocator = std.testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();
     const color = @import("../color.zig");

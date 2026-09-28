@@ -283,7 +283,7 @@ pub const UpperBound = struct {
 // Tests
 // ---------------------------------------------------------------------------------------
 
-test "UpperBound dominates the sampled points" {
+test "UpperBound.evaluate: dominates the sampled points" {
     const allocator = std.testing.allocator;
     var ub = try UpperBound.init(allocator, 2, .default);
     defer ub.deinit();
@@ -307,7 +307,7 @@ test "UpperBound dominates the sampled points" {
     for (ub.slopes) |s| try std.testing.expect(s >= 0);
 }
 
-test "UpperBound warm-start: incremental refits converge fast and stay correct" {
+test "UpperBound.add: incremental warm-start refits converge fast and stay correct" {
     const allocator = std.testing.allocator;
     var ub = try UpperBound.init(allocator, 3, .default);
     defer ub.deinit();
@@ -331,7 +331,7 @@ test "UpperBound warm-start: incremental refits converge fast and stay correct" 
     }
 }
 
-test "UpperBound with a single point evaluates to that point's value" {
+test "UpperBound.evaluate: a single point evaluates to that point's value" {
     const allocator = std.testing.allocator;
     var ub = try UpperBound.init(allocator, 2, .default);
     defer ub.deinit();
@@ -342,7 +342,7 @@ test "UpperBound with a single point evaluates to that point's value" {
     try std.testing.expectEqual(@as(f64, 1.5), ub.evaluate(&[_]f64{ 5.0, 5.0 }));
 }
 
-test "UpperBound is consistent for a 1D Lipschitz function" {
+test "UpperBound.evaluate: consistent for a 1D Lipschitz function" {
     const allocator = std.testing.allocator;
     var ub = try UpperBound.init(allocator, 1, .default);
     defer ub.deinit();

@@ -625,7 +625,7 @@ fn interpolateWithKernel(comptime T: type, self: Image(T), x: f32, y: f32, compt
     return fromChannels(T, sums);
 }
 
-test "sampler matches interpolate away from the borders" {
+test "Sampler: matches interpolate away from the borders" {
     const allocator = std.testing.allocator;
     const Rgb = @import("../color.zig").Rgb(u8);
     var prng = std.Random.DefaultPrng.init(0x5a);

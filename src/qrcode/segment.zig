@@ -225,14 +225,14 @@ pub fn readSegments(allocator: Allocator, codewords: []const u8, version: u8) ![
     return out.toOwnedSlice(allocator);
 }
 
-test "detectMode" {
+test "detectMode: picks the narrowest mode" {
     try std.testing.expectEqual(Mode.numeric, detectMode("0123456789"));
     try std.testing.expectEqual(Mode.alphanumeric, detectMode("HELLO WORLD"));
     try std.testing.expectEqual(Mode.byte, detectMode("hello"));
     try std.testing.expectEqual(Mode.numeric, detectMode(""));
 }
 
-test "ISO 18004 Annex I data codewords" {
+test "buildCodewords: ISO 18004 Annex I data codewords" {
     // "01234567" as version 1-M: 16 data codewords including padding.
     const codewords = try buildCodewords(std.testing.allocator, "01234567", .numeric, 1, .medium);
     defer std.testing.allocator.free(codewords);
@@ -240,7 +240,7 @@ test "ISO 18004 Annex I data codewords" {
     try std.testing.expectEqualSlices(u8, &expected, codewords);
 }
 
-test "segment roundtrip across modes" {
+test "readSegments: roundtrip across modes" {
     const cases = [_][]const u8{ "0123456789012345", "HELLO WORLD $%*+-./:", "byte mode \xff\x00 data", "8", "AC-42", "" };
     for (cases) |data| {
         const mode = detectMode(data);
@@ -253,7 +253,7 @@ test "segment roundtrip across modes" {
     }
 }
 
-test "fitVersion picks minimal version and errors when too large" {
+test "fitVersion: picks minimal version and errors when too large" {
     // 25 alphanumeric characters need version 2 at level L? Version 1-L holds
     // up to 25 alphanumeric characters, so 25 fits and 26 does not.
     try std.testing.expectEqual(@as(u8, 1), try fitVersion(.alphanumeric, .low, 25));

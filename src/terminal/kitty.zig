@@ -109,7 +109,7 @@ pub fn isSupported(io: std.Io) bool {
 }
 
 // Tests
-test "imageToKitty basic functionality" {
+test "fromImage: basic functionality" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -140,7 +140,7 @@ test "imageToKitty basic functionality" {
     try testing.expect(std.mem.find(u8, kitty_data, "a=T") != null);
 }
 
-test "imageToKitty with options" {
+test "fromImage: options" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -167,7 +167,7 @@ test "imageToKitty with options" {
     try testing.expect(std.mem.find(u8, kitty_data, "d=1") != null);
 }
 
-test "imageToKitty with scaling" {
+test "fromImage: scaling" {
     const testing = std.testing;
     const allocator = testing.allocator;
 
@@ -199,7 +199,7 @@ test "imageToKitty with scaling" {
     try testing.expect(kitty_data.len > 100);
 }
 
-test "imageToKitty with chunking enabled" {
+test "fromImage: chunking enabled" {
     const testing = std.testing;
     const allocator = testing.allocator;
 

@@ -106,7 +106,7 @@ pub fn Decompressor(comptime T: type) type {
     };
 }
 
-test "RLE basic compression" {
+test "compress: basic compression" {
     const allocator = std.testing.allocator;
     const input = "AAAABBBCCDAA";
     const expected = [_]Entry(u8){
@@ -127,7 +127,7 @@ test "RLE basic compression" {
     }
 }
 
-test "RLE compressor iterator" {
+test "Compressor: iterator" {
     const input = [_]u32{ 10, 10, 20, 30, 30, 30 };
     var compressor = Compressor(u32){ .data = &input };
 
@@ -146,7 +146,7 @@ test "RLE compressor iterator" {
     try std.testing.expect(compressor.next() == null);
 }
 
-test "RLE basic decompression" {
+test "decompress: basic decompression" {
     const allocator = std.testing.allocator;
     const input = [_]Entry(u8){
         .{ .value = 'A', .count = 4 },
@@ -160,7 +160,7 @@ test "RLE basic decompression" {
     try std.testing.expectEqualSlices(u8, expected, decompressed);
 }
 
-test "RLE decompression overflow" {
+test "decompress: overflow" {
     const allocator = std.testing.allocator;
     const input = [_]Entry(u8){
         .{ .value = 'A', .count = std.math.maxInt(usize) },
@@ -171,7 +171,7 @@ test "RLE decompression overflow" {
     try std.testing.expectError(error.Overflow, result);
 }
 
-test "RLE decompressor iterator" {
+test "Decompressor: iterator" {
     const entries = [_]Entry(u8){
         .{ .value = 'X', .count = 2 },
         .{ .value = 'Y', .count = 1 },

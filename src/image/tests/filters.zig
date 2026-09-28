@@ -16,7 +16,7 @@ const Rgba = color.Rgba(u8);
 
 const io = std.Io.Threaded.global_single_threaded.io();
 
-test "invert" {
+test "Image.invert: inverts pixels" {
     // Test grayscale
     var gray: Image(u8) = try .init(std.testing.allocator, 2, 2);
     defer gray.deinit(std.testing.allocator);
@@ -50,7 +50,7 @@ test "invert" {
     try expectEqualDeep(Rgba{ .r = 255, .g = 127, .b = 0, .a = 64 }, rgba.at(0, 0).*);
 }
 
-test "invertInto and equalizeInto match the in-place versions through views" {
+test "Image.invertInto: matches the in-place versions through views, with equalizeInto" {
     const gpa = std.testing.allocator;
     inline for (.{ u8, Rgb, Rgba }) |T| {
         var base: Image(T) = try .init(gpa, 9, 13);
@@ -76,7 +76,7 @@ test "invertInto and equalizeInto match the in-place versions through views" {
     }
 }
 
-test "boxBlur radius 0 with views" {
+test "Image.boxBlur: radius 0 with views" {
     var image: Image(u8) = try .init(std.testing.allocator, 6, 8);
     defer image.deinit(std.testing.allocator);
 
@@ -103,7 +103,7 @@ test "boxBlur radius 0 with views" {
     }
 }
 
-test "view" {
+test "Image.view: is not contiguous" {
     var image: Image(Rgba) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     const rect: Rectangle(u32) = .{ .l = 0, .t = 0, .r = 8, .b = 10 };
@@ -113,7 +113,7 @@ test "view" {
     try expectEqualDeep(rect, view.getRectangle());
 }
 
-test "boxBlur basic functionality" {
+test "Image.boxBlur: basic functionality" {
     // Test with uniform image - should remain unchanged
     var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
@@ -131,7 +131,7 @@ test "boxBlur basic functionality" {
     }
 }
 
-test "boxBlur zero radius" {
+test "Image.boxBlur: zero radius" {
     var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
@@ -154,7 +154,7 @@ test "boxBlur zero radius" {
     }
 }
 
-test "boxBlur border effects" {
+test "Image.boxBlur: border effects" {
     // Create a small image to test border handling
     var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
@@ -182,7 +182,7 @@ test "boxBlur border effects" {
     try expectEqual(center_val < 255, true);
 }
 
-test "boxBlur struct type" {
+test "Image.boxBlur: struct type" {
     var image: Image(Rgba) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
@@ -212,7 +212,7 @@ test "boxBlur struct type" {
     try expectEqual(center.b != 255, true);
 }
 
-test "boxBlur border area calculations" {
+test "Image.boxBlur: border area calculations" {
     // Test that border pixels get correct area calculations by comparing
     // uniform images with different values
     const test_size: u32 = 12;
@@ -260,7 +260,7 @@ test "boxBlur border area calculations" {
     }
 }
 
-test "boxBlur struct type comprehensive" {
+test "Image.boxBlur: struct type comprehensive" {
     // Test RGBA with both large images (SIMD) and small images (scalar)
     for ([_]u32{ 8, 32 }) |test_size| { // Small and large
         for ([_]u32{ 1, 3 }) |radius| {
@@ -303,7 +303,7 @@ test "boxBlur struct type comprehensive" {
     }
 }
 
-test "sharpen basic functionality" {
+test "Image.sharpen: basic functionality" {
     var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
 
@@ -330,7 +330,7 @@ test "sharpen basic functionality" {
     try expectEqual(right_val >= 192, true); // Bright side should get brighter or stay same
 }
 
-test "sharpen zero radius" {
+test "Image.sharpen: zero radius" {
     var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
@@ -353,7 +353,7 @@ test "sharpen zero radius" {
     }
 }
 
-test "sharpen uniform image" {
+test "Image.sharpen: uniform image" {
     var image: Image(u8) = try .init(std.testing.allocator, 4, 4);
     defer image.deinit(std.testing.allocator);
 
@@ -371,7 +371,7 @@ test "sharpen uniform image" {
     }
 }
 
-test "sharpen struct type" {
+test "Image.sharpen: struct type" {
     var image: Image(Rgba) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
@@ -396,7 +396,7 @@ test "sharpen struct type" {
     try expectEqual(sharpened_center.b >= original_center.b, true);
 }
 
-test "convolve identity kernel" {
+test "Image.convolve: identity kernel" {
     var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
@@ -426,7 +426,7 @@ test "convolve identity kernel" {
     }
 }
 
-test "convolve blur kernel" {
+test "Image.convolve: blur kernel" {
     var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
 
@@ -453,7 +453,7 @@ test "convolve blur kernel" {
     try expectEqual(edge_val > 0 and edge_val < 255, true);
 }
 
-test "convolve border modes" {
+test "Image.convolve: border modes" {
     var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
@@ -495,7 +495,7 @@ test "convolve border modes" {
     _ = result_mirror.at(0, 0).*;
 }
 
-test "convolveSeparable Gaussian approximation" {
+test "Image.convolveSeparable: Gaussian approximation" {
     var image: Image(f32) = try .init(std.testing.allocator, 7, 7);
     defer image.deinit(std.testing.allocator);
 
@@ -519,7 +519,7 @@ test "convolveSeparable Gaussian approximation" {
     try expectEqual(center > adjacent, true); // Center should still be brightest
 }
 
-test "gaussianBlur basic" {
+test "Image.gaussianBlur: basic" {
     var image: Image(u8) = try .init(std.testing.allocator, 11, 11);
     defer image.deinit(std.testing.allocator);
 
@@ -547,7 +547,7 @@ test "gaussianBlur basic" {
     try expectEqual(center > 200, true);
 }
 
-test "gaussianBlur sigma variations" {
+test "Image.gaussianBlur: sigma variations" {
     var image: Image(f32) = try .init(std.testing.allocator, 15, 15);
     defer image.deinit(std.testing.allocator);
 
@@ -574,7 +574,7 @@ test "gaussianBlur sigma variations" {
     try expectEqual(edge_large > edge_small, true); // Large sigma spreads more to edges
 }
 
-test "sobel with new convolution" {
+test "Image.sobel: with new convolution" {
     var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
 
@@ -597,7 +597,7 @@ test "sobel with new convolution" {
     try expectEqual(non_edge < 50, true); // Weak or no edge
 }
 
-test "repro: uniform channel bug in struct convolution with .zero borders" {
+test "Image.convolve: uniform channel bug in struct convolution with .zero borders" {
     const allocator = std.testing.allocator;
     var image = try Image(Rgb).init(allocator, 5, 5);
     defer image.deinit(allocator);
@@ -628,7 +628,7 @@ test "repro: uniform channel bug in struct convolution with .zero borders" {
     try std.testing.expect(diff <= 1);
 }
 
-test "repro: stride bug in f32 separable convolution" {
+test "Image.convolveSeparable: stride bug in f32 separable convolution" {
     const allocator = std.testing.allocator;
     // Create a 5x5 image
     var base = try Image(f32).init(allocator, 5, 5);
@@ -660,7 +660,7 @@ test "repro: stride bug in f32 separable convolution" {
     }
 }
 
-test "convolve3x3 optimization" {
+test "Image.convolve: 3x3 optimization" {
     // This test verifies that 3x3 convolution uses the optimized path
     var image: Image(u8) = try .init(std.testing.allocator, 10, 10);
     defer image.deinit(std.testing.allocator);
@@ -688,7 +688,7 @@ test "convolve3x3 optimization" {
     try expectEqual(result.cols, image.cols);
 }
 
-test "convolve preserves color channels" {
+test "Image.convolve: preserves color channels" {
     // Test that RGB convolution processes each channel independently
     var image: Image(Rgb) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
@@ -727,7 +727,7 @@ test "convolve preserves color channels" {
     }
 }
 
-test "convolve into view (stride-safe)" {
+test "Image.convolve: into view (stride-safe)" {
     // Create a base image with a larger stride than the view width
     var base_src: Image(u8) = try .init(std.testing.allocator, 6, 8);
     defer base_src.deinit(std.testing.allocator);
@@ -772,7 +772,7 @@ test "convolve into view (stride-safe)" {
     }
 }
 
-test "convolveSeparable into view (stride-safe)" {
+test "Image.convolveSeparable: into view (stride-safe)" {
     // Create a base image and a matching destination base
     var base_src: Image(u8) = try .init(std.testing.allocator, 7, 9);
     defer base_src.deinit(std.testing.allocator);
@@ -811,7 +811,7 @@ test "convolveSeparable into view (stride-safe)" {
     }
 }
 
-test "gaussianBlur preserves color" {
+test "Image.gaussianBlur: preserves color" {
     // Test that Gaussian blur on RGB images maintains color information
     var image: Image(Rgb) = try .init(std.testing.allocator, 7, 7);
     defer image.deinit(std.testing.allocator);
@@ -843,7 +843,7 @@ test "gaussianBlur preserves color" {
     }
 }
 
-test "medianBlur removes impulse noise" {
+test "Image.medianBlur: removes impulse noise" {
     var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
 
@@ -859,7 +859,7 @@ test "medianBlur removes impulse noise" {
     try expectEqual(@as(u8, 0), blurred.at(1, 2).*);
 }
 
-test "percentileBlur max filter" {
+test "Image.percentileBlur: max filter" {
     var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
@@ -879,7 +879,7 @@ test "percentileBlur max filter" {
     try expectEqual(@as(u8, 4), out.at(0, 0).*);
 }
 
-test "medianBlur preserves dominant RGB color" {
+test "Image.medianBlur: preserves dominant RGB color" {
     var image: Image(Rgb) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
@@ -895,7 +895,7 @@ test "medianBlur preserves dominant RGB color" {
     try expectEqualDeep(base, blurred.at(0, 0).*);
 }
 
-test "minBlur matches percentile zero" {
+test "Image.minBlur: matches percentile zero" {
     var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
@@ -922,7 +922,7 @@ test "minBlur matches percentile zero" {
     }
 }
 
-test "maxBlur matches percentile one" {
+test "Image.maxBlur: matches percentile one" {
     var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
@@ -947,7 +947,7 @@ test "maxBlur matches percentile one" {
     }
 }
 
-test "midpointBlur averages extremes" {
+test "Image.midpointBlur: averages extremes" {
     var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
@@ -966,7 +966,7 @@ test "midpointBlur averages extremes" {
     try expectEqual(@as(u8, 4), blurred.at(1, 1).*);
 }
 
-test "alphaTrimmedMeanBlur drops extremes" {
+test "Image.alphaTrimmedMeanBlur: drops extremes" {
     var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
@@ -985,7 +985,7 @@ test "alphaTrimmedMeanBlur drops extremes" {
     try expectEqual(@as(u8, 4), blurred.at(1, 1).*);
 }
 
-test "alphaTrimmedMeanBlur invalid trim" {
+test "Image.alphaTrimmedMeanBlur: invalid trim" {
     var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
@@ -995,7 +995,7 @@ test "alphaTrimmedMeanBlur invalid trim" {
     try expectError(error.InvalidTrim, image.alphaTrimmedMeanBlur(io, std.testing.allocator, out, 1, 0.6, BorderMode.replicate));
 }
 
-test "linearMotionBlur horizontal" {
+test "Image.motionBlur: linear horizontal" {
     var image: Image(u8) = try .init(std.testing.allocator, 5, 7);
     defer image.deinit(std.testing.allocator);
 
@@ -1021,7 +1021,7 @@ test "linearMotionBlur horizontal" {
     try expectEqual(true, diff < 10); // Should be very similar
 }
 
-test "linearMotionBlur vertical" {
+test "Image.motionBlur: linear vertical" {
     var image: Image(u8) = try .init(std.testing.allocator, 7, 5);
     defer image.deinit(std.testing.allocator);
 
@@ -1047,7 +1047,7 @@ test "linearMotionBlur vertical" {
     try expectEqual(true, diff < 10); // Should be very similar
 }
 
-test "linearMotionBlur diagonal" {
+test "Image.motionBlur: linear diagonal" {
     var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
 
@@ -1066,7 +1066,7 @@ test "linearMotionBlur diagonal" {
     try expectEqual(true, blurred.at(3, 3).* > 0);
 }
 
-test "linearMotionBlur zero distance" {
+test "Image.motionBlur: linear zero distance" {
     var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
@@ -1089,7 +1089,7 @@ test "linearMotionBlur zero distance" {
     }
 }
 
-test "linearMotionBlur RGB" {
+test "Image.motionBlur: linear RGB" {
     var image: Image(Rgb) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
 
@@ -1111,7 +1111,7 @@ test "linearMotionBlur RGB" {
     try expectEqual(true, adjacent.r > 0);
 }
 
-test "radialMotionBlur zoom" {
+test "Image.motionBlur: radial zoom" {
     var image: Image(u8) = try .init(std.testing.allocator, 7, 7);
     defer image.deinit(std.testing.allocator);
 
@@ -1138,7 +1138,7 @@ test "radialMotionBlur zoom" {
     try expectEqual(true, center_diff < 20);
 }
 
-test "radialMotionBlur spin" {
+test "Image.motionBlur: radial spin" {
     var image: Image(u8) = try .init(std.testing.allocator, 7, 7);
     defer image.deinit(std.testing.allocator);
 
@@ -1162,7 +1162,7 @@ test "radialMotionBlur spin" {
     try expectEqual(true, non_zero_count > 1);
 }
 
-test "radialMotionBlur zero strength" {
+test "Image.motionBlur: radial zero strength" {
     var image: Image(u8) = try .init(std.testing.allocator, 3, 3);
     defer image.deinit(std.testing.allocator);
 
@@ -1185,7 +1185,7 @@ test "radialMotionBlur zero strength" {
     }
 }
 
-test "gaussianBlur with sigma=0" {
+test "Image.gaussianBlur: with sigma=0" {
     var image: Image(f32) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
 
@@ -1208,7 +1208,7 @@ test "gaussianBlur with sigma=0" {
     }
 }
 
-test "canny edge detection basic" {
+test "Image.canny: basic" {
     // Test basic Canny edge detection on a simple vertical edge
     var image: Image(u8) = try .init(std.testing.allocator, 10, 10);
     defer image.deinit(std.testing.allocator);
@@ -1240,7 +1240,7 @@ test "canny edge detection basic" {
     try expectEqual(true, edge_detected);
 }
 
-test "canny edge detection parameter validation" {
+test "Image.canny: parameter validation" {
     var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
 
@@ -1265,7 +1265,7 @@ test "canny edge detection parameter validation" {
     try expectError(error.InvalidThreshold, image.canny(io, std.testing.allocator, edges, 1.0, 100, 50));
 }
 
-test "canny rejects non-finite parameters" {
+test "Image.canny: rejects non-finite parameters" {
     var image: Image(u8) = try .init(std.testing.allocator, 5, 5);
     defer image.deinit(std.testing.allocator);
 
@@ -1292,7 +1292,7 @@ test "canny rejects non-finite parameters" {
     try expectError(error.InvalidParameter, image.canny(io, std.testing.allocator, edges, -std.math.inf(f32), 50, 100));
 }
 
-test "canny edge detection on RGB" {
+test "Image.canny: on RGB" {
     // Test that Canny works with RGB images (converts to grayscale internally)
     var image: Image(Rgb) = try .init(std.testing.allocator, 8, 8);
     defer image.deinit(std.testing.allocator);
@@ -1328,7 +1328,7 @@ test "canny edge detection on RGB" {
     try expectEqual(true, edge_detected);
 }
 
-test "convolve regression issue #255 (missing pixels)" {
+test "Image.convolve: regression issue #255 (missing pixels)" {
     // This test ensures that convolution writes all pixels, even when SIMD is used.
     // Specifically targets the case where leading border columns were skipped.
     const width = 20;
@@ -1370,7 +1370,7 @@ test "convolve regression issue #255 (missing pixels)" {
     }
 }
 
-test "convolvePair matches two independent convolves" {
+test "convolvePair: matches two independent convolves" {
     const convolution = @import("../convolution.zig");
     const allocator = std.testing.allocator;
 
@@ -1412,7 +1412,7 @@ test "convolvePair matches two independent convolves" {
     }
 }
 
-test "boxBlur/sharpen interleaved u8 path matches plane-split path" {
+test "Image.boxBlur: interleaved u8 path matches plane-split path, with sharpen" {
     const allocator = std.testing.allocator;
     var prng = std.Random.DefaultPrng.init(0x5eed);
     const random = prng.random();
@@ -1452,7 +1452,7 @@ test "boxBlur/sharpen interleaved u8 path matches plane-split path" {
 
 // Every banded filter must produce the same bytes on a thread pool as serially. The image is
 // large enough for several bands and for the fused separable path (temp plane > 1 MiB).
-test "filters are identical on a thread pool" {
+test "Image: filters are identical on a thread pool" {
     const allocator = std.testing.allocator;
     var pool: std.Io.Threaded = .init(allocator, .{});
     defer pool.deinit();
@@ -1564,7 +1564,7 @@ test "filters are identical on a thread pool" {
 
 // Kernels above 7x7 loop over rows at runtime instead of unrolling both axes; every size
 // must match a plain reference for u8 and f32 in every border mode.
-test "large 2D kernels match a scalar reference" {
+test "Image.convolve: large 2D kernels match a scalar reference" {
     const allocator = std.testing.allocator;
     var prng = std.Random.DefaultPrng.init(0xbeef);
     const random = prng.random();

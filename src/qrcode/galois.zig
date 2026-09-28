@@ -55,7 +55,7 @@ pub fn polyEval(poly: []const u8, x: u8) u8 {
     return y;
 }
 
-test "exp/log are inverses" {
+test "tables: exp and log are inverses" {
     for (1..256) |a| {
         const v: u8 = @intCast(a);
         try std.testing.expectEqual(v, tables.exp[tables.log[v]]);
@@ -65,7 +65,7 @@ test "exp/log are inverses" {
     }
 }
 
-test "multiplicative inverse" {
+test "inv: multiplicative inverse" {
     for (1..256) |a| {
         const v: u8 = @intCast(a);
         try std.testing.expectEqual(@as(u8, 1), mul(v, inv(v)));
@@ -73,14 +73,14 @@ test "multiplicative inverse" {
     }
 }
 
-test "known products" {
+test "mul: known products" {
     // From the field's defining relation: alpha^8 = 0x1d.
     try std.testing.expectEqual(@as(u8, 0x1d), expAlpha(8));
     try std.testing.expectEqual(@as(u8, 0), mul(0, 123));
     try std.testing.expectEqual(@as(u8, 123), mul(1, 123));
 }
 
-test "polyEval" {
+test "polyEval: evaluates polynomials" {
     // p(x) = 3x^2 + 2x + 1 at x = 1 is 3 ^ 2 ^ 1 = 0.
     const p = [_]u8{ 1, 2, 3 };
     try std.testing.expectEqual(@as(u8, 0), polyEval(&p, 1));

@@ -13,7 +13,7 @@ const DrawOptions = @import("../Canvas.zig").DrawOptions;
 
 const gray: Rgba = .{ .r = 128, .g = 128, .b = 128, .a = 255 };
 
-test "fast mode blends translucent colors with normal blending" {
+test "Canvas.fillRectangle: fast mode blends translucent colors with normal blending" {
     const allocator = testing.allocator;
     var img: Image(Rgba) = try .init(allocator, 20, 20);
     defer img.deinit(allocator);
@@ -37,7 +37,7 @@ test "fast mode blends translucent colors with normal blending" {
     try expectEqual(overwritten.a, 128);
 }
 
-test "multiply blending applies on fast fill paths with opaque colors" {
+test "Canvas.fillCircle: multiply blending applies on fast fill paths with opaque colors" {
     const allocator = testing.allocator;
     var img: Image(Rgba) = try .init(allocator, 40, 40);
     defer img.deinit(allocator);
@@ -52,7 +52,7 @@ test "multiply blending applies on fast fill paths with opaque colors" {
     try expectEqual(img.at(2, 2).*.r, 128);
 }
 
-test "multiply blending is coverage-scaled on soft AA edges" {
+test "Canvas.fillCircle: multiply blending is coverage-scaled on soft AA edges" {
     const allocator = testing.allocator;
     var img: Image(Rgba) = try .init(allocator, 40, 40);
     defer img.deinit(allocator);
@@ -68,7 +68,7 @@ test "multiply blending is coverage-scaled on soft AA edges" {
     try expect(edge > interior and edge < 128);
 }
 
-test "opaque fast drawing is identical for none and normal blending" {
+test "Canvas: opaque fast drawing is identical for none and normal blending" {
     const allocator = testing.allocator;
     var img_none: Image(Rgba) = try .init(allocator, 50, 50);
     defer img_none.deinit(allocator);
@@ -89,7 +89,7 @@ test "opaque fast drawing is identical for none and normal blending" {
     try expectEqualSlices(Rgba, img_none.data, img_normal.data);
 }
 
-test "fast Bresenham lines blend translucent colors" {
+test "Canvas.drawLine: fast Bresenham lines blend translucent colors" {
     const allocator = testing.allocator;
     var img: Image(Rgba) = try .init(allocator, 30, 30);
     defer img.deinit(allocator);

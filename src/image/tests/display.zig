@@ -7,7 +7,7 @@ const expectEqualStrings = std.testing.expectEqualStrings;
 const color = @import("../../color.zig");
 const Image = @import("../../image.zig").Image;
 
-test "image format sgr" {
+test "Image.display: sgr" {
     const Rgb = color.Rgb(u8);
 
     // Create a small 2x2 RGB image
@@ -37,7 +37,7 @@ test "image format sgr" {
     try expectEqualStrings(expected, result);
 }
 
-test "image format sgr coalesces repeated colors" {
+test "Image.display: sgr coalesces repeated colors" {
     const Rgb = color.Rgb(u8);
 
     // 2x2 solid red: both cells share the same fg/bg pair, so the escape is emitted once.
@@ -58,7 +58,7 @@ test "image format sgr coalesces repeated colors" {
     try expectEqualStrings(expected, result);
 }
 
-test "image format sgr odd rows" {
+test "Image.display: sgr odd rows" {
     const Rgb = color.Rgb(u8);
 
     // Create a 3x2 RGB image (odd number of rows)
@@ -89,7 +89,7 @@ test "image format sgr odd rows" {
     try expectEqualStrings(expected, result);
 }
 
-test "image format braille" {
+test "Image.display: braille" {
     const Rgb = color.Rgb(u8);
 
     // Create a 4x4 RGB image (perfect for one Braille character)
@@ -126,7 +126,7 @@ test "image format braille" {
     try expectEqualStrings(expected, result);
 }
 
-test "image format braille custom threshold" {
+test "Image.display: braille custom threshold" {
     const Rgb = color.Rgb(u8);
 
     // Create a 4x2 grayscale gradient image
@@ -160,7 +160,7 @@ test "image format braille custom threshold" {
     try expectEqualStrings(expected, result);
 }
 
-test "image format braille large image" {
+test "Image.display: braille large image" {
     const Rgb = color.Rgb(u8);
 
     // Create an 8x4 image (2x2 Braille characters)
@@ -197,7 +197,7 @@ test "image format braille large image" {
     try expectEqualStrings(expected, result);
 }
 
-test "image format braille color" {
+test "Image.display: braille color" {
     const Rgb = color.Rgb(u8);
 
     // 4x2 image: lit (bright) pixels are colored, dark pixels stay off.
@@ -227,7 +227,7 @@ test "image format braille color" {
     try expectEqualStrings(expected, result);
 }
 
-test "image format braille palette snaps tint" {
+test "Image.display: braille palette snaps tint" {
     const Rgb = color.Rgb(u8);
 
     var image = try Image(Rgb).init(std.testing.allocator, 4, 2);
@@ -254,7 +254,7 @@ test "image format braille palette snaps tint" {
     try expectEqualStrings(expected, result);
 }
 
-test "image format braille coalesces repeated colors" {
+test "Image.display: braille coalesces repeated colors" {
     const Rgb = color.Rgb(u8);
 
     // 4x4 solid white: two full cells in the row share one color, so one escape is emitted.

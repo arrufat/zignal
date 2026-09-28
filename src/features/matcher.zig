@@ -272,7 +272,7 @@ pub const MatchStats = struct {
 };
 
 // Tests
-test "BruteForceMatcher basic matching" {
+test "BruteForceMatcher.match: basic matching" {
     const allocator = std.testing.allocator;
 
     // Create some test descriptors
@@ -314,7 +314,7 @@ test "BruteForceMatcher basic matching" {
     }
 }
 
-test "BruteForceMatcher cross-check" {
+test "BruteForceMatcher.match: cross-check" {
     const allocator = std.testing.allocator;
 
     // Create descriptors where only some have mutual best matches
@@ -359,7 +359,7 @@ test "BruteForceMatcher cross-check" {
     try expectEqual(true, matches_cross.len <= matches_no_cross.len);
 }
 
-test "BruteForceMatcher kNN matching" {
+test "BruteForceMatcher.knnMatch: kNN matching" {
     const allocator = std.testing.allocator;
 
     // Create query descriptor
@@ -399,7 +399,7 @@ test "BruteForceMatcher kNN matching" {
     }
 }
 
-test "MatchStats computation" {
+test "MatchStats.compute: computation" {
     const matches = [_]Match{
         .{ .query_idx = 0, .train_idx = 0, .distance = 10 },
         .{ .query_idx = 1, .train_idx = 1, .distance = 20 },

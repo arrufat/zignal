@@ -257,7 +257,7 @@ fn expectLines(font: Font, text: []const u8, max_width: ?f32, expected: []const 
     try testing.expectEqual(null, lines.next());
 }
 
-test "paragraphs without wrapping" {
+test "Lines: paragraphs without wrapping" {
     const font: Font = .{ .bitmap = font8x8.basic };
     try expectLines(font, "", null, &.{""});
     try expectLines(font, "ab", null, &.{"ab"});
@@ -269,7 +269,7 @@ test "paragraphs without wrapping" {
     try testing.expectEqual(56, measure(font, "aaa bbb ccc", 8, 64, .{ .wrap = true }).r);
 }
 
-test "word wrap" {
+test "Lines: word wrap" {
     const font: Font = .{ .bitmap = font8x8.basic };
     // 8 px per glyph: "aaa bbb" is 56 px, "aaa bbb ccc" 88.
     try expectLines(font, "aaa bbb ccc", 64, &.{ "aaa bbb", "ccc" });
@@ -289,7 +289,7 @@ test "word wrap" {
     try expectLines(font, "aaa\n\nbbb", 40, &.{ "aaa", "", "bbb" });
 }
 
-test "spacing and measure" {
+test "measure: spacing" {
     const font: Font = .{ .bitmap = font8x8.basic };
     try testing.expectEqual(24, lineWidth(font, "abc", 8, 0));
     try testing.expectEqual(28, lineWidth(font, "abc", 8, 2));
@@ -306,7 +306,7 @@ test "spacing and measure" {
     try testing.expectEqual(Rectangle(f32){ .l = 0, .t = 0, .r = 0, .b = 8 }, measure(font, "", 8, null, .default));
 }
 
-test "getTextBounds is measureText under the default layout" {
+test "Font.getTextBounds: is measureText under the default layout" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const vector: Font = .{ .vector = synthetic.font(&buf, .{}) };
     const bitmap: Font = .{ .bitmap = font8x8.basic };
@@ -330,7 +330,7 @@ test "getTextBounds is measureText under the default layout" {
     try testing.expectEqual(Rectangle(f32){ .l = 0, .t = 0, .r = 20, .b = 24 }, bitmap.measureText("A©", 8, null, .{ .letter_spacing = 4, .line_spacing = 3 }));
 }
 
-test "getTextBoundsTight is the ink of every line" {
+test "Font.getTextBoundsTight: is the ink of every line" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const vector: Font = .{ .vector = synthetic.font(&buf, .{}) };
     const tight = vector.getTextBoundsTight("A", 100);
@@ -360,7 +360,7 @@ test "getTextBoundsTight is the ink of every line" {
     try testing.expectEqual(Rectangle(f32){ .l = 0, .t = 0, .r = 0, .b = 0 }, latin.getTextBoundsTight("A", 8));
 }
 
-test "pen walks bitmap and vector lines alike" {
+test "Pen: walks bitmap and vector lines alike" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const vector: Font = .{ .vector = synthetic.font(&buf, .{}) };
     const bitmap: Font = .{ .bitmap = font8x8.basic };
@@ -378,7 +378,7 @@ test "pen walks bitmap and vector lines alike" {
     }
 }
 
-test "vector widths follow kerning" {
+test "Lines: vector widths follow kerning" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font: Font = .{ .vector = synthetic.font(&buf, .{}) };
     // A then B kerns by -30 units; at 1000 px per em that is 800 - 30 + 800.

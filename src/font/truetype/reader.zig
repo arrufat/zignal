@@ -70,7 +70,7 @@ pub const Reader = struct {
     }
 };
 
-test "reads are bounds checked" {
+test "Reader: reads are bounds checked" {
     const bytes = [_]u8{ 0x12, 0x34, 0xff, 0xfe, 0x00, 0x00, 0x40, 0x00 };
     const r: Reader = .init(&bytes);
     try std.testing.expectEqual(@as(u16, 0x1234), try r.u16At(0));
@@ -82,7 +82,7 @@ test "reads are bounds checked" {
     try std.testing.expectError(error.UnexpectedEof, r.slice(4, std.math.maxInt(usize)));
 }
 
-test "lower bound over sorted records" {
+test "Reader.lowerBound: sorted records" {
     // Three 4-byte records keyed by their second u16: 5, 9, 9.
     const bytes = [_]u8{ 0, 1, 0, 5, 0, 2, 0, 9, 0, 3, 0, 9 };
     const r: Reader = .init(&bytes);

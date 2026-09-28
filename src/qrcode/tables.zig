@@ -280,7 +280,7 @@ pub fn alphanumericValue(char: u8) ?u6 {
 /// Character for an alphanumeric mode value.
 pub const alphanumeric_charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:";
 
-test "format info known vector" {
+test "formatInfo: known vector" {
     // M with mask 0 encodes data 0, so the codeword is exactly the XOR mask.
     try std.testing.expectEqual(@as(u15, 0b101010000010010), formatInfo(.medium, 0));
     try std.testing.expectEqual(@as(u15, 0b111011111000100), formatInfo(.low, 0));
@@ -293,7 +293,7 @@ test "format info known vector" {
     }
 }
 
-test "version info known vector" {
+test "versionInfo: known vector" {
     // ISO/IEC 18004: version 7 encodes as 000111110010010100.
     try std.testing.expectEqual(@as(u18, 0b000111110010010100), versionInfo(7));
     for (version_info, 0..) |a, i| {
@@ -303,7 +303,7 @@ test "version info known vector" {
     }
 }
 
-test "alignment positions are consistent" {
+test "alignmentPositions: consistent" {
     for (min_version..max_version + 1) |v| {
         const version: u8 = @intCast(v);
         const positions = alignmentPositions(version);
@@ -321,7 +321,7 @@ test "alignment positions are consistent" {
     }
 }
 
-test "ec blocks totals match module capacity" {
+test "ecBlocks: totals match module capacity" {
     // The sum of data and ecc codewords over all blocks must equal the number
     // of non-function modules divided by 8, for every version and level.
     const BitMatrix = @import("matrix.zig").BitMatrix;

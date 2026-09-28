@@ -166,7 +166,7 @@ fn classOf(r: Reader, class_def: usize, gid: u16) Error!u16 {
 const synthetic = @import("synthetic.zig");
 const VectorFont = @import("../Vector.zig");
 
-test "pair adjustment: format 1, format 2 via extension, GPOS over kern" {
+test "pairAdjust: format 1, format 2 via extension, GPOS over kern" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font = synthetic.font(&buf, .{});
     try std.testing.expect(font.tables.gpos != null);
@@ -180,7 +180,7 @@ test "pair adjustment: format 1, format 2 via extension, GPOS over kern" {
     try std.testing.expectEqual(@as(i16, 0), font.kern(0, 0));
 }
 
-test "truncated GPOS reads as no kerning" {
+test "findPairPos: truncated GPOS reads as no kerning" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     var font = synthetic.font(&buf, .{});
     font.tables.gpos.?.table.len = 12;

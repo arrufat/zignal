@@ -251,7 +251,7 @@ fn parseGlyph(gpa: Allocator, lines: *std.mem.TokenIterator(u8, .any), state: *B
     return false;
 }
 
-test "BDF to BitmapFont conversion" {
+test "parse: converts to BitmapFont" {
     const test_bdf =
         \\STARTFONT 2.1
         \\FONT test
@@ -294,7 +294,7 @@ test "BDF to BitmapFont conversion" {
     try testing.expectEqual(@as(u8, 0x24), char_data.?[1]);
 }
 
-test "BDF sorts glyphs by encoding, the last duplicate winning" {
+test "parse: sorts glyphs by encoding, the last duplicate winning" {
     const unsorted_bdf =
         \\STARTFONT 2.1
         \\FONTBOUNDINGBOX 8 1 0 0
@@ -330,7 +330,7 @@ test "BDF sorts glyphs by encoding, the last duplicate winning" {
     try testing.expectEqualSlices(u8, &.{@bitReverse(@as(u8, 0x02))}, font.getCharData('B').?);
 }
 
-test "BDF parses glyph rows wider than 32 bits" {
+test "parse: glyph rows wider than 32 bits" {
     const wide_bdf =
         \\STARTFONT 2.1
         \\FONT wide-test
@@ -402,11 +402,11 @@ fn expectRoundtrip(file_name: []const u8) !void {
     }
 }
 
-test "BDF save and load roundtrip" {
+test "save: roundtrip with load" {
     try expectRoundtrip("test_font.bdf");
 }
 
-test "BDF save and load compressed roundtrip" {
+test "save: compressed roundtrip with load" {
     try expectRoundtrip("test_font.bdf.gz");
 }
 

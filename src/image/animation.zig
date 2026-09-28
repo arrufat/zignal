@@ -164,7 +164,7 @@ pub fn Animation(comptime T: type) type {
     };
 }
 
-test "Animation(u8) — build, deinit, helpers" {
+test "Animation: build, deinit, helpers" {
     const gpa = std.testing.allocator;
 
     var frames = try gpa.alloc(Image(u8), 2);
@@ -191,7 +191,7 @@ test "Animation(u8) — build, deinit, helpers" {
     try std.testing.expectEqual(@as(u32, 0), anim.loop_count);
 }
 
-test "still formats load as one frame" {
+test "Animation.loadFromBytes: still formats load as one frame" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     var img: Image(u8) = try .init(gpa, 3, 5);
@@ -207,7 +207,7 @@ test "still formats load as one frame" {
     try std.testing.expectEqualSlices(u8, img.data, anim.frame(0).data);
 }
 
-test "save writes what encode returns" {
+test "Image.save: writes what encode returns" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});

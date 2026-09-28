@@ -396,7 +396,7 @@ pub fn Rectangle(comptime T: type) type {
     };
 }
 
-test "Rectangle" {
+test "Rectangle: size, contains and as" {
     const irect: Rectangle(isize) = .{ .l = 0, .t = 0, .r = 640, .b = 480 };
     try expectEqual(irect.width(), 640);
     try expectEqual(irect.height(), 480);
@@ -408,7 +408,7 @@ test "Rectangle" {
     try expectEqualDeep(frect.as(isize), irect);
 }
 
-test "Rectangle grow and shrink" {
+test "Rectangle.grow: round-trips with shrink" {
     const rect = Rectangle(i32){ .l = 50, .t = 25, .r = 100, .b = 100 };
     const amount: i32 = 10;
     var rect2 = rect.grow(amount);
@@ -419,7 +419,7 @@ test "Rectangle grow and shrink" {
     try expectEqualDeep(rect, rect2);
 }
 
-test "Rectangle intersect" {
+test "Rectangle.intersect: overlapping and disjoint" {
     // Test integer rectangles
     const rect1 = Rectangle(i32){ .l = 0, .t = 0, .r = 100, .b = 100 };
     const rect2 = Rectangle(i32){ .l = 50, .t = 50, .r = 150, .b = 150 };
@@ -447,7 +447,7 @@ test "Rectangle intersect" {
     try expectEqual(fintersection2, null);
 }
 
-test "Rectangle iou and overlaps" {
+test "Rectangle.iou: iou and overlaps" {
     const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
     // Test with integer rectangles
@@ -502,14 +502,14 @@ test "Rectangle iou and overlaps" {
     try expectEqualDeep(self_intersection, rect1);
 }
 
-test "Rectangle contains rejects NaN" {
+test "Rectangle.contains: rejects NaN" {
     const rect: Rectangle(f32) = .{ .l = -10.0, .t = -10.0, .r = 10.0, .b = 10.0 };
     const nan = std.math.nan(f32);
     try expectEqual(false, rect.contains(.init(.{ nan, 0.0 })));
     try expectEqual(false, rect.contains(.init(.{ 0.0, nan })));
 }
 
-test "Rectangle helpers" {
+test "Rectangle: helpers" {
     const expectApproxEqAbs = std.testing.expectApproxEqAbs;
 
     const rect: Rectangle(f32) = .{ .l = 10, .t = 20, .r = 30, .b = 50 };
@@ -550,7 +550,7 @@ test "Rectangle helpers" {
     try expectEqual(frect.covers(.{ .l = 0.5, .t = 0.5, .r = 1.5, .b = 1.5 }), true);
 }
 
-test "Rectangle merge" {
+test "Rectangle.merge: bounding union" {
     const rect1: Rectangle(i32) = .{ .l = 0, .t = 0, .r = 10, .b = 10 };
     const rect2: Rectangle(i32) = .{ .l = 20, .t = 20, .r = 30, .b = 30 };
     const merged = rect1.merge(rect2);
@@ -561,7 +561,7 @@ test "Rectangle merge" {
     try expectEqualDeep(empty.merge(rect1), rect1);
 }
 
-test "Rectangle perimeter and aspect ratio" {
+test "Rectangle.perimeter: perimeter and aspect ratio" {
     const rect: Rectangle(i32) = .{ .l = 0, .t = 0, .r = 100, .b = 50 };
     try expectEqual(rect.perimeter(), 300);
     try std.testing.expectApproxEqAbs(rect.aspectRatio(), 2.0, 1e-9);
@@ -577,7 +577,7 @@ test "Rectangle perimeter and aspect ratio" {
     try std.testing.expect(std.math.isNan(point.aspectRatio()));
 }
 
-test "Rectangle reorder" {
+test "Rectangle.reorder: fixes flipped edges" {
     const flipped: Rectangle(i32) = .{ .l = 100, .t = 100, .r = 0, .b = 0 };
     try expectEqual(flipped.isEmpty(), true);
     try expectEqual(flipped.width(), 0);
@@ -588,7 +588,7 @@ test "Rectangle reorder" {
     try expectEqual(fixed.width(), 100);
 }
 
-test "Rectangle contains with Point" {
+test "Rectangle.contains: Point" {
     const rect: Rectangle(f32) = .{ .l = 0, .t = 0, .r = 10, .b = 10 };
     const p_in: Point(2, f32) = .init(.{ 5.0, 5.0 });
     const p_out: Point(2, f32) = .init(.{ 15.0, 5.0 });

@@ -1241,7 +1241,7 @@ fn convolveSeparablePlane(
     try SeparablePass(TempT, PixelT, AccumIntT, channels).vertical(io, temp_img, dst_img, allocator, kernel_y, border_mode);
 }
 
-test "fused separable matches standard path" {
+test "convolveSeparablePlaneFused: matches standard path" {
     const testing = std.testing;
     const allocator = testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();
@@ -1285,7 +1285,7 @@ test "fused separable matches standard path" {
 }
 
 // Every interleaved strategy must match the same kernels run per channel as a plane.
-test "interleaved separable matches per-channel planes" {
+test "convolveSeparable: interleaved matches per-channel planes" {
     const testing = std.testing;
     const allocator = testing.allocator;
     const io = Io.Threaded.global_single_threaded.io();

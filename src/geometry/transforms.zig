@@ -294,7 +294,7 @@ pub fn ProjectiveTransform(comptime T: type) type {
     };
 }
 
-test "similarity transform rejects rank deficient input" {
+test "SimilarityTransform.init: rejects rank deficient input" {
     const T = f64;
     const from_points: []const Point(2, T) = &.{
         Point(2, T).init(.{ 0, 0 }),
@@ -307,7 +307,7 @@ test "similarity transform rejects rank deficient input" {
     try std.testing.expectError(error.RankDeficient, SimilarityTransform(T).init(from_points, to_points));
 }
 
-test "affine transform rejects rank deficient input" {
+test "AffineTransform.init: rejects rank deficient input" {
     const T = f64;
     const from_points: []const Point(2, T) = &.{
         .init(.{ 0, 0 }),
@@ -322,7 +322,7 @@ test "affine transform rejects rank deficient input" {
     try std.testing.expectError(error.RankDeficient, AffineTransform(T).init(std.testing.allocator, from_points, to_points));
 }
 
-test "projective transform rejects rank deficient input" {
+test "ProjectiveTransform.init: rejects rank deficient input" {
     const T = f64;
     const from_points: []const Point(2, T) = &.{
         .init(.{ 0, 0 }),
@@ -339,7 +339,7 @@ test "projective transform rejects rank deficient input" {
     try std.testing.expectError(error.RankDeficient, ProjectiveTransform(T).init(from_points, to_points));
 }
 
-test "affine3" {
+test "AffineTransform.init: three correspondences" {
     const T = f64;
     const from_points: []const Point(2, T) = &.{
         .init(.{ 0, 0 }),
@@ -374,7 +374,7 @@ test "affine3" {
     }
 }
 
-test "affine with additional correspondences" {
+test "AffineTransform.init: additional correspondences" {
     const T = f64;
     const from_points: []const Point(2, T) = &.{
         .init(.{ 0, 0 }),
@@ -407,7 +407,7 @@ test "affine with additional correspondences" {
     }
 }
 
-test "projection4" {
+test "ProjectiveTransform.init: four correspondences" {
     const T = f64;
     const tol = 1e-5;
     const from_points: []const Point(2, T) = &.{
@@ -455,7 +455,7 @@ test "projection4" {
     }
 }
 
-test "projection8" {
+test "ProjectiveTransform.init: eight correspondences" {
     const T = f64;
     const from_points: []const Point(2, T) = &.{
         .init(.{ 319.48406982, 240.21486282 }),
@@ -497,7 +497,7 @@ test "projection8" {
     }
 }
 
-test "projective init solves four correspondences exactly" {
+test "ProjectiveTransform.init: solves four correspondences exactly" {
     const source = [4]Point(2, f64){
         .init(.{ 0, 0 }), .init(.{ 100, 0 }), .init(.{ 0, 100 }), .init(.{ 100, 100 }),
     };

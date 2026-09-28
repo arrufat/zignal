@@ -83,7 +83,7 @@ pub fn normalizedDistance(self: BinaryDescriptor, other: BinaryDescriptor) f32 {
 }
 
 // Tests
-test "BinaryDescriptor initialization" {
+test "BinaryDescriptor.init: all bits clear" {
     const desc = BinaryDescriptor.init();
 
     // Should be all zeros
@@ -94,7 +94,7 @@ test "BinaryDescriptor initialization" {
     try expectEqual(@as(u32, 0), desc.popCount());
 }
 
-test "BinaryDescriptor bit operations" {
+test "BinaryDescriptor.setBit: bit operations" {
     var desc = BinaryDescriptor.init();
 
     // Set some bits
@@ -117,7 +117,7 @@ test "BinaryDescriptor bit operations" {
     try expectEqual(@as(u32, 3), desc.popCount());
 }
 
-test "BinaryDescriptor Hamming distance" {
+test "BinaryDescriptor.hammingDistance: counts differing bits" {
     var desc1 = BinaryDescriptor.init();
     var desc2 = BinaryDescriptor.init();
 
@@ -137,7 +137,7 @@ test "BinaryDescriptor Hamming distance" {
     try expectEqual(@as(u32, 4), desc1.hammingDistance(desc2));
 }
 
-test "BinaryDescriptor normalized distance" {
+test "BinaryDescriptor.normalizedDistance: normalized distance" {
     var desc1 = BinaryDescriptor.init();
     var desc2 = BinaryDescriptor.init();
 
@@ -154,7 +154,7 @@ test "BinaryDescriptor normalized distance" {
     try expectEqual(@as(f32, 1.0), desc1.normalizedDistance(desc2));
 }
 
-test "BinaryDescriptor equality" {
+test "BinaryDescriptor.equals: equality" {
     var desc1 = BinaryDescriptor.init();
     var desc2 = BinaryDescriptor.init();
 
@@ -167,7 +167,7 @@ test "BinaryDescriptor equality" {
     try expectEqual(true, desc1.equals(desc2));
 }
 
-test "BinaryDescriptor random generation" {
+test "BinaryDescriptor.random: successive draws differ" {
     var prng = std.Random.DefaultPrng.init(12345);
     const rng = prng.random();
 

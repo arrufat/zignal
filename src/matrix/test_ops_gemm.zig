@@ -3,7 +3,7 @@ const io = std.Io.Threaded.global_single_threaded.io();
 const expectEqual = std.testing.expectEqual;
 const Matrix = @import("Matrix.zig").Matrix;
 
-test "Matrix gram and covariance matrices" {
+test "Matrix.gram: gram and covariance matrices" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -43,7 +43,7 @@ test "Matrix gram and covariance matrices" {
     try expectEqual(@as(f64, 56.0), cov_result.at(1, 1).*);
 }
 
-test "Matrix GEMM operations" {
+test "Matrix.gemm: GEMM operations" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -108,7 +108,7 @@ test "Matrix GEMM operations" {
     try expectEqual(@as(f32, 22.0), cov.at(0, 1).*); // 1*2 + 4*5
 }
 
-test "Matrix SIMD case 2: A^T * B with same matrix (covariance)" {
+test "Matrix.covariance: matches A^T * B gemm with the same matrix" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -169,7 +169,7 @@ test "Matrix SIMD case 2: A^T * B with same matrix (covariance)" {
     }
 }
 
-test "Matrix GEMM all transpose cases with same matrix" {
+test "Matrix.gemm: all transpose cases with same matrix" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -244,7 +244,7 @@ test "Matrix GEMM all transpose cases with same matrix" {
     try expectEqual(@as(f32, 22.0), result4.at(1, 1).*); // 2*3 + 4*4
 }
 
-test "Matrix SIMD 9x9 matrix with known values" {
+test "Matrix.gemm: SIMD 9x9 matrix with known values" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -299,7 +299,7 @@ test "Matrix SIMD 9x9 matrix with known values" {
     try expectEqual(@as(f32, 405.0), result4.at(8, 8).*);
 }
 
-test "Matrix GEMM double transpose respects operands" {
+test "Matrix.gemm: double transpose respects operands" {
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
 
@@ -345,7 +345,7 @@ test "Matrix GEMM double transpose respects operands" {
 
 // Bands of C rows share only read-only inputs and keep the per-element k order, so a
 // pool must produce the same bits as the serial run for every transpose combination.
-test "gemm is identical on a thread pool" {
+test "Matrix.gemm: identical on a thread pool" {
     const allocator = std.testing.allocator;
     var pool: std.Io.Threaded = .init(allocator, .{});
     defer pool.deinit();

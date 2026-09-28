@@ -1194,7 +1194,7 @@ fn buildReader(data: []const u8) Io.Reader {
     return Io.Reader.fixed(data);
 }
 
-test "getInfo — minimal GIF87a, no frames" {
+test "getInfo: minimal GIF87a with no frames" {
     const gpa = std.testing.allocator;
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
@@ -1213,7 +1213,7 @@ test "getInfo — minimal GIF87a, no frames" {
     try expectEqual(@as(u16, 0), info.loop_count);
 }
 
-test "getInfo — GIF89a with 1 frame and GCE" {
+test "getInfo: GIF89a with 1 frame and GCE" {
     const gpa = std.testing.allocator;
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
@@ -1233,7 +1233,7 @@ test "getInfo — GIF89a with 1 frame and GCE" {
     try expectEqual(@as(u16, 0), info.loop_count);
 }
 
-test "getInfo — NETSCAPE2.0 loop count = 3" {
+test "getInfo: NETSCAPE2.0 loop count = 3" {
     const gpa = std.testing.allocator;
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
@@ -1251,7 +1251,7 @@ test "getInfo — NETSCAPE2.0 loop count = 3" {
     try expectEqual(@as(u32, 2), info.frame_count);
 }
 
-test "getInfo — comment extension is skipped" {
+test "getInfo: skips comment extension" {
     const gpa = std.testing.allocator;
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
@@ -1266,19 +1266,19 @@ test "getInfo — comment extension is skipped" {
     try expectEqual(@as(u32, 1), info.frame_count);
 }
 
-test "getInfo — bad signature rejected" {
+test "getInfo: rejects bad signature" {
     const data = "FOO89a" ++ @as([7]u8, @splat(0)) ++ [_]u8{block_trailer};
     var reader = buildReader(data);
     try expectError(error.InvalidGifSignature, getInfo(&reader, .{}));
 }
 
-test "getInfo — unsupported version rejected" {
+test "getInfo: rejects unsupported version" {
     const data = "GIF99x" ++ ([_]u8{ 0x04, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00 }) ++ [_]u8{block_trailer};
     var reader = buildReader(data);
     try expectError(error.UnsupportedGifVersion, getInfo(&reader, .{}));
 }
 
-test "getInfo — width exceeds limit" {
+test "getInfo: width exceeds limit" {
     const gpa = std.testing.allocator;
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
@@ -1290,7 +1290,7 @@ test "getInfo — width exceeds limit" {
     try expectError(error.ImageTooLarge, getInfo(&reader, .{ .max_width = .limited(1024) }));
 }
 
-test "getInfo — frame count exceeds limit" {
+test "getInfo: frame count exceeds limit" {
     const gpa = std.testing.allocator;
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
@@ -1316,7 +1316,7 @@ const test_palette_4 = [_]Rgb{
     .{ .r = 0, .g = 0, .b = 255 },
 };
 
-test "loadFromBytes — 1x1 red pixel" {
+test "loadFromBytes: 1x1 red pixel" {
     const gpa = std.testing.allocator;
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
@@ -1336,7 +1336,7 @@ test "loadFromBytes — 1x1 red pixel" {
     try expectEqual(Rgb{ .r = 255, .g = 0, .b = 0 }, img.at(0, 0).*);
 }
 
-test "loadFromBytes — 2x2 with global palette" {
+test "loadFromBytes: 2x2 with global palette" {
     const gpa = std.testing.allocator;
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
@@ -1357,7 +1357,7 @@ test "loadFromBytes — 2x2 with global palette" {
     try expectEqual(Rgb{ .r = 0, .g = 0, .b = 255 }, img.at(1, 1).*);
 }
 
-test "loadFromBytes — local color table overrides global" {
+test "loadFromBytes: local color table overrides global" {
     const gpa = std.testing.allocator;
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
@@ -1385,7 +1385,7 @@ test "loadFromBytes — local color table overrides global" {
     try expectEqual(Rgb{ .r = 255, .g = 255, .b = 255 }, img.at(0, 0).*);
 }
 
-test "loadFromBytes — frame outside screen rejected via descriptor checks" {
+test "loadFromBytes: rejects frame outside screen via descriptor checks" {
     const gpa = std.testing.allocator;
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
@@ -1404,7 +1404,7 @@ test "loadFromBytes — frame outside screen rejected via descriptor checks" {
 // Multi-frame tests
 // ---------------------------------------------------------------------------
 
-test "loadAnimated — two frames, do_not_dispose, per-frame delays" {
+test "loadAnimatedFromBytes: two frames with do_not_dispose and per-frame delays" {
     const gpa = std.testing.allocator;
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
@@ -1435,7 +1435,7 @@ test "loadAnimated — two frames, do_not_dispose, per-frame delays" {
     try expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 }, anim.frame(1).at(0, 0).*);
 }
 
-test "loadAnimated — restore_to_background blanks the previous rect" {
+test "loadAnimatedFromBytes: restore_to_background blanks the previous rect" {
     const gpa = std.testing.allocator;
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
@@ -1470,7 +1470,7 @@ test "loadAnimated — restore_to_background blanks the previous rect" {
     try expectEqual(@as(u8, 0), anim.frame(1).at(0, 1).a);
 }
 
-test "loadAnimated — transparent index → alpha=0 on Rgba" {
+test "loadAnimatedFromBytes: transparent index gives alpha=0 on Rgba" {
     const gpa = std.testing.allocator;
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
@@ -1500,7 +1500,7 @@ test "loadAnimated — transparent index → alpha=0 on Rgba" {
 // Encode tests
 // ---------------------------------------------------------------------------
 
-test "encode — caller-supplied palette, exact round-trip" {
+test "encode: caller-supplied palette round-trips exactly" {
     const gpa = std.testing.allocator;
 
     // 2x2 image where pixels exactly hit a 4-color palette.
@@ -1532,7 +1532,7 @@ test "encode — caller-supplied palette, exact round-trip" {
     try expectEqual(Rgb{ .r = 0, .g = 0, .b = 0 }, decoded.at(1, 1).*);
 }
 
-test "encode — auto median-cut on 16x16 gradient" {
+test "encode: auto median-cut on 16x16 gradient" {
     const gpa = std.testing.allocator;
     var img = try Image(Rgb).init(gpa, 16, 16);
     defer img.deinit(gpa);
@@ -1556,7 +1556,7 @@ test "encode — auto median-cut on 16x16 gradient" {
     try expectEqual(@as(usize, 16), decoded.cols);
 }
 
-test "encode — Image(u8) gradient via linear gray palette" {
+test "encode: Image(u8) gradient via linear gray palette" {
     const gpa = std.testing.allocator;
     var img = try Image(u8).init(gpa, 4, 8);
     defer img.deinit(gpa);
@@ -1581,7 +1581,7 @@ test "encode — Image(u8) gradient via linear gray palette" {
     }
 }
 
-test "encode — Floyd–Steinberg dithering produces valid output" {
+test "encode: Floyd–Steinberg dithering produces valid output" {
     const gpa = std.testing.allocator;
     var img = try Image(Rgb).init(gpa, 8, 8);
     defer img.deinit(gpa);
@@ -1602,7 +1602,7 @@ test "encode — Floyd–Steinberg dithering produces valid output" {
     try expectEqual(@as(usize, 8), decoded.cols);
 }
 
-test "encode — getInfo on encoded output is consistent" {
+test "encode: getInfo on encoded output is consistent" {
     const gpa = std.testing.allocator;
     var img = try Image(Rgb).init(gpa, 8, 12);
     defer img.deinit(gpa);
@@ -1623,7 +1623,7 @@ test "encode — getInfo on encoded output is consistent" {
 // Animated encode tests
 // ---------------------------------------------------------------------------
 
-test "still loads stop after the first frame" {
+test "loadFromBytes: still loads stop after the first frame" {
     const gpa = std.testing.allocator;
 
     const f0 = try Image(Rgb).init(gpa, 2, 2);
@@ -1652,7 +1652,7 @@ fn buildAnimated(comptime T: type, gpa: Allocator, frame_data: []const Image(T),
     return .{ .frames = frames, .durations_ms = try gpa.dupe(u32, durations_ms), .loop_count = loop };
 }
 
-test "encodeAnimated — 2 Rgb frames round-trip with delays and loop count" {
+test "encodeAnimated: 2 Rgb frames round-trip with delays and loop count" {
     const gpa = std.testing.allocator;
 
     const f0 = try Image(Rgb).init(gpa, 2, 2);
@@ -1677,7 +1677,7 @@ test "encodeAnimated — 2 Rgb frames round-trip with delays and loop count" {
     try expectEqual(Rgba{ .r = 0, .g = 255, .b = 0, .a = 255 }, decoded.frame(1).at(0, 0).*);
 }
 
-test "encodeAnimated — Rgba transparent pixel round-trips alpha=0" {
+test "encodeAnimated: Rgba transparent pixel round-trips alpha=0" {
     const gpa = std.testing.allocator;
 
     const f0 = try Image(Rgba).init(gpa, 1, 2);
@@ -1702,7 +1702,7 @@ test "encodeAnimated — Rgba transparent pixel round-trips alpha=0" {
     try expectEqual(Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 }, decoded.frame(1).at(0, 1).*);
 }
 
-test "encodeAnimated — opaque pixel turned transparent round-trips alpha=0" {
+test "encodeAnimated: opaque pixel turned transparent round-trips alpha=0" {
     const gpa = std.testing.allocator;
 
     const f0 = try Image(Rgba).init(gpa, 2, 3);
@@ -1727,7 +1727,7 @@ test "encodeAnimated — opaque pixel turned transparent round-trips alpha=0" {
     try expectEqual(Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 }, decoded.frame(2).at(1, 1).*);
 }
 
-test "encodeAnimated — changed-region frames decode to the full frames" {
+test "encodeAnimated: changed-region frames decode to the full frames" {
     const gpa = std.testing.allocator;
     const palette = [_]Rgb{ .{ .r = 10, .g = 20, .b = 30 }, .{ .r = 200, .g = 50, .b = 50 }, .{ .r = 40, .g = 220, .b = 90 } };
 
@@ -1754,7 +1754,7 @@ test "encodeAnimated — changed-region frames decode to the full frames" {
     for (anim.frames, decoded.frames) |a, b| try std.testing.expectEqualSlices(Rgb, a.data, b.data);
 }
 
-test "encodeAnimated — caller-supplied global palette uses GCT, no per-frame LCT" {
+test "encodeAnimated: caller-supplied global palette uses GCT and no per-frame LCT" {
     const gpa = std.testing.allocator;
 
     const f0 = try Image(Rgb).init(gpa, 1, 1);
@@ -1786,13 +1786,13 @@ test "encodeAnimated — caller-supplied global palette uses GCT, no per-frame L
     try expectEqual(Rgb{ .r = 0, .g = 0, .b = 255 }, decoded.frame(1).at(0, 0).*);
 }
 
-test "encodeAnimated — empty animation rejected" {
+test "encodeAnimated: rejects empty animation" {
     const gpa = std.testing.allocator;
     const anim: Animation(Rgb) = .{ .frames = &.{}, .durations_ms = &.{}, .loop_count = 0 };
     try expectError(error.NoFrames, encodeAnimated(Rgb, parallel.inline_io, gpa, anim, .{}));
 }
 
-test "encodeAnimated — mismatched frame dimensions rejected" {
+test "encodeAnimated: rejects mismatched frame dimensions" {
     const gpa = std.testing.allocator;
     const f0 = try Image(Rgb).init(gpa, 2, 2);
     @memset(f0.data, .{ .r = 0, .g = 0, .b = 0 });
@@ -1805,7 +1805,7 @@ test "encodeAnimated — mismatched frame dimensions rejected" {
     try expectError(error.InconsistentFrameDimensions, encodeAnimated(Rgb, parallel.inline_io, gpa, anim, .{}));
 }
 
-test "loadFromBytes — missing global color table without LCT" {
+test "loadFromBytes: missing global color table without LCT" {
     const gpa = std.testing.allocator;
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
@@ -1822,7 +1822,7 @@ test "loadFromBytes — missing global color table without LCT" {
     try expectError(error.MissingGlobalColorTable, loadFromBytes(Rgb, parallel.inline_io, gpa, b.written(), .{}));
 }
 
-test "getInfo — image descriptor with local color table" {
+test "getInfo: image descriptor with local color table" {
     const gpa = std.testing.allocator;
     var b: TestBuilder = .init(gpa);
     defer b.deinit();
@@ -1840,7 +1840,7 @@ test "getInfo — image descriptor with local color table" {
     try expectEqual(@as(u16, 2), info.global_color_table_size);
 }
 
-test "GIF encode keeps the transparent pixels of an Rgba image" {
+test "encode: keeps the transparent pixels of an Rgba image" {
     const gpa = std.testing.allocator;
     var img: Image(Rgba) = try .init(gpa, 4, 4);
     defer img.deinit(gpa);

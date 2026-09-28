@@ -817,7 +817,7 @@ fn expectPoint(p: Outline.Point, x: f32, y: f32, kind: Outline.Point.Kind) !void
     try testing.expectEqual(kind, p.kind);
 }
 
-test "lines, subrs, width and hints" {
+test "outline: lines, subrs, width and hints" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font = synthetic.font(&buf, .{ .cff = true });
     try testing.expect(font.tables.outlines == .cff);
@@ -862,7 +862,7 @@ test "lines, subrs, width and hints" {
     try testing.expectError(error.InvalidGlyph, font.outline(testing.allocator, 7));
 }
 
-test "cubic contour closing on its start" {
+test "outline: cubic contour closing on its start" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font = synthetic.font(&buf, .{ .cff = true });
     var o = try font.outline(testing.allocator, 3);
@@ -881,7 +881,7 @@ test "cubic contour closing on its start" {
     try testing.expectEqual(VectorFont.Bounds{ .x_min = 0, .y_min = 0, .x_max = 800, .y_max = 700 }, font.glyphBounds(3).?);
 }
 
-test "seac composes a base and an accent" {
+test "outline: seac composes a base and an accent" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     const font = synthetic.font(&buf, .{ .cff = true, .cff_gid6 = .seac });
     var o = try font.outline(testing.allocator, 6);
@@ -903,7 +903,7 @@ test "seac composes a base and an accent" {
     try testing.expectEqual(null, unencoded.glyphBounds(6));
 }
 
-test "CFF2 default instance matches the CFF outlines" {
+test "parse2: default instance matches the CFF outlines" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     var cff_buf: [synthetic.buffer_size]u8 = undefined;
     const reference = synthetic.font(&cff_buf, .{ .cff = true });
@@ -950,7 +950,7 @@ test "CFF2 default instance matches the CFF outlines" {
     }
 }
 
-test "rejects bad charstrings and truncation without panicking" {
+test "outline: rejects bad charstrings and truncation without panicking" {
     var buf: [synthetic.buffer_size]u8 = undefined;
     try testing.expectError(error.UnsupportedFontFormat, VectorFont.loadFromBytes(synthetic.build(&buf, .{ .cff = true, .cff_charstring_type = 1 })));
 

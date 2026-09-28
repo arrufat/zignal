@@ -249,7 +249,7 @@ fn generateSsimWindow() [121]f64 {
     return gaussian_window;
 }
 
-test "meanPixelError RGB example" {
+test "meanPixelError: RGB example" {
     const Pixel = struct { r: u8, g: u8, b: u8 };
 
     var data_a = [_]Pixel{.{ .r = 255, .g = 0, .b = 0 }};
@@ -272,7 +272,7 @@ test "meanPixelError RGB example" {
     try testing.expectApproxEqAbs(1.0 / 3.0, percent, 1e-9);
 }
 
-test "ssim rgb scales with luminance" {
+test "ssim: rgb scales with luminance" {
     const Pixel = struct { r: u8, g: u8, b: u8 };
     const width = 12;
     const height = 12;

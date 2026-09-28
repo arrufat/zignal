@@ -11,7 +11,7 @@ const Canvas = @import("../Canvas.zig").Canvas;
 const DrawOptions = @import("../Canvas.zig").DrawOptions;
 const FillRule = @import("../Canvas.zig").FillRule;
 
-test "line endpoints are connected" {
+test "Canvas.drawLine: endpoints are connected" {
     const allocator = testing.allocator;
     const width = 100;
     const height = 100;
@@ -72,7 +72,7 @@ test "line endpoints are connected" {
     }
 }
 
-test "thick lines have correct width" {
+test "Canvas.drawLine: thick lines have correct width" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
@@ -123,7 +123,7 @@ test "thick lines have correct width" {
     }
 }
 
-test "filled circle has correct radius" {
+test "Canvas.fillCircle: correct radius" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
@@ -179,7 +179,7 @@ test "filled circle has correct radius" {
     }
 }
 
-test "circle outline has correct thickness" {
+test "Canvas.drawCircle: outline has correct thickness" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
@@ -227,7 +227,7 @@ test "circle outline has correct thickness" {
     }
 }
 
-test "drawImage copies opaque pixels" {
+test "Canvas.drawImage: copies opaque pixels" {
     const allocator = testing.allocator;
 
     var dest: Image(Rgba) = try .init(allocator, 4, 4);
@@ -257,7 +257,7 @@ test "drawImage copies opaque pixels" {
     try expectEqual(Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 }, dest.at(0, 0).*);
 }
 
-test "drawImage blends alpha" {
+test "Canvas.drawImage: blends alpha" {
     const allocator = testing.allocator;
 
     var dest: Image(Rgba) = try .init(allocator, 2, 2);
@@ -281,7 +281,7 @@ test "drawImage blends alpha" {
     try expectEqual(expected, dest.at(0, 0).*);
 }
 
-test "drawImage supports source rect and clipping" {
+test "Canvas.drawImage: supports source rect and clipping" {
     const allocator = testing.allocator;
 
     var dest: Image(Rgba) = try .init(allocator, 2, 3);
@@ -311,7 +311,7 @@ test "drawImage supports source rect and clipping" {
     try expectEqual(Rgba{ .r = 40, .g = 50, .b = 60, .a = 255 }, dest.at(0, 0).*);
 }
 
-test "filled rectangle has correct area" {
+test "Canvas.fillPolygon: filled rectangle has correct area" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
@@ -350,7 +350,7 @@ test "filled rectangle has correct area" {
     try expect(diff <= tolerance);
 }
 
-test "polygon fill respects convexity" {
+test "Canvas.fillPolygon: respects convexity" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
@@ -394,7 +394,7 @@ test "polygon fill respects convexity" {
     }
 }
 
-test "antialiased vs solid fill coverage" {
+test "Canvas.fillCircle: antialiased vs solid fill coverage" {
     const allocator = testing.allocator;
     const width = 100;
     const height = 100;
@@ -434,7 +434,7 @@ test "antialiased vs solid fill coverage" {
     try expect(smooth_coverage <= solid_coverage);
 }
 
-test "bezier curve smoothness" {
+test "Canvas.drawCubicBezier: curve smoothness" {
     const allocator = testing.allocator;
     const width = 200;
     const height = 200;
@@ -492,7 +492,7 @@ test "bezier curve smoothness" {
     try expect(black_pixel_count > 50); // Should have a reasonable number of pixels
 }
 
-test "drawLine with soft mode handles out-of-bounds endpoints" {
+test "Canvas.drawLine: soft mode handles out-of-bounds endpoints" {
     const allocator = testing.allocator;
     var img = try Image(u8).init(allocator, 400, 400);
     defer img.deinit(allocator);
@@ -513,7 +513,7 @@ test "drawLine with soft mode handles out-of-bounds endpoints" {
     try expect(img.at(100, 300).* > 0);
 }
 
-test "fillPolygon soft antialiases near-horizontal edges" {
+test "Canvas.fillPolygon: soft antialiases near-horizontal edges" {
     const allocator = testing.allocator;
     var img: Image(Rgba) = try .init(allocator, 40, 100);
     defer img.deinit(allocator);
@@ -551,7 +551,7 @@ fn whiteCanvas(img: Image(Rgba)) Canvas(Rgba) {
     return .init(testing.allocator, img);
 }
 
-test "fill rules on overlapping contours" {
+test "Canvas.fillPolygons: fill rules on overlapping contours" {
     var img: Image(Rgba) = try .init(testing.allocator, 100, 100);
     defer img.deinit(testing.allocator);
     const black: Rgba = .{ .r = 0, .g = 0, .b = 0, .a = 255 };
@@ -585,7 +585,7 @@ test "fill rules on overlapping contours" {
     }
 }
 
-test "fillPolygon is the even-odd single-contour case" {
+test "Canvas.fillPolygon: is the even-odd single-contour case" {
     var a: Image(Rgba) = try .init(testing.allocator, 64, 64);
     defer a.deinit(testing.allocator);
     var b: Image(Rgba) = try .init(testing.allocator, 64, 64);
@@ -601,7 +601,7 @@ test "fillPolygon is the even-odd single-contour case" {
     }
 }
 
-test "coverage masks accumulate with max" {
+test "Canvas.rasterizePolygons: coverage masks accumulate with max" {
     var buf: [20 * 20]u8 = @splat(0);
     const mask: Canvas(u8) = .init(testing.allocator, .initFromSlice(20, 20, &buf));
     // A square whose left edge sits on a pixel centre: that column is half covered.
@@ -624,7 +624,7 @@ test "coverage masks accumulate with max" {
     try expect(row_sum >= 10 * 255 - 3 and row_sum <= 10 * 255 + 3);
 }
 
-test "glyph coverage into a caller-sized mask" {
+test "Canvas.rasterizeGlyph: coverage into a caller-sized mask" {
     var font_buf: [synthetic.buffer_size]u8 = undefined;
     const font: VectorFont = try .loadFromBytes(synthetic.build(&font_buf, .{}));
     var outline = try font.outline(testing.allocator, 1);
@@ -676,7 +676,7 @@ fn isWhite(img: Image(Rgba), row: usize, col: usize) bool {
     return std.meta.eql(img.data[row * img.stride + col], Rgba.white);
 }
 
-test "drawTextBox places lines where drawText would" {
+test "Canvas.drawTextBox: places lines where drawText would" {
     const allocator = testing.allocator;
     var expected = try blankImage(allocator);
     defer expected.deinit(allocator);
@@ -758,7 +758,7 @@ fn inkBox(img: Image(Rgba)) Rectangle(usize) {
     return box;
 }
 
-test "cached text matches uncached" {
+test "Canvas.drawText: cached text matches uncached" {
     const allocator = testing.allocator;
     var expected = try blankImage(allocator);
     defer expected.deinit(allocator);
@@ -820,7 +820,7 @@ test "cached text matches uncached" {
     }
 }
 
-test "the cache is hit on the second draw" {
+test "Canvas.drawText: the cache is hit on the second draw" {
     const allocator = testing.allocator;
     var img = try blankImage(allocator);
     defer img.deinit(allocator);
@@ -844,7 +844,7 @@ test "the cache is hit on the second draw" {
     try expectEqual(@as(usize, 4), cache.masks.count());
 }
 
-test "mask budget eviction while drawing" {
+test "Canvas.drawText: mask budget eviction while drawing" {
     const allocator = testing.allocator;
     var img = try blankImage(allocator);
     defer img.deinit(allocator);
@@ -870,7 +870,7 @@ test "mask budget eviction while drawing" {
     try expectEqual(before, cache.masks.count());
 }
 
-test "outlined glyphs are hollow, halos dilate bitmaps" {
+test "Canvas.drawTextOutline: outlined glyphs are hollow, halos dilate bitmaps" {
     const allocator = testing.allocator;
     var img = try blankImage(allocator);
     defer img.deinit(allocator);
@@ -920,7 +920,7 @@ test "outlined glyphs are hollow, halos dilate bitmaps" {
     for (plain.data, img.data) |p, q| if (p.r == 0) try expect(q.r == 0);
 }
 
-test "text boxes on a grayscale canvas" {
+test "Canvas.drawTextBox: grayscale canvas" {
     const allocator = testing.allocator;
     var img: Image(u8) = try .init(allocator, 40, 80);
     defer img.deinit(allocator);
@@ -932,7 +932,7 @@ test "text boxes on a grayscale canvas" {
     try expect(lit > 0);
 }
 
-test "a soft fill is unaffected by the fill before it" {
+test "Canvas.fillPolygons: a soft fill is unaffected by the fill before it" {
     // The area accumulator is stack scratch reused across fills; a shape whose interior
     // crosses a block the previous fill deposited into must not read those cells.
     const allocator = testing.allocator;
@@ -956,7 +956,7 @@ test "a soft fill is unaffected by the fill before it" {
     try testing.expectEqualSlices(Rgba, alone.data, after.data);
 }
 
-test "shapes off the image or with non-finite input draw nothing" {
+test "Canvas: shapes off the image or with non-finite input draw nothing" {
     const allocator = testing.allocator;
     var img = try Image(u8).init(allocator, 10, 10);
     defer img.deinit(allocator);

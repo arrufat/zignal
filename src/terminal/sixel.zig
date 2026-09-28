@@ -268,7 +268,7 @@ pub fn isSupported(io: std.Io) bool {
     return detect.isSixelSupported(io) catch false;
 }
 
-test "basic sixel encoding - 2x2 image" {
+test "fromImage: 2x2 image" {
     const allocator = std.testing.allocator;
 
     // Create a 2x2 test image with distinct colors
@@ -298,7 +298,7 @@ test "basic sixel encoding - 2x2 image" {
     try expect(std.mem.find(u8, sixel_data, "\"") != null);
 }
 
-test "basic sixel encoding - verify palette format" {
+test "fromImage: palette format" {
     const allocator = std.testing.allocator;
 
     // Create a 4x4 test image
@@ -324,7 +324,7 @@ test "basic sixel encoding - verify palette format" {
     try expect(std.mem.find(u8, sixel_data, "#") != null);
 }
 
-test "palette mode - fixed 6x7x6 color mapping" {
+test "fromImage: fixed 6x7x6 palette mapping" {
     const allocator = std.testing.allocator;
 
     // Create image with colors that map to specific palette indices
@@ -349,7 +349,7 @@ test "palette mode - fixed 6x7x6 color mapping" {
     try expect(std.mem.find(u8, sixel_data, "#0;2;0;0;0") != null); // Black
 }
 
-test "palette mode - adaptive with color reduction" {
+test "fromImage: adaptive palette with color reduction" {
     const allocator = std.testing.allocator;
 
     // Create image with 8 distinct colors
@@ -393,7 +393,7 @@ test "palette mode - adaptive with color reduction" {
     try expect(std.mem.find(u8, sixel_data, "#4;") == null);
 }
 
-test "edge case - single pixel image" {
+test "fromImage: single pixel image" {
     const allocator = std.testing.allocator;
 
     var img = try Image(Rgb).init(allocator, 1, 1);
@@ -415,7 +415,7 @@ test "edge case - single pixel image" {
     try expect(std.mem.find(u8, sixel_data, "\"1;1;") != null);
 }
 
-test "edge case - uniform color image" {
+test "fromImage: uniform color image" {
     const allocator = std.testing.allocator;
 
     var img = try Image(Rgb).init(allocator, 8, 8);

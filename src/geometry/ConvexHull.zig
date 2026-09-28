@@ -123,7 +123,7 @@ pub fn ConvexHull(comptime T: type) type {
     };
 }
 
-test "convex hull contains" {
+test "ConvexHull.contains: inside, outside and NaN points" {
     const points: []const Point(2, f32) = &.{
         .init(.{ 0.0, 0.0 }),
         .init(.{ 2.0, 0.0 }),
@@ -153,7 +153,7 @@ test "convex hull contains" {
     try expectEqual(convex_hull.contains(.init(.{ 1.0, nan })), false);
 }
 
-test "convex hull" {
+test "ConvexHull.find: hull and degenerate inputs" {
     const points: []const Point(2, f32) = &.{
         .init(.{ 0.0, 0.0 }),
         .init(.{ 1.0, 1.0 }),
@@ -183,7 +183,7 @@ test "convex hull" {
     try expectEqual(empty, null);
 }
 
-test "orientation" {
+test "Point.orientation: precision" {
     // These three points can have different orientations due to floating point precision.
     const a: Point(2, f32) = .init(.{ 4.9171928e-1, 6.473901e-1 });
     const b: Point(2, f32) = .init(.{ 3.6271343e-1, 9.712454e-1 });
@@ -193,7 +193,7 @@ test "orientation" {
     try std.testing.expectEqual(orientation_abc, orientation_acb);
 }
 
-test "areAllCollinear" {
+test "Point.areAllCollinear: collinear and non-collinear points" {
     const pts_collinear: []const Point(2, f32) = &.{
         .init(.{ 0, 0 }),
         .init(.{ 1, 1 }),
@@ -210,7 +210,7 @@ test "areAllCollinear" {
     try std.testing.expect(!Point(2, f32).areAllCollinear(pts_non_collinear));
 }
 
-test "convex hull square" {
+test "ConvexHull.find: square" {
     const points: []const Point(2, f32) = &.{
         .init(.{ 0.0, 0.0 }),
         .init(.{ 1.0, 0.0 }),
@@ -228,7 +228,7 @@ test "convex hull square" {
     try expectEqualDeep(rect, Rectangle(f32).init(0.0, 0.0, 1.0, 1.0));
 }
 
-test "convex hull triangle" {
+test "ConvexHull.find: triangle" {
     const points: []const Point(2, f32) = &.{
         .init(.{ 0.0, 0.0 }),
         .init(.{ 1.0, 0.0 }),
@@ -242,7 +242,7 @@ test "convex hull triangle" {
     try expectEqualDeep(result, &expected);
 }
 
-test "convex hull with interior points" {
+test "ConvexHull.find: interior points" {
     const points: []const Point(2, f32) = &.{
         .init(.{ 0.0, 0.0 }),
         .init(.{ 2.0, 0.0 }),
@@ -258,7 +258,7 @@ test "convex hull with interior points" {
     try expectEqualDeep(hull, &expected);
 }
 
-test "convex hull duplicate points" {
+test "ConvexHull.find: duplicate points" {
     const points: []const Point(2, f32) = &.{
         .init(.{ 0.0, 0.0 }),
         .init(.{ 1.0, 0.0 }),
@@ -275,7 +275,7 @@ test "convex hull duplicate points" {
     try expectEqualDeep(result, &expected);
 }
 
-test "convex hull bounding rectangle requires valid hull" {
+test "ConvexHull.getRectangle: requires valid hull" {
     const collinear: []const Point(2, f32) = &.{
         .init(.{ 0.0, 0.0 }),
         .init(.{ 1.0, 1.0 }),

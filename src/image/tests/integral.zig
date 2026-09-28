@@ -8,7 +8,7 @@ const Rgb = color.Rgb(u8);
 const Rgba = color.Rgba(u8);
 const Integral = @import("../integral.zig").Integral;
 
-test "integral image scalar" {
+test "Image.integral: scalar" {
     var image: Image(u8) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = 1;
@@ -27,7 +27,7 @@ test "integral image scalar" {
     }
 }
 
-test "integral image view scalar" {
+test "Image.integral: view scalar" {
     var image: Image(u8) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = 1;
@@ -46,7 +46,7 @@ test "integral image view scalar" {
     }
 }
 
-test "integral image struct" {
+test "Image.integral: struct" {
     var image: Image(Rgba) = try .init(std.testing.allocator, 21, 13);
     defer image.deinit(std.testing.allocator);
     for (image.data) |*i| i.* = .{ .r = 1, .g = 1, .b = 1, .a = 1 };
@@ -67,7 +67,7 @@ test "integral image struct" {
     }
 }
 
-test "integral image RGB vs RGBA with full alpha produces same RGB values" {
+test "Image.integral: RGB vs RGBA with full alpha produces same RGB values" {
     const test_size = 10;
 
     // Create RGB image
@@ -113,7 +113,7 @@ test "integral image RGB vs RGBA with full alpha produces same RGB values" {
     }
 }
 
-test "computeIntegralSum function" {
+test "Integral.sum: box sums" {
     const allocator = std.testing.allocator;
 
     // Create a simple 3x3 test image with values 1-9

@@ -11,6 +11,7 @@ pub fn build(b: *Build) void {
 
     const print_md5sums = b.option(bool, "print-md5sums", "Print MD5 checksums instead of testing them") orelse false;
     const debug_test_images = b.option(bool, "debug-test-images", "Save regression test renderings as PNGs") orelse false;
+    const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match any filter") orelse &.{};
     const cli_libc = b.option(bool, "libc", "Link the CLI against libc, which enables JPEG XL and WebP through the system libraries (default: Windows only)") orelse
         (target.result.os.tag == .windows);
 
@@ -78,6 +79,7 @@ pub fn build(b: *Build) void {
             .target = target,
             .optimize = optimize,
         }),
+        .filters = test_filters,
     });
     lib_test.root_module.addOptions("build_options", build_options);
     // libc lets the tests load libjxl/libwebp (src/dynlib.zig).

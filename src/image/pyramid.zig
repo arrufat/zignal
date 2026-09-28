@@ -137,7 +137,7 @@ pub fn ImagePyramid(comptime T: type) type {
 
 const test_io = std.Io.Threaded.global_single_threaded.io();
 
-test "ImagePyramid basic construction" {
+test "ImagePyramid: basic construction" {
     const allocator = std.testing.allocator;
 
     var image = try Image(u8).init(allocator, 640, 480);
@@ -171,7 +171,7 @@ test "ImagePyramid basic construction" {
     }
 }
 
-test "ImagePyramid scale calculations" {
+test "ImagePyramid: scale calculations" {
     const allocator = std.testing.allocator;
 
     var image = try Image(u8).init(allocator, 100, 100);
@@ -194,7 +194,7 @@ test "ImagePyramid scale calculations" {
     try expectApproxEqAbs(@as(f32, 20.0), pyr.y, 0.01);
 }
 
-test "ImagePyramid truncation for small images" {
+test "ImagePyramid: truncation for small images" {
     const allocator = std.testing.allocator;
 
     var image = try Image(u8).init(allocator, 32, 32);
@@ -210,7 +210,7 @@ test "ImagePyramid truncation for small images" {
     try expect(last_level.cols >= 8);
 }
 
-test "ImagePyramid memory usage" {
+test "ImagePyramid: memory usage" {
     const allocator = std.testing.allocator;
 
     var image = try Image(u8).init(allocator, 256, 256);
