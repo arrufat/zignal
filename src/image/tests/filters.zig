@@ -1611,3 +1611,38 @@ test "Image.convolve: large 2D kernels match a scalar reference" {
         }
     }
 }
+
+test "Image.gaussianBlur: rejects non-finite sigma" {
+    var image: Image(u8) = try .init(std.testing.allocator, 8, 8);
+    defer image.deinit(std.testing.allocator);
+    var out: Image(u8) = try .initLike(std.testing.allocator, image);
+    defer out.deinit(std.testing.allocator);
+    for ([_]f32{ std.math.nan(f32), std.math.inf(f32), -1 }) |sigma| {
+        try expectError(error.InvalidSigma, image.gaussianBlur(io, std.testing.allocator, out, sigma, .default));
+    }
+}
+
+test "Image.motionBlur: rejects non-finite or out-of-range parameters" {
+    var image: Image(u8) = try .init(std.testing.allocator, 8, 8);
+    defer image.deinit(std.testing.allocator);
+    var out: Image(u8) = try .initLike(std.testing.allocator, image);
+    defer out.deinit(std.testing.allocator);
+    const nan = std.math.nan(f32);
+    try expectError(error.InvalidParameter, image.motionBlur(io, std.testing.allocator, out, .{ .linear = .{ .angle = nan, .distance = 3 } }));
+    try expectError(error.InvalidParameter, image.motionBlur(io, std.testing.allocator, out, .{ .radial_zoom = .{ .center_x = nan, .center_y = 0.5, .strength = 0.5 } }));
+    try expectError(error.InvalidParameter, image.motionBlur(io, std.testing.allocator, out, .{ .radial_spin = .{ .center_x = 0.5, .center_y = 0.5, .strength = 1.5 } }));
+    try expectError(error.InvalidParameter, image.motionBlur(io, std.testing.allocator, out, .{ .radial_spin = .{ .center_x = 0.5, .center_y = 0.5, .strength = nan } }));
+}
+
+test "Image.motionBlur: linear distance is capped at the image size" {
+    var image: Image(u8) = try .init(std.testing.allocator, 12, 20);
+    defer image.deinit(std.testing.allocator);
+    for (image.data, 0..) |*p, i| p.* = @truncate(i * 37);
+    var capped: Image(u8) = try .initLike(std.testing.allocator, image);
+    defer capped.deinit(std.testing.allocator);
+    var huge: Image(u8) = try .initLike(std.testing.allocator, image);
+    defer huge.deinit(std.testing.allocator);
+    try image.motionBlur(io, std.testing.allocator, capped, .{ .linear = .{ .angle = 0.3, .distance = 20 } });
+    try image.motionBlur(io, std.testing.allocator, huge, .{ .linear = .{ .angle = 0.3, .distance = 1 << 30 } });
+    try expectEqualDeep(capped.data, huge.data);
+}
