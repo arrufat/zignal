@@ -141,10 +141,10 @@ pub fn main(init: std.process.Init) !void {
         const end_box = std.Io.Clock.awake.now(init.io);
         const box_ns = start_box.durationTo(end_box).toNanoseconds();
         const speedup = @as(f64, @floatFromInt(gaussian_ns)) / @as(f64, @floatFromInt(box_ns));
-        const psnr = try gaussian.psnr(last_result.*);
+        const psnr = try gaussian.psnr(init.io, last_result.*);
         const ssim_value = try gaussian.ssim(init.io, init.gpa, last_result.*);
 
-        const avg_error = (try gaussian.meanPixelError(last_result.*)) * 100.0;
+        const avg_error = (try gaussian.meanPixelError(init.io, last_result.*)) * 100.0;
 
         var widths_buf: [64]u8 = undefined;
         const widths_text = try formatWidths(widths, &widths_buf);

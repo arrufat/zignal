@@ -63,8 +63,8 @@ pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Ar
 
         const timer = common.Timer.begin(io);
 
-        const psnr_val = ref_img.psnr(img) catch unreachable;
-        const mean_err = ref_img.meanPixelError(img) catch unreachable;
+        const psnr_val = ref_img.psnr(io, img) catch unreachable;
+        const mean_err = ref_img.meanPixelError(io, img) catch unreachable;
 
         const ssim_val = ref_img.ssim(io, gpa, img) catch |err| switch (err) {
             error.ImageTooSmall => blk: {

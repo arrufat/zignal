@@ -3167,7 +3167,7 @@ test "encode: RGB roundtrip" {
     try decodeInto(Rgb, parallel.inline_io, gpa, &state, &out);
 
     // One 4:2:0 MCU at quality 85: integer chroma upsampling lands at ~38.7 dB.
-    const psnr = try img.psnr(out);
+    const psnr = try img.psnr(std.testing.io, out);
     try std.testing.expect(psnr > 38.0);
 }
 
@@ -3192,7 +3192,7 @@ test "encode: grayscale roundtrip" {
     // Convert original gray to RGB for PSNR
     var gray_rgb = try img.convert(parallel.inline_io, gpa, Rgb);
     defer gray_rgb.deinit(gpa);
-    const psnr = try gray_rgb.psnr(out);
+    const psnr = try gray_rgb.psnr(std.testing.io, out);
     try std.testing.expect(psnr > 45);
 }
 
@@ -3223,7 +3223,7 @@ test "encode: 4:2:2 subsampling roundtrip" {
     defer out.deinit(gpa);
     try decodeInto(Rgb, parallel.inline_io, gpa, &state, &out);
 
-    const psnr = try img.psnr(out);
+    const psnr = try img.psnr(std.testing.io, out);
     try std.testing.expect(psnr > 40);
 }
 
@@ -3254,7 +3254,7 @@ test "encode: 4:2:0 subsampling roundtrip" {
     defer out.deinit(gpa);
     try decodeInto(Rgb, parallel.inline_io, gpa, &state, &out);
 
-    const psnr = try img.psnr(out);
+    const psnr = try img.psnr(std.testing.io, out);
     try std.testing.expect(psnr > 45);
 }
 
@@ -3288,7 +3288,7 @@ test "encode: 4:2:0 odd-size roundtrip (non-multiple-of-MCU)" {
     try decodeInto(Rgb, parallel.inline_io, gpa, &state, &out);
 
     // We expect a decent reconstruction quality even with 4:2:0 on odd dimensions.
-    const psnr = try img.psnr(out);
+    const psnr = try img.psnr(std.testing.io, out);
     try std.testing.expect(psnr > 35.0);
 }
 
@@ -3659,10 +3659,10 @@ test "loadFromBytes: Adobe APP14 transform 0 decodes the planes as RGB" {
     }
     var got = try loadFromBytes(Rgb, parallel.inline_io, gpa, patched.items, .{});
     defer got.deinit(gpa);
-    try std.testing.expect(try want.psnr(got) > 40);
+    try std.testing.expect(try want.psnr(std.testing.io, got) > 40);
 
     // With the JFIF segment the same scan is YCbCr.
     var plain = try loadFromBytes(Rgb, parallel.inline_io, gpa, bytes, .{});
     defer plain.deinit(gpa);
-    try std.testing.expect(try img.psnr(plain) > 40);
+    try std.testing.expect(try img.psnr(std.testing.io, plain) > 40);
 }

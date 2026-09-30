@@ -614,7 +614,7 @@ test "encode: lossy round trip stays close" {
     defer allocator.free(bytes);
     var back = try loadFromBytes(Rgb, io, allocator, bytes, .default);
     defer back.deinit(allocator);
-    try std.testing.expect(try img.psnr(back) > 30);
+    try std.testing.expect(try img.psnr(std.testing.io, back) > 30);
 }
 
 fn testAnimation(comptime T: type, allocator: Allocator, durations: []const u32, loop_count: u32) !Animation(T) {

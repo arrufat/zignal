@@ -67,12 +67,12 @@ test "Image.invertInto: matches the in-place versions through views, with equali
 
         expected.invert();
         src.invertInto(dst);
-        try expectEqual(0, try expected.meanPixelError(dst));
+        try expectEqual(0, try expected.meanPixelError(std.testing.io, dst));
 
         src.copy(expected);
         expected.equalize();
         src.equalizeInto(dst);
-        try expectEqual(0, try expected.meanPixelError(dst));
+        try expectEqual(0, try expected.meanPixelError(std.testing.io, dst));
     }
 }
 
