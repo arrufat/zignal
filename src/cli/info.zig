@@ -1,4 +1,4 @@
-//! Info subcommand: inspects and displays image metadata and format details.
+//! Info subcommand: inspects and displays image and font metadata and format details.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -19,15 +19,15 @@ const Args = struct {
     stats: bool = false,
 
     pub const meta = .{
-        .stats = .{ .help = "Compute and display image statistics (min, max, mean, stdDev)" },
+        .stats = .{ .help = "Compute and display image statistics (min, max, mean, stdDev); ignored for fonts" },
     };
 };
 
-pub const description = "Display detailed information about one or more image files.";
+pub const description = "Display detailed information about one or more image or font files.";
 
 pub const help = args.generateHelp(
     Args,
-    "zignal info [options] <image1> <image2> ...",
+    "zignal info [options] <file1> <file2> ...",
     description,
 );
 
@@ -43,18 +43,29 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     var read_buffer: [4096]u8 = undefined;
     var failed = false;
 
-    for (parsed.positionals) |image_path| {
+    for (parsed.positionals) |path| {
         if (parsed.positionals.len > 1) {
-            try writer.print("File: {s}\n", .{image_path});
+            try writer.print("File: {s}\n", .{path});
         }
 
         const result = blk: {
-            std.log.debug("inspecting: {s}", .{image_path});
-            const file = Io.Dir.cwd().openFile(io, image_path, .{}) catch |err| break :blk err;
+            std.log.debug("inspecting: {s}", .{path});
+            const file = Io.Dir.cwd().openFile(io, path, .{}) catch |err| break :blk err;
             defer file.close(io);
 
             var reader = file.reader(io, &read_buffer);
-            const image_format = zignal.image.Format.peek(&reader.interface) catch |err| break :blk err;
+            const image_format = zignal.image.Format.peek(&reader.interface) catch |err| switch (err) {
+                error.UnsupportedImageFormat => {
+                    // Gzipped fonts can't be sniffed, so trust the extension.
+                    const font_format = zignal.font.Format.detectFromBytes(reader.interface.buffered()) orelse
+                        (if (zignal.font.isGzipPath(path)) zignal.font.Format.detectFromExtension(path) else null) orelse
+                        break :blk error.UnsupportedFormat;
+                    std.log.debug("format detected: {s}", .{@tagName(font_format)});
+                    printFontInfo(io, writer, gpa, path, font_format) catch |e| break :blk e;
+                    break :blk {};
+                },
+                else => break :blk err,
+            };
             std.log.debug("format detected: {s}", .{@tagName(image_format)});
 
             switch (image_format) {
@@ -142,8 +153,8 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
             }
 
             if (parsed.options.stats) {
-                std.log.debug("loading image for stats: {s}", .{image_path});
-                var image = zignal.Image(zignal.Rgba(u8)).load(io, gpa, image_path) catch |err| break :blk err;
+                std.log.debug("loading image for stats: {s}", .{path});
+                var image = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| break :blk err;
                 defer image.deinit(gpa);
 
                 const timer = common.Timer.begin(io);
@@ -173,7 +184,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         };
 
         if (result) |_| {} else |err| {
-            std.log.err("failed to get info for '{s}': {t}", .{ image_path, err });
+            std.log.err("failed to get info for '{s}': {t}", .{ path, err });
             failed = true;
         }
 
@@ -183,4 +194,43 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     }
     try writer.flush();
     if (failed) return error.BatchIncomplete;
+}
+
+fn printFontInfo(io: Io, writer: *Io.Writer, gpa: Allocator, path: []const u8, format: zignal.font.Format) !void {
+    var font: zignal.Font = try .load(io, gpa, path);
+    defer font.deinit(gpa);
+
+    try writer.print("Format:      {s}\n", .{switch (format) {
+        .bdf => "BDF",
+        .pcf => "PCF",
+        .ttf => "TrueType",
+        .otf => "OpenType",
+        .ttc => "OpenType collection",
+    }});
+    switch (font) {
+        .bitmap => |b| {
+            try writer.print("Name:        {s}\n", .{b.name});
+            try writer.print("Cell Size:   {d}x{d}\n", .{ b.char_width, b.char_height });
+            try writer.print("Ascent:      {d}\n", .{b.ascent()});
+            try writer.print("Glyphs:      {d}\n", .{b.glyphCount()});
+            try writer.print("Spacing:     {s}\n", .{if (b.isMonospace()) "monospace" else "proportional"});
+        },
+        .vector => |v| {
+            if (format == .ttc) {
+                try writer.print("Faces:       {d} (showing face 0)\n", .{v.num_faces});
+            }
+            try writer.print("Outlines:    {s}\n", .{switch (v.tables.outlines) {
+                .glyf => "glyf (quadratic)",
+                .cff => "CFF (cubic)",
+            }});
+            try writer.print("Units/em:    {d}\n", .{v.units_per_em});
+            try writer.print("Glyphs:      {d}\n", .{v.num_glyphs});
+            try writer.print("Ascent:      {d}\n", .{v.ascent});
+            try writer.print("Descent:     {d}\n", .{v.descent});
+            try writer.print("Line Gap:    {d}\n", .{v.line_gap});
+            const gpos = v.tables.gpos != null;
+            const kern = v.tables.kern != null;
+            try writer.print("Kerning:     {s}\n", .{if (gpos and kern) "GPOS, kern" else if (gpos) "GPOS" else if (kern) "kern" else "none"});
+        },
+    }
 }
