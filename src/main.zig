@@ -48,13 +48,13 @@ pub fn main(init: std.process.Init) !void {
     var stdout = Io.File.stdout().writer(init.io, &buffer);
 
     const cli: Cli = .init();
-    try cli.run(init.gpa, init.io, &stdout.interface, &args);
+    try cli.run(init.io, init.gpa, &stdout.interface, &args);
 }
 
 /// CLI subcommand definition with execution handler and help text.
 pub const Command = struct {
     name: []const u8,
-    run: *const fn (Io, *Io.Writer, Allocator, *std.process.Args.Iterator) anyerror!void,
+    run: *const fn (Io, Allocator, *Io.Writer, *std.process.Args.Iterator) anyerror!void,
     description: []const u8,
     help: []const u8,
 };
@@ -65,27 +65,14 @@ pub const Cli = struct {
 
     pub fn init() Cli {
         const cmds = comptime blk: {
-            var command_count: comptime_int = 0;
-            for (std.meta.declarations(root)) |decl| {
-                if (getCommandModule(decl) != null) {
-                    command_count += 1;
-                }
-            }
-
-            var array: [command_count]Command = undefined;
-            var i: comptime_int = 0;
-            for (std.meta.declarations(root)) |decl| {
+            var found: []const Command = &.{};
+            for (@typeInfo(root).@"struct".decl_names) |decl| {
                 if (getCommandModule(decl)) |val| {
-                    array[i] = .{
-                        .name = decl,
-                        .run = val.run,
-                        .description = val.description,
-                        .help = val.help,
-                    };
-                    i += 1;
+                    found = found ++ .{Command{ .name = decl, .run = val.run, .description = val.description, .help = val.help }};
                 }
             }
 
+            var array = found[0..found.len].*;
             std.sort.block(Command, &array, {}, struct {
                 fn lessThan(_: void, lhs: Command, rhs: Command) bool {
                     return std.mem.lessThan(u8, lhs.name, rhs.name);
@@ -110,8 +97,8 @@ pub const Cli = struct {
 
     pub fn run(
         self: Cli,
-        allocator: Allocator,
         io: Io,
+        allocator: Allocator,
         stdout: *Io.Writer,
         args: *std.process.Args.Iterator,
     ) !void {
@@ -128,7 +115,7 @@ pub const Cli = struct {
 
         if (arg) |cmd_name| {
             if (self.getCommand(cmd_name)) |cmd| {
-                cmd.run(io, stdout, allocator, args) catch |err| {
+                cmd.run(io, allocator, stdout, args) catch |err| {
                     // BatchIncomplete means individual items already reported their
                     // own errors; just propagate a non-zero exit without a summary.
                     if (err != error.BatchIncomplete) {
@@ -190,31 +177,19 @@ pub const Cli = struct {
             \\
         , .{cli_args.log_level_names});
 
-        var max_len: usize = 0;
-        for (self.commands) |cmd| {
-            if (cmd.name.len > max_len) max_len = cmd.name.len;
-        }
-        const help_len = "help".len;
-        if (help_len > max_len) max_len = help_len;
-
-        const padding_target = max_len + 2;
+        var max_len: usize = "help".len;
+        for (self.commands) |cmd| max_len = @max(max_len, cmd.name.len);
 
         for (self.commands) |cmd| {
-            var desc_iter = std.mem.splitSequence(u8, cmd.description, "\n");
-            const desc = desc_iter.first();
-
+            const desc = std.mem.sliceTo(cmd.description, '\n');
             try stdout.print("  {s}", .{cmd.name});
-            var i: usize = 0;
-            const pad_len = padding_target - cmd.name.len;
-            while (i < pad_len) : (i += 1) try stdout.writeAll(" ");
+            try stdout.splatByteAll(' ', max_len + 2 - cmd.name.len);
             try stdout.print("{s}\n", .{desc});
         }
 
-        try stdout.print("  help", .{});
-        var i: usize = 0;
-        const pad_len = padding_target - help_len;
-        while (i < pad_len) : (i += 1) try stdout.writeAll(" ");
-        try stdout.print("Display this help message\n", .{});
+        try stdout.writeAll("  help");
+        try stdout.splatByteAll(' ', max_len + 2 - "help".len);
+        try stdout.writeAll("Display this help message\n");
 
         try stdout.print(
             \\

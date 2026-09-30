@@ -11,7 +11,7 @@ pub var runtime_log_level: std.log.Level = if (builtin.mode == .debug) .debug el
 
 /// Comma-separated list of valid `std.log.Level` names — shared by error messages
 /// and help text so they cannot drift.
-pub const log_level_names: []const u8 = @import("common.zig").joinFieldNames(std.log.Level);
+pub const log_level_names: []const u8 = common.joinFieldNames(std.log.Level);
 
 /// Configuration for a specific command-line option.
 pub const OptionConfig = struct {
@@ -213,6 +213,23 @@ fn kebabName(comptime name: []const u8) [name.len]u8 {
     return res;
 }
 
+/// The `meta` entry for `field_name`, or a placeholder when it has none.
+fn fieldConfig(comptime T: type, comptime field_name: []const u8) OptionConfig {
+    if (!@hasDecl(T, "meta") or !@hasField(@TypeOf(T.meta), field_name)) return .{ .help = "No description" };
+    const info = @field(T.meta, field_name);
+    return .{
+        .help = info.help,
+        .metavar = if (@hasField(@TypeOf(info), "metavar")) info.metavar else null,
+    };
+}
+
+/// The help column for `field`: `"  -o, --output <path>"`, without the value for flags.
+fn flagString(comptime T: type, comptime field: anytype) []const u8 {
+    const flag = "  " ++ shortPrefix(T, field.name) ++ "--" ++ kebabName(field.name);
+    if (PayloadType(field.type) == bool) return flag;
+    return flag ++ " <" ++ (fieldConfig(T, field.name).metavar orelse "value") ++ ">";
+}
+
 /// Generates a formatted help message at compile-time based on the struct T.
 /// T can optionally contain a `meta` declaration of type `struct { [field_name]: OptionConfig }`.
 pub fn generateHelp(comptime T: type, comptime usage_line: []const u8, comptime description: []const u8) []const u8 {
@@ -224,61 +241,12 @@ pub fn generateHelp(comptime T: type, comptime usage_line: []const u8, comptime 
     }
 
     comptime var max_len = 0;
-    inline for (fields) |field| {
-        const is_bool = PayloadType(field.type) == bool;
-        const info = if (@hasDecl(T, "meta") and @hasField(@TypeOf(T.meta), field.name))
-            @field(T.meta, field.name)
-        else
-            OptionConfig{ .help = "No description" };
-
-        const metavar = if (@hasField(@TypeOf(info), "metavar"))
-            switch (@typeInfo(@TypeOf(info.metavar))) {
-                .optional => info.metavar orelse "value",
-                else => info.metavar,
-            }
-        else
-            "value";
-
-        const flag_name_fmt = comptime kebabName(field.name);
-
-        const short_arr = comptime shortPrefix(T, field.name);
-
-        const flag_len = if (is_bool)
-            ("  " ++ short_arr ++ "--" ++ flag_name_fmt).len
-        else
-            ("  " ++ short_arr ++ "--" ++ flag_name_fmt ++ " <" ++ metavar ++ ">").len;
-
-        if (flag_len > max_len) max_len = flag_len;
-    }
-
-    const padding_target = max_len + 2;
+    inline for (fields) |field| max_len = @max(max_len, flagString(T, field).len);
 
     inline for (fields) |field| {
-        const meta_info = if (@hasDecl(T, "meta") and @hasField(@TypeOf(T.meta), field.name))
-            @field(T.meta, field.name)
-        else
-            OptionConfig{ .help = "No description" };
-
-        const metavar = if (@hasField(@TypeOf(meta_info), "metavar")) blk: {
-            const m = meta_info.metavar;
-            break :blk if (@typeInfo(@TypeOf(m)) == .optional) m orelse "value" else m;
-        } else "value";
-
-        const is_bool = PayloadType(field.type) == bool;
-
-        const flag_name_fmt = comptime kebabName(field.name);
-
-        const short_arr = comptime shortPrefix(T, field.name);
-
-        const flag_str = if (is_bool)
-            "  " ++ short_arr ++ "--" ++ flag_name_fmt
-        else
-            "  " ++ short_arr ++ "--" ++ flag_name_fmt ++ " <" ++ metavar ++ ">";
-
-        const padding_len = padding_target - flag_str.len;
-        const padding: [padding_len]u8 = @splat(' ');
-
-        text = text ++ flag_str ++ padding ++ meta_info.help ++ "\n";
+        const flag_str = flagString(T, field);
+        const padding: [max_len + 2 - flag_str.len]u8 = @splat(' ');
+        text = text ++ flag_str ++ padding ++ fieldConfig(T, field.name).help ++ "\n";
     }
     return text;
 }

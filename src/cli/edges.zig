@@ -56,7 +56,7 @@ const Algo = enum {
     shen_castan,
 };
 
-pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
@@ -65,39 +65,23 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         return;
     }
 
-    const is_batch = parsed.positionals.len > 1;
-    var target: ?common.OutputTarget = null;
-
-    if (parsed.options.output) |out_path| {
-        target = try common.resolveOutputTarget(io, out_path, is_batch);
-    }
-
+    const target = if (parsed.options.output) |out| try common.resolveOutputTarget(io, out, parsed.positionals.len > 1) else null;
     const display_format = display.displayFormatFor(parsed.options, target);
-
-    var failed = false;
-    for (parsed.positionals) |input_path| {
-        processImage(io, writer, gpa, input_path, target, parsed.options, display_format) catch |err| {
-            std.log.err("failed to process image '{s}': {t}", .{ input_path, err });
-            if (!is_batch) return err;
-            failed = true;
-        };
-    }
-    if (failed) return error.BatchIncomplete;
+    try display.processInputs(u8, io, gpa, writer, parsed.positionals, target, display_format, parsed.options, applyGray);
 }
 
-/// Run the selected edge detector on a grayscale image into a caller-allocated
-/// `out`. Shared by the standalone command (which stays on the u8 fast path) and
-/// the `apply` wrapper used by the `pipeline` command.
-pub fn applyGray(io: Io, gpa: Allocator, img: zignal.Image(u8), out: zignal.Image(u8), options: Args) !void {
+/// Run the selected edge detector on a grayscale image, returning a freshly allocated
+/// image the caller owns. The standalone command stays on this u8 fast path.
+pub fn applyGray(io: Io, gpa: Allocator, img: zignal.Image(u8), options: Args) !zignal.Image(u8) {
     const algo = options.filter orelse .sobel;
+    var out: zignal.Image(u8) = try .initLike(gpa, img);
+    errdefer out.deinit(gpa);
 
     std.log.debug("applying {s} edge detection...", .{@tagName(algo)});
     const timer = common.Timer.begin(io);
 
     switch (algo) {
-        .sobel => {
-            try img.sobel(io, gpa, out);
-        },
+        .sobel => try img.sobel(io, gpa, out),
         .canny => {
             const sigma = options.sigma orelse 1.0;
             const low = options.low orelse 50.0;
@@ -121,6 +105,7 @@ pub fn applyGray(io: Io, gpa: Allocator, img: zignal.Image(u8), out: zignal.Imag
     }
 
     timer.logElapsed("edge detection");
+    return out;
 }
 
 /// Pipeline-facing wrapper: detect edges on an RGBA image by bridging through
@@ -129,31 +114,8 @@ pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options
     var gray = try img.convert(io, gpa, u8);
     defer gray.deinit(gpa);
 
-    var edges_gray: zignal.Image(u8) = try .init(gpa, gray.rows, gray.cols);
+    var edges_gray = try applyGray(io, gpa, gray, options);
     defer edges_gray.deinit(gpa);
 
-    try applyGray(io, gpa, gray, edges_gray, options);
-
     return edges_gray.convert(io, gpa, zignal.Rgba(u8));
-}
-
-fn processImage(
-    io: Io,
-    writer: *Io.Writer,
-    gpa: Allocator,
-    input_path: []const u8,
-    target: ?common.OutputTarget,
-    options: Args,
-    display_format: ?zignal.image.DisplayFormat,
-) !void {
-    std.log.debug("loading image: {s}", .{input_path});
-    var img = try zignal.Image(u8).load(io, gpa, input_path);
-    defer img.deinit(gpa);
-
-    var out_img = try zignal.Image(u8).init(gpa, img.rows, img.cols);
-    defer out_img.deinit(gpa);
-
-    try applyGray(io, gpa, img, out_img, options);
-
-    try display.emit(io, writer, gpa, out_img, input_path, target, display_format);
 }

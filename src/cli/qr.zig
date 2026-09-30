@@ -34,7 +34,7 @@ pub const help = args.generateHelp(
     description,
 );
 
-pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
@@ -46,9 +46,9 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     const subcommand = parsed.positionals[0];
     const rest = parsed.positionals[1..];
     if (std.mem.eql(u8, subcommand, "encode")) {
-        try encode(io, writer, gpa, rest, parsed.options);
+        try encode(io, gpa, writer, rest, parsed.options);
     } else if (std.mem.eql(u8, subcommand, "decode")) {
-        try decode(io, writer, gpa, rest);
+        try decode(io, gpa, writer, rest);
     } else {
         std.log.err("unknown subcommand '{s}': expected 'encode' or 'decode'", .{subcommand});
         return error.InvalidArguments;
@@ -72,7 +72,7 @@ fn parseEcLevel(name: ?[]const u8) !qrcode.EcLevel {
     };
 }
 
-fn encode(io: Io, writer: *Io.Writer, gpa: Allocator, positionals: []const []const u8, options: Args) !void {
+fn encode(io: Io, gpa: Allocator, writer: *Io.Writer, positionals: []const []const u8, options: Args) !void {
     if (positionals.len != 1) {
         std.log.err("encode expects exactly one text argument", .{});
         return error.InvalidArguments;
@@ -97,7 +97,7 @@ fn encode(io: Io, writer: *Io.Writer, gpa: Allocator, positionals: []const []con
     }
 }
 
-fn decode(io: Io, writer: *Io.Writer, gpa: Allocator, positionals: []const []const u8) !void {
+fn decode(io: Io, gpa: Allocator, writer: *Io.Writer, positionals: []const []const u8) !void {
     if (positionals.len == 0) {
         std.log.err("decode expects at least one image argument", .{});
         return error.InvalidArguments;
@@ -105,7 +105,7 @@ fn decode(io: Io, writer: *Io.Writer, gpa: Allocator, positionals: []const []con
     const is_batch = positionals.len > 1;
     var failures: usize = 0;
     for (positionals) |path| {
-        decodeImage(io, writer, gpa, path, is_batch) catch |err| {
+        decodeImage(io, gpa, writer, path, is_batch) catch |err| {
             std.log.err("failed to decode '{s}': {t}", .{ path, err });
             failures += 1;
         };
@@ -114,8 +114,8 @@ fn decode(io: Io, writer: *Io.Writer, gpa: Allocator, positionals: []const []con
     if (failures > 0) return error.DecodeFailed;
 }
 
-fn decodeImage(io: Io, writer: *Io.Writer, gpa: Allocator, path: []const u8, is_batch: bool) !void {
-    var image: zignal.Image(zignal.Rgba(u8)) = try .load(io, gpa, path);
+fn decodeImage(io: Io, gpa: Allocator, writer: *Io.Writer, path: []const u8, is_batch: bool) !void {
+    var image: zignal.Image(u8) = try .load(io, gpa, path);
     defer image.deinit(gpa);
 
     var result = (try qrcode.decode(gpa, image)) orelse return error.NoQrCodeFound;
