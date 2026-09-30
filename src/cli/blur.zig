@@ -9,8 +9,6 @@ const zignal = @import("zignal");
 const args = @import("args.zig");
 const common = @import("common.zig");
 const display = @import("display.zig");
-const displayCanvas = display.displayCanvas;
-const resolveDisplayFormat = display.resolveDisplayFormat;
 
 pub const Args = struct {
     type: ?BlurType = null,
@@ -67,7 +65,7 @@ const BlurType = enum {
     motion_spin,
 };
 
-pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
@@ -76,23 +74,9 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         return;
     }
 
-    const is_batch = parsed.positionals.len > 1;
-    var target: ?common.OutputTarget = null;
-    if (parsed.options.output) |out_arg| {
-        target = try common.resolveOutputTarget(io, out_arg, is_batch);
-    }
-
+    const target = if (parsed.options.output) |out| try common.resolveOutputTarget(io, out, parsed.positionals.len > 1) else null;
     const display_format = display.displayFormatFor(parsed.options, target);
-
-    var failed = false;
-    for (parsed.positionals) |input_path| {
-        processImage(io, writer, gpa, input_path, target, parsed.options, display_format) catch |err| {
-            std.log.err("failed to blur '{s}': {t}", .{ input_path, err });
-            if (!is_batch) return err;
-            failed = true;
-        };
-    }
-    if (failed) return error.BatchIncomplete;
+    try display.processInputs(zignal.Rgba(u8), io, gpa, writer, parsed.positionals, target, display_format, parsed.options, apply);
 }
 
 /// Blur `img` according to `options`, returning a freshly allocated image the
@@ -181,24 +165,4 @@ pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options
 
     timer.logElapsed("blur");
     return out;
-}
-
-fn processImage(
-    io: Io,
-    writer: *Io.Writer,
-    gpa: Allocator,
-    input_path: []const u8,
-    target: ?common.OutputTarget,
-    options: Args,
-    display_format: ?zignal.image.DisplayFormat,
-) !void {
-    std.log.debug("loading {s}...", .{input_path});
-
-    var img: zignal.Image(zignal.Rgba(u8)) = try .load(io, gpa, input_path);
-    defer img.deinit(gpa);
-
-    var out = try apply(io, gpa, img, options);
-    defer out.deinit(gpa);
-
-    try display.emit(io, writer, gpa, out, input_path, target, display_format);
 }

@@ -43,6 +43,6 @@ pub export fn compute_metrics(
     const distorted_img: Image(Rgba) = .initFromSlice(distorted_rows, distorted_cols, distorted_ptr[0..size]);
 
     result_ptr[0] = reference_img.psnr(distorted_img) catch @panic("PSNR computation failed");
-    result_ptr[1] = reference_img.ssim(distorted_img) catch @panic("SSIM computation failed");
+    result_ptr[1] = reference_img.ssim(.failing, std.heap.wasm_allocator, distorted_img) catch @panic("SSIM computation failed");
     result_ptr[2] = reference_img.meanPixelError(distorted_img) catch @panic("Mean pixel error computation failed");
 }

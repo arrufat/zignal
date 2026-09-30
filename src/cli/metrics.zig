@@ -19,7 +19,7 @@ pub const help = args.generateHelp(
     description ++ "\n\nThe first image provided is used as the reference, and all subsequent images are compared against it.",
 );
 
-pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
@@ -66,13 +66,13 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         const psnr_val = ref_img.psnr(img) catch unreachable;
         const mean_err = ref_img.meanPixelError(img) catch unreachable;
 
-        // SSIM requires the window to fit, so 11x11 is the minimum.
-        var ssim_val: f64 = 0;
-        if (img.rows >= 11 and img.cols >= 11) {
-            ssim_val = try ref_img.ssim(img);
-        } else {
-            std.log.warn("image {s} is too small for ssim (min 11x11)", .{path});
-        }
+        const ssim_val = ref_img.ssim(io, gpa, img) catch |err| switch (err) {
+            error.ImageTooSmall => blk: {
+                std.log.warn("image {s} is too small for ssim", .{path});
+                break :blk 0;
+            },
+            else => |e| return e,
+        };
 
         timer.logElapsed("metrics");
 

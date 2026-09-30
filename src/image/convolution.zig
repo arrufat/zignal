@@ -288,14 +288,21 @@ fn ConvolutionKernel(comptime T: type, comptime rows: usize, comptime cols: usiz
 pub fn gaussianKernel(allocator: Allocator, sigma: f32) ![]f32 {
     const radius: usize = @ceil(3.0 * sigma);
     const kernel = try allocator.alloc(f32, 2 * radius + 1);
-    var sum: f32 = 0;
+    fillGaussianKernel(f32, kernel, sigma);
+    return kernel;
+}
+
+/// Fills the odd-length `kernel` with a normalized 1-D Gaussian centred on its middle tap.
+/// Works at comptime.
+pub fn fillGaussianKernel(comptime F: type, kernel: []F, sigma: F) void {
+    const radius: F = @floatFromInt(kernel.len / 2);
+    var sum: F = 0;
     for (kernel, 0..) |*k, i| {
-        const x = @as(f32, @floatFromInt(i)) - @as(f32, @floatFromInt(radius));
+        const x = @as(F, @floatFromInt(i)) - radius;
         k.* = @exp(-(x * x) / (2.0 * sigma * sigma));
         sum += k.*;
     }
     for (kernel) |*k| k.* /= sum;
-    return kernel;
 }
 
 /// Comptime {height, width} of a 2D array kernel type.

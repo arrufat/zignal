@@ -48,7 +48,7 @@ pub const help = args.generateHelp(
     description,
 );
 
-pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
@@ -65,52 +65,42 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
     const mode = parsed.options.mode orelse .square;
 
-    var rows: u32 = 0;
-    var cols: u32 = 0;
-
-    switch (mode) {
-        .horizontal => {
-            rows = 1;
-            cols = @intCast(img_count);
+    const rows: u32, const cols: u32 = switch (mode) {
+        .horizontal => .{ 1, @intCast(img_count) },
+        .vertical => .{ @intCast(img_count), 1 },
+        .square => blk: {
+            const cols: u32 = @ceil(std.math.sqrt(@as(f32, @floatFromInt(img_count))));
+            break :blk .{ @intCast((img_count + cols - 1) / cols), cols };
         },
-        .vertical => {
-            rows = @intCast(img_count);
-            cols = 1;
-        },
-        .square => {
-            const sqrt = std.math.sqrt(@as(f32, @floatFromInt(img_count)));
-            cols = @ceil(sqrt);
-            rows = @intCast((img_count + cols - 1) / cols);
-        },
-        .grid => {
-            if (parsed.options.rows == null or parsed.options.cols == null) {
-                std.log.err("mode 'grid' requires --rows and --cols", .{});
+        .grid => blk: {
+            const missing_msg = "mode 'grid' requires --rows and --cols";
+            const rows = parsed.options.rows orelse {
+                std.log.err(missing_msg, .{});
                 return error.InvalidArguments;
-            }
-            rows = parsed.options.rows.?;
-            cols = parsed.options.cols.?;
+            };
+            const cols = parsed.options.cols orelse {
+                std.log.err(missing_msg, .{});
+                return error.InvalidArguments;
+            };
             if (rows * cols < img_count) {
                 std.log.warn("grid size ({d}x{d}={d}) is smaller than image count ({d}). some images will be ignored.", .{ rows, cols, rows * cols, img_count });
             } else if (rows * cols > img_count) {
                 std.log.debug("grid size ({d}x{d}={d}) is larger than image count ({d}). empty cells will be black.", .{ rows, cols, rows * cols, img_count });
             }
+            break :blk .{ rows, cols };
         },
-        .factors => {
-            // Largest factor pair closest to a square; prefer landscape below.
+        .factors => blk: {
+            // Largest factor at most sqrt(n), so rows <= cols (landscape).
             const n: u32 = @intCast(img_count);
             var best_r: u32 = 1;
             var i: u32 = 1;
             while (i * i <= n) : (i += 1) {
-                if (n % i == 0) {
-                    best_r = i;
-                }
+                if (n % i == 0) best_r = i;
             }
-            rows = best_r;
-            cols = n / best_r;
-            if (rows > cols) std.mem.swap(u32, &rows, &cols);
-            std.log.debug("factors mode: calculated {d}x{d} grid for {d} images", .{ rows, cols, n });
+            std.log.debug("factors mode: calculated {d}x{d} grid for {d} images", .{ best_r, n / best_r, n });
+            break :blk .{ best_r, n / best_r };
         },
-    }
+    };
 
     std.log.info("tiling {d} images into a {d}x{d} grid ({s})...", .{ img_count, cols, rows, @tagName(mode) });
 
@@ -124,13 +114,14 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     if (cell_w == 0 or cell_h == 0) {
         std.log.debug("analyzing reference image: {s}...", .{input_paths[0]});
         reference_img = try zignal.Image(zignal.Rgba(u8)).load(io, gpa, input_paths[0]);
+        const ref = reference_img.?;
 
-        const ref_w_f: f32 = @floatFromInt(reference_img.?.cols);
-        const ref_h_f: f32 = @floatFromInt(reference_img.?.rows);
+        const ref_w_f: f32 = @floatFromInt(ref.cols);
+        const ref_h_f: f32 = @floatFromInt(ref.rows);
 
         if (cell_w == 0 and cell_h == 0) {
-            cell_w = @intCast(reference_img.?.cols);
-            cell_h = @intCast(reference_img.?.rows);
+            cell_w = ref.cols;
+            cell_h = ref.rows;
         } else if (cell_h == 0) {
             cell_h = @round((@as(f32, @floatFromInt(cell_w)) / ref_w_f) * ref_h_f);
         } else {
@@ -146,7 +137,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
     var canvas = try zignal.Image(zignal.Rgba(u8)).init(gpa, canvas_h, canvas_w);
     defer canvas.deinit(gpa);
-    canvas.fill(.{ .r = 0, .g = 0, .b = 0, .a = 255 });
+    canvas.fill(.black);
 
     var failed = false;
     const timer = common.Timer.begin(io);
@@ -158,19 +149,13 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
         std.log.debug("[{d}/{d}] processing {s}...", .{ idx + 1, img_count, path });
 
-        var img: zignal.Image(zignal.Rgba(u8)) = undefined;
-        var loaded_new = false;
-        if (idx == 0 and reference_img != null) {
-            img = reference_img.?;
-        } else {
-            img = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| {
-                std.log.warn("failed to load {s}: {s}. skipping slot.", .{ path, @errorName(err) });
-                failed = true;
-                continue;
-            };
-            loaded_new = true;
-        }
-        defer if (loaded_new) img.deinit(gpa);
+        const cached = if (idx == 0) reference_img else null;
+        var img = cached orelse zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| {
+            std.log.warn("failed to load {s}: {t}. skipping slot.", .{ path, err });
+            failed = true;
+            continue;
+        };
+        defer if (cached == null) img.deinit(gpa);
 
         const scale_x = @as(f32, @floatFromInt(cell_w)) / @as(f32, @floatFromInt(img.cols));
         const scale_y = @as(f32, @floatFromInt(cell_h)) / @as(f32, @floatFromInt(img.rows));

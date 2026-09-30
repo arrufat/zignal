@@ -142,7 +142,7 @@ pub fn main(init: std.process.Init) !void {
         const box_ns = start_box.durationTo(end_box).toNanoseconds();
         const speedup = @as(f64, @floatFromInt(gaussian_ns)) / @as(f64, @floatFromInt(box_ns));
         const psnr = try gaussian.psnr(last_result.*);
-        const ssim_value = try gaussian.ssim(last_result.*);
+        const ssim_value = try gaussian.ssim(init.io, init.gpa, last_result.*);
 
         const avg_error = (try gaussian.meanPixelError(last_result.*)) * 100.0;
 

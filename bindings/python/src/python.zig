@@ -1255,6 +1255,7 @@ pub fn mapZigError(err: anyerror, context: []const u8) void {
 
         // Common domain errors
         error.DimensionMismatch => setValueError("Dimension mismatch in {s}", .{context}),
+        error.ImageTooSmall => setValueError("Image too small for {s}", .{context}),
         error.NotSquare => setValueError("{s} must be square", .{context}),
         error.Singular => setValueError("{s} is singular", .{context}),
         error.OutOfBounds => setIndexError("{s} index out of bounds", .{context}),
