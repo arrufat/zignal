@@ -10,7 +10,6 @@ const convolution = @import("convolution.zig");
 const color = @import("../color.zig");
 
 const Image = @import("../image.zig").Image;
-const testing = std.testing;
 
 /// PSNR in dB over every component; `inf` for identical images. Rows run in bands on `io`.
 pub fn psnr(comptime T: type, io: Io, image_a: Image(T), image_b: Image(T)) !f64 {
@@ -26,9 +25,9 @@ pub fn psnr(comptime T: type, io: Io, image_a: Image(T), image_b: Image(T)) !f64
     return 20.0 * std.math.log10(componentMaxValue(T)) - 10.0 * std.math.log10(mse);
 }
 
-const ssim_window = 11;
+pub const ssim_window = 11;
 /// Normalized 1D Gaussian (σ = 1.5); the 11×11 window of Wang et al. is its outer product.
-const ssim_kernel: [ssim_window]f64 = blk: {
+pub const ssim_kernel: [ssim_window]f64 = blk: {
     var k: [ssim_window]f64 = undefined;
     convolution.fillGaussianKernel(f64, &k, 1.5);
     break :blk k;
@@ -40,7 +39,7 @@ inline fn splat(comptime V: type, x: f64) V {
 }
 
 /// SSIM of one window from its weighted moments E[x], E[y], E[x²], E[y²], E[xy].
-inline fn ssimTerm(comptime T: type, comptime V: type, mu_x: V, mu_y: V, mu_xx: V, mu_yy: V, mu_xy: V) V {
+pub inline fn ssimTerm(comptime T: type, comptime V: type, mu_x: V, mu_y: V, mu_xx: V, mu_yy: V, mu_xy: V) V {
     const l = componentMaxValue(T);
     const c1 = splat(V, (0.01 * l) * (0.01 * l));
     const c2 = splat(V, (0.03 * l) * (0.03 * l));
@@ -301,7 +300,7 @@ inline fn componentMaxValue(comptime T: type) f64 {
     };
 }
 
-inline fn getPixelScalar(comptime PixelType: type, pixel: PixelType) f64 {
+pub inline fn getPixelScalar(comptime PixelType: type, pixel: PixelType) f64 {
     switch (@typeInfo(PixelType)) {
         .int, .float => return meta.as(f64, pixel),
         .@"struct" => {
@@ -341,173 +340,4 @@ inline fn convertChannelToU8(comptime ChannelType: type, value: ChannelType) u8 
         .float => meta.clamp(u8, value * 255.0),
         else => 0,
     };
-}
-
-test "meanPixelError: RGB example" {
-    const Pixel = struct { r: u8, g: u8, b: u8 };
-
-    var data_a = [_]Pixel{.{ .r = 255, .g = 0, .b = 0 }};
-    var data_b = [_]Pixel{.{ .r = 0, .g = 0, .b = 0 }};
-
-    const image_a: Image(Pixel) = .{
-        .rows = 1,
-        .cols = 1,
-        .stride = 1,
-        .data = &data_a,
-    };
-    const image_b: Image(Pixel) = .{
-        .rows = 1,
-        .cols = 1,
-        .stride = 1,
-        .data = &data_b,
-    };
-
-    const percent = try meanPixelError(Pixel, testing.io, image_a, image_b);
-    try testing.expectApproxEqAbs(1.0 / 3.0, percent, 1e-9);
-}
-
-test "ssim: rgb scales with luminance" {
-    const Pixel = struct { r: u8, g: u8, b: u8 };
-    const width = 12;
-    const height = 12;
-    var a_data: [width * height]Pixel = @splat(.{ .r = 0, .g = 0, .b = 0 });
-    var b_data: [width * height]Pixel = @splat(.{ .r = 0, .g = 0, .b = 0 });
-
-    for (0..height) |r| {
-        for (0..width) |c| {
-            const idx = r * width + c;
-            a_data[idx] = if ((r + c) % 2 == 0) .{ .r = 255, .g = 0, .b = 0 } else .{ .r = 0, .g = 255, .b = 0 };
-        }
-    }
-
-    const img_a: Image(Pixel) = .initFromSlice(height, width, &a_data);
-    const img_b: Image(Pixel) = .initFromSlice(height, width, &b_data);
-
-    const result = try ssim(Pixel, std.testing.io, testing.allocator, img_a, img_b);
-    try testing.expect(result < 0.99);
-}
-
-test "ssim: matches the direct 11x11 window" {
-    const Pixel = struct { r: u8, g: u8, b: u8 };
-    const rows = 97;
-    const cols = 83;
-    var prng: std.Random.DefaultPrng = .init(7);
-    const random = prng.random();
-    var a_data: [rows * cols]Pixel = undefined;
-    var b_data: [rows * cols]Pixel = undefined;
-    for (&a_data, &b_data) |*a, *b| {
-        a.* = .{ .r = random.int(u8), .g = random.int(u8), .b = random.int(u8) };
-        b.* = .{ .r = a.r / 2 + random.int(u8) / 4, .g = a.g, .b = a.b / 3 };
-    }
-    const img_a: Image(Pixel) = .initFromSlice(rows, cols, &a_data);
-    const img_b: Image(Pixel) = .initFromSlice(rows, cols, &b_data);
-
-    // Direct 2D window.
-    const out_rows = rows - (ssim_window - 1);
-    const out_cols = cols - (ssim_window - 1);
-    var expected: f64 = 0;
-    for (0..out_rows) |r| {
-        for (0..out_cols) |c| {
-            var mu: [5]f64 = @splat(0);
-            for (0..ssim_window) |dy| {
-                for (0..ssim_window) |dx| {
-                    const w = ssim_kernel[dy] * ssim_kernel[dx];
-                    const x = getPixelScalar(Pixel, img_a.at(r + dy, c + dx).*);
-                    const y = getPixelScalar(Pixel, img_b.at(r + dy, c + dx).*);
-                    mu[0] += w * x;
-                    mu[1] += w * y;
-                    mu[2] += w * x * x;
-                    mu[3] += w * y * y;
-                    mu[4] += w * x * y;
-                }
-            }
-            expected += ssimTerm(Pixel, f64, mu[0], mu[1], mu[2], mu[3], mu[4]);
-        }
-    }
-    expected /= out_rows * out_cols;
-
-    const result = try ssim(Pixel, testing.io, testing.allocator, img_a, img_b);
-    try testing.expectApproxEqRel(expected, result, 1e-12);
-}
-
-test "ssim: banded result equals the serial one" {
-    // Large enough for several bands.
-    const rows = 480;
-    const cols = 320;
-    const a_data = try testing.allocator.alloc(u8, rows * cols);
-    defer testing.allocator.free(a_data);
-    const b_data = try testing.allocator.alloc(u8, rows * cols);
-    defer testing.allocator.free(b_data);
-    var prng: std.Random.DefaultPrng = .init(11);
-    const random = prng.random();
-    for (a_data, b_data) |*a, *b| {
-        a.* = random.int(u8);
-        b.* = a.* / 2 + random.int(u8) / 2;
-    }
-    const img_a: Image(u8) = .initFromSlice(rows, cols, a_data);
-    const img_b: Image(u8) = .initFromSlice(rows, cols, b_data);
-
-    const serial = try ssim(u8, parallel.inline_io, testing.allocator, img_a, img_b);
-    const banded = try ssim(u8, testing.io, testing.allocator, img_a, img_b);
-    try testing.expectEqual(serial, banded);
-}
-
-test "psnr, meanPixelError: exact for integer pixels, on views too" {
-    const Pixel = color.Rgba(u8);
-    const rows = 300;
-    const cols = 257;
-    const a_data = try testing.allocator.alloc(Pixel, rows * cols);
-    defer testing.allocator.free(a_data);
-    const b_data = try testing.allocator.alloc(Pixel, rows * cols);
-    defer testing.allocator.free(b_data);
-    var prng: std.Random.DefaultPrng = .init(3);
-    const random = prng.random();
-    for (a_data, b_data) |*a, *b| {
-        a.* = .{ .r = random.int(u8), .g = random.int(u8), .b = random.int(u8), .a = random.int(u8) };
-        b.* = .{ .r = a.r / 2, .g = random.int(u8), .b = a.b, .a = a.a / 3 };
-    }
-    const full_a: Image(Pixel) = .initFromSlice(rows, cols, a_data);
-    const full_b: Image(Pixel) = .initFromSlice(rows, cols, b_data);
-    // A view, so rows are strided.
-    const rect: @import("../geometry.zig").Rectangle(u32) = .{ .l = 3, .t = 5, .r = 250, .b = 297 };
-    const img_a = full_a.view(rect);
-    const img_b = full_b.view(rect);
-
-    var squared: f64 = 0;
-    var absolute: f64 = 0;
-    for (0..img_a.rows) |r| {
-        for (0..img_a.cols) |c| {
-            const p = img_a.at(r, c).*;
-            const q = img_b.at(r, c).*;
-            inline for (.{ "r", "g", "b", "a" }) |f| {
-                const d = @as(f64, @field(p, f)) - @as(f64, @field(q, f));
-                squared += d * d;
-                absolute += @abs(d);
-            }
-        }
-    }
-    const count: f64 = @floatFromInt(img_a.rows * img_a.cols * 4);
-    const expected_psnr = 20.0 * std.math.log10(255.0) - 10.0 * std.math.log10(squared / count);
-    try testing.expectEqual(expected_psnr, try psnr(Pixel, testing.io, img_a, img_b));
-    try testing.expectEqual(absolute / count / 255.0, try meanPixelError(Pixel, testing.io, img_a, img_b));
-}
-
-test "psnr, meanPixelError: banded float result equals the serial one" {
-    const rows = 480;
-    const cols = 320;
-    const a_data = try testing.allocator.alloc(f32, rows * cols);
-    defer testing.allocator.free(a_data);
-    const b_data = try testing.allocator.alloc(f32, rows * cols);
-    defer testing.allocator.free(b_data);
-    var prng: std.Random.DefaultPrng = .init(5);
-    const random = prng.random();
-    for (a_data, b_data) |*a, *b| {
-        a.* = random.float(f32);
-        b.* = random.float(f32);
-    }
-    const img_a: Image(f32) = .initFromSlice(rows, cols, a_data);
-    const img_b: Image(f32) = .initFromSlice(rows, cols, b_data);
-
-    try testing.expectEqual(try psnr(f32, parallel.inline_io, img_a, img_b), try psnr(f32, testing.io, img_a, img_b));
-    try testing.expectEqual(try meanPixelError(f32, parallel.inline_io, img_a, img_b), try meanPixelError(f32, testing.io, img_a, img_b));
 }

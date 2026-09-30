@@ -1312,7 +1312,7 @@ test {
     _ = @import("image/tests/display.zig");
     _ = @import("image/tests/interpolation.zig");
     _ = @import("image/tests/resize.zig");
-    _ = @import("image/tests/psnr.zig");
+    _ = @import("image/tests/metrics.zig");
     _ = @import("image/tests/shen_castan.zig");
     _ = @import("image/tests/binary.zig");
     _ = @import("image/hough.zig");
