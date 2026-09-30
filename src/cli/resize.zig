@@ -8,7 +8,6 @@ const zignal = @import("zignal");
 
 const args = @import("args.zig");
 const common = @import("common.zig");
-
 const display = @import("display.zig");
 
 pub const Args = struct {
@@ -46,7 +45,7 @@ pub const help = args.generateHelp(
     description,
 );
 
-pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
@@ -62,29 +61,17 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         return error.InvalidArguments;
     };
 
-    const is_batch = parsed.positionals.len > 1;
-    const target = try common.resolveOutputTarget(io, output_arg, is_batch);
-
-    var failed = false;
-    for (parsed.positionals) |input_path| {
-        processImage(io, writer, gpa, input_path, target, is_batch, parsed.options) catch |err| {
-            std.log.err("failed to resize '{s}': {t}", .{ input_path, err });
-            if (!is_batch) return err;
-            failed = true;
-        };
-    }
-    if (failed) return error.BatchIncomplete;
+    const target = try common.resolveOutputTarget(io, output_arg, parsed.positionals.len > 1);
+    try display.processInputs(zignal.Rgba(u8), io, gpa, writer, parsed.positionals, target, null, parsed.options, apply);
 }
 
-/// Resize `img` according to `options`, returning a freshly allocated image the
-/// caller owns. Shared by the standalone command and the `pipeline` command.
+/// Resize `img` according to `options` (already validated), returning a freshly allocated
+/// image the caller owns. Shared by the standalone command and the `pipeline` command.
 pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options: Args) !zignal.Image(zignal.Rgba(u8)) {
     if (img.rows == 0 or img.cols == 0) {
         std.log.err("input image has zero dimensions ({d}x{d})", .{ img.cols, img.rows });
         return error.InvalidDimensions;
     }
-
-    try options.validate();
 
     const filter = common.resolveFilter(options.filter);
     const dims = try computeTargetDimensions(img, options);
@@ -101,54 +88,25 @@ pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options
     return out;
 }
 
-fn processImage(
-    io: Io,
-    writer: *Io.Writer,
-    gpa: Allocator,
-    input_path: []const u8,
-    target: common.OutputTarget,
-    is_batch: bool,
-    options: Args,
-) !void {
-    std.log.debug("{s} {s}...", .{ if (is_batch) "processing" else "loading", input_path });
-
-    var img: zignal.Image(zignal.Rgba(u8)) = try .load(io, gpa, input_path);
-    defer img.deinit(gpa);
-
-    var out = try apply(io, gpa, img, options);
-    defer out.deinit(gpa);
-
-    try display.emit(io, writer, gpa, out, input_path, target, null);
-}
-
 const Dimensions = struct { width: u32, height: u32 };
 
 fn computeTargetDimensions(img: zignal.Image(zignal.Rgba(u8)), options: Args) !Dimensions {
-    var width: u32 = 0;
-    var height: u32 = 0;
-
-    if (options.scale) |s| {
+    const cols: f32 = @floatFromInt(img.cols);
+    const rows: f32 = @floatFromInt(img.rows);
+    // `validate` guarantees either a scale or at least one side.
+    const width: f32, const height: f32 = if (options.scale) |s| blk: {
         if (s <= 0 or !std.math.isFinite(s)) {
             std.log.err("scale factor must be positive and finite", .{});
             return error.InvalidArguments;
         }
-        width = zignal.meta.safeCast(u32, @as(f32, @floatFromInt(img.cols)) * s) catch return error.InvalidDimensions;
-        height = zignal.meta.safeCast(u32, @as(f32, @floatFromInt(img.rows)) * s) catch return error.InvalidDimensions;
-    } else if (options.width != null and options.height != null) {
-        width = options.width.?;
-        height = options.height.?;
-    } else if (options.width) |w| {
-        width = w;
-        const aspect = @as(f32, @floatFromInt(img.rows)) / @as(f32, @floatFromInt(img.cols));
-        height = zignal.meta.safeCast(u32, @as(f32, @floatFromInt(w)) * aspect) catch return error.InvalidDimensions;
-    } else if (options.height) |h| {
-        height = h;
-        const aspect = @as(f32, @floatFromInt(img.cols)) / @as(f32, @floatFromInt(img.rows));
-        width = zignal.meta.safeCast(u32, @as(f32, @floatFromInt(h)) * aspect) catch return error.InvalidDimensions;
-    }
+        break :blk .{ cols * s, rows * s };
+    } else if (options.width) |w| .{
+        @floatFromInt(w),
+        if (options.height) |h| @floatFromInt(h) else @as(f32, @floatFromInt(w)) * (rows / cols),
+    } else .{ @as(f32, @floatFromInt(options.height.?)) * (cols / rows), @floatFromInt(options.height.?) };
 
     return .{
-        .width = @max(width, 1),
-        .height = @max(height, 1),
+        .width = @max(1, zignal.meta.safeCast(u32, width) catch return error.InvalidDimensions),
+        .height = @max(1, zignal.meta.safeCast(u32, height) catch return error.InvalidDimensions),
     };
 }

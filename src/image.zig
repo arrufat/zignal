@@ -1152,8 +1152,9 @@ pub fn Image(comptime T: type) type {
         /// - Uses "valid" windowing: drops 5-pixel border (no padding/reflection)
         ///
         /// Returns an error if the images have different dimensions or are too small (< 11x11).
-        pub fn ssim(self: Self, other: Self) !f64 {
-            return metrics.ssim(T, self, other);
+        /// Rows run in bands on `io`; `allocator` holds a few rows of scratch per band.
+        pub fn ssim(self: Self, io: Io, allocator: Allocator, other: Self) !f64 {
+            return metrics.ssim(T, io, allocator, self, other);
         }
 
         /// Options for computing image differences.

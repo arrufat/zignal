@@ -39,40 +39,25 @@ pub fn resolveOutputTarget(
     output_arg: []const u8,
     is_batch: bool,
 ) !OutputTarget {
-    var is_directory = false;
-
-    if (Io.Dir.cwd().openDir(io, output_arg, .{})) |dir| {
+    const is_directory = if (Io.Dir.cwd().openDir(io, output_arg, .{})) |dir| blk: {
         dir.close(io);
-        is_directory = true;
+        break :blk true;
     } else |err| switch (err) {
-        error.NotDir => {
-            if (is_batch) {
-                std.log.err("output path '{s}' is a file, but multiple input files were provided. batch output requires a directory.", .{output_arg});
-                return error.InvalidArguments;
-            }
-            is_directory = false;
-        },
-        error.FileNotFound => {
-            const ends_with_sep = std.mem.endsWith(u8, output_arg, "/") or std.mem.endsWith(u8, output_arg, "\\");
-            if (ends_with_sep) {
-                is_directory = true;
-                std.log.debug("creating output directory '{s}'...", .{output_arg});
-                try Io.Dir.cwd().createDirPath(io, output_arg);
-            } else {
-                if (is_batch) {
-                    std.log.err("output path '{s}' does not exist and does not end with a separator. batch output requires a directory.", .{output_arg});
-                    return error.InvalidArguments;
-                }
-                is_directory = false;
-            }
-        },
+        error.NotDir => if (is_batch) {
+            std.log.err("output path '{s}' is a file, but multiple input files were provided. batch output requires a directory.", .{output_arg});
+            return error.InvalidArguments;
+        } else false,
+        error.FileNotFound => if (std.mem.endsWith(u8, output_arg, "/") or std.mem.endsWith(u8, output_arg, "\\")) blk: {
+            std.log.debug("creating output directory '{s}'...", .{output_arg});
+            try Io.Dir.cwd().createDirPath(io, output_arg);
+            break :blk true;
+        } else if (is_batch) {
+            std.log.err("output path '{s}' does not exist and does not end with a separator. batch output requires a directory.", .{output_arg});
+            return error.InvalidArguments;
+        } else false,
         else => return err,
-    }
-
-    return OutputTarget{
-        .path = output_arg,
-        .is_directory = is_directory,
     };
+    return .{ .path = output_arg, .is_directory = is_directory };
 }
 
 /// The tag enum of `zignal.image.Interpolation` — usable directly as a CLI/ZON option

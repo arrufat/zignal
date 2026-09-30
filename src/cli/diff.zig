@@ -40,7 +40,7 @@ pub const help = args.generateHelp(
     description,
 );
 
-pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
@@ -81,22 +81,18 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
         return error.DimensionMismatch;
     }
 
-    const scale = parsed.options.scale orelse 1.0;
     const threshold = parsed.options.threshold orelse 0;
-    const binary = parsed.options.binary;
 
     var diff_img = try zignal.Image(zignal.Rgba(u8)).init(gpa, img1.rows, img1.cols);
     defer diff_img.deinit(gpa);
 
-    const diff_opts = zignal.Image(zignal.Rgba(u8)).DiffOptions{
-        .threshold = @floatFromInt(threshold),
-        .scale = scale,
-        .binary = binary,
-        .force_opaque = true,
-    };
-
     const timer = common.Timer.begin(io);
-    const result = try img1.diff(img2, diff_img, diff_opts);
+    const result = try img1.diff(img2, diff_img, .{
+        .threshold = threshold,
+        .scale = parsed.options.scale orelse 1.0,
+        .binary = parsed.options.binary,
+        .force_opaque = true,
+    });
     timer.logElapsed("diff");
 
     // `result.stats` describes the *visualized* diff image (after threshold/scale/binary),
