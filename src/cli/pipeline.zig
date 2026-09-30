@@ -75,7 +75,7 @@ pub const help = args.generateHelp(
     description,
 );
 
-pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Args.Iterator) !void {
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
     const parsed = try args.parse(Args, gpa, iterator);
     defer parsed.deinit(gpa);
 
@@ -109,10 +109,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
     // Validate recipe steps before loading any images
     for (recipe.steps) |step| {
-        switch (step) {
-            .resize => |cfg| try cfg.validate(),
-            else => {},
-        }
+        if (step == .resize) try step.resize.validate();
     }
 
     if (recipe.steps.len == 0) {
@@ -120,62 +117,37 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     }
 
     // Inputs: CLI positionals win, otherwise the recipe's `.input`.
-    var single_input: [1][]const u8 = undefined;
     const inputs: []const []const u8 = if (input_overrides.len > 0)
         input_overrides
-    else if (recipe.input) |in| blk: {
-        single_input[0] = in;
-        break :blk &single_input;
-    } else {
+    else if (recipe.input) |*in|
+        in[0..1]
+    else {
         std.log.err("no input image: recipe has no .input and none given on the command line", .{});
         return error.InvalidArguments;
     };
 
     // Output: CLI --output wins, otherwise the recipe's `.output`.
     const output_arg = parsed.options.output orelse recipe.output;
-    const is_batch = inputs.len > 1;
-    var target: ?common.OutputTarget = null;
-    if (output_arg) |out| {
-        target = try common.resolveOutputTarget(io, out, is_batch);
-    }
-
+    const target = if (output_arg) |out| try common.resolveOutputTarget(io, out, inputs.len > 1) else null;
     const display_format = display.displayFormatFor(parsed.options, target);
-
-    var failed = false;
-    for (inputs) |input_path| {
-        processImage(io, writer, gpa, input_path, recipe.steps, target, display_format) catch |err| {
-            std.log.err("failed to process '{s}': {t}", .{ input_path, err });
-            if (!is_batch) return err;
-            failed = true;
-        };
-    }
-    if (failed) return error.BatchIncomplete;
+    try display.processInputs(zignal.Rgba(u8), io, gpa, writer, inputs, target, display_format, recipe.steps, applySteps);
 }
 
-fn processImage(
-    io: Io,
-    writer: *Io.Writer,
-    gpa: Allocator,
-    input_path: []const u8,
-    steps: []const Step,
-    target: ?common.OutputTarget,
-    display_format: ?zignal.image.DisplayFormat,
-) !void {
-    std.log.debug("loading {s}...", .{input_path});
-
-    var current: zignal.Image(zignal.Rgba(u8)) = try .load(io, gpa, input_path);
-    defer current.deinit(gpa);
+/// Runs `steps` in order on `img`, returning a freshly allocated image the caller owns.
+fn applySteps(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), steps: []const Step) !zignal.Image(zignal.Rgba(u8)) {
+    var current: ?zignal.Image(zignal.Rgba(u8)) = null;
+    errdefer if (current) |*c| c.deinit(gpa);
 
     for (steps, 1..) |step, step_no| {
         std.log.info("step {d}: {s}", .{ step_no, @tagName(step) });
+        const src = current orelse img;
         const next = switch (step) {
-            .resize => |o| try resize.apply(io, gpa, current, o),
-            .blur => |o| try blur.apply(io, gpa, current, o),
-            .edges => |o| try edges.apply(io, gpa, current, o),
+            .resize => |o| try resize.apply(io, gpa, src, o),
+            .blur => |o| try blur.apply(io, gpa, src, o),
+            .edges => |o| try edges.apply(io, gpa, src, o),
         };
-        current.deinit(gpa);
+        if (current) |*c| c.deinit(gpa);
         current = next;
     }
-
-    try display.emit(io, writer, gpa, current, input_path, target, display_format);
+    return current orelse img.dupe(gpa);
 }
