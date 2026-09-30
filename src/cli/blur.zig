@@ -21,7 +21,7 @@ pub const Args = struct {
 
     // Motion blur parameters
     angle: ?f32 = null,
-    distance: ?f32 = null,
+    distance: ?u32 = null,
     center_x: ?f32 = null,
     center_y: ?f32 = null,
     strength: ?f32 = null,
@@ -84,62 +84,18 @@ pub fn apply(io: Io, gpa: Allocator, img: zignal.Image(zignal.Rgba(u8)), options
             const radius = options.radius orelse 1;
             try img.boxBlur(io, gpa, out, radius);
         },
-        .gaussian => {
-            const sigma = options.sigma orelse 1.0;
-            if (sigma < 0 or !std.math.isFinite(sigma)) {
-                std.log.err("sigma must be a non-negative finite number.", .{});
-                return error.InvalidArguments;
-            }
-            try img.gaussianBlur(io, gpa, out, sigma, .default);
-        },
-        .median => {
-            const radius = options.radius orelse 1;
-            if (radius > 256) {
-                std.log.err("median blur radius {d} exceeds maximum limit of 256.", .{radius});
-                return error.InvalidArguments;
-            }
-            try img.medianBlur(io, gpa, out, radius);
-        },
+        .gaussian => try img.gaussianBlur(io, gpa, out, options.sigma orelse 1.0, .default),
+        .median => try img.medianBlur(io, gpa, out, options.radius orelse 1),
         .motion_linear => {
-            const angle_deg = options.angle orelse 0.0;
-            var dist = options.distance orelse 10.0;
-
-            if (!std.math.isFinite(angle_deg) or !std.math.isFinite(dist)) {
-                std.log.err("angle and distance must be finite numbers.", .{});
-                return error.InvalidArguments;
-            }
-            if (dist < 0) {
-                std.log.err("distance must be non-negative.", .{});
-                return error.InvalidArguments;
-            }
-
-            const max_dim: f32 = @floatFromInt(@max(img.rows, img.cols));
-
-            if (dist > max_dim) {
-                std.log.warn("motion blur distance {d:.1} exceeds image dimensions. clamping to {d:.1}.", .{ dist, max_dim });
-                dist = max_dim;
-            }
-
-            const angle_rad = std.math.degreesToRadians(angle_deg);
-            try img.motionBlur(io, gpa, out, .{ .linear = .{ .angle = angle_rad, .distance = @trunc(dist) } });
+            const angle = std.math.degreesToRadians(options.angle orelse 0.0);
+            try img.motionBlur(io, gpa, out, .{ .linear = .{ .angle = angle, .distance = options.distance orelse 10 } });
         },
         .motion_zoom, .motion_spin => {
             const cx = options.center_x orelse 0.5;
             const cy = options.center_y orelse 0.5;
             const strength = options.strength orelse 0.5;
-
-            if (!std.math.isFinite(cx) or !std.math.isFinite(cy) or !std.math.isFinite(strength)) {
-                std.log.err("radial blur parameters (center-x, center-y, strength) must be finite numbers.", .{});
-                return error.InvalidArguments;
-            }
-
             if (cx < 0 or cx > 1 or cy < 0 or cy > 1) {
                 std.log.warn("center coordinates ({d:.2}, {d:.2}) are outside the typical [0, 1] range.", .{ cx, cy });
-            }
-
-            if (strength < 0 or strength > 1) {
-                std.log.err("strength must be between 0.0 and 1.0.", .{});
-                return error.InvalidArguments;
             }
 
             const motion: zignal.image.MotionBlur = if (blur_type == .motion_zoom)
