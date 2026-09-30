@@ -17,7 +17,7 @@ pub const protocol_help: []const u8 = "Display protocol: " ++ common.joinFieldNa
 /// field, since the tag names double as the accepted protocol names.
 pub const ProtocolTag = @typeInfo(zignal.image.DisplayFormat).@"union".tag_type.?;
 
-const Args = struct {
+pub const Args = struct {
     width: ?u32 = null,
     height: ?u32 = null,
     protocol: ?ProtocolTag = null,
@@ -31,29 +31,17 @@ const Args = struct {
 
 pub const description = "Display an image in the terminal using supported graphics protocols.";
 
-pub const help = args.generateHelp(
-    Args,
-    "zignal display <image> [options]",
-    description,
-);
+pub const usage = "zignal display <image> [options]";
 
-pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
-    const parsed = try args.parse(Args, gpa, iterator);
-    defer parsed.deinit(gpa);
-
-    if (parsed.help or parsed.positionals.len == 0) {
-        try args.printHelp(writer, help);
-        return;
-    }
-
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, options: Args, inputs: []const []const u8) !void {
     const display_fmt = resolveDisplayFormat(
-        parsed.options.protocol,
-        parsed.options.width,
-        parsed.options.height,
+        options.protocol,
+        options.width,
+        options.height,
     );
 
     var failed = false;
-    for (parsed.positionals) |path| {
+    for (inputs) |path| {
         std.log.debug("loading image: {s}", .{path});
         var image = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| {
             std.log.err("failed to load image '{s}': {t}", .{ path, err });
