@@ -746,13 +746,8 @@ pub fn image_ssim(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
                 inline else => |*img| if (@TypeOf(img) == @TypeOf(img1)) img else unreachable,
             };
 
-            if (img1.rows < 11 or img1.cols < 11) {
-                python.setValueError("Images must be at least 11x11 for SSIM", .{});
-                return null;
-            }
-
-            return img1.ssim(img2.*) catch |err| {
-                python.setZigError(err);
+            return img1.ssim(python.io, allocator, img2.*) catch |err| {
+                python.mapZigError(err, "SSIM (images must be at least 11x11)");
                 return null;
             };
         }

@@ -66,7 +66,7 @@ pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Ar
         const psnr_val = ref_img.psnr(img) catch unreachable;
         const mean_err = ref_img.meanPixelError(img) catch unreachable;
 
-        const ssim_val = ref_img.ssim(img) catch |err| switch (err) {
+        const ssim_val = ref_img.ssim(io, gpa, img) catch |err| switch (err) {
             error.ImageTooSmall => blk: {
                 std.log.warn("image {s} is too small for ssim", .{path});
                 break :blk 0;
