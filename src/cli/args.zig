@@ -82,40 +82,41 @@ fn shortPrefix(comptime T: type, comptime field_name: []const u8) [4]u8 {
 /// for non-boolean fields. Shared by the long (`--flag`) and short (`-f`) paths.
 fn setOption(comptime T: type, comptime field: anytype, options: *T, args: *std.process.Args.Iterator) !void {
     const ChildType = PayloadType(field.type);
+    const flag = comptime &kebabName(field.name);
 
     if (ChildType == bool) {
         @field(options.*, field.name) = true;
-        std.log.debug("option --{s} set to true", .{field.name});
+        std.log.debug("option --{s} set to true", .{flag});
         return;
     }
 
     const val_str = args.next() orelse {
-        std.log.err("missing value for --{s}", .{field.name});
+        std.log.err("missing value for --{s}", .{flag});
         return error.InvalidArguments;
     };
 
     if (ChildType == []const u8) {
         @field(options.*, field.name) = val_str;
-        std.log.debug("option --{s} set to '{s}'", .{ field.name, val_str });
+        std.log.debug("option --{s} set to '{s}'", .{ flag, val_str });
     } else if (@typeInfo(ChildType) == .int) {
         @field(options.*, field.name) = std.fmt.parseInt(ChildType, val_str, 10) catch {
-            std.log.err("invalid value for --{s}: {s}", .{ field.name, val_str });
+            std.log.err("invalid value for --{s}: {s}", .{ flag, val_str });
             return error.InvalidArguments;
         };
-        std.log.debug("option --{s} set to {s}", .{ field.name, val_str });
+        std.log.debug("option --{s} set to {s}", .{ flag, val_str });
     } else if (@typeInfo(ChildType) == .float) {
         @field(options.*, field.name) = std.fmt.parseFloat(ChildType, val_str) catch {
-            std.log.err("invalid value for --{s}: {s}", .{ field.name, val_str });
+            std.log.err("invalid value for --{s}: {s}", .{ flag, val_str });
             return error.InvalidArguments;
         };
-        std.log.debug("option --{s} set to {s}", .{ field.name, val_str });
+        std.log.debug("option --{s} set to {s}", .{ flag, val_str });
     } else if (@typeInfo(ChildType) == .@"enum") {
         // Accept either kebab- or snake-case, matching the ZON enum-literal names.
         @field(options.*, field.name) = common.parseEnum(ChildType, val_str) orelse {
-            std.log.err("invalid value for --{s}: {s}", .{ field.name, val_str });
+            std.log.err("invalid value for --{s}: {s}", .{ flag, val_str });
             return error.InvalidArguments;
         };
-        std.log.debug("option --{s} set to {s}", .{ field.name, val_str });
+        std.log.debug("option --{s} set to {s}", .{ flag, val_str });
     } else {
         @compileError("Unsupported type for arg parsing: " ++ @typeName(ChildType));
     }

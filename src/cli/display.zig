@@ -87,8 +87,8 @@ pub fn displayFormatFor(options: anytype, target: ?common.OutputTarget) ?zignal.
     return resolveDisplayFormat(options.protocol, options.width, options.height);
 }
 
-/// Loads each input as `T`, maps it through `transform` and emits the result. A single
-/// input's error propagates; a batch logs it, carries on and ends in `error.BatchIncomplete`.
+/// Loads each input as `T`, maps it through `transform` and emits the result. Failures are
+/// logged and skipped; any failure ends in `error.BatchIncomplete`.
 pub fn processInputs(
     comptime T: type,
     io: Io,
@@ -104,7 +104,6 @@ pub fn processInputs(
     for (inputs) |input_path| {
         processInput(T, io, gpa, writer, input_path, target, display_format, context, transform) catch |err| {
             std.log.err("failed to process '{s}': {t}", .{ input_path, err });
-            if (inputs.len == 1) return err;
             failed = true;
         };
     }
@@ -185,9 +184,14 @@ pub fn createHorizontalComposite(
     const wf: f32 = @floatFromInt(w);
     const hf: f32 = @floatFromInt(h);
 
+    // Letterbox each image into its w x h cell, preserving its aspect ratio.
     for (images, 0..) |img, i| {
-        const offset_x = @as(f32, @floatFromInt(i)) * wf;
-        canvas.insert(io, img, .{ .l = offset_x, .t = 0, .r = offset_x + wf, .b = hf }, 0, .bilinear, .none);
+        const cols: f32 = @floatFromInt(img.cols);
+        const rows: f32 = @floatFromInt(img.rows);
+        const scale = @min(wf / cols, hf / rows);
+        const l = @as(f32, @floatFromInt(i)) * wf + (wf - cols * scale) / 2;
+        const t = (hf - rows * scale) / 2;
+        canvas.insert(io, img, .{ .l = l, .t = t, .r = l + cols * scale, .b = t + rows * scale }, 0, .bilinear, .none);
     }
 
     return canvas;

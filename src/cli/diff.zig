@@ -81,8 +81,9 @@ pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, options: Args, inputs: []
 
     // `result.stats` describes the *visualized* diff image (after threshold/scale/binary),
     // not the raw per-pixel delta — so for binary mode max() is 0 or 255.
-    std.log.info("max difference found: {d}", .{@as(u32, @trunc(result.stats.max()))});
-    std.log.info("pixels differing > {d}: {d}", .{ threshold, result.diff_count });
+    try writer.print("max difference: {d}\n", .{@as(u32, @trunc(result.stats.max()))});
+    try writer.print("pixels differing > {d}: {d}\n", .{ threshold, result.diff_count });
+    try writer.flush();
 
     if (options.output) |output_path| {
         std.log.info("saving difference image to '{s}'...", .{output_path});
