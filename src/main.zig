@@ -200,6 +200,7 @@ pub const Cli = struct {
             \\Usage: zignal [options] <command> [command-options]
             \\
             \\Global Options:
+            \\  -h, --help            Show help (also after a command)
             \\  --log-level <level>   Set the logging level ({s})
             \\
             \\Commands:

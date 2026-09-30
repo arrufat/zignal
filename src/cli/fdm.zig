@@ -15,25 +15,31 @@ pub const Args = struct {
     width: ?u32 = null,
     height: ?u32 = null,
     protocol: ?display.ProtocolTag = null,
+    output: ?[]const u8 = null,
 
     pub const meta = .{
         .display = .{ .help = "Display the result in the terminal", .short = 'd' },
         .width = .{ .help = "Width of each sub-image", .metavar = "N" },
         .height = .{ .help = "Height of each sub-image", .metavar = "N" },
         .protocol = .{ .help = display.protocol_help, .metavar = "p" },
+        .output = .{ .help = "Output file path (or pass it as the third argument)", .metavar = "path", .short = 'o' },
     };
 };
 
 pub const description = "Apply Feature Distribution Matching (style transfer) from target to source image.\nIf output is omitted, the result is displayed in the terminal.";
 
-pub const usage = "zignal fdm <source> <target> [output] [options]";
+pub const usage = "zignal fdm <source> <target> [-o <output>] [options]";
 
 pub const positionals: args.Positionals = .{ .min = 2, .max = 3 };
 
 pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, options: Args, inputs: []const []const u8) !void {
     const source_path = inputs[0];
     const target_path = inputs[1];
-    const output_path = if (inputs.len == 3) inputs[2] else null;
+    if (inputs.len == 3 and options.output != null) {
+        std.log.err("output given both as an argument and with --output", .{});
+        return error.InvalidArguments;
+    }
+    const output_path = if (inputs.len == 3) inputs[2] else options.output;
 
     const should_display = options.display or output_path == null;
 
