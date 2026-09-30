@@ -228,7 +228,7 @@ test "Image.rotate: crop keeps the input size and the same centre" {
     const dr = (expanded.rows - cropped.rows) / 2;
     const dc = (expanded.cols - cropped.cols) / 2;
     const middle = expanded.view(.{ .l = dc, .t = dr, .r = dc + cropped.cols, .b = dr + cropped.rows });
-    try std.testing.expect(try middle.meanPixelError(cropped) < 0.05);
+    try std.testing.expect(try middle.meanPixelError(std.testing.io, cropped) < 0.05);
 }
 
 test "Image.rotate: arbitrary angle" {
@@ -495,12 +495,12 @@ test "Image.flipLeftRightInto: matches the in-place flips through views, with fl
 
     expected.flipLeftRight(io);
     src.flipLeftRightInto(io, dst);
-    try expectEqual(0, try expected.meanPixelError(dst));
+    try expectEqual(0, try expected.meanPixelError(std.testing.io, dst));
 
     src.copy(expected);
     expected.flipTopBottom(io);
     src.flipTopBottomInto(io, dst);
-    try expectEqual(0, try expected.meanPixelError(dst));
+    try expectEqual(0, try expected.meanPixelError(std.testing.io, dst));
 }
 
 test "Image.insert: rectangle outside the image or NaN angle is a no-op" {

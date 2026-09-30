@@ -24,7 +24,7 @@ test "Image.psnr: identical images returns inf" {
         pixel.* = 128;
     }
 
-    const psnr = try img1.psnr(img2);
+    const psnr = try img1.psnr(std.testing.io, img2);
     try expectEqual(std.math.inf(f64), psnr);
 }
 
@@ -35,7 +35,7 @@ test "Image.psnr: dimension mismatch error" {
     var img2 = try Image(u8).init(std.testing.allocator, 10, 20);
     defer img2.deinit(std.testing.allocator);
 
-    try expectError(error.DimensionMismatch, img1.psnr(img2));
+    try expectError(error.DimensionMismatch, img1.psnr(std.testing.io, img2));
 }
 
 test "Image.psnr: known values for u8" {
@@ -55,7 +55,7 @@ test "Image.psnr: known values for u8" {
 
     // MSE = (100 + 100 + 25 + 25) / 4 = 62.5
     // PSNR = 10 * log10(255^2 / 62.5) = 10 * log10(1040.4) = 30.171
-    const psnr = try img1.psnr(img2);
+    const psnr = try img1.psnr(std.testing.io, img2);
     try expectApproxEqAbs(30.171, psnr, 0.01);
 }
 
@@ -72,7 +72,7 @@ test "Image.psnr: RGB struct type" {
     // MSE per pixel = (100 + 100 + 25) / 3 = 75
     // All 4 pixels are the same, so overall MSE = 75
     // PSNR = 10 * log10(255^2 / 75) = 10 * log10(867) = 29.38
-    const psnr = try img1.psnr(img2);
+    const psnr = try img1.psnr(std.testing.io, img2);
     try expectApproxEqAbs(29.38, psnr, 0.01);
 }
 
@@ -89,7 +89,7 @@ test "Image.psnr: RGBA struct type" {
 
     // MSE = (25 + 25 + 0 + 0 + 0 + 25 + 25 + 0) / 8 = 12.5
     // PSNR = 10 * log10(255^2 / 12.5) = 10 * log10(5202) = 37.16
-    const psnr = try img1.psnr(img2);
+    const psnr = try img1.psnr(std.testing.io, img2);
     try expectApproxEqAbs(37.16, psnr, 0.01);
 }
 
@@ -110,7 +110,7 @@ test "Image.psnr: f32 scalar type" {
 
     // MSE = (0.01 + 0.01 + 0.01 + 0.01) / 4 = 0.01
     // PSNR = 10 * log10(1.0 / 0.01) = 10 * log10(100) = 20.0
-    const psnr = try img1.psnr(img2);
+    const psnr = try img1.psnr(std.testing.io, img2);
     try expectApproxEqAbs(20.0, psnr, 0.01);
 }
 
@@ -127,7 +127,7 @@ test "Image.psnr: array type [3]u8" {
 
     // MSE = (25 + 25 + 25 + 25 + 25 + 25) / 6 = 25
     // PSNR = 10 * log10(255^2 / 25) = 10 * log10(2601) = 34.15
-    const psnr = try img1.psnr(img2);
+    const psnr = try img1.psnr(std.testing.io, img2);
     try expectApproxEqAbs(34.15, psnr, 0.01);
 }
 
@@ -146,7 +146,7 @@ test "Image.psnr: extreme case black vs white" {
 
     // MSE = 255^2 = 65025
     // PSNR = 10 * log10(255^2 / 65025) = 10 * log10(1) = 0
-    const psnr = try img1.psnr(img2);
+    const psnr = try img1.psnr(std.testing.io, img2);
     try expectApproxEqAbs(0.0, psnr, 0.01);
 }
 
@@ -171,6 +171,6 @@ test "Image.psnr: slight noise" {
 
     // MSE = (4 + 4 + 1 + 1) / 10000 = 0.001
     // PSNR = 10 * log10(255^2 / 0.001) = 10 * log10(65025000) = 78.13
-    const psnr = try img1.psnr(img2);
+    const psnr = try img1.psnr(std.testing.io, img2);
     try expectApproxEqAbs(78.13, psnr, 0.1);
 }
