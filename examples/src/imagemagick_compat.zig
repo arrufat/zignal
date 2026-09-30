@@ -46,7 +46,7 @@ fn checkPair(io: std.Io, gpa: std.mem.Allocator, dir: []const u8, name: []const 
     };
     defer fixture.deinit(gpa);
 
-    const db = try fixture.psnr(reference);
+    const db = try fixture.psnr(io, reference);
     const threshold = minPsnr(name);
     const ok = db >= threshold;
     if (!ok) failures.* += 1;
@@ -70,7 +70,7 @@ fn checkAnimated(io: std.Io, gpa: std.mem.Allocator, dir: []const u8, failures: 
         var reference: Image(Rgba) = try .load(io, gpa, ref_path);
         defer reference.deinit(gpa);
 
-        const db = try anim.frame(i).psnr(reference);
+        const db = try anim.frame(i).psnr(io, reference);
         const ok = db >= 35.0;
         if (!ok) failures.* += 1;
         std.debug.print("{s} gif_animated.gif frame {d}: PSNR {d:.2} dB (min 35)\n", .{ if (ok) "ok  " else "FAIL", i, db });
@@ -90,7 +90,7 @@ fn roundtrip(
     var back = try codec.loadFromBytes(Rgba, io, gpa, bytes, .{});
     defer back.deinit(gpa);
 
-    const db = try back.psnr(src);
+    const db = try back.psnr(io, src);
     const ok = db >= threshold;
     if (!ok) failures.* += 1;
     std.debug.print("{s} roundtrip {s}: PSNR {d:.2} dB (min {d:.0})\n", .{ if (ok) "ok  " else "FAIL", label, db, threshold });

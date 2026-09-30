@@ -642,7 +642,7 @@ pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
             const img2 = switch (img2_p.data) {
                 inline else => |*img| if (@TypeOf(img) == @TypeOf(img1)) img else unreachable,
             };
-            return img1.psnr(img2.*) catch |err| {
+            return img1.psnr(python.io, img2.*) catch |err| {
                 python.mapZigError(err, "PSNR");
                 return null;
             };
@@ -772,7 +772,7 @@ pub fn image_mean_pixel_error(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
             const img2 = switch (img2_p.data) {
                 inline else => |*img| if (@TypeOf(img) == @TypeOf(img1)) img else unreachable,
             };
-            return img1.meanPixelError(img2.*) catch |err| {
+            return img1.meanPixelError(python.io, img2.*) catch |err| {
                 python.mapZigError(err, "mean pixel error");
                 return null;
             };

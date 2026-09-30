@@ -10,58 +10,24 @@ const convolution = @import("convolution.zig");
 const color = @import("../color.zig");
 
 const Image = @import("../image.zig").Image;
-const testing = std.testing;
 
-pub fn psnr(comptime T: type, image_a: Image(T), image_b: Image(T)) !f64 {
+/// PSNR in dB over every component; `inf` for identical images. Rows run in bands on `io`.
+pub fn psnr(comptime T: type, io: Io, image_a: Image(T), image_b: Image(T)) !f64 {
     if (image_a.rows != image_b.rows or image_a.cols != image_b.cols) {
         return error.DimensionMismatch;
     }
+    const a = componentView(T, image_a);
+    const count = a.rows * a.cols;
+    if (count == 0) return error.ImageTooSmall;
 
-    var mse: f64 = 0.0;
-    var component_count: usize = 0;
-    for (0..image_a.rows) |r| {
-        const row_offset_a = r * image_a.stride;
-        const row_offset_b = r * image_b.stride;
-        for (0..image_a.cols) |c| {
-            const idx_a = row_offset_a + c;
-            const idx_b = row_offset_b + c;
-            switch (@typeInfo(T)) {
-                .int, .float => {
-                    const diff = meta.as(f64, image_a.data[idx_a]) - meta.as(f64, image_b.data[idx_b]);
-                    mse += diff * diff;
-                    component_count += 1;
-                },
-                .@"struct" => {
-                    inline for (comptime meta.structFields(T)) |field| {
-                        const diff = meta.as(f64, @field(image_a.data[idx_a], field.name)) - meta.as(f64, @field(image_b.data[idx_b], field.name));
-                        mse += diff * diff;
-                        component_count += 1;
-                    }
-                },
-                .array => |arr_info| {
-                    for (0..arr_info.len) |i| {
-                        const diff = meta.as(f64, image_a.data[idx_a][i]) - meta.as(f64, image_b.data[idx_b][i]);
-                        mse += diff * diff;
-                        component_count += 1;
-                    }
-                },
-                else => @compileError("Unsupported pixel type for PSNR: " ++ @typeName(T)),
-            }
-        }
-    }
-
-    if (component_count == 0) return error.ImageTooSmall;
-    mse /= @as(f64, @floatFromInt(component_count));
+    const mse = meta.as(f64, sumRows(io, a, componentView(T, image_b), .squared)) / @as(f64, @floatFromInt(count));
     if (mse == 0.0) return std.math.inf(f64);
-
-    const max_val = componentMaxValue(T);
-
-    return 20.0 * std.math.log10(max_val) - 10.0 * std.math.log10(mse);
+    return 20.0 * std.math.log10(componentMaxValue(T)) - 10.0 * std.math.log10(mse);
 }
 
-const ssim_window = 11;
+pub const ssim_window = 11;
 /// Normalized 1D Gaussian (σ = 1.5); the 11×11 window of Wang et al. is its outer product.
-const ssim_kernel: [ssim_window]f64 = blk: {
+pub const ssim_kernel: [ssim_window]f64 = blk: {
     var k: [ssim_window]f64 = undefined;
     convolution.fillGaussianKernel(f64, &k, 1.5);
     break :blk k;
@@ -73,7 +39,7 @@ inline fn splat(comptime V: type, x: f64) V {
 }
 
 /// SSIM of one window from its weighted moments E[x], E[y], E[x²], E[y²], E[xy].
-inline fn ssimTerm(comptime T: type, comptime V: type, mu_x: V, mu_y: V, mu_xx: V, mu_yy: V, mu_xy: V) V {
+pub inline fn ssimTerm(comptime T: type, comptime V: type, mu_x: V, mu_y: V, mu_xx: V, mu_yy: V, mu_xy: V) V {
     const l = componentMaxValue(T);
     const c1 = splat(V, (0.01 * l) * (0.01 * l));
     const c2 = splat(V, (0.03 * l) * (0.03 * l));
@@ -200,58 +166,118 @@ pub fn ssim(comptime T: type, io: Io, allocator: Allocator, image_a: Image(T), i
     return total / @as(f64, @floatFromInt(out_rows * out_cols));
 }
 
-pub fn meanPixelError(comptime T: type, image_a: Image(T), image_b: Image(T)) !f64 {
+/// Mean absolute component difference over the component range, in [0, 1]. Rows run in
+/// bands on `io`.
+pub fn meanPixelError(comptime T: type, io: Io, image_a: Image(T), image_b: Image(T)) !f64 {
     if (image_a.rows != image_b.rows or image_a.cols != image_b.cols) {
         return error.DimensionMismatch;
     }
+    const a = componentView(T, image_a);
+    const count = a.rows * a.cols;
+    if (count == 0) return 0.0;
 
-    var total_abs: f64 = 0.0;
-    var component_count: usize = 0;
+    const total = meta.as(f64, sumRows(io, a, componentView(T, image_b), .absolute));
+    return total / @as(f64, @floatFromInt(count)) / componentMaxValue(T);
+}
 
-    for (0..image_a.rows) |r| {
-        const row_offset_a = r * image_a.stride;
-        const row_offset_b = r * image_b.stride;
-        for (0..image_a.cols) |c| {
-            const idx_a = row_offset_a + c;
-            const idx_b = row_offset_b + c;
-            switch (@typeInfo(T)) {
-                .int, .float => {
-                    const diff = @abs(meta.as(f64, image_a.data[idx_a]) - meta.as(f64, image_b.data[idx_b]));
-                    total_abs += diff;
-                    component_count += 1;
-                },
-                .@"struct" => {
-                    inline for (comptime meta.structFields(T)) |field| {
-                        const diff = @abs(
-                            meta.as(f64, @field(image_a.data[idx_a], field.name)) -
-                                meta.as(f64, @field(image_b.data[idx_b], field.name)),
-                        );
-                        total_abs += diff;
-                        component_count += 1;
-                    }
-                },
-                .array => |arr_info| {
-                    for (0..arr_info.len) |i| {
-                        const diff = @abs(
-                            meta.as(f64, image_a.data[idx_a][i]) -
-                                meta.as(f64, image_b.data[idx_b][i]),
-                        );
-                        total_abs += diff;
-                        component_count += 1;
-                    }
-                },
-                else => @compileError("Unsupported pixel type for meanPixelError: " ++ @typeName(T)),
+/// `image` as a plane of its components, each pixel's fields or elements as consecutive
+/// columns. Pixels must be made of one component type without padding.
+fn componentView(comptime T: type, image: Image(T)) Image(componentType(T)) {
+    const C = componentType(T);
+    if (C == T) return image;
+    const n = @sizeOf(T) / @sizeOf(C);
+    comptime switch (@typeInfo(T)) {
+        .@"struct" => |info| for (info.field_types) |F| {
+            if (F != C) @compileError("image metrics need one component type, got " ++ @typeName(T));
+        },
+        .array => {},
+        else => @compileError("unsupported pixel type for image metrics: " ++ @typeName(T)),
+    };
+    comptime std.debug.assert(n * @sizeOf(C) == @sizeOf(T));
+    return .{
+        .rows = image.rows,
+        .cols = image.cols * n,
+        .stride = image.stride * n,
+        .data = @as([*]C, @ptrCast(image.data.ptr))[0 .. image.data.len * n],
+    };
+}
+
+const Difference = enum { squared, absolute };
+
+/// Row chunks of `sumRows`: fixed, so float sums do not depend on the band count.
+const sum_chunks = 64;
+
+/// Sum over all components of the squared or absolute difference of `a` and `b`: exact in
+/// u64 for integer components, f64 in a fixed order for floats.
+fn sumRows(io: Io, a: anytype, b: @TypeOf(a), comptime diff: Difference) SumType(@TypeOf(a.data[0])) {
+    const C = @TypeOf(a.data[0]);
+    const Sum = SumType(C);
+    const chunks = @min(sum_chunks, a.rows);
+    var sums: [sum_chunks]Sum = @splat(0);
+
+    const Ctx = struct {
+        a: @TypeOf(a),
+        b: @TypeOf(a),
+        chunks: usize,
+        sums: *[sum_chunks]Sum,
+
+        const lanes = std.simd.suggestVectorLength(C) orelse 1;
+        /// u8 terms fit u32 lanes for `block` vectors; wider components accumulate in u64.
+        const Lane = if (@typeInfo(C) == .float) f64 else if (@bitSizeOf(C) <= 8) u32 else u64;
+        const block = if (Lane == u32) lanes * 65536 else std.math.maxInt(usize);
+
+        fn band(c: *const @This(), _: usize, first: usize, last: usize) void {
+            for (first..last) |k| {
+                var sum: Sum = 0;
+                for (c.a.rows * k / c.chunks..c.a.rows * (k + 1) / c.chunks) |r| {
+                    sum += row(c.a.data[r * c.a.stride ..][0..c.a.cols], c.b.data[r * c.b.stride ..][0..c.a.cols]);
+                }
+                c.sums[k] = sum;
             }
         }
-    }
 
-    if (component_count == 0) return 0.0;
-    const mean_abs = total_abs / @as(f64, @floatFromInt(component_count));
+        fn row(xs: []const C, ys: []const C) Sum {
+            var sum: Sum = 0;
+            var i: usize = 0;
+            while (i + lanes <= xs.len) {
+                const end = i + @min(block, (xs.len - i) / lanes * lanes);
+                var acc: @Vector(lanes, Lane) = @splat(0);
+                while (i < end) : (i += lanes) {
+                    acc += term(@Vector(lanes, Lane), xs[i..][0..lanes].*, ys[i..][0..lanes].*);
+                }
+                sum += @reduce(.Add, acc);
+            }
+            while (i < xs.len) : (i += 1) sum += term(Sum, xs[i], ys[i]);
+            return sum;
+        }
 
-    const max_val = componentMaxValue(T);
-    if (max_val == 0) return 0.0;
+        inline fn term(comptime W: type, x_in: anytype, y_in: anytype) W {
+            const Elem = if (@TypeOf(x_in) == C) C else @Vector(lanes, C);
+            const x: Elem = x_in;
+            const y: Elem = y_in;
+            if (@typeInfo(C) == .int) {
+                // |x - y| on the unsigned components, widened only for the square.
+                const d: W = @max(x, y) - @min(x, y);
+                return if (diff == .squared) d * d else d;
+            }
+            const d = @as(W, x) - @as(W, y);
+            return if (diff == .squared) d * d else @abs(d);
+        }
+    };
+    const ctx: Ctx = .{ .a = a, .b = b, .chunks = chunks, .sums = &sums };
+    parallel.forRowBands(io, chunks, @min(chunks, parallel.bandCount(a.rows, a.cols)), &ctx, Ctx.band);
 
-    return mean_abs / max_val;
+    var total: Sum = 0;
+    for (sums[0..chunks]) |s| total += s;
+    return total;
+}
+
+fn SumType(comptime C: type) type {
+    return switch (@typeInfo(C)) {
+        .int => |info| if (info.signedness == .unsigned) u64 else @compileError("signed components are not supported for image metrics"),
+        .float => f64,
+        else => @compileError("unsupported component type for image metrics: " ++ @typeName(C)),
+    };
 }
 
 inline fn componentType(comptime T: type) type {
@@ -274,7 +300,7 @@ inline fn componentMaxValue(comptime T: type) f64 {
     };
 }
 
-inline fn getPixelScalar(comptime PixelType: type, pixel: PixelType) f64 {
+pub inline fn getPixelScalar(comptime PixelType: type, pixel: PixelType) f64 {
     switch (@typeInfo(PixelType)) {
         .int, .float => return meta.as(f64, pixel),
         .@"struct" => {
@@ -314,113 +340,4 @@ inline fn convertChannelToU8(comptime ChannelType: type, value: ChannelType) u8 
         .float => meta.clamp(u8, value * 255.0),
         else => 0,
     };
-}
-
-test "meanPixelError: RGB example" {
-    const Pixel = struct { r: u8, g: u8, b: u8 };
-
-    var data_a = [_]Pixel{.{ .r = 255, .g = 0, .b = 0 }};
-    var data_b = [_]Pixel{.{ .r = 0, .g = 0, .b = 0 }};
-
-    const image_a: Image(Pixel) = .{
-        .rows = 1,
-        .cols = 1,
-        .stride = 1,
-        .data = &data_a,
-    };
-    const image_b: Image(Pixel) = .{
-        .rows = 1,
-        .cols = 1,
-        .stride = 1,
-        .data = &data_b,
-    };
-
-    const percent = try meanPixelError(Pixel, image_a, image_b);
-    try testing.expectApproxEqAbs(1.0 / 3.0, percent, 1e-9);
-}
-
-test "ssim: rgb scales with luminance" {
-    const Pixel = struct { r: u8, g: u8, b: u8 };
-    const width = 12;
-    const height = 12;
-    var a_data: [width * height]Pixel = @splat(.{ .r = 0, .g = 0, .b = 0 });
-    var b_data: [width * height]Pixel = @splat(.{ .r = 0, .g = 0, .b = 0 });
-
-    for (0..height) |r| {
-        for (0..width) |c| {
-            const idx = r * width + c;
-            a_data[idx] = if ((r + c) % 2 == 0) .{ .r = 255, .g = 0, .b = 0 } else .{ .r = 0, .g = 255, .b = 0 };
-        }
-    }
-
-    const img_a: Image(Pixel) = .initFromSlice(height, width, &a_data);
-    const img_b: Image(Pixel) = .initFromSlice(height, width, &b_data);
-
-    const result = try ssim(Pixel, std.testing.io, testing.allocator, img_a, img_b);
-    try testing.expect(result < 0.99);
-}
-
-test "ssim: matches the direct 11x11 window" {
-    const Pixel = struct { r: u8, g: u8, b: u8 };
-    const rows = 97;
-    const cols = 83;
-    var prng: std.Random.DefaultPrng = .init(7);
-    const random = prng.random();
-    var a_data: [rows * cols]Pixel = undefined;
-    var b_data: [rows * cols]Pixel = undefined;
-    for (&a_data, &b_data) |*a, *b| {
-        a.* = .{ .r = random.int(u8), .g = random.int(u8), .b = random.int(u8) };
-        b.* = .{ .r = a.r / 2 + random.int(u8) / 4, .g = a.g, .b = a.b / 3 };
-    }
-    const img_a: Image(Pixel) = .initFromSlice(rows, cols, &a_data);
-    const img_b: Image(Pixel) = .initFromSlice(rows, cols, &b_data);
-
-    // Direct 2D window.
-    const out_rows = rows - (ssim_window - 1);
-    const out_cols = cols - (ssim_window - 1);
-    var expected: f64 = 0;
-    for (0..out_rows) |r| {
-        for (0..out_cols) |c| {
-            var mu: [5]f64 = @splat(0);
-            for (0..ssim_window) |dy| {
-                for (0..ssim_window) |dx| {
-                    const w = ssim_kernel[dy] * ssim_kernel[dx];
-                    const x = getPixelScalar(Pixel, img_a.at(r + dy, c + dx).*);
-                    const y = getPixelScalar(Pixel, img_b.at(r + dy, c + dx).*);
-                    mu[0] += w * x;
-                    mu[1] += w * y;
-                    mu[2] += w * x * x;
-                    mu[3] += w * y * y;
-                    mu[4] += w * x * y;
-                }
-            }
-            expected += ssimTerm(Pixel, f64, mu[0], mu[1], mu[2], mu[3], mu[4]);
-        }
-    }
-    expected /= out_rows * out_cols;
-
-    const result = try ssim(Pixel, testing.io, testing.allocator, img_a, img_b);
-    try testing.expectApproxEqRel(expected, result, 1e-12);
-}
-
-test "ssim: banded result equals the serial one" {
-    // Large enough for several bands.
-    const rows = 480;
-    const cols = 320;
-    const a_data = try testing.allocator.alloc(u8, rows * cols);
-    defer testing.allocator.free(a_data);
-    const b_data = try testing.allocator.alloc(u8, rows * cols);
-    defer testing.allocator.free(b_data);
-    var prng: std.Random.DefaultPrng = .init(11);
-    const random = prng.random();
-    for (a_data, b_data) |*a, *b| {
-        a.* = random.int(u8);
-        b.* = a.* / 2 + random.int(u8) / 2;
-    }
-    const img_a: Image(u8) = .initFromSlice(rows, cols, a_data);
-    const img_b: Image(u8) = .initFromSlice(rows, cols, b_data);
-
-    const serial = try ssim(u8, parallel.inline_io, testing.allocator, img_a, img_b);
-    const banded = try ssim(u8, testing.io, testing.allocator, img_a, img_b);
-    try testing.expectEqual(serial, banded);
 }

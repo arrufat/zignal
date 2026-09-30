@@ -1129,10 +1129,10 @@ pub fn Image(comptime T: type) type {
         ///
         /// This wrapper is type-agnostic and works with any pixel type:
         /// - Scalars (u8, f32, etc.)
-        /// - Structs (Rgb, Rgba, etc.)
+        /// - Structs of one component type (Rgb, Rgba, etc.)
         /// - Arrays ([3]u8, [4]f32, etc.)
-        pub fn psnr(self: Self, other: Self) !f64 {
-            return metrics.psnr(T, self, other);
+        pub fn psnr(self: Self, io: Io, other: Self) !f64 {
+            return metrics.psnr(T, io, self, other);
         }
 
         /// Calculates the Structural Similarity Index (SSIM) between two images.
@@ -1178,8 +1178,8 @@ pub fn Image(comptime T: type) type {
 
         /// Computes the mean absolute pixel error normalized by the maximum channel value
         /// (e.g. 255 for `u8`). Requires both images to share the same dimensions.
-        pub fn meanPixelError(self: Self, other: Self) !f64 {
-            return metrics.meanPixelError(T, self, other);
+        pub fn meanPixelError(self: Self, io: Io, other: Self) !f64 {
+            return metrics.meanPixelError(T, io, self, other);
         }
 
         pub fn pixels(self: Self) PixelIterator(T) {
@@ -1312,7 +1312,7 @@ test {
     _ = @import("image/tests/display.zig");
     _ = @import("image/tests/interpolation.zig");
     _ = @import("image/tests/resize.zig");
-    _ = @import("image/tests/psnr.zig");
+    _ = @import("image/tests/metrics.zig");
     _ = @import("image/tests/shen_castan.zig");
     _ = @import("image/tests/binary.zig");
     _ = @import("image/hough.zig");
