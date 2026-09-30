@@ -637,51 +637,19 @@ pub fn image_psnr(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
         return null;
     }
 
-    if (self_pimg.rows() != other_pimg.rows() or self_pimg.cols() != other_pimg.cols()) {
-        python.setValueError("Images must have the same dimensions", .{});
-        return null;
-    }
-
     const psnr_value = self_pimg.dispatch(.{other_pimg}, struct {
-        fn apply(img1: anytype, img2_p: *PyImage) f64 {
-            const T = @TypeOf(img1.data[0]);
+        fn apply(img1: anytype, img2_p: *PyImage) ?f64 {
             const img2 = switch (img2_p.data) {
                 inline else => |*img| if (@TypeOf(img) == @TypeOf(img1)) img else unreachable,
             };
-
-            const channels: f64 = comptime if (T == u8) 1.0 else if (T == Rgb) 3.0 else 4.0;
-
-            // Calculate MSE
-            var sum: f64 = 0.0;
-            for (0..img1.rows) |r| {
-                for (0..img1.cols) |col| {
-                    const p1 = img1.at(r, col);
-                    const p2 = img2.at(r, col);
-                    if (T == u8) {
-                        const diff: f64 = @floatFromInt(@as(i32, p1.*) - p2.*);
-                        sum += diff * diff;
-                    } else { // Rgb or Rgba
-                        const dr: f64 = @floatFromInt(@as(i32, p1.r) - p2.r);
-                        const dg: f64 = @floatFromInt(@as(i32, p1.g) - p2.g);
-                        const db: f64 = @floatFromInt(@as(i32, p1.b) - p2.b);
-                        sum += dr * dr + dg * dg + db * db;
-                        if (T == Rgba) {
-                            const da: f64 = @floatFromInt(@as(i32, p1.a) - p2.a);
-                            sum += da * da;
-                        }
-                    }
-                }
-            }
-            const mse = sum / (@as(f64, img1.rows * img1.cols) * channels);
-            if (mse == 0.0) {
-                return std.math.inf(f64);
-            }
-            const max_pixel_value = 255.0;
-            return 20.0 * std.math.log10(max_pixel_value / @sqrt(mse));
+            return img1.psnr(img2.*) catch |err| {
+                python.mapZigError(err, "PSNR");
+                return null;
+            };
         }
     }.apply);
 
-    return python.create(psnr_value);
+    return if (psnr_value) |val| python.create(val) else null;
 }
 
 // ============================================================================
@@ -701,7 +669,7 @@ pub const image_ssim_doc =
     \\float: SSIM value between 0 and 1 (inclusive)
     \\
     \\## Raises
-    \\- `ValueError`: If images have different dimensions or dtypes, or are smaller than 11x11
+    \\- `ValueError`: If images have different dimensions or dtypes, or are smaller than 11×11
     \\
     \\## Examples
     \\```python
@@ -735,11 +703,6 @@ pub fn image_ssim(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
 
     const other_pimg = other.py_image.?;
 
-    if (self.py_image.?.rows() != other_pimg.rows() or self.py_image.?.cols() != other_pimg.cols()) {
-        python.setValueError("Images must have the same dimensions", .{});
-        return null;
-    }
-
     const ssim_value = self.py_image.?.dispatch(.{other_pimg}, struct {
         fn apply(img1: anytype, img2_p: *PyImage) ?f64 {
             const img2 = switch (img2_p.data) {
@@ -747,7 +710,7 @@ pub fn image_ssim(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject
             };
 
             return img1.ssim(python.io, allocator, img2.*) catch |err| {
-                python.mapZigError(err, "SSIM (images must be at least 11x11)");
+                python.mapZigError(err, "SSIM");
                 return null;
             };
         }
@@ -804,22 +767,13 @@ pub fn image_mean_pixel_error(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: 
 
     const other_pimg = other.py_image.?;
 
-    if (self.py_image.?.rows() != other_pimg.rows() or self.py_image.?.cols() != other_pimg.cols()) {
-        python.setValueError("Images must have the same dimensions", .{});
-        return null;
-    }
-
     const error_value = self.py_image.?.dispatch(.{other_pimg}, struct {
         fn apply(img1: anytype, img2_p: *PyImage) ?f64 {
             const img2 = switch (img2_p.data) {
                 inline else => |*img| if (@TypeOf(img) == @TypeOf(img1)) img else unreachable,
             };
             return img1.meanPixelError(img2.*) catch |err| {
-                if (err == error.DimensionMismatch) {
-                    python.setValueError("Images must have the same dimensions", .{});
-                } else {
-                    python.setZigError(err);
-                }
+                python.mapZigError(err, "mean pixel error");
                 return null;
             };
         }

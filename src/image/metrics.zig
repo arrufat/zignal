@@ -6,6 +6,7 @@ const Io = std.Io;
 
 const meta = @import("../meta.zig");
 const parallel = @import("../parallel.zig");
+const convolution = @import("convolution.zig");
 const color = @import("../color.zig");
 
 const Image = @import("../image.zig").Image;
@@ -62,13 +63,7 @@ const ssim_window = 11;
 /// Normalized 1D Gaussian (σ = 1.5); the 11×11 window of Wang et al. is its outer product.
 const ssim_kernel: [ssim_window]f64 = blk: {
     var k: [ssim_window]f64 = undefined;
-    var sum: f64 = 0;
-    for (&k, 0..) |*w, i| {
-        const x: f64 = @as(f64, @floatFromInt(i)) - ssim_window / 2;
-        w.* = @exp(-x * x / (2 * 1.5 * 1.5));
-        sum += w.*;
-    }
-    for (&k) |*w| w.* /= sum;
+    convolution.fillGaussianKernel(f64, &k, 1.5);
     break :blk k;
 };
 
