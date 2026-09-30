@@ -55,15 +55,7 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
 
             var reader = file.reader(io, &read_buffer);
             const image_format = zignal.image.Format.peek(&reader.interface) catch |err| switch (err) {
-                error.UnsupportedImageFormat => {
-                    // Gzipped fonts can't be sniffed, so trust the extension.
-                    const font_format = zignal.font.Format.detectFromBytes(reader.interface.buffered()) orelse
-                        (if (zignal.font.isGzipPath(path)) zignal.font.Format.detectFromExtension(path) else null) orelse
-                        break :blk error.UnsupportedFormat;
-                    std.log.debug("format detected: {s}", .{@tagName(font_format)});
-                    printFontInfo(io, writer, gpa, path, font_format) catch |e| break :blk e;
-                    break :blk {};
-                },
+                error.UnsupportedImageFormat => break :blk printFontInfo(io, writer, gpa, path),
                 else => break :blk err,
             };
             std.log.debug("format detected: {s}", .{@tagName(image_format)});
@@ -196,7 +188,9 @@ pub fn run(io: Io, writer: *Io.Writer, gpa: Allocator, iterator: *std.process.Ar
     if (failed) return error.BatchIncomplete;
 }
 
-fn printFontInfo(io: Io, writer: *Io.Writer, gpa: Allocator, path: []const u8, format: zignal.font.Format) !void {
+fn printFontInfo(io: Io, writer: *Io.Writer, gpa: Allocator, path: []const u8) !void {
+    const format = try zignal.font.Format.detectFromPath(io, path) orelse return error.UnsupportedFormat;
+    std.log.debug("format detected: {s}", .{@tagName(format)});
     var font: zignal.Font = try .load(io, gpa, path);
     defer font.deinit(gpa);
 
