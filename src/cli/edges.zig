@@ -44,11 +44,7 @@ pub const Args = struct {
 
 pub const description = "Perform edge detection on an image using Sobel, Canny, or Shen-Castan algorithms.";
 
-pub const help = args.generateHelp(
-    Args,
-    "zignal edges <image> [options]",
-    description,
-);
+pub const usage = "zignal edges <image> [options]";
 
 const Algo = enum {
     sobel,
@@ -56,18 +52,10 @@ const Algo = enum {
     shen_castan,
 };
 
-pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
-    const parsed = try args.parse(Args, gpa, iterator);
-    defer parsed.deinit(gpa);
-
-    if (parsed.help or parsed.positionals.len == 0) {
-        try args.printHelp(writer, help);
-        return;
-    }
-
-    const target = if (parsed.options.output) |out| try common.resolveOutputTarget(io, out, parsed.positionals.len > 1) else null;
-    const display_format = display.displayFormatFor(parsed.options, target);
-    try display.processInputs(u8, io, gpa, writer, parsed.positionals, target, display_format, parsed.options, applyGray);
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, options: Args, inputs: []const []const u8) !void {
+    const target = if (options.output) |out| try common.resolveOutputTarget(io, out, inputs.len > 1) else null;
+    const display_format = display.displayFormatFor(options, target);
+    try display.processInputs(u8, io, gpa, writer, inputs, target, display_format, options, applyGray);
 }
 
 /// Run the selected edge detector on a grayscale image, returning a freshly allocated

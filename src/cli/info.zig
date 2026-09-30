@@ -15,7 +15,7 @@ const webp = zignal.webp;
 const args = @import("args.zig");
 const common = @import("common.zig");
 
-const Args = struct {
+pub const Args = struct {
     stats: bool = false,
 
     pub const meta = .{
@@ -25,34 +25,22 @@ const Args = struct {
 
 pub const description = "Display detailed information about one or more image or font files.";
 
-pub const help = args.generateHelp(
-    Args,
-    "zignal info [options] <file1> <file2> ...",
-    description,
-);
+pub const usage = "zignal info [options] <file1> <file2> ...";
 
-pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
-    const parsed = try args.parse(Args, gpa, iterator);
-    defer parsed.deinit(gpa);
-
-    if (parsed.help or parsed.positionals.len == 0) {
-        try args.printHelp(writer, help);
-        return;
-    }
-
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, options: Args, inputs: []const []const u8) !void {
     var failed = false;
 
-    for (parsed.positionals) |path| {
-        if (parsed.positionals.len > 1) {
+    for (inputs) |path| {
+        if (inputs.len > 1) {
             try writer.print("File: {s}\n", .{path});
         }
 
-        printInfo(io, gpa, writer, path, parsed.options.stats) catch |err| {
+        printInfo(io, gpa, writer, path, options.stats) catch |err| {
             std.log.err("failed to get info for '{s}': {t}", .{ path, err });
             failed = true;
         };
 
-        if (parsed.positionals.len > 1) {
+        if (inputs.len > 1) {
             try writer.writeAll("\n");
         }
     }

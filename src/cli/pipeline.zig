@@ -34,7 +34,7 @@ const Recipe = struct {
 
 /// CLI-level flags for the `pipeline` command itself. `--output` overrides the
 /// recipe's `.output`; the display flags mirror the other commands.
-const Args = struct {
+pub const Args = struct {
     output: ?[]const u8 = null,
     display: bool = false,
     width: ?u32 = null,
@@ -69,23 +69,11 @@ pub const description =
     \\  }
 ;
 
-pub const help = args.generateHelp(
-    Args,
-    "zignal pipeline <recipe.zon> [images...] [options]",
-    description,
-);
+pub const usage = "zignal pipeline <recipe.zon> [images...] [options]";
 
-pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
-    const parsed = try args.parse(Args, gpa, iterator);
-    defer parsed.deinit(gpa);
-
-    if (parsed.help or parsed.positionals.len == 0) {
-        try args.printHelp(writer, help);
-        return;
-    }
-
-    const recipe_path = parsed.positionals[0];
-    const input_overrides = parsed.positionals[1..];
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, options: Args, positionals: []const []const u8) !void {
+    const recipe_path = positionals[0];
+    const input_overrides = positionals[1..];
 
     // The recipe and every string it references live in this arena for the
     // duration of processing.
@@ -127,9 +115,9 @@ pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Ar
     };
 
     // Output: CLI --output wins, otherwise the recipe's `.output`.
-    const output_arg = parsed.options.output orelse recipe.output;
+    const output_arg = options.output orelse recipe.output;
     const target = if (output_arg) |out| try common.resolveOutputTarget(io, out, inputs.len > 1) else null;
-    const display_format = display.displayFormatFor(parsed.options, target);
+    const display_format = display.displayFormatFor(options, target);
     try display.processInputs(zignal.Rgba(u8), io, gpa, writer, inputs, target, display_format, recipe.steps, applySteps);
 }
 

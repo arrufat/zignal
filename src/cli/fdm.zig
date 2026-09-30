@@ -10,7 +10,7 @@ const args = @import("args.zig");
 const common = @import("common.zig");
 const display = @import("display.zig");
 
-const Args = struct {
+pub const Args = struct {
     display: bool = false,
     width: ?u32 = null,
     height: ?u32 = null,
@@ -26,31 +26,16 @@ const Args = struct {
 
 pub const description = "Apply Feature Distribution Matching (style transfer) from target to source image.\nIf output is omitted, the result is displayed in the terminal.";
 
-pub const help = args.generateHelp(
-    Args,
-    "zignal fdm <source> <target> [output] [options]",
-    description,
-);
+pub const usage = "zignal fdm <source> <target> [output] [options]";
 
-pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
-    const parsed = try args.parse(Args, gpa, iterator);
-    defer parsed.deinit(gpa);
+pub const positionals: args.Positionals = .{ .min = 2, .max = 3 };
 
-    if (parsed.help) {
-        try args.printHelp(writer, help);
-        return;
-    }
-    if (parsed.positionals.len < 2 or parsed.positionals.len > 3) {
-        std.log.err("expected a source image, a target image and an optional output path.", .{});
-        try args.printHelp(writer, help);
-        return error.InvalidArguments;
-    }
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, options: Args, inputs: []const []const u8) !void {
+    const source_path = inputs[0];
+    const target_path = inputs[1];
+    const output_path = if (inputs.len == 3) inputs[2] else null;
 
-    const source_path = parsed.positionals[0];
-    const target_path = parsed.positionals[1];
-    const output_path = if (parsed.positionals.len == 3) parsed.positionals[2] else null;
-
-    const should_display = parsed.options.display or output_path == null;
+    const should_display = options.display or output_path == null;
 
     const Pixel = zignal.Rgb(u8);
 
@@ -91,12 +76,12 @@ pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Ar
             io,
             gpa,
             &images,
-            parsed.options.width,
-            parsed.options.height,
+            options.width,
+            options.height,
         );
         defer canvas.deinit(gpa);
 
-        const format = display.resolveDisplayFormat(parsed.options.protocol, null, null);
+        const format = display.resolveDisplayFormat(options.protocol, null, null);
         try display.displayCanvas(io, writer, &canvas, format);
     }
 }

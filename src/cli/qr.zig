@@ -10,7 +10,7 @@ const qrcode = zignal.qrcode;
 const args = @import("args.zig");
 const common = @import("common.zig");
 
-const Args = struct {
+pub const Args = struct {
     ec_level: ?[]const u8 = null,
     symbol_version: ?u8 = null,
     module_size: ?u32 = null,
@@ -28,25 +28,13 @@ const Args = struct {
 
 pub const description = "Encode text as a QR code or decode QR codes from images.";
 
-pub const help = args.generateHelp(
-    Args,
-    "zignal qr encode [options] <text>\n       zignal qr decode <image> [image...]",
-    description,
-);
+pub const usage = "zignal qr encode [options] <text>\n       zignal qr decode <image> [image...]";
 
-pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
-    const parsed = try args.parse(Args, gpa, iterator);
-    defer parsed.deinit(gpa);
-
-    if (parsed.help or parsed.positionals.len == 0) {
-        try args.printHelp(writer, help);
-        return;
-    }
-
-    const subcommand = parsed.positionals[0];
-    const rest = parsed.positionals[1..];
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, options: Args, inputs: []const []const u8) !void {
+    const subcommand = inputs[0];
+    const rest = inputs[1..];
     if (std.mem.eql(u8, subcommand, "encode")) {
-        try encode(io, gpa, writer, rest, parsed.options);
+        try encode(io, gpa, writer, rest, options);
     } else if (std.mem.eql(u8, subcommand, "decode")) {
         try decode(io, gpa, writer, rest);
     } else {
@@ -103,15 +91,15 @@ fn decode(io: Io, gpa: Allocator, writer: *Io.Writer, positionals: []const []con
         return error.InvalidArguments;
     }
     const is_batch = positionals.len > 1;
-    var failures: usize = 0;
+    var failed = false;
     for (positionals) |path| {
         decodeImage(io, gpa, writer, path, is_batch) catch |err| {
             std.log.err("failed to decode '{s}': {t}", .{ path, err });
-            failures += 1;
+            failed = true;
         };
     }
     try writer.flush();
-    if (failures > 0) return error.DecodeFailed;
+    if (failed) return error.BatchIncomplete;
 }
 
 fn decodeImage(io: Io, gpa: Allocator, writer: *Io.Writer, path: []const u8, is_batch: bool) !void {

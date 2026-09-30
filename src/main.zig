@@ -67,8 +67,8 @@ pub const Cli = struct {
         const cmds = comptime blk: {
             var found: []const Command = &.{};
             for (@typeInfo(root).@"struct".decl_names) |decl| {
-                if (getCommandModule(decl)) |val| {
-                    found = found ++ .{Command{ .name = decl, .run = val.run, .description = val.description, .help = val.help }};
+                if (getCommandModule(decl)) |M| {
+                    found = found ++ .{Command{ .name = decl, .run = runner(M), .description = M.description, .help = helpText(M) }};
                 }
             }
 
@@ -88,11 +88,41 @@ pub const Cli = struct {
         const val = @field(root, decl);
         return if (@TypeOf(val) == type and
             @hasDecl(val, "run") and
-            @hasDecl(val, "description") and
-            @hasDecl(val, "help"))
+            @hasDecl(val, "Args") and
+            @hasDecl(val, "usage") and
+            @hasDecl(val, "description"))
             val
         else
             null;
+    }
+
+    fn helpText(comptime M: type) []const u8 {
+        return comptime cli_args.generateHelp(M.Args, M.usage, M.description);
+    }
+
+    /// Parses `M.Args`, handles `--help` and the positional count, then runs `M`.
+    fn runner(comptime M: type) *const fn (Io, Allocator, *Io.Writer, *std.process.Args.Iterator) anyerror!void {
+        return struct {
+            fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) anyerror!void {
+                const parsed = try cli_args.parse(M.Args, gpa, iterator);
+                defer parsed.deinit(gpa);
+                if (parsed.help) return cli_args.printHelp(writer, helpText(M));
+
+                const range: cli_args.Positionals = if (@hasDecl(M, "positionals")) M.positionals else .default;
+                const n = parsed.positionals.len;
+                if (!range.contains(n)) {
+                    if (range.max) |max| {
+                        if (max == range.min)
+                            std.log.err("expected {d} argument(s), got {d}", .{ max, n })
+                        else
+                            std.log.err("expected {d} to {d} arguments, got {d}", .{ range.min, max, n });
+                    } else std.log.err("expected at least {d} argument(s), got {d}", .{ range.min, n });
+                    try cli_args.printHelp(writer, helpText(M));
+                    return error.InvalidArguments;
+                }
+                return M.run(io, gpa, writer, parsed.options, parsed.positionals);
+            }
+        }.run;
     }
 
     pub fn run(
@@ -116,9 +146,8 @@ pub const Cli = struct {
         if (arg) |cmd_name| {
             if (self.getCommand(cmd_name)) |cmd| {
                 cmd.run(io, allocator, stdout, args) catch |err| {
-                    // BatchIncomplete means individual items already reported their
-                    // own errors; just propagate a non-zero exit without a summary.
-                    if (err != error.BatchIncomplete) {
+                    // These were already reported where they happened.
+                    if (err != error.BatchIncomplete and err != error.InvalidArguments) {
                         std.log.err("{s} command failed: {t}", .{ cmd_name, err });
                     }
                     stdout.flush() catch {};

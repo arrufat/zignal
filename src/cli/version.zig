@@ -8,25 +8,15 @@ const zignal = @import("zignal");
 
 const args = @import("args.zig");
 
-const Args = struct {};
+pub const Args = struct {};
 
 pub const description = "Display version information.";
 
-pub const help = args.generateHelp(
-    Args,
-    "zignal version",
-    description,
-);
+pub const usage = "zignal version";
 
-pub fn run(_: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
-    const parsed = try args.parse(Args, gpa, iterator);
-    defer parsed.deinit(gpa);
+pub const positionals: args.Positionals = .{ .min = 0, .max = 0 };
 
-    if (parsed.help) {
-        try args.printHelp(writer, help);
-        return;
-    }
-
+pub fn run(_: Io, _: Allocator, writer: *Io.Writer, _: Args, _: []const []const u8) !void {
     std.log.debug("printing version info...", .{});
     try writer.print("{s}\n", .{zignal.version});
     try writer.flush();

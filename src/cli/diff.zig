@@ -10,7 +10,7 @@ const args = @import("args.zig");
 const common = @import("common.zig");
 const display = @import("display.zig");
 
-const Args = struct {
+pub const Args = struct {
     output: ?[]const u8 = null,
     scale: ?f32 = null,
     threshold: ?u8 = null,
@@ -34,31 +34,15 @@ const Args = struct {
 
 pub const description = "Compute the visual difference between two images.";
 
-pub const help = args.generateHelp(
-    Args,
-    "zignal diff <image1> <image2> [options]",
-    description,
-);
+pub const usage = "zignal diff <image1> <image2> [options]";
 
-pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
-    const parsed = try args.parse(Args, gpa, iterator);
-    defer parsed.deinit(gpa);
+pub const positionals: args.Positionals = .{ .min = 2, .max = 2 };
 
-    if (parsed.help) {
-        try args.printHelp(writer, help);
-        return;
-    }
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, options: Args, inputs: []const []const u8) !void {
+    const path1 = inputs[0];
+    const path2 = inputs[1];
 
-    if (parsed.positionals.len != 2) {
-        std.log.err("expected exactly two input images.", .{});
-        try args.printHelp(writer, help);
-        return error.InvalidArguments;
-    }
-
-    const path1 = parsed.positionals[0];
-    const path2 = parsed.positionals[1];
-
-    const should_display = parsed.options.display or parsed.options.output == null;
+    const should_display = options.display or options.output == null;
 
     std.log.debug("loading first image: {s}", .{path1});
     var img1 = zignal.Image(zignal.Rgba(u8)).load(io, gpa, path1) catch |err| {
@@ -81,7 +65,7 @@ pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Ar
         return error.DimensionMismatch;
     }
 
-    const threshold = parsed.options.threshold orelse 0;
+    const threshold = options.threshold orelse 0;
 
     var diff_img = try zignal.Image(zignal.Rgba(u8)).init(gpa, img1.rows, img1.cols);
     defer diff_img.deinit(gpa);
@@ -89,8 +73,8 @@ pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Ar
     const timer = common.Timer.begin(io);
     const result = try img1.diff(img2, diff_img, .{
         .threshold = threshold,
-        .scale = parsed.options.scale orelse 1.0,
-        .binary = parsed.options.binary,
+        .scale = options.scale orelse 1.0,
+        .binary = options.binary,
         .force_opaque = true,
     });
     timer.logElapsed("diff");
@@ -100,7 +84,7 @@ pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Ar
     std.log.info("max difference found: {d}", .{@as(u32, @trunc(result.stats.max()))});
     std.log.info("pixels differing > {d}: {d}", .{ threshold, result.diff_count });
 
-    if (parsed.options.output) |output_path| {
+    if (options.output) |output_path| {
         std.log.info("saving difference image to '{s}'...", .{output_path});
         try diff_img.save(io, gpa, output_path);
     }
@@ -113,12 +97,12 @@ pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Ar
             io,
             gpa,
             &images,
-            parsed.options.width,
-            parsed.options.height,
+            options.width,
+            options.height,
         );
         defer canvas.deinit(gpa);
 
-        const format = display.resolveDisplayFormat(parsed.options.protocol, null, null);
+        const format = display.resolveDisplayFormat(options.protocol, null, null);
         try display.displayCanvas(io, writer, &canvas, format);
     }
 }
