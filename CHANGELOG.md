@@ -24,6 +24,9 @@
 - **`ImageFormat.detectFromPath` is removed**: `Image.load` reads the file once, and `detectFromBytes` on the first `ImageFormat.signature_len` bytes replaces it. ([#489](https://github.com/arrufat/zignal/pull/489))
 - **Codecs stream through `std.Io.Reader`/`Writer`**: `Image.read`/`write` back `load`/`save`, per-codec `load`/`save` are removed, `DecodeLimits` fields are `std.Io.Limit`, and GIF, BMP and PNG drop their byte caps. ([#494](https://github.com/arrufat/zignal/pull/494))
 - **`bmp.DibHeaderKind` is renamed `DibHeader`**, and `Header.dib_kind` is `dib_header`. ([#494](https://github.com/arrufat/zignal/pull/494))
+- **Namespaced public API**: core types stay flat (`Image`, `Animation`, `Canvas`, colors, `Point`, `Rectangle`, `Matrix`, `SMatrix`, `Font`), while options, enums and algorithms move under `image`, `canvas`, `geometry`, `matrix`, `font`, `features`, `optimization`, `stats` and `perlin` without redundant prefixes (`ImageFormat` is `image.Format`, `MatrixError` is `matrix.Error`, `AnimatedImage` is `Animation`). Python is unchanged. ([#497](https://github.com/arrufat/zignal/pull/497))
+- **`image.Any`** replaces the per-codec native unions: codecs return it from `toAnyImage`, `jxl.decode`/`webp.decode` are `loadAnyFromBytes`, and `image.Any.load`/`read`/`loadFromBytes` keep the file's pixel type. ([#497](https://github.com/arrufat/zignal/pull/497))
+- **Image metrics take `io`**: `Image.ssim(io, allocator, other)`, `Image.psnr(io, other)` and `Image.meanPixelError(io, other)`, and struct pixels must have one component type. ([#500](https://github.com/arrufat/zignal/pull/500), [#501](https://github.com/arrufat/zignal/pull/501))
 - **Minimum Zig version is 0.17.0-dev.2163.**
 
 ### Features
@@ -51,6 +54,7 @@
 - **CLI**: a `pipeline` command runs a `.zon` recipe, options accept short aliases, and batch failures set the exit code. ([#379](https://github.com/arrufat/zignal/pull/379))
 - **Python releases the GIL** around every image filter binding. ([#446](https://github.com/arrufat/zignal/pull/446))
 - **Examples**: codec playground, QR camera scanner, gray-world white balance and a live global optimizer preview. ([#384](https://github.com/arrufat/zignal/pull/384))
+- **CLI `info` reads fonts**: BDF, PCF, TrueType, OpenType and collections, gzipped or not.
 
 ### Performance
 - **JPEG decoding** streams MCU rows through vectorized paths and decodes restart segments in parallel, at or below libjpeg-turbo. ([#451](https://github.com/arrufat/zignal/pull/451)-[#456](https://github.com/arrufat/zignal/pull/456), [#465](https://github.com/arrufat/zignal/pull/465))
@@ -58,6 +62,7 @@
 - **PNG** deflates rows in parallel chunks and defilters with a branchless Paeth and SIMD rows (4K RGB encode: 344 to 77 ms). ([#383](https://github.com/arrufat/zignal/pull/383), [#469](https://github.com/arrufat/zignal/pull/469))
 - **Streaming codec I/O**: files are read and written through fixed buffers, so BMP load and save need no memory beyond the image and a 4K RGBA PNG save peaks at 89 MB instead of 124. ([#494](https://github.com/arrufat/zignal/pull/494))
 - **GIF still loads** decode only the first frame (60-frame 960x540: 102 to 3 ms). ([#495](https://github.com/arrufat/zignal/pull/495))
+- **Image metrics**: SSIM runs separable vectorized taps banded on the pool (4K Rgb: 2536 to 82 ms serial, 20 ms on 8 cores), and PSNR and mean pixel error vectorize with exact integer sums (4K Rgba: 18.7 to 2.0 ms serial, 0.8 ms on 8 cores). ([#500](https://github.com/arrufat/zignal/pull/500), [#501](https://github.com/arrufat/zignal/pull/501))
 - **Filters on the pool**: convolution, the blurs, Sobel and Canny run in row bands, 2.6-4.9x on 8 cores. ([#437](https://github.com/arrufat/zignal/pull/437), [#440](https://github.com/arrufat/zignal/pull/440), [#441](https://github.com/arrufat/zignal/pull/441))
 - **Convolution kernels** use i32 accumulators, a fused separable ring path and folded symmetric taps, and median blur memoizes its fine row. ([#391](https://github.com/arrufat/zignal/pull/391)-[#395](https://github.com/arrufat/zignal/pull/395), [#429](https://github.com/arrufat/zignal/pull/429))
 - **Interleaved struct pixels**: separable convolution, the recursive Gaussian and resize run over `Rgb`/`Rgba` bytes directly, up to 2x faster. ([#460](https://github.com/arrufat/zignal/pull/460), [#461](https://github.com/arrufat/zignal/pull/461), [#463](https://github.com/arrufat/zignal/pull/463))
@@ -76,6 +81,7 @@
 - **Input hardening**: canvas, codecs, fonts and the CLI reject NaN, off-image and oversized inputs instead of panicking. ([#408](https://github.com/arrufat/zignal/pull/408), [#432](https://github.com/arrufat/zignal/pull/432))
 - **Terminal detection**: single round-trip sixel probing, upscaling within `max_dim` and `EndOfStream` as a timeout. ([#351](https://github.com/arrufat/zignal/pull/351), [#397](https://github.com/arrufat/zignal/pull/397))
 - **Single-threaded builds** skip the sixel palette cache spinlock.
+- **Python metrics** call the Zig `psnr`, `ssim` and `mean_pixel_error` and raise `ValueError` from their errors. ([#500](https://github.com/arrufat/zignal/pull/500))
 
 ### Fixes
 - **Antialiased fills** no longer inherit coverage from a previous fill. ([#428](https://github.com/arrufat/zignal/pull/428))
@@ -93,6 +99,9 @@
 - **Tests run as one binary** rooted at `src/root.zig`, cutting the uncached suite from 3 min to 31 s. ([#458](https://github.com/arrufat/zignal/pull/458))
 - **Codecs live in `src/codecs/`**, and `parallel.zig` moved to `src/`. ([#352](https://github.com/arrufat/zignal/pull/352), [#448](https://github.com/arrufat/zignal/pull/448))
 - **CI** publishes to TestPyPI only on releases and manual runs. ([#413](https://github.com/arrufat/zignal/pull/413))
+- **Test filters**: `zig build test -Dtest-filter=<text>` selects tests by qualified name, and tests are named `"Subject: behavior"`. ([#499](https://github.com/arrufat/zignal/pull/499))
+- **`dynlib.zig`** moved out of the codecs to `src/`, and `Library` takes the error it reports. ([#498](https://github.com/arrufat/zignal/pull/498))
+- **CLI subcommands** share one load/transform/save loop and a single help-text builder. ([#500](https://github.com/arrufat/zignal/pull/500))
 
 ## [0.10.0] - 2026-04-15
 
