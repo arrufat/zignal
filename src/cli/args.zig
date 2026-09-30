@@ -24,6 +24,18 @@ pub const OptionConfig = struct {
     short: ?u8 = null,
 };
 
+/// How many positional arguments a command takes; a null `max` is unbounded.
+pub const Positionals = struct {
+    min: usize = 1,
+    max: ?usize = null,
+
+    pub const default: Positionals = .{};
+
+    pub fn contains(self: Positionals, n: usize) bool {
+        return n >= self.min and n <= self.max orelse n;
+    }
+};
+
 /// The result of parsing command-line arguments.
 pub fn ParseResult(comptime T: type) type {
     return struct {
@@ -233,6 +245,7 @@ fn flagString(comptime T: type, comptime field: anytype) []const u8 {
 /// Generates a formatted help message at compile-time based on the struct T.
 /// T can optionally contain a `meta` declaration of type `struct { [field_name]: OptionConfig }`.
 pub fn generateHelp(comptime T: type, comptime usage_line: []const u8, comptime description: []const u8) []const u8 {
+    @setEvalBranchQuota(10_000);
     var text: []const u8 = "Usage: " ++ usage_line ++ "\n\n" ++ description ++ "\n\n";
 
     const fields = comptime meta.structFields(T);

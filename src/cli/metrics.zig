@@ -9,33 +9,17 @@ const zignal = @import("zignal");
 const args = @import("args.zig");
 const common = @import("common.zig");
 
-const Args = struct {};
+pub const Args = struct {};
 
-pub const description = "Compute quality metrics (PSNR, SSIM, Mean Error) between a reference and target images.";
+pub const description = "Compute quality metrics (PSNR, SSIM, Mean Error) between a reference and target images." ++ "\n\nThe first image provided is used as the reference, and all subsequent images are compared against it.";
 
-pub const help = args.generateHelp(
-    Args,
-    "zignal metrics <reference_image> <target_images...>",
-    description ++ "\n\nThe first image provided is used as the reference, and all subsequent images are compared against it.",
-);
+pub const usage = "zignal metrics <reference_image> <target_images...>";
 
-pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
-    const parsed = try args.parse(Args, gpa, iterator);
-    defer parsed.deinit(gpa);
+pub const positionals: args.Positionals = .{ .min = 2 };
 
-    if (parsed.help) {
-        try args.printHelp(writer, help);
-        return;
-    }
-
-    if (parsed.positionals.len < 2) {
-        std.log.err("not enough arguments, need at least two images (reference and target).", .{});
-        try args.printHelp(writer, help);
-        return error.InvalidArguments;
-    }
-
-    const ref_path = parsed.positionals[0];
-    const targets = parsed.positionals[1..];
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, _: Args, inputs: []const []const u8) !void {
+    const ref_path = inputs[0];
+    const targets = inputs[1..];
 
     std.log.debug("loading reference image: {s}", .{ref_path});
     var ref_img = try zignal.Image(zignal.Rgba(u8)).load(io, gpa, ref_path);

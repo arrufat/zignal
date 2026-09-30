@@ -39,30 +39,18 @@ pub const Args = struct {
 
 pub const description = "Resize an image using various interpolation methods.";
 
-pub const help = args.generateHelp(
-    Args,
-    "zignal resize <image> --output <path> [options]",
-    description,
-);
+pub const usage = "zignal resize <image> --output <path> [options]";
 
-pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
-    const parsed = try args.parse(Args, gpa, iterator);
-    defer parsed.deinit(gpa);
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, options: Args, inputs: []const []const u8) !void {
+    try options.validate();
 
-    if (parsed.help or parsed.positionals.len == 0) {
-        try args.printHelp(writer, help);
-        return;
-    }
-
-    try parsed.options.validate();
-
-    const output_arg = parsed.options.output orelse {
+    const output_arg = options.output orelse {
         std.log.err("missing mandatory option: --output <file_or_dir>", .{});
         return error.InvalidArguments;
     };
 
-    const target = try common.resolveOutputTarget(io, output_arg, parsed.positionals.len > 1);
-    try display.processInputs(zignal.Rgba(u8), io, gpa, writer, parsed.positionals, target, null, parsed.options, apply);
+    const target = try common.resolveOutputTarget(io, output_arg, inputs.len > 1);
+    try display.processInputs(zignal.Rgba(u8), io, gpa, writer, inputs, target, null, options, apply);
 }
 
 /// Resize `img` according to `options` (already validated), returning a freshly allocated
