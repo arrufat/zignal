@@ -97,7 +97,10 @@ pub fn MotionBlurOps(comptime T: type) type {
 
         /// Applies linear motion blur by averaging pixels along a line at the given `angle`
         /// (radians, 0 = horizontal) and `distance` (pixels).
-        pub fn linear(image: Image(T), io: Io, out: Image(T), allocator: Allocator, angle: f32, distance: usize) !void {
+        pub fn linear(image: Image(T), io: Io, out: Image(T), allocator: Allocator, angle: f32, requested_distance: usize) !void {
+            if (!std.math.isFinite(angle)) return error.InvalidParameter;
+            // A trail longer than the image covers nothing more.
+            const distance = @min(requested_distance, @max(image.rows, image.cols));
             if (distance == 0) {
                 image.copy(out);
                 return;
@@ -259,6 +262,8 @@ pub fn MotionBlurOps(comptime T: type) type {
             strength: f32,
             blur_type: RadialType,
         ) !void {
+            if (!std.math.isFinite(center_x) or !std.math.isFinite(center_y)) return error.InvalidParameter;
+            if (!(strength >= 0 and strength <= 1)) return error.InvalidParameter;
             if (image.rows == 0 or image.cols == 0) return;
             if (strength == 0) {
                 image.copy(out);
@@ -273,13 +278,10 @@ pub fn MotionBlurOps(comptime T: type) type {
             const far_y = @max(cy, @as(f32, @floatFromInt(image.rows - 1)) - cy);
             const max_distance = @max(@sqrt(far_x * far_x + far_y * far_y), std.math.floatEps(f32));
 
-            // Clamp strength to [0, 1]
-            const clamped_strength = @max(0, @min(1, strength));
-
             // Calculate number of samples based on strength
             const base_samples = 8;
             const max_additional_samples = 24;
-            const num_samples: usize = base_samples + @as(usize, @trunc(clamped_strength * @as(f32, @floatFromInt(max_additional_samples))));
+            const num_samples: usize = base_samples + @as(usize, @trunc(strength * @as(f32, @floatFromInt(max_additional_samples))));
 
             switch (@typeInfo(T)) {
                 .int, .float => {
@@ -297,9 +299,9 @@ pub fn MotionBlurOps(comptime T: type) type {
 
                             // Calculate blur amount based on distance from center
                             const blur_amount = if (blur_type == .zoom)
-                                (distance / max_distance) * clamped_strength * 20
+                                (distance / max_distance) * strength * 20
                             else
-                                clamped_strength * 0.5;
+                                strength * 0.5;
 
                             var sum: f32 = 0;
                             var count: usize = 0;
@@ -378,9 +380,9 @@ pub fn MotionBlurOps(comptime T: type) type {
 
                             // Calculate blur amount based on distance from center
                             const blur_amount = if (blur_type == .zoom)
-                                (distance / max_distance) * clamped_strength * 20
+                                (distance / max_distance) * strength * 20
                             else
-                                clamped_strength * 0.5;
+                                strength * 0.5;
 
                             var sums: [fields.len]f32 = @splat(0);
                             var count: usize = 0;

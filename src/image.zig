@@ -998,12 +998,12 @@ pub fn Image(comptime T: type) type {
             if (!self.hasSameShape(out)) {
                 return error.DimensionMismatch;
             }
+            if (!(sigma >= 0) or !std.math.isFinite(sigma)) return error.InvalidSigma;
             // sigma == 0 means no blur; just copy input to output
             if (sigma == 0) {
                 self.copy(out);
                 return;
             }
-            if (sigma < 0) return error.InvalidSigma;
 
             const recursive = switch (options.method) {
                 .fir => false,
