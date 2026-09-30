@@ -111,9 +111,9 @@ pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, options: Args, inputs: []
             cell_w = ref.cols;
             cell_h = ref.rows;
         } else if (cell_h == 0) {
-            cell_h = @round((@as(f32, @floatFromInt(cell_w)) / ref_w_f) * ref_h_f);
+            cell_h = @max(1, @as(u32, @round((@as(f32, @floatFromInt(cell_w)) / ref_w_f) * ref_h_f)));
         } else {
-            cell_w = @round((@as(f32, @floatFromInt(cell_h)) / ref_h_f) * ref_w_f);
+            cell_w = @max(1, @as(u32, @round((@as(f32, @floatFromInt(cell_h)) / ref_h_f) * ref_w_f)));
         }
     }
 
