@@ -50,11 +50,7 @@ pub const Args = struct {
 
 pub const description = "Apply various blur effects to images.";
 
-pub const help = args.generateHelp(
-    Args,
-    "zignal blur <image> [options]",
-    description,
-);
+pub const usage = "zignal blur <image> [options]";
 
 const BlurType = enum {
     box,
@@ -65,18 +61,10 @@ const BlurType = enum {
     motion_spin,
 };
 
-pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
-    const parsed = try args.parse(Args, gpa, iterator);
-    defer parsed.deinit(gpa);
-
-    if (parsed.help or parsed.positionals.len == 0) {
-        try args.printHelp(writer, help);
-        return;
-    }
-
-    const target = if (parsed.options.output) |out| try common.resolveOutputTarget(io, out, parsed.positionals.len > 1) else null;
-    const display_format = display.displayFormatFor(parsed.options, target);
-    try display.processInputs(zignal.Rgba(u8), io, gpa, writer, parsed.positionals, target, display_format, parsed.options, apply);
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, options: Args, inputs: []const []const u8) !void {
+    const target = if (options.output) |out| try common.resolveOutputTarget(io, out, inputs.len > 1) else null;
+    const display_format = display.displayFormatFor(options, target);
+    try display.processInputs(zignal.Rgba(u8), io, gpa, writer, inputs, target, display_format, options, apply);
 }
 
 /// Blur `img` according to `options`, returning a freshly allocated image the

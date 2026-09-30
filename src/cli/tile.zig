@@ -18,7 +18,7 @@ const LayoutMode = enum {
     factors,
 };
 
-const Args = struct {
+pub const Args = struct {
     mode: ?LayoutMode = null,
     rows: ?u32 = null,
     cols: ?u32 = null,
@@ -42,28 +42,16 @@ const Args = struct {
 
 pub const description = "Combine multiple images into a single tiled image.\nIf --output is omitted, the result is displayed in the terminal.";
 
-pub const help = args.generateHelp(
-    Args,
-    "zignal tile <images...> [options]",
-    description,
-);
+pub const usage = "zignal tile <images...> [options]";
 
-pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Args.Iterator) !void {
-    const parsed = try args.parse(Args, gpa, iterator);
-    defer parsed.deinit(gpa);
-
-    if (parsed.help or parsed.positionals.len < 1) {
-        try args.printHelp(writer, help);
-        return;
-    }
-
-    const input_paths = parsed.positionals;
+pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, options: Args, inputs: []const []const u8) !void {
+    const input_paths = inputs;
     const img_count = input_paths.len;
-    const output_path = parsed.options.output;
+    const output_path = options.output;
 
-    const should_display = parsed.options.display or output_path == null;
+    const should_display = options.display or output_path == null;
 
-    const mode = parsed.options.mode orelse .square;
+    const mode = options.mode orelse .square;
 
     const rows: u32, const cols: u32 = switch (mode) {
         .horizontal => .{ 1, @intCast(img_count) },
@@ -74,11 +62,11 @@ pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Ar
         },
         .grid => blk: {
             const missing_msg = "mode 'grid' requires --rows and --cols";
-            const rows = parsed.options.rows orelse {
+            const rows = options.rows orelse {
                 std.log.err(missing_msg, .{});
                 return error.InvalidArguments;
             };
-            const cols = parsed.options.cols orelse {
+            const cols = options.cols orelse {
                 std.log.err(missing_msg, .{});
                 return error.InvalidArguments;
             };
@@ -104,8 +92,8 @@ pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Ar
 
     std.log.info("tiling {d} images into a {d}x{d} grid ({s})...", .{ img_count, cols, rows, @tagName(mode) });
 
-    var cell_w: u32 = parsed.options.width orelse 0;
-    var cell_h: u32 = parsed.options.height orelse 0;
+    var cell_w: u32 = options.width orelse 0;
+    var cell_h: u32 = options.height orelse 0;
     // Caches the first image so we don't load it twice when it doubles as the
     // reference for cell sizing.
     var reference_img: ?zignal.Image(zignal.Rgba(u8)) = null;
@@ -187,7 +175,7 @@ pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, iterator: *std.process.Ar
     }
 
     if (should_display) {
-        const format = display.resolveDisplayFormat(parsed.options.protocol, null, null);
+        const format = display.resolveDisplayFormat(options.protocol, null, null);
         try display.displayCanvas(io, writer, &canvas, format);
     }
 
