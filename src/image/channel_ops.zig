@@ -271,7 +271,8 @@ pub const weight_scale = 1 << weight_shift;
 /// Mirror-resolved source indices and weights for every output position along one axis,
 /// as fixed point for u8 planes (each position sums to exactly `weight_scale`) and as unit
 /// gain floats for f32 planes, so the passes need no per-pixel normalization; the kernel is
-/// evaluated `taps` times per output position instead of `taps²` per pixel.
+/// evaluated `taps` times per output position instead of `taps²` per pixel. Downscales
+/// stretch the kernel by the ratio to anti-alias, so `taps` grows with it.
 pub fn AxisTaps(comptime P: type) type {
     return struct {
         const Self = @This();
@@ -281,26 +282,30 @@ pub fn AxisTaps(comptime P: type) type {
         weights: []Accum(P),
 
         pub fn init(allocator: std.mem.Allocator, src_len: u32, dst_len: u32, method: Interpolation) !Self {
-            const taps = interpolation.kernelTaps(method);
+            const ratio = @as(f32, @floatFromInt(src_len)) / @as(f32, @floatFromInt(dst_len));
+            const scale = @max(1, ratio);
+            const support = @as(f32, @floatFromInt(interpolation.kernelTaps(method) / 2)) * scale;
+            const taps: usize = @ceil(2 * support);
             const indices = try allocator.alloc(u32, @as(usize, dst_len) * taps);
             errdefer allocator.free(indices);
             const weights = try allocator.alloc(Accum(P), @as(usize, dst_len) * taps);
-            const ratio = @as(f32, @floatFromInt(src_len)) / @as(f32, @floatFromInt(dst_len));
+            errdefer allocator.free(weights);
+            const raw = try allocator.alloc(f32, taps);
+            defer allocator.free(raw);
 
             for (0..dst_len) |i| {
                 const center = (@as(f32, @floatFromInt(i)) + 0.5) * ratio - 0.5;
-                const base: isize = @as(isize, @floor(center)) - @as(isize, @intCast(taps / 2 - 1));
-                var raw: [interpolation.max_taps]f32 = undefined;
+                const base: isize = @as(isize, @floor(center - support)) + 1;
                 var sum: f32 = 0;
-                for (0..taps) |t| {
+                for (raw, 0..) |*r, t| {
                     const x = base + @as(isize, @intCast(t));
-                    raw[t] = interpolation.kernelWeight(method, center - @as(f32, @floatFromInt(x)));
-                    sum += raw[t];
+                    r.* = interpolation.kernelWeight(method, (center - @as(f32, @floatFromInt(x))) / scale);
+                    sum += r.*;
                     indices[i * taps + t] = @intCast(resolveIndex(x, @intCast(src_len), .mirror).?);
                 }
-                for (raw[0..taps]) |*r| r.* /= sum;
+                for (raw) |*r| r.* /= sum;
                 const w = weights[i * taps ..][0..taps];
-                if (P == u8) quantizeKernel(w, raw[0..taps], weight_scale) else @memcpy(w, raw[0..taps]);
+                if (P == u8) quantizeKernel(w, raw, weight_scale) else @memcpy(w, raw);
             }
             return .{ .taps = taps, .indices = indices, .weights = weights };
         }
