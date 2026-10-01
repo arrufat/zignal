@@ -179,6 +179,13 @@ pub fn main(init: std.process.Init) !void {
     try benchResize(Rgb, io, gpa, random, filter, 480, 640, 2160, 3840, .bicubic);
     try benchResize(Rgb, io, gpa, random, filter, 480, 640, 2160, 3840, .lanczos);
 
+    // The `Interpolation` doc table: Rgba 1080p up to 4K and down to 540p, every method.
+    for ([_][2]u32{ .{ 2160, 3840 }, .{ 540, 960 } }) |dst| {
+        for ([_]Interpolation{ .nearest, .bilinear, .bicubic, .catmull_rom, .{ .mitchell = .default }, .lanczos }) |method| {
+            try benchResize(Rgba, io, gpa, random, filter, 1080, 1920, dst[0], dst[1], method);
+        }
+    }
+
     try benchRotate(Rgb, io, gpa, random, filter, 1080, 1920, .bilinear);
     try benchRotate(u8, io, gpa, random, filter, 1080, 1920, .bicubic);
     try benchWarp(Rgb, io, gpa, random, filter, 1080, 1920);

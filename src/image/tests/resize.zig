@@ -319,7 +319,7 @@ test "Image.resize: separable u8 matches the float path" {
     for (src_f.data, src.data) |*f, v| f.* = @as(f32, v);
 
     for ([_]Interpolation{ .bilinear, .bicubic, .catmull_rom, .{ .mitchell = .default }, .lanczos }) |method| {
-        for ([_][2]u32{ .{ 61, 47 }, .{ 200, 150 }, .{ 97, 131 } }) |shape| {
+        for ([_][2]u32{ .{ 61, 47 }, .{ 12, 9 }, .{ 200, 150 }, .{ 97, 131 } }) |shape| {
             var out: Image(u8) = try .init(allocator, shape[0], shape[1]);
             defer out.deinit(allocator);
             var out_f: Image(f32) = try .init(allocator, shape[0], shape[1]);
@@ -334,7 +334,7 @@ test "Image.resize: separable u8 matches the float path" {
 }
 
 // f32 planes take the separable float passes; against the per-pixel 2-D kernel the only
-// difference is float summation order.
+// difference is float summation order. Upscales only: downscales widen the kernel.
 test "Image.resize: separable f32 matches the per-pixel kernel" {
     const allocator = std.testing.allocator;
     const interpolation = @import("../interpolation.zig");
@@ -346,7 +346,7 @@ test "Image.resize: separable f32 matches the per-pixel kernel" {
     for (src.data) |*v| v.* = 255 * random.float(f32);
 
     for ([_]Interpolation{ .bilinear, .bicubic, .catmull_rom, .{ .mitchell = .default }, .lanczos }) |method| {
-        for ([_][2]u32{ .{ 61, 47 }, .{ 200, 150 } }) |shape| {
+        for ([_][2]u32{ .{ 200, 150 }, .{ 130, 180 } }) |shape| {
             var out: Image(f32) = try .init(allocator, shape[0], shape[1]);
             defer out.deinit(allocator);
             src.resize(io, allocator, out, method);
@@ -397,10 +397,9 @@ test "Image.resize: interleaved struct matches per-channel planes" {
 }
 
 // Other pixel types gather the taps x taps window through the same tap tables as the planes;
-// against per-pixel `interpolate` (mirror-normalized over the same window) the difference
-// is float summation order, the exact Lanczos kernel against the per-pixel LUT, and integer
-// rounding. Bilinear u16 is checked against the f32 plane instead: `interpolate` quantizes
-// the bilinear fraction to 1/256, which is coarser than a 16-bit sample.
+// on upscales, against per-pixel `interpolate` the difference is float summation order,
+// the exact Lanczos kernel against the per-pixel LUT, and integer rounding. Downscales and
+// bilinear u16 (`interpolate` quantizes its fraction to 1/256) are checked against the f32 plane.
 test "Image.resize: tapped generic matches the per-pixel kernel" {
     const allocator = std.testing.allocator;
     const interpolation = @import("../interpolation.zig");
@@ -417,7 +416,7 @@ test "Image.resize: tapped generic matches the per-pixel kernel" {
             for (src.data) |*px| px.* = if (T == u16) random.int(u16) else .{ .r = 255 * random.float(f32), .g = 255 * random.float(f32), .b = 255 * random.float(f32) };
 
             for (methods) |method| {
-                for ([_][2]u32{ .{ 61, 47 }, .{ 200, 150 } }) |shape| {
+                for ([_][2]u32{ .{ 200, 150 }, .{ 130, 180 } }) |shape| {
                     var out: Image(T) = try .init(allocator, shape[0], shape[1]);
                     defer out.deinit(allocator);
                     src.resize(io, allocator, out, method);
@@ -442,20 +441,57 @@ test "Image.resize: tapped generic matches the per-pixel kernel" {
         }
     }
 
-    // Bilinear u16 against the separable f32 plane of the same samples: within rounding.
     var src: Image(u16) = try .init(allocator, 97, 131);
     defer src.deinit(allocator);
     for (src.data) |*px| px.* = random.int(u16);
     var src_f: Image(f32) = try .init(allocator, src.rows, src.cols);
     defer src_f.deinit(allocator);
     for (src_f.data, src.data) |*f, v| f.* = @as(f32, v);
-    for ([_][2]u32{ .{ 61, 47 }, .{ 200, 150 } }) |shape| {
-        var out: Image(u16) = try .init(allocator, shape[0], shape[1]);
-        defer out.deinit(allocator);
-        var out_f: Image(f32) = try .init(allocator, shape[0], shape[1]);
-        defer out_f.deinit(allocator);
-        src.resize(io, allocator, out, .bilinear);
-        src_f.resize(io, allocator, out_f, .bilinear);
-        for (out.data, out_f.data) |v, f| try std.testing.expect(@abs(@as(f32, v) - f) <= 1);
+    for (methods) |method| {
+        for ([_][2]u32{ .{ 61, 47 }, .{ 12, 9 }, .{ 61, 150 }, .{ 200, 150 } }) |shape| {
+            if (method != .bilinear and shape[0] > src.rows and shape[1] > src.cols) continue;
+            var out: Image(u16) = try .init(allocator, shape[0], shape[1]);
+            defer out.deinit(allocator);
+            var out_f: Image(f32) = try .init(allocator, shape[0], shape[1]);
+            defer out_f.deinit(allocator);
+            src.resize(io, allocator, out, method);
+            src_f.resize(io, allocator, out_f, method);
+            for (out.data, out_f.data) |v, f| try std.testing.expect(@abs(@as(f32, v) - std.math.clamp(f, 0, 65535)) <= 1);
+        }
+    }
+}
+
+// A pattern above the output Nyquist frequency must average out, not alias.
+test "Image.resize: downscales low-pass instead of aliasing" {
+    const allocator = std.testing.allocator;
+    const Rgbf = color.Rgb(f32);
+    const methods = [_]Interpolation{ .bilinear, .bicubic, .catmull_rom, .{ .mitchell = .default }, .lanczos };
+
+    // 0.4 cycles/pixel: above the output Nyquist for any ratio >= 2.
+    var src: Image(u8) = try .init(allocator, 160, 240);
+    defer src.deinit(allocator);
+    for (0..src.rows) |r| {
+        for (0..src.cols) |c| {
+            const phase = 2 * std.math.pi / 2.5;
+            const v = 127.5 + 127.5 * @cos(phase * @as(f32, @floatFromInt(c))) * @cos(phase * @as(f32, @floatFromInt(r)));
+            src.at(r, c).* = @round(v);
+        }
+    }
+    var src_rgb: Image(Rgbf) = try .init(allocator, src.rows, src.cols);
+    defer src_rgb.deinit(allocator);
+    for (src_rgb.data, src.data) |*px, v| px.* = .{ .r = @as(f32, v), .g = @as(f32, v), .b = @as(f32, v) };
+
+    for (methods) |method| {
+        for ([_][2]u32{ .{ 80, 120 }, .{ 40, 60 }, .{ 37, 53 }, .{ 20, 30 } }) |shape| {
+            var out: Image(u8) = try .init(allocator, shape[0], shape[1]);
+            defer out.deinit(allocator);
+            src.resize(io, allocator, out, method);
+            for (out.data) |v| try std.testing.expect(@abs(@as(f32, v) - 127.5) <= 4);
+
+            var out_rgb: Image(Rgbf) = try .init(allocator, shape[0], shape[1]);
+            defer out_rgb.deinit(allocator);
+            src_rgb.resize(io, allocator, out_rgb, method);
+            for (out_rgb.data) |px| try std.testing.expect(@abs(px.r - 127.5) <= 4);
+        }
     }
 }

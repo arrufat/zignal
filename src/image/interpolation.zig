@@ -36,16 +36,18 @@ const parallel = @import("../parallel.zig");
 ///
 /// Speed is the `resize` throughput of a 1920x1080 `Rgba(u8)` image on one core, in output
 /// Mpix/s, upscaling to 3840x2160 / downscaling to 960x540; a pool `io` scales it with the
-/// core count. The three cubic kernels share the 4-tap separable path and differ only in
-/// their weights, so they cost the same.
+/// core count (`zig build run-transform-bench --release=fast -- "Rgba(u8)"` in `examples/`).
+/// The three cubic kernels share the 4-tap separable path and differ only in their weights,
+/// so they cost the same. Downscales stretch the kernel by the ratio to anti-alias, doubling
+/// the taps at 2×.
 /// | Method      | Quality | Mpix/s up / down | Best Use Case       | Overshoot |
 /// |-------------|---------|------------------|---------------------|-----------|
-/// | Nearest     | ★☆☆☆☆   | 2300 / 1200      | Pixel art, masks    | No        |
-/// | Bilinear    | ★★☆☆☆   |  590 /  230      | Real-time, preview  | No        |
-/// | Bicubic     | ★★★☆☆   |  360 /  150      | General purpose     | Yes       |
-/// | Catmull-Rom | ★★★★☆   |  360 /  150      | Natural images      | No        |
-/// | Mitchell    | ★★★★☆   |  360 /  150      | Balanced quality    | Yes       |
-/// | Lanczos3    | ★★★★★   |  250 /  110      | High-quality resize | Yes       |
+/// | Nearest     | ★☆☆☆☆   | 4100 / 3200      | Pixel art, masks    | No        |
+/// | Bilinear    | ★★☆☆☆   |  620 /  160      | Real-time, preview  | No        |
+/// | Bicubic     | ★★★☆☆   |  365 /  115      | General purpose     | Yes       |
+/// | Catmull-Rom | ★★★★☆   |  365 /  115      | Natural images      | No        |
+/// | Mitchell    | ★★★★☆   |  365 /  115      | Balanced quality    | Yes       |
+/// | Lanczos3    | ★★★★★   |  250 /   75      | High-quality resize | Yes       |
 pub const Interpolation = union(enum) {
     nearest,
     bilinear,
@@ -127,8 +129,10 @@ fn resizePlane(comptime P: type, comptime channels: usize, io: Io, src: Image(P)
             const bands = parallel.bandCount(dst.rows, dst_cols);
             const rings = try allocator.alloc(channel_ops.Accum(P), bands * ring_rows * dst.cols);
             defer allocator.free(rings);
+            const row_ptrs = try allocator.alloc([*]const channel_ops.Accum(P), bands * ring_rows);
+            defer allocator.free(row_ptrs);
 
-            const ctx: SeparablePlane(P, channels) = .{ .src = src, .dst = dst, .x_taps = x_taps, .y_taps = y_taps, .rings = rings, .ring_rows = ring_rows };
+            const ctx: SeparablePlane(P, channels) = .{ .src = src, .dst = dst, .x_taps = x_taps, .y_taps = y_taps, .rings = rings, .row_ptrs = row_ptrs, .ring_rows = ring_rows };
             parallel.forRowBands(io, dst.rows, bands, &ctx, SeparablePlane(P, channels).band);
         },
     }
@@ -159,6 +163,8 @@ fn SeparablePlane(comptime P: type, comptime channels: usize) type {
         y_taps: channel_ops.AxisTaps(P),
         /// `ring_rows` horizontally resampled source rows per band, slot `row % ring_rows`.
         rings: []A,
+        /// `ring_rows` pointers per band into its ring, one per vertical tap.
+        row_ptrs: [][*]const A,
         ring_rows: usize,
 
         /// Output rows `[r0, r1)`. The ring holds the contiguous source rows `[lo, hi)`; a
@@ -166,10 +172,11 @@ fn SeparablePlane(comptime P: type, comptime channels: usize) type {
         /// mirrored bottom edge folding back) restarts it, so untapped source rows are never
         /// resampled and each band recomputes at most one window of halo.
         fn band(ctx: *const @This(), k: usize, r0: usize, r1: usize) void {
-            const taps = ctx.x_taps.taps;
+            const taps = ctx.y_taps.taps;
             const row_len: usize = ctx.dst.cols;
             const dst_cols = row_len / channels;
             const ring = ctx.rings[k * ctx.ring_rows * row_len ..][0 .. ctx.ring_rows * row_len];
+            const srcs = ctx.row_ptrs[k * taps ..][0..taps];
             var lo: usize = 0;
             var hi: usize = 0;
             for (r0..r1) |r| {
@@ -186,9 +193,8 @@ fn SeparablePlane(comptime P: type, comptime channels: usize) type {
                     hi = need_hi;
                     lo = @max(lo, hi -| ctx.ring_rows);
                 }
-                var srcs: [max_taps][*]const A = undefined;
-                for (rows, 0..) |sr, t| srcs[t] = ring[(sr % ctx.ring_rows) * row_len ..].ptr;
-                channel_ops.blendRows(P, srcs[0..taps], ctx.y_taps.weightsAt(r), ctx.dst.data[r * ctx.dst.stride ..][0..row_len]);
+                for (rows, srcs) |sr, *ptr| ptr.* = ring[(sr % ctx.ring_rows) * row_len ..].ptr;
+                channel_ops.blendRows(P, srcs, ctx.y_taps.weightsAt(r), ctx.dst.data[r * ctx.dst.stride ..][0..row_len]);
             }
         }
     };
@@ -219,9 +225,37 @@ fn TappedResize(comptime T: type) type {
         y_taps: channel_ops.AxisTaps(f32),
 
         fn band(ctx: *const @This(), _: usize, r0: usize, r1: usize) void {
-            switch (ctx.x_taps.taps) {
-                inline 2, 4, 6 => |taps| ctx.rows(taps, r0, r1),
-                else => unreachable,
+            if (ctx.x_taps.taps == ctx.y_taps.taps) switch (ctx.x_taps.taps) {
+                inline 2, 4, 6 => |taps| return ctx.rows(taps, r0, r1),
+                else => {},
+            };
+            ctx.rowsAnyTaps(r0, r1);
+        }
+
+        /// `rows` for runtime tap counts (downscales).
+        fn rowsAnyTaps(ctx: *const @This(), r0: usize, r1: usize) void {
+            const src = ctx.src;
+            const out = ctx.out;
+            const n = comptime Image(T).channels();
+            const tx = ctx.x_taps.taps;
+            const ty = ctx.y_taps.taps;
+            for (r0..r1) |r| {
+                const ys = ctx.y_taps.indices[r * ty ..][0..ty];
+                const wy = ctx.y_taps.weightsAt(r);
+                for (out.data[r * out.stride ..][0..out.cols], 0..) |*px, c| {
+                    const xs = ctx.x_taps.indices[c * tx ..][0..tx];
+                    const wx = ctx.x_taps.weightsAt(c);
+                    var sums: [n]f32 = @splat(0);
+                    for (ys, wy) |y, w_row| {
+                        const row = src.data[y * src.stride ..];
+                        var row_sums: [n]f32 = @splat(0);
+                        for (xs, wx) |x, w| {
+                            inline for (0..n) |ch| row_sums[ch] += channelOf(row[x], ch) * w;
+                        }
+                        inline for (0..n) |ch| sums[ch] += row_sums[ch] * w_row;
+                    }
+                    px.* = fromChannels(T, sums);
+                }
             }
         }
 
