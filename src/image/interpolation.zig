@@ -421,8 +421,9 @@ pub fn kernelWeight(method: Interpolation, x: f32) f32 {
     };
 }
 
-/// `kernelWeight` for the per-pixel path; Lanczos reads a LUT instead of two sines per tap.
-fn kernelWeightFast(method: Interpolation, x: f32) f32 {
+/// `kernelWeight` with Lanczos read from `lanczos3_lut` instead of two sines per tap, for the
+/// per-pixel path.
+fn kernelWeightLut(method: Interpolation, x: f32) f32 {
     return if (method == .lanczos) lanczos3KernelLut(x) else kernelWeight(method, x);
 }
 
@@ -600,8 +601,8 @@ fn interpolateWithKernel(comptime T: type, self: Image(T), x: f32, y: f32, compt
     inline for (0..taps) |t| {
         const offset: isize = @as(isize, t) - lead;
         const d: f32 = @floatFromInt(offset);
-        wx[t] = kernelWeightFast(method, d - fx);
-        wy[t] = kernelWeightFast(method, d - fy);
+        wx[t] = kernelWeightLut(method, d - fx);
+        wy[t] = kernelWeightLut(method, d - fy);
         cols[t] = resolveIndex(ix + offset, @intCast(self.cols), border);
         rows[t] = resolveIndex(iy + offset, @intCast(self.rows), border);
     }
