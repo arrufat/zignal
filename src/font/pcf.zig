@@ -9,7 +9,7 @@ const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const testing = std.testing;
 
-const native_endian = builtin.cpu.arch.endian();
+const native_endian = builtin.target.cpu.arch.endian();
 
 const LoadFilter = @import("../font.zig").LoadFilter;
 const isGzipPath = @import("../font.zig").isGzipPath;
@@ -66,7 +66,7 @@ const FormatFlags = struct {
         };
     }
 
-    fn byteOrder(self: FormatFlags) std.builtin.Endian {
+    fn byteOrder(self: FormatFlags) std.lang.Endian {
         return if (self.byte_order_msb) .big else .little;
     }
 
@@ -237,7 +237,7 @@ fn validateTableBounds(data: []const u8, table: TableEntry) !void {
 const OpenTable = struct {
     reader: Io.Reader,
     flags: FormatFlags,
-    byte_order: std.builtin.Endian,
+    byte_order: std.lang.Endian,
 };
 
 fn openTable(data: []const u8, table: TableEntry) !OpenTable {
@@ -326,7 +326,7 @@ fn getStringProperty(properties: []const Property, name: []const u8) ?[]const u8
 }
 
 /// Read metric from stream (handles both compressed and uncompressed formats)
-fn readMetric(reader: *Io.Reader, byte_order: std.builtin.Endian, compressed: bool) !Metric {
+fn readMetric(reader: *Io.Reader, byte_order: std.lang.Endian, compressed: bool) !Metric {
     if (compressed) {
         // Read compressed metric (5 bytes, each offset by 0x80)
         const lsb = try reader.takeByte();

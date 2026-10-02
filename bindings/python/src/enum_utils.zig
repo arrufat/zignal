@@ -1,7 +1,7 @@
 //! Registration of Zig enums as Python IntEnums, and conversion back to Zig values.
 
 const std = @import("std");
-const BuiltinEnum = std.builtin.Type.Enum;
+const BuiltinEnum = std.lang.Type.Enum;
 
 const enums = @import("enums.zig");
 const python = @import("python.zig");

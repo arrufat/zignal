@@ -71,10 +71,8 @@ fn printVec(label: []const u8, v: []const f64) void {
     std.debug.print("]\n", .{});
 }
 
-pub fn main() !void {
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = debug_allocator.deinit();
-    const gpa = debug_allocator.allocator();
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
 
     // A thread-pool-backed Io drives the objective evaluations. Pass any std.Io implementation
     // (e.g. Io.Threaded.global_single_threaded.io()) to run them inline instead.

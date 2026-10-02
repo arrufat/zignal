@@ -105,7 +105,7 @@ pub fn build(b: *std.Build) void {
 fn buildWasm(
     b: *std.Build,
     name: []const u8,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
     zignal: *std.Build.Dependency,
 ) *std.Build.Step.Compile {
     const module = b.addExecutable(.{

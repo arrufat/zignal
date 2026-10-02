@@ -171,10 +171,8 @@ fn projectAndAlign(pca: Pca(f64), original_points: Matrix(f64)) !Matrix(f64) {
     return try pca.transform(Io.Threaded.global_single_threaded.io(), original_points);
 }
 
-pub fn main() !void {
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = debug_allocator.deinit();
-    const gpa = debug_allocator.allocator();
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
     const io = Io.Threaded.global_single_threaded.io();
 
     const canvas_size = 400;

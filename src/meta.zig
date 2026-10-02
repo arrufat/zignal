@@ -1,6 +1,7 @@
 //! Comptime reflection, type introspection, and conversion utilities.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 /// Converts between numeric types: .@"enum", .int and .float.
 pub fn as(comptime T: type, from: anytype) T {
@@ -46,7 +47,7 @@ pub fn isPacked(comptime T: type) bool {
 }
 
 /// Strips all type names to their unqualified base names.
-/// e.g., "zignal.Rgb" -> "Rgb", "std.builtin.Type" -> "Type"
+/// e.g., "zignal.Rgb" -> "Rgb", "std.lang.Type" -> "Type"
 pub fn getSimpleTypeName(comptime T: type) []const u8 {
     const full_name = @typeName(T);
     if (std.mem.findLast(u8, full_name, ".")) |dot_index| {
@@ -132,7 +133,7 @@ pub fn clamp(comptime T: type, value: anytype) T {
 pub fn narrowToBytes(v: anytype) @Vector(@typeInfo(@TypeOf(v)).vector.len, u8) {
     const info = @typeInfo(@TypeOf(v)).vector;
     const V = @TypeOf(v);
-    if (std.debug.runtime_safety) {
+    if (builtin.mode.runtimeSafety()) {
         std.debug.assert(@reduce(.And, v >= @as(V, @splat(0))) and @reduce(.And, v <= @as(V, @splat(255))));
     }
     const Unsigned = @Vector(info.len, @Int(.unsigned, @typeInfo(info.child).int.bits));
