@@ -9,7 +9,8 @@ const min_zig_version = std.SemanticVersion.parse(@import("build.zig.zon").minim
 pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const translate_c = b.dependency("translate_c", .{});
+    // An explicit mode keeps a bare `--release` from reaching translate-c, which declares no preferred one.
+    const translate_c = b.dependency("translate_c", .{ .optimize = optimize });
 
     const print_md5sums = b.option(bool, "print-md5sums", "Print MD5 checksums instead of testing them") orelse false;
     const debug_test_images = b.option(bool, "debug-test-images", "Save regression test renderings as PNGs") orelse false;
