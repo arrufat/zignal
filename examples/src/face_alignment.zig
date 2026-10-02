@@ -15,7 +15,7 @@ const SimilarityTransform = zignal.geometry.SimilarityTransform(f32);
 const js = @import("js.zig");
 
 pub const std_options: std.Options = .{
-    .logFn = if (builtin.cpu.arch.isWasm()) js.logFn else std.log.defaultLog,
+    .logFn = if (builtin.target.cpu.arch.isWasm()) js.logFn else std.log.defaultLog,
     .log_level = std.log.default_level,
 };
 
@@ -24,7 +24,7 @@ comptime {
     _ = js.free;
 }
 
-pub fn panic(msg: []const u8, st: ?*std.builtin.StackTrace, addr: ?usize) noreturn {
+pub fn panic(msg: []const u8, st: ?*std.lang.StackTrace, addr: ?usize) noreturn {
     _ = st;
     _ = addr;
     std.log.err("panic: {s}", .{msg});
@@ -115,7 +115,7 @@ pub export fn extract_aligned_face(
     extra_len: usize,
 ) void {
     var arena: std.heap.ArenaAllocator = .init(blk: {
-        if (builtin.cpu.arch.isWasm() and builtin.os.tag == .freestanding) {
+        if (builtin.target.cpu.arch.isWasm() and builtin.target.os.tag == .freestanding) {
             // We need at least one Image(Rgba) for blurring and one Image(f32) for the integral image.
             assert(extra_len >= 9 * @as(usize, rows) * @as(usize, cols));
             if (extra_ptr) |ptr| {

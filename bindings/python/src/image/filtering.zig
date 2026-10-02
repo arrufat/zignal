@@ -882,7 +882,7 @@ pub fn image_shen_castan(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.P
     const cols = self.py_image.?.cols();
     const max_window = @min(rows, cols);
     if (params.window_size > max_window) {
-        const msg = std.fmt.allocPrint(allocator, "window_size ({d}) cannot exceed minimum image dimension ({d})\x00", .{ params.window_size, max_window }) catch {
+        const msg = allocator.print("window_size ({d}) cannot exceed minimum image dimension ({d})\x00", .{ params.window_size, max_window }) catch {
             c.PyErr_SetString(c.PyExc_ValueError, "window_size too large for image dimensions");
             return null;
         };

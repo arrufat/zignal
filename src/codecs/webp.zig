@@ -441,7 +441,7 @@ const Api = struct {
     WebPEncode: *const fn (config: *const Config, picture: *Picture) callconv(.c) c_int,
 };
 
-const Libwebp = dynlib.Library(Api, switch (builtin.os.tag) {
+const Libwebp = dynlib.Library(Api, switch (builtin.target.os.tag) {
     .macos => dynlib.macosNames("libwebp.dylib"),
     else => &.{ "libwebp.so.7", "libwebp.so" },
 }, error.CodecUnavailable);
@@ -477,7 +477,7 @@ const DemuxApi = struct {
     WebPAnimDecoderDelete: *const fn (dec: *AnimDecoder) callconv(.c) void,
 };
 
-const LibwebpDemux = dynlib.Library(DemuxApi, switch (builtin.os.tag) {
+const LibwebpDemux = dynlib.Library(DemuxApi, switch (builtin.target.os.tag) {
     .macos => dynlib.macosNames("libwebpdemux.dylib"),
     else => &.{ "libwebpdemux.so.2", "libwebpdemux.so" },
 }, error.CodecUnavailable);
@@ -505,7 +505,7 @@ const MuxApi = struct {
     WebPAnimEncoderDelete: *const fn (enc: *AnimEncoder) callconv(.c) void,
 };
 
-const LibwebpMux = dynlib.Library(MuxApi, switch (builtin.os.tag) {
+const LibwebpMux = dynlib.Library(MuxApi, switch (builtin.target.os.tag) {
     .macos => dynlib.macosNames("libwebpmux.dylib"),
     else => &.{ "libwebpmux.so.3", "libwebpmux.so" },
 }, error.CodecUnavailable);

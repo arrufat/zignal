@@ -10,7 +10,7 @@ const Rgba = zignal.Rgba(u8);
 const js = @import("js.zig");
 
 pub const std_options: std.Options = .{
-    .logFn = if (builtin.cpu.arch.isWasm()) js.logFn else std.log.defaultLog,
+    .logFn = if (builtin.target.cpu.arch.isWasm()) js.logFn else std.log.defaultLog,
     .log_level = std.log.default_level,
 };
 
@@ -19,14 +19,14 @@ comptime {
     _ = js.free;
 }
 
-pub fn panic(msg: []const u8, st: ?*std.builtin.StackTrace, addr: ?usize) noreturn {
+pub fn panic(msg: []const u8, st: ?*std.lang.StackTrace, addr: ?usize) noreturn {
     _ = st;
     _ = addr;
     std.log.err("panic: {s}", .{msg});
     @trap();
 }
 
-const allocator = if (builtin.cpu.arch.isWasm() and builtin.os.tag == .freestanding)
+const allocator = if (builtin.target.cpu.arch.isWasm() and builtin.target.os.tag == .freestanding)
     std.heap.wasm_allocator
 else
     std.heap.page_allocator;

@@ -28,9 +28,9 @@ fn minPsnr(name: []const u8) f64 {
 
 fn checkPair(io: std.Io, gpa: std.mem.Allocator, dir: []const u8, name: []const u8, failures: *usize) !bool {
     const stem = name[0..std.mem.lastIndexOfScalar(u8, name, '.').?];
-    const fixture_path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dir, name });
+    const fixture_path = try gpa.print("{s}/{s}", .{ dir, name });
     defer gpa.free(fixture_path);
-    const ref_path = try std.fmt.allocPrint(gpa, "{s}/{s}.ref.png", .{ dir, stem });
+    const ref_path = try gpa.print("{s}/{s}.ref.png", .{ dir, stem });
     defer gpa.free(ref_path);
 
     var reference: Image(Rgba) = Image(Rgba).load(io, gpa, ref_path) catch |err| switch (err) {
@@ -55,7 +55,7 @@ fn checkPair(io: std.Io, gpa: std.mem.Allocator, dir: []const u8, name: []const 
 }
 
 fn checkAnimated(io: std.Io, gpa: std.mem.Allocator, dir: []const u8, failures: *usize) !void {
-    const gif_path = try std.fmt.allocPrint(gpa, "{s}/gif_animated.gif", .{dir});
+    const gif_path = try gpa.print("{s}/gif_animated.gif", .{dir});
     defer gpa.free(gif_path);
     var anim = zignal.Animation(Rgba).load(io, gpa, gif_path) catch |err| {
         std.debug.print("FAIL gif_animated.gif: decode error {t}\n", .{err});
@@ -65,7 +65,7 @@ fn checkAnimated(io: std.Io, gpa: std.mem.Allocator, dir: []const u8, failures: 
     defer anim.deinit(gpa);
 
     for (0..anim.frameCount()) |i| {
-        const ref_path = try std.fmt.allocPrint(gpa, "{s}/gif_animated.ref-{d:0>2}.png", .{ dir, i });
+        const ref_path = try gpa.print("{s}/gif_animated.ref-{d:0>2}.png", .{ dir, i });
         defer gpa.free(ref_path);
         var reference: Image(Rgba) = try .load(io, gpa, ref_path);
         defer reference.deinit(gpa);
@@ -140,11 +140,11 @@ pub fn main(init: std.process.Init) !u8 {
 
     // Encoder round-trips: alpha-capable formats use the RGBA source; JPEG and
     // GIF cannot represent its transparent disc, so they use the opaque source.
-    const src_rgba_path = try std.fmt.allocPrint(gpa, "{s}/src_rgba.png", .{dir_path});
+    const src_rgba_path = try gpa.print("{s}/src_rgba.png", .{dir_path});
     defer gpa.free(src_rgba_path);
     var src_rgba: Image(Rgba) = try .load(io, gpa, src_rgba_path);
     defer src_rgba.deinit(gpa);
-    const src_rgb_path = try std.fmt.allocPrint(gpa, "{s}/src_rgb.png", .{dir_path});
+    const src_rgb_path = try gpa.print("{s}/src_rgb.png", .{dir_path});
     defer gpa.free(src_rgb_path);
     var src_rgb: Image(Rgba) = try .load(io, gpa, src_rgb_path);
     defer src_rgb.deinit(gpa);

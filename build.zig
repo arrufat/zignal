@@ -1,13 +1,15 @@
-// Copyright (C) 2024 B*Factory
-
 const std = @import("std");
 const builtin = @import("builtin");
+
+const Translator = @import("translate_c").Translator;
+
 const zignal_version = std.SemanticVersion.parse(@import("build.zig.zon").version) catch unreachable;
 const min_zig_version = std.SemanticVersion.parse(@import("build.zig.zon").minimum_zig_version) catch unreachable;
 
 pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const translate_c = b.dependency("translate_c", .{});
 
     const print_md5sums = b.option(bool, "print-md5sums", "Print MD5 checksums instead of testing them") orelse false;
     const debug_test_images = b.option(bool, "debug-test-images", "Save regression test renderings as PNGs") orelse false;
@@ -108,25 +110,26 @@ pub fn build(b: *Build) void {
     const os_tag = target.result.os.tag;
     const py_paths: PythonPaths = .fromOptions(b);
 
-    const tc = b.addTranslateC(.{
-        .root_source_file = b.path("bindings/python/src/c.h"),
-        .target = target,
-        .optimize = optimize,
-    });
-    if (py_paths.include_dir) |inc| {
-        validatePath(inc, "python-include-dir");
-        tc.addIncludePath(.{ .cwd_relative = inc });
-    } else if (os_tag == .windows) {
+    if (py_paths.include_dir == null and os_tag == .windows) {
         // Fail lazily so steps that don't need Python still work.
         const fail = b.addFail("Could not determine the Python include directory; pass -Dpython-include-dir=.");
         py_bindings_step.dependOn(&fail.step);
         python_stubs_step.dependOn(&fail.step);
         return;
-    } else {
-        // Last resort: ambient pkg-config python3 (its cflags match python3-embed's; may be a different Python).
-        tc.linkSystemLibrary("python3", .{});
     }
-    const c_module = tc.createModule();
+    const translator: Translator = .init(translate_c, .{
+        .c_source_file = b.path("bindings/python/src/c.h"),
+        .target = target,
+        .optimize = optimize,
+        // Zero-default struct fields like the old built-in translate-c (`.ob_base = .{}`).
+        .default_init = true,
+        // Last resort: ambient pkg-config python3 (its cflags match python3-embed's; may be a different Python).
+        .link_system_libs = if (py_paths.include_dir == null) &.{.{ .name = "python3" }} else &.{},
+    });
+    if (py_paths.include_dir) |inc| {
+        validatePath(inc, "python-include-dir");
+        translator.addIncludePath(.{ .cwd_relative = inc });
+    }
 
     const py_module = b.addLibrary(.{
         .name = "zignal",
@@ -138,7 +141,7 @@ pub fn build(b: *Build) void {
             .strip = optimize != .debug,
             .imports = &.{
                 .{ .name = "zignal", .module = zignal },
-                .{ .name = "c", .module = c_module },
+                .{ .name = "c", .module = translator.mod },
             },
         }),
     });
@@ -158,7 +161,7 @@ pub fn build(b: *Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "zignal", .module = zignal },
-                .{ .name = "c", .module = c_module },
+                .{ .name = "c", .module = translator.mod },
             },
         }),
     });

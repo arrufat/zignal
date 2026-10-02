@@ -575,7 +575,7 @@ const Api = struct {
 };
 
 /// Newest first; the soname carries the minor version while libjxl is 0.x.
-const Libjxl = dynlib.Library(Api, switch (builtin.os.tag) {
+const Libjxl = dynlib.Library(Api, switch (builtin.target.os.tag) {
     .macos => dynlib.macosNames("libjxl.dylib"),
     else => &.{ "libjxl.so.1", "libjxl.so.0.13", "libjxl.so.0.12", "libjxl.so.0.11", "libjxl.so.0.10", "libjxl.so.0.9", "libjxl.so.0.8", "libjxl.so.0.7", "libjxl.so" },
 }, error.CodecUnavailable);
