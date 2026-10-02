@@ -355,7 +355,7 @@ const PercentileReducer = struct {
 
     /// Declares this reducer rank-expressible: the two-level path serves it as a
     /// constant-rank selection over the window population.
-    fn rankFor(self: @This(), population: usize) usize {
+    pub fn rankFor(self: @This(), population: usize) usize {
         return percentileRank(self.percentile, population);
     }
 };
