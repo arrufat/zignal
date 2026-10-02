@@ -12,7 +12,7 @@ const Rgba = zignal.Rgba(u8);
 const js = @import("js.zig");
 
 pub const std_options: std.Options = .{
-    .logFn = if (builtin.cpu.arch.isWasm()) js.logFn else std.log.defaultLog,
+    .logFn = if (builtin.target.cpu.arch.isWasm()) js.logFn else std.log.defaultLog,
     .log_level = if (builtin.mode == .debug) .debug else .info,
 };
 
@@ -122,7 +122,7 @@ pub export fn seam_carve(
             assert(extra_len >= size * 13); // Need at least 13x for sobel buffers
             var fba: std.heap.FixedBufferAllocator = .init(ptr[0..extra_len]);
             break :blk fba.allocator();
-        } else if (builtin.cpu.arch.isWasm() and builtin.os.tag == .freestanding) {
+        } else if (builtin.target.cpu.arch.isWasm() and builtin.target.os.tag == .freestanding) {
             @panic("ERROR: extra_ptr can't be null when running in WebAssembly.");
         } else if (builtin.link_libc) {
             break :blk std.heap.c_allocator;

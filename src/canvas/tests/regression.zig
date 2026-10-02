@@ -22,7 +22,7 @@ fn saveDebugImage(allocator: std.mem.Allocator, image: Image(Rgba), name: []cons
     const io = Io.Threaded.global_single_threaded.io();
     const cwd = Io.Dir.cwd();
     try cwd.createDirPath(io, output_dir);
-    const path = try std.fmt.allocPrint(allocator, "{s}/{s}.png", .{ output_dir, name });
+    const path = try allocator.print("{s}/{s}.png", .{ output_dir, name });
     defer allocator.free(path);
     try image.save(io, allocator, path);
 }

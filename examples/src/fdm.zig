@@ -9,7 +9,7 @@ const Rgba = @import("zignal").Rgba(u8);
 const js = @import("js.zig");
 
 pub const std_options: std.Options = .{
-    .logFn = if (builtin.cpu.arch.isWasm()) js.logFn else std.log.defaultLog,
+    .logFn = if (builtin.target.cpu.arch.isWasm()) js.logFn else std.log.defaultLog,
     .log_level = std.log.default_level,
 };
 
@@ -18,7 +18,7 @@ comptime {
     _ = js.free;
 }
 
-pub fn panic(msg: []const u8, st: ?*std.builtin.StackTrace, addr: ?usize) noreturn {
+pub fn panic(msg: []const u8, st: ?*std.lang.StackTrace, addr: ?usize) noreturn {
     _ = st;
     _ = addr;
     std.log.err("panic: {s}", .{msg});
@@ -39,7 +39,7 @@ pub export fn fdm(
     const source_size = @as(usize, source_rows) * @as(usize, source_cols);
     const target_size = @as(usize, target_rows) * @as(usize, target_cols);
     const allocator: std.mem.Allocator = blk: {
-        if (builtin.cpu.arch.isWasm() and builtin.os.tag == .freestanding) {
+        if (builtin.target.cpu.arch.isWasm() and builtin.target.os.tag == .freestanding) {
             const min_size = (source_size + target_size) * @sizeOf(f64) * 50;
             if (extra_len < min_size) {
                 std.log.err("Not enough extra memory: need at least {d}, got {d}", .{ min_size, extra_len });

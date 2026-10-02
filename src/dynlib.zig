@@ -8,7 +8,7 @@ const meta = @import("meta.zig");
 
 /// `std.DynLib` needs libc to load distro libraries on Linux and has no Windows backend.
 /// `link_libc` is compilation-wide, so a program that links libc turns this on.
-pub const supported = builtin.link_libc and !builtin.cpu.arch.isWasm() and builtin.os.tag != .windows;
+pub const supported = builtin.link_libc and !builtin.target.cpu.arch.isWasm() and builtin.target.os.tag != .windows;
 
 /// `file` as installed by the system, then by Homebrew on Apple silicon and Intel.
 pub fn macosNames(comptime file: []const u8) []const []const u8 {

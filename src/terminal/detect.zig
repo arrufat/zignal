@@ -18,7 +18,7 @@ const default_timeout_ms: u64 = 100;
 pub const max_dimension: u32 = 2048;
 
 // Windows API declarations and constants (conditionally compiled)
-const win_api = if (builtin.os.tag == .windows) struct {
+const win_api = if (builtin.target.os.tag == .windows) struct {
     // Console mode constants
     const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
     const ENABLE_LINE_INPUT: u32 = 0x0002;
@@ -39,7 +39,7 @@ const win_api = if (builtin.os.tag == .windows) struct {
 } else void;
 
 /// Terminal state for restoration
-const TerminalState = if (builtin.os.tag == .windows) struct {
+const TerminalState = if (builtin.target.os.tag == .windows) struct {
     output_mode: u32,
     input_mode: u32,
 } else std.posix.termios;
@@ -202,7 +202,7 @@ const State = struct {
         const stdin = Io.File.stdin();
         const stdout = Io.File.stdout();
 
-        if (builtin.os.tag == .windows) {
+        if (builtin.target.os.tag == .windows) {
             const stdin_handle = win_api.GetStdHandle(win_api.STD_INPUT_HANDLE);
             const stdout_handle = win_api.GetStdHandle(win_api.STD_OUTPUT_HANDLE);
 
@@ -247,7 +247,7 @@ const State = struct {
 
     /// Restore the terminal to its original state.
     fn deinit(self: *State) void {
-        if (builtin.os.tag == .windows) {
+        if (builtin.target.os.tag == .windows) {
             const stdin_handle = win_api.GetStdHandle(win_api.STD_INPUT_HANDLE);
             const stdout_handle = win_api.GetStdHandle(win_api.STD_OUTPUT_HANDLE);
             _ = win_api.SetConsoleMode(stdout_handle, self.original_state.output_mode);
@@ -259,7 +259,7 @@ const State = struct {
 
     /// Restore the saved termios (no-op on Windows, where deinit restores console modes).
     fn restoreTermios(self: *const State) void {
-        if (builtin.os.tag != .windows) {
+        if (builtin.target.os.tag != .windows) {
             std.posix.tcsetattr(self.stdin.handle, .FLUSH, self.original_state) catch {};
         }
     }
@@ -267,7 +267,7 @@ const State = struct {
     /// Disable canonical mode and echo so responses can be read unbuffered.
     /// Windows is already in raw mode from init.
     fn enterRawMode(self: *const State) !void {
-        if (builtin.os.tag != .windows) {
+        if (builtin.target.os.tag != .windows) {
             var raw = self.original_state;
 
             raw.lflag.ICANON = false;
@@ -283,7 +283,7 @@ const State = struct {
     /// Read a terminal response within `timeout_ms`, returning the bytes read
     /// (0 on timeout). Windows polls _kbhit/_getch; POSIX relies on termios VTIME.
     fn readWithTimeout(self: *const State, buffer: []u8, timeout_ms: u64) !usize {
-        if (builtin.os.tag == .windows) {
+        if (builtin.target.os.tag == .windows) {
             const start_time = win_api.GetTickCount64();
             var total_read: usize = 0;
 
@@ -331,7 +331,7 @@ const State = struct {
         try self.enterRawMode();
         defer self.restoreTermios();
 
-        if (builtin.os.tag == .windows) {
+        if (builtin.target.os.tag == .windows) {
             while (win_api._kbhit() != 0) {
                 _ = win_api._getch();
             }

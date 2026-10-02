@@ -11,7 +11,7 @@ const Rectangle = zignal.Rectangle;
 const js = @import("js.zig");
 
 pub const std_options: std.Options = .{
-    .logFn = if (builtin.cpu.arch.isWasm()) js.logFn else std.log.defaultLog,
+    .logFn = if (builtin.target.cpu.arch.isWasm()) js.logFn else std.log.defaultLog,
     .log_level = .info,
 };
 

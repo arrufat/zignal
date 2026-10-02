@@ -86,10 +86,15 @@ pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, options: Args, positional
         return error.InvalidArguments;
     };
 
-    var diag: std.zon.parse.Diagnostics = .{};
-    const recipe = std.zon.parse.fromSliceAlloc(Recipe, arena, source, &diag, .{ .free_on_error = false }) catch |err| switch (err) {
+    var diag: std.zon.parse.Diagnostics = undefined;
+    const recipe = std.zon.parse.fromSlice(Recipe, .{
+        .gpa = gpa,
+        .arena = arena,
+        .source = source,
+        .diagnostics = &diag,
+    }) catch |err| switch (err) {
         error.ParseZon => {
-            std.log.err("invalid recipe '{s}':\n{f}", .{ recipe_path, diag });
+            std.log.err("invalid recipe '{s}':\n{f}", .{ recipe_path, diag.fmt(recipe_path) });
             return error.InvalidArguments;
         },
         else => |e| return e,

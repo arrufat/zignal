@@ -46,7 +46,7 @@ const GeneratedStub = struct {
     }
 
     fn writef(self: *GeneratedStub, comptime fmt: []const u8, args: anytype) !void {
-        const formatted = try std.fmt.allocPrint(self.allocator, fmt, args);
+        const formatted = try self.allocator.print(fmt, args);
         defer self.allocator.free(formatted);
         try self.content.appendSlice(self.allocator, formatted);
     }
@@ -718,8 +718,6 @@ fn generateInitStub(gpa: std.mem.Allocator) ![]u8 {
 
 /// Generates and writes both stub files.
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
     const allocator = python.allocator;
     const io = python.io;
 
