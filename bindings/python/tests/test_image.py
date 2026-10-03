@@ -230,24 +230,32 @@ class TestImage:
 
         rng = np.random.default_rng(1)
         img = zignal.Image.from_numpy(rng.integers(0, 256, (1080, 1920, 1), dtype=np.uint8))
-        start = time.perf_counter()
-        probe_at = [None]
-
-        def blur():
-            for _ in range(3):
-                img.median_blur(8)
+        probes = []
+        done = threading.Event()
 
         def probe():
-            probe_at[0] = time.perf_counter() - start
+            while not done.is_set():
+                probes.append(time.perf_counter())
+                time.sleep(0.001)
 
-        worker = threading.Thread(target=blur)
-        worker.start()
-        time.sleep(0.02)
-        threading.Thread(target=probe).start()
-        worker.join()
-        total = time.perf_counter() - start
-        # With the GIL held the probe would only run once the blurs finish.
-        assert probe_at[0] is not None and probe_at[0] < total / 2
+        def overlapped(begin, end):
+            # A held GIL can still hand the probe one turn on the way into the call and one on
+            # the way out, so require more samples than that inside a single blur.
+            return sum(begin < t < end for t in probes) > 2
+
+        prober = threading.Thread(target=probe)
+        prober.start()
+        # Blur until a probe lands inside a call rather than a fixed count, so a probe thread
+        # starved by the filter's worker pool cannot lose a race against a short workload.
+        hit = False
+        deadline = time.perf_counter() + 10
+        while not hit and time.perf_counter() < deadline:
+            begin = time.perf_counter()
+            img.median_blur(8)
+            hit = overlapped(begin, time.perf_counter())
+        done.set()
+        prober.join()
+        assert hit
 
     def test_gaussian_blur_iir_matches_fir(self):
         rng = np.random.default_rng(7)
