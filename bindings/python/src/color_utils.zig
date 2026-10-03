@@ -19,6 +19,7 @@ const Oklch = zignal.Oklch(f64);
 const Xyb = zignal.Xyb(f64);
 const Xyz = zignal.Xyz(f64);
 const Ycbcr = zignal.Ycbcr(u8);
+const Cmyk = zignal.Cmyk(u8);
 
 const zignalColorTypes = .{
     .{ .py_type = &color.gray, .zig_type = Gray, .binding = color.GrayBinding },
@@ -34,6 +35,7 @@ const zignalColorTypes = .{
     .{ .py_type = &color.xyb, .zig_type = Xyb, .binding = color.XybBinding },
     .{ .py_type = &color.xyz, .zig_type = Xyz, .binding = color.XyzBinding },
     .{ .py_type = &color.ycbcr, .zig_type = Ycbcr, .binding = color.YcbcrBinding },
+    .{ .py_type = &color.cmyk, .zig_type = Cmyk, .binding = color.CmykBinding },
 };
 
 fn objectToZigColor(comptime ColorType: type, comptime Binding: type, obj: *c.PyObject) ColorType {

@@ -15,6 +15,7 @@ const codecs = @import("../codecs.zig");
 const Image = @import("../image.zig").Image;
 const AnyImage = @import("../image/any.zig").Any;
 
+const Cmyk = @import("../color.zig").Cmyk(u8);
 const Rgb = @import("../color.zig").Rgb(u8);
 const Ycbcr = @import("../color.zig").Ycbcr(u8);
 const meta = @import("../meta.zig");
@@ -1411,7 +1412,7 @@ pub const JpegState = struct {
     /// True when decoding stopped early because limits.max_scans was reached.
     scan_limit_reached: bool = false,
 
-    // Colour-model hints, resolved by `isRgbColorModel` with libjpeg's rules.
+    // Color-model hints, resolved by `isRgbColorModel` and `isYcck` with libjpeg's rules.
     saw_jfif: bool = false,
     adobe_transform: ?u8 = null,
 
@@ -1426,7 +1427,7 @@ pub const JpegState = struct {
         .scan_components = &[_]ScanComponent{},
     };
 
-    /// Records the colour-model hints carried by APP0 (JFIF) and APP14 (Adobe).
+    /// Records the color-model hints carried by APP0 (JFIF) and APP14 (Adobe).
     fn noteAppSegment(self: *JpegState, marker: Marker, payload: []const u8) void {
         switch (marker) {
             .APP0 => if (std.mem.startsWith(u8, payload, "JFIF\x00")) {
@@ -1445,6 +1446,12 @@ pub const JpegState = struct {
         if (self.header.num_components != 3 or self.saw_jfif) return false;
         if (self.adobe_transform) |transform| return transform == 0;
         return self.components[0].id == 'R' and self.components[1].id == 'G' and self.components[2].id == 'B';
+    }
+
+    /// Four components are YCCK under a nonzero Adobe transform, otherwise CMYK stored
+    /// inverted, even without the marker (as Pillow and browsers assume).
+    fn isYcck(self: JpegState) bool {
+        return self.header.num_components == 4 and (self.adobe_transform orelse 0) != 0;
     }
 
     fn maxSamplingFactors(self: JpegState) struct { u4, u4 } {
@@ -1520,12 +1527,9 @@ pub const JpegState = struct {
             return error.ImageTooLarge;
         }
 
-        // Distinguish between invalid and unsupported component counts
         switch (self.header.num_components) {
-            1, 3 => {}, // Supported: grayscale and YCbCr
-            4 => return error.UnsupportedComponentCount, // CMYK - valid but unsupported
-            0 => return error.InvalidComponentCount, // Invalid: no components
-            else => return error.InvalidComponentCount, // Invalid: too many components
+            1, 3, 4 => {}, // Grayscale, YCbCr/RGB, CMYK/YCCK
+            else => return error.InvalidComponentCount,
         }
 
         // Parse component information
@@ -1557,7 +1561,7 @@ pub const JpegState = struct {
         }
 
         // Validate specific chroma subsampling combinations
-        if (self.header.num_components == 3) {
+        if (self.header.num_components >= 3) {
             // For color images, check if we support the chroma subsampling
             const y_h = self.components[0].h_sampling;
             const y_v = self.components[0].v_sampling;
@@ -1578,6 +1582,11 @@ pub const JpegState = struct {
             const is_411 = (y_h == 4 and y_v == 1 and cb_h == 1 and cb_v == 1);
 
             if (!is_444 and !is_420 and !is_422 and !is_411) {
+                return error.UnsupportedSamplingFactor;
+            }
+
+            // K at full resolution needs no upsampling row.
+            if (self.header.num_components == 4 and (self.components[3].h_sampling != y_h or self.components[3].v_sampling != y_v)) {
                 return error.UnsupportedSamplingFactor;
             }
         }
@@ -2384,7 +2393,7 @@ pub fn decode(allocator: Allocator, data: []const u8, limits: DecodeLimits) !Jpe
             .DNL => return error.UnsupportedJpegVariant,
 
             .APP0, .APP1, .APP2, .APP3, .APP4, .APP5, .APP6, .APP7, .APP8, .APP9, .APP10, .APP11, .APP12, .APP13, .APP14, .APP15, .COM => {
-                // Skip application and comment markers, noting the colour-model hints
+                // Skip application and comment markers, noting the color-model hints
                 if (pos + 4 > data.len) break;
                 const length = try readMarkerLength(data, pos + 2);
                 try accumulateWithLimit(&total_marker_bytes, length, limits.max_marker_bytes, error.MarkerDataLimitExceeded);
@@ -2796,7 +2805,7 @@ const RenderBand = struct {
             self.strides[c] = mcus_x * @as(usize, comp.h_sampling) * 8;
             self.planes[c] = try allocator.alloc(u8, self.strides[c] * @as(usize, comp.v_sampling) * 8 + padded);
         }
-        if (nc == 3) {
+        if (nc >= 3) {
             self.vrow = try allocator.alloc(i32, padded + 2);
             for (&self.crows) |*crow| crow.* = try allocator.alloc(u8, padded);
             self.rgb_row = try allocator.alloc(Rgb, padded);
@@ -2933,6 +2942,71 @@ const RenderBand = struct {
         }
     }
 
+    /// Inverted CMYK or YCCK rows to `width` pixels of `Rgb` or `Cmyk` ink.
+    fn convertCmykRow(comptime Out: type, c0: []const u8, c1: []const u8, c2: []const u8, k: []const u8, ycck: bool, dst: []Out, width: usize) void {
+        var px: usize = 0;
+        while (px < width) : (px += lanes) {
+            // Inverted ink: 255 is none.
+            var c: B = c0[px..][0..lanes].*;
+            var m: B = c1[px..][0..lanes].*;
+            var y: B = c2[px..][0..lanes].*;
+            const kv: B = k[px..][0..lanes].*;
+            if (ycck) {
+                // The YCbCr planes encode the inks themselves.
+                const r, const g, const b = yccToRgb(c, m, y);
+                c = ~meta.narrowToBytes(r);
+                m = ~meta.narrowToBytes(g);
+                y = ~meta.narrowToBytes(b);
+            }
+            const out = dst[px..@min(px + lanes, width)];
+            if (Out == Rgb) {
+                storeRgb(out, mulDiv255(c, kv), mulDiv255(m, kv), mulDiv255(y, kv));
+            } else {
+                const ca: [lanes]u8 = ~c;
+                const ma: [lanes]u8 = ~m;
+                const ya: [lanes]u8 = ~y;
+                const ka: [lanes]u8 = ~kv;
+                for (out, 0..) |*o, i| o.* = .{ .c = ca[i], .m = ma[i], .y = ya[i], .k = ka[i] };
+            }
+        }
+    }
+
+    /// Exact `round(a * b / 255)` in u16 lanes.
+    inline fn mulDiv255(a: B, b: B) B {
+        const U = @Vector(lanes, u16);
+        const t = @as(U, a) * @as(U, b) + @as(U, @splat(128));
+        return meta.narrowToBytes((t + (t >> @splat(8))) >> @splat(8));
+    }
+
+    /// BT.601 YCbCr to RGB, clamped to [0, 255].
+    inline fn yccToRgb(y8: B, cb8: B, cr8: B) struct { V, V, V } {
+        const yv: V = @intCast(y8);
+        const u = @as(V, @intCast(cb8)) - @as(V, @splat(128));
+        const v = @as(V, @intCast(cr8)) - @as(V, @splat(128));
+        const rounding: V = @splat(32768);
+        const lo: V = @splat(0);
+        const hi: V = @splat(255);
+        return .{
+            std.math.clamp(yv + ((@as(V, @splat(bt601.r_cr)) * v + rounding) >> @splat(16)), lo, hi),
+            std.math.clamp(yv - ((@as(V, @splat(bt601.g_cb)) * u + @as(V, @splat(bt601.g_cr)) * v + rounding) >> @splat(16)), lo, hi),
+            std.math.clamp(yv + ((@as(V, @splat(bt601.b_cb)) * u + rounding) >> @splat(16)), lo, hi),
+        };
+    }
+
+    /// Writes up to `lanes` pixels of `out` from planar channel vectors.
+    inline fn storeRgb(out: []Rgb, r: B, g: B, b: B) void {
+        if (out.len == lanes and packed_rgb) {
+            const rg = @shuffle(u8, r, g, interleave2);
+            const rgb = @shuffle(u8, rg, b, interleave3);
+            std.mem.sliceAsBytes(out)[0 .. 3 * lanes].* = rgb;
+        } else {
+            const ra: [lanes]u8 = r;
+            const ga: [lanes]u8 = g;
+            const ba: [lanes]u8 = b;
+            for (out, ra[0..out.len], ga[0..out.len], ba[0..out.len]) |*px_out, pr, pg, pb| px_out.* = .{ .r = pr, .g = pg, .b = pb };
+        }
+    }
+
     const packed_rgb = @sizeOf(Rgb) == 3 and @offsetOf(Rgb, "r") == 0 and @offsetOf(Rgb, "g") == 1 and @offsetOf(Rgb, "b") == 2;
     const interleave2 = blk: {
         var mask: [2 * lanes]i32 = undefined;
@@ -2953,14 +3027,15 @@ const RenderBand = struct {
     };
 };
 
-/// Dequantizes, inverse-transforms and colour-converts block rows `[block_row0, block_row0 +
+/// Dequantizes, inverse-transforms and color-converts block rows `[block_row0, block_row0 +
 /// block_rows)` into `img`. `blocks` holds those rows from index 0, `block_width_actual` wide,
 /// as whole MCU rows so chroma is upsampled within its MCU row.
 fn renderBlockRows(comptime T: type, state: *const JpegState, band: *RenderBand, blocks: [][4][64]i16, block_row0: usize, block_rows: usize, img: *Image(T)) !void {
     const nc: usize = state.header.num_components;
     const bw: usize = state.block_width_actual;
     const max_h, const max_v = state.maxSamplingFactors();
-    const rgb_model = nc == 3 and state.isRgbColorModel();
+    const rgb_model = state.isRgbColorModel();
+    const ycck = state.isYcck();
 
     // Consecutive blocks of one component are adjacent in its plane, so they transform in pairs.
     for (0..block_rows) |v| {
@@ -2998,11 +3073,18 @@ fn renderBlockRows(comptime T: type, state: *const JpegState, band: *RenderBand,
         }
         const cb = band.chromaRow(state, 1, py, max_h, max_v);
         const cr = band.chromaRow(state, 2, py, max_h, max_v);
-        if (T == Rgb) {
-            RenderBand.convertRow(luma, cb, cr, rgb_model, dst, width);
+        if (T == Cmyk and nc == 4) {
+            RenderBand.convertCmykRow(Cmyk, luma, cb, cr, band.row(3, py), ycck, dst, width);
+            continue;
+        }
+        const out = if (T == Rgb) dst else band.rgb_row;
+        if (nc == 4) {
+            RenderBand.convertCmykRow(Rgb, luma, cb, cr, band.row(3, py), ycck, out, width);
         } else {
-            RenderBand.convertRow(luma, cb, cr, rgb_model, band.rgb_row, width);
-            for (dst, band.rgb_row[0..width]) |*out, rgb| out.* = convertColor(T, rgb);
+            RenderBand.convertRow(luma, cb, cr, rgb_model, out, width);
+        }
+        if (T != Rgb) {
+            for (dst, band.rgb_row[0..width]) |*px_out, rgb| px_out.* = convertColor(T, rgb);
         }
     }
 }
@@ -3665,4 +3747,144 @@ test "loadFromBytes: Adobe APP14 transform 0 decodes the planes as RGB" {
     var plain = try loadFromBytes(Rgb, parallel.inline_io, gpa, bytes, .{});
     defer plain.deinit(gpa);
     try std.testing.expect(try img.psnr(std.testing.io, plain) > 40);
+}
+
+const test_inks = [4]Cmyk{
+    .{ .c = 0, .m = 0, .y = 0, .k = 0 },
+    .{ .c = 51, .m = 102, .y = 153, .k = 64 },
+    .{ .c = 200, .m = 30, .y = 90, .k = 10 },
+    .{ .c = 10, .m = 220, .y = 40, .k = 128 },
+};
+
+/// `ink` as stored: inverted CMYK, or YCbCr of the inks plus inverted K (YCCK).
+fn storedSamples(ycck: bool, ink: Cmyk) [4]u8 {
+    if (!ycck) return .{ 255 - ink.c, 255 - ink.m, 255 - ink.y, 255 - ink.k };
+    const ycc = convertColor(Ycbcr, Rgb{ .r = ink.c, .g = ink.m, .b = ink.y });
+    return .{ ycc.y, ycc.cb, ycc.cr, 255 - ink.k };
+}
+
+/// 32x32 baseline four-component JPEG, flat per 16x16 quadrant of `test_inks`; unit
+/// quantization makes each block its exact DC.
+fn testCmykJpeg(gpa: Allocator, ycck: bool, adobe: bool, sampling: [4]u8, restart_interval: u16) ![]u8 {
+    var out: Io.Writer.Allocating = .init(gpa);
+    defer out.deinit();
+    const w = &out.writer;
+    try writeMarker(w, 0xFFD8);
+    if (adobe) try writeSegment(w, 0xFFEE, &.{ 'A', 'd', 'o', 'b', 'e', 0, 100, 0, 0, 0, 0, if (ycck) 2 else 0 });
+    try writeDQT(w, &@as([64]u8, @splat(1)), null);
+    var sof: [6 + 4 * 3]u8 = .{ 8, 0, 32, 0, 32, 4 } ++ @as([12]u8, undefined);
+    for (0..4) |c| sof[6 + 3 * c ..][0..3].* = .{ @intCast(c + 1), sampling[c], 0 };
+    try writeSegment(w, 0xFFC0, &sof);
+    try writeDHT(w, true);
+    if (restart_interval != 0) try writeDRI(w, restart_interval);
+    try writeSegment(w, 0xFFDA, &.{ 4, 1, 0x00, 2, 0x00, 3, 0x00, 4, 0x00, 0, 63, 0 });
+
+    const dc = buildHuffmanEncoder(&StdTables.bits_dc_luma, &StdTables.val_dc_luma);
+    const ac = buildHuffmanEncoder(&StdTables.bits_ac_luma, &StdTables.val_ac_luma);
+    var bits: BitWriter = .{ .gpa = gpa };
+    defer bits.deinit();
+    var max_h: usize = 1;
+    var max_v: usize = 1;
+    for (sampling) |f| {
+        max_h = @max(max_h, f >> 4);
+        max_v = @max(max_v, f & 0x0F);
+    }
+    var prev_dc: [4]i32 = @splat(0);
+    var mcus: usize = 0;
+    var rst: u3 = 0;
+    var my: usize = 0;
+    while (my < 32) : (my += 8 * max_v) {
+        var mx: usize = 0;
+        while (mx < 32) : (mx += 8 * max_h) {
+            if (restart_interval != 0 and mcus != 0 and mcus % restart_interval == 0) {
+                try bits.reserve();
+                bits.restart(rst);
+                rst +%= 1;
+                prev_dc = @splat(0);
+            }
+            mcus += 1;
+            // MCUs never straddle a quadrant, so every block of one is flat.
+            const samples = storedSamples(ycck, test_inks[(my / 16) * 2 + mx / 16]);
+            for (0..4) |c| {
+                var block: [64]i16 = @splat(0);
+                block[0] = 8 * (@as(i16, samples[c]) - 128);
+                for (0..@as(usize, sampling[c] >> 4) * (sampling[c] & 0x0F)) |_| {
+                    try bits.reserve();
+                    encodeBlockCoefs(&bits, &block, &dc, &ac, &prev_dc[c]);
+                }
+            }
+        }
+    }
+    try bits.reserve();
+    bits.flush();
+    try w.writeAll(bits.list.items);
+    try writeMarker(w, 0xFFD9);
+    return out.toOwnedSlice();
+}
+
+/// Checks every pixel at least 2 away from a quadrant edge against `expected[quadrant]`.
+fn expectQuadrants(comptime T: type, img: Image(T), expected: [4]T, tolerance: u8) !void {
+    for (0..img.rows) |r| {
+        for (0..img.cols) |c| {
+            if (r % 16 < 2 or r % 16 >= 14 or c % 16 < 2 or c % 16 >= 14) continue;
+            const want = expected[(r / 16) * 2 + c / 16];
+            const got = img.at(r, c).*;
+            inline for (comptime meta.structFields(T)) |f| {
+                if (@abs(@as(i16, @field(got, f.name)) - @field(want, f.name)) > tolerance) {
+                    std.debug.print("pixel ({d}, {d}) .{s}: got {d}, want {d}\n", .{ r, c, f.name, @field(got, f.name), @field(want, f.name) });
+                    return error.TestUnexpectedResult;
+                }
+            }
+        }
+    }
+}
+
+test "loadFromBytes: CMYK and YCCK frames decode to their inks" {
+    const gpa = std.testing.allocator;
+    var want_rgb: [4]Rgb = undefined;
+    for (&want_rgb, test_inks) |*w, ink| w.* = ink.to(.rgb);
+    const cases = [_]struct { ycck: bool = false, adobe: bool = true, sampling: [4]u8, restart_interval: u16 = 0 }{
+        .{ .sampling = @splat(0x11) },
+        .{ .sampling = @splat(0x11), .restart_interval = 3 },
+        // Inverted without the marker too.
+        .{ .adobe = false, .sampling = @splat(0x11) },
+        .{ .ycck = true, .sampling = @splat(0x11) },
+        .{ .ycck = true, .sampling = .{ 0x22, 0x11, 0x11, 0x22 } },
+    };
+    for (cases) |case| {
+        const bytes = try testCmykJpeg(gpa, case.ycck, case.adobe, case.sampling, case.restart_interval);
+        defer gpa.free(bytes);
+        // YCCK goes through a u8 YCbCr round trip.
+        const tolerance: u8 = if (case.ycck) 2 else 0;
+
+        var rgb = try loadFromBytes(Rgb, parallel.inline_io, gpa, bytes, .{});
+        defer rgb.deinit(gpa);
+        try expectQuadrants(Rgb, rgb, want_rgb, tolerance);
+
+        var cmyk = try loadFromBytes(Cmyk, parallel.inline_io, gpa, bytes, .{});
+        defer cmyk.deinit(gpa);
+        try expectQuadrants(Cmyk, cmyk, test_inks, tolerance);
+
+        var any = try loadAnyFromBytes(parallel.inline_io, gpa, bytes, .{});
+        defer any.deinit(gpa);
+        try std.testing.expect(any == .rgb);
+        try std.testing.expectEqualSlices(Rgb, rgb.data, any.rgb.data);
+    }
+}
+
+test "getInfo: reports four components" {
+    const gpa = std.testing.allocator;
+    const bytes = try testCmykJpeg(gpa, true, true, .{ 0x22, 0x11, 0x11, 0x22 }, 0);
+    defer gpa.free(bytes);
+    var reader: Io.Reader = .fixed(bytes);
+    const header = try getInfo(&reader, .{});
+    try std.testing.expectEqual(4, header.num_components);
+    try std.testing.expectEqual(null, header.subsampling);
+}
+
+test "JpegState.parseSOF: rejects K sampled unlike the first component" {
+    const gpa = std.testing.allocator;
+    const bytes = try testCmykJpeg(gpa, true, true, .{ 0x22, 0x11, 0x11, 0x11 }, 0);
+    defer gpa.free(bytes);
+    try std.testing.expectError(error.UnsupportedSamplingFactor, loadFromBytes(Rgb, parallel.inline_io, gpa, bytes, .{}));
 }

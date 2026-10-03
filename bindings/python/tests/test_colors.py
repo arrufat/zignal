@@ -78,6 +78,7 @@ def test_color_invert_methods():
         lambda: zignal.Xyb(0.1, 0.2, 0.3),
         lambda: zignal.Xyz(10.0, 20.0, 5.0),
         lambda: zignal.Ycbcr(128, 140, 120),
+        lambda: zignal.Cmyk(51, 102, 153, 64),
     ],
 )
 def test_color_invert_smoke(factory):
@@ -105,3 +106,15 @@ def test_color_invert_smoke(factory):
         inverted_rgb = original_rgb.invert()
         roundtrip_rgb = inverted_rgb.to(zignal.Rgb)
         assert isinstance(roundtrip_rgb, zignal.Rgb)
+
+
+def test_cmyk_conversions():
+    ink = zignal.Cmyk(51, 102, 153, 64)
+    assert (ink.c, ink.m, ink.y, ink.k) == (51, 102, 153, 64)
+    rgb = ink.to(zignal.Rgb)
+    assert (rgb.r, rgb.g, rgb.b) == (153, 115, 76)
+    red = zignal.Rgb(255, 0, 0).to(zignal.Cmyk)
+    assert (red.c, red.m, red.y, red.k) == (0, 255, 255, 0)
+    assert zignal.Rgb(0, 0, 0).to(zignal.Cmyk).k == 255
+    with pytest.raises(ValueError):
+        zignal.Cmyk(256, 0, 0, 0)
