@@ -411,7 +411,7 @@ return s;
     ctx.stroke();
   }
 
-  // Draw the evaluated samples as move-coloured dots. `project(p)` maps a point to [px, py], or
+  // Draw the evaluated samples as move-colored dots. `project(p)` maps a point to [px, py], or
   // returns null to skip it. (Invariant context state is set once, outside the loop.)
   function drawSamplePoints(project) {
     ctx.lineWidth = 0.5;
@@ -606,7 +606,7 @@ return s;
       }
     }
     ctx.stroke();
-    // evaluated samples, sitting on the curve, coloured by move
+    // evaluated samples, sitting on the curve, colored by move
     drawSamplePoints(function (p) {
       return isFinite(p.y) ? [xToPx(p.x[0]), yToPx(p.y)] : null;
     });
