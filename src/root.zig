@@ -8,7 +8,7 @@
 //!
 //! - **Image Operations**: Load, save, manipulate, and transform images
 //! - **Drawing & Canvas**: Lines, circles, polygons, Bézier curves with antialiasing
-//! - **Color Spaces**: RGB, HSL, HSV, XYZ, Lab, LCh, LMS, Oklab, Oklch, XYB conversions
+//! - **Color Spaces**: RGB, Gray, HSL, HSV, XYZ, Lab, LCh, LMS, Oklab, Oklch, XYB, YCbCr, CMYK conversions
 //! - **Geometry**: 2D/3D points, rectangles, transforms (affine, projective, similarity)
 //! - **Matrix Operations**: Linear algebra with SVD decomposition support
 //! - **Computer Vision**: Feature distribution matching, convex hull algorithms, PCA
@@ -53,6 +53,7 @@ pub const Oklab = color.Oklab;
 pub const Oklch = color.Oklch;
 pub const Xyb = color.Xyb;
 pub const Ycbcr = color.Ycbcr;
+pub const Cmyk = color.Cmyk;
 
 /// Points, rectangles, transforms (similarity, affine, projective) and convex hulls.
 pub const geometry = @import("geometry.zig");

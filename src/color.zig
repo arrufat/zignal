@@ -14,7 +14,8 @@
 //!   - **Cylindrical**: Hue-Saturation-Value (`Hsv`), Hue-Saturation-Lightness (`Hsl`)
 //!   - **Scientific (CIE)**: CIE 1931 XYZ (`Xyz`), CIELAB (`Lab`), CIELCh (`Lch`)
 //!   - **Perceptual (Next-Gen)**: Oklab (`Oklab`), Oklch (`Oklch`)
-//!   - **Specialized**: LMS Cone Response (`Lms`), JPEG XL XYB (`Xyb`), YCbCr BT.601 (`Ycbcr`)
+//!   - **Specialized**: LMS Cone Response (`Lms`), JPEG XL XYB (`Xyb`), YCbCr BT.601 (`Ycbcr`),
+//!     uncalibrated device CMYK (`Cmyk`)
 //! - **Utilities**:
 //!   - Hexadecimal parsing and formatting (`initHex`, `hex`).
 //!   - Color blending operations (`blendColors`).
@@ -195,11 +196,11 @@ fn formatColor(comptime T: type, self: T, writer: *Io.Writer) !void {
 /// and maintainability.
 ///
 /// **Display Hub (RGB)**             **Scientific Hub (XYZ)**
-///        Gray                             Lms
-///         |                                |
-///        Rgb <-------------------------> Xyz <----> Xyb
-///     / / | \ \                         /   \
-/// Rgba Hsl Hsv Ycbcr                 Oklab  Lab
+///            Gray                         Lms
+///             |                            |
+///            Rgb <---------------------> Xyz <----> Xyb
+///     /   /   |   \   \                 /   \
+///  Rgba Hsl Hsv Ycbcr Cmyk           Oklab  Lab
 ///                                      |     |
 ///                                    Oklch  Lch
 ///
@@ -207,6 +208,7 @@ fn formatColor(comptime T: type, self: T, writer: *Io.Writer) !void {
 /// - **Cross-conversions** (e.g., Hsl -> Lab) travel through the bridge:
 ///   `Hsl -> Rgb -> Xyz -> Lab`
 pub const ColorSpace = enum {
+    cmyk,
     gray,
     hsl,
     hsv,
@@ -230,6 +232,7 @@ pub const ColorSpace = enum {
     /// Returns the color type for a given space and component type.
     pub fn Type(self: ColorSpace, comptime T: type) type {
         return switch (self) {
+            .cmyk => Cmyk(T),
             .gray => Gray(T),
             .hsl => Hsl(T),
             .hsv => Hsv(T),
@@ -251,6 +254,7 @@ pub const ColorSpace = enum {
 /// Useful for APIs that accept dynamic color spaces at runtime.
 pub fn Color(comptime T: type) type {
     return union(ColorSpace) {
+        cmyk: Cmyk(T),
         gray: Gray(T),
         hsl: Hsl(T),
         hsv: Hsv(T),
@@ -348,6 +352,7 @@ pub fn Rgb(comptime T: type) type {
         /// Converts the color to another color space.
         pub fn to(self: Rgb(T), comptime color_space: ColorSpace) color_space.Type(T) {
             return switch (color_space) {
+                .cmyk => rgbToCmyk(T, self),
                 .gray => rgbToGray(T, self),
                 .hsl => rgbToHsl(T, self),
                 .hsv => rgbToHsv(T, self),
@@ -1090,6 +1095,108 @@ fn ycbcrToRgb(comptime T: type, ycbcr: Ycbcr(T)) Rgb(T) {
     }
 }
 
+/// Device CMYK ink coverage (0 = no ink), components within 0-255 when `T` is `u8` and
+/// within 0-1 when `T` is float. Uncalibrated: the conversion is the naive
+/// `R = (1 - C)(1 - K)` with no ICC profile, so it is not suitable for print proofing.
+pub fn Cmyk(comptime T: type) type {
+    switch (@typeInfo(T)) {
+        .float => {},
+        .int => if (T != u8) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space"),
+        else => @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space"),
+    }
+    return struct {
+        pub const space: ColorSpace = .cmyk;
+        c: T,
+        m: T,
+        y: T,
+        k: T,
+
+        /// Formats the color for terminal output.
+        pub fn format(self: Cmyk(T), writer: *Io.Writer) !void {
+            return formatColor(Cmyk(T), self, writer);
+        }
+
+        /// Converts the color to another color space.
+        pub fn to(self: Cmyk(T), comptime color_space: ColorSpace) color_space.Type(T) {
+            return switch (color_space) {
+                .cmyk => self,
+                .rgb => cmykToRgb(T, self),
+                else => self.to(.rgb).to(color_space),
+            };
+        }
+
+        /// Converts the backing component type.
+        pub fn as(self: Cmyk(T), comptime U: type) Cmyk(U) {
+            return switch (T) {
+                u8 => switch (U) {
+                    u8 => self,
+                    else => .{
+                        .c = @as(U, self.c) / 255,
+                        .m = @as(U, self.m) / 255,
+                        .y = @as(U, self.y) / 255,
+                        .k = @as(U, self.k) / 255,
+                    },
+                },
+                else => switch (U) {
+                    u8 => .{
+                        .c = @round(255 * clamp(self.c, 0, 1)),
+                        .m = @round(255 * clamp(self.m, 0, 1)),
+                        .y = @round(255 * clamp(self.y, 0, 1)),
+                        .k = @round(255 * clamp(self.k, 0, 1)),
+                    },
+                    else => .{
+                        .c = @floatCast(self.c),
+                        .m = @floatCast(self.m),
+                        .y = @floatCast(self.y),
+                        .k = @floatCast(self.k),
+                    },
+                },
+            };
+        }
+    };
+}
+
+/// Converts RGB to CMYK with full black generation: K = 1 - max(R, G, B), C = (max - R) / max.
+fn rgbToCmyk(comptime T: type, rgb: Rgb(T)) Cmyk(T) {
+    if (T == u8) {
+        const max: u32 = @max(rgb.r, rgb.g, rgb.b);
+        if (max == 0) return .{ .c = 0, .m = 0, .y = 0, .k = 255 };
+        const half = max / 2;
+        return .{
+            .c = @intCast(((max - rgb.r) * 255 + half) / max),
+            .m = @intCast(((max - rgb.g) * 255 + half) / max),
+            .y = @intCast(((max - rgb.b) * 255 + half) / max),
+            .k = @intCast(255 - max),
+        };
+    } else {
+        const r = clamp(rgb.r, 0, 1);
+        const g = clamp(rgb.g, 0, 1);
+        const b = clamp(rgb.b, 0, 1);
+        const max = @max(r, g, b);
+        if (max == 0) return .{ .c = 0, .m = 0, .y = 0, .k = 1 };
+        return .{ .c = (max - r) / max, .m = (max - g) / max, .y = (max - b) / max, .k = 1 - max };
+    }
+}
+
+/// Converts CMYK to RGB: R = (1 - C)(1 - K).
+fn cmykToRgb(comptime T: type, cmyk: Cmyk(T)) Rgb(T) {
+    if (T == u8) {
+        const w: u32 = 255 - cmyk.k;
+        return .{
+            .r = @intCast(((255 - cmyk.c) * w + 127) / 255),
+            .g = @intCast(((255 - cmyk.m) * w + 127) / 255),
+            .b = @intCast(((255 - cmyk.y) * w + 127) / 255),
+        };
+    } else {
+        const w = 1 - clamp(cmyk.k, 0, 1);
+        return .{
+            .r = (1 - clamp(cmyk.c, 0, 1)) * w,
+            .g = (1 - clamp(cmyk.m, 0, 1)) * w,
+            .b = (1 - clamp(cmyk.y, 0, 1)) * w,
+        };
+    }
+}
+
 /// Converts RGB to HSV.
 fn rgbToHsv(comptime T: type, rgb: Rgb(T)) Hsv(T) {
     comptime assert(@typeInfo(T) == .float);
@@ -1777,6 +1884,47 @@ test "Rgb.to: 100 random colors round-trip" {
         const rgb_from_inv = rgb.invert().invert();
         try expectEqualDeep(rgb, rgb_from_inv);
     }
+}
+
+test "Rgb.to: cmyk round-trips every u8 color" {
+    var r: u32 = 0;
+    while (r < 256) : (r += 1) {
+        var g: u32 = 0;
+        while (g < 256) : (g += 1) {
+            var b: u32 = 0;
+            while (b < 256) : (b += 1) {
+                const rgb: Rgb(u8) = .{ .r = @intCast(r), .g = @intCast(g), .b = @intCast(b) };
+                try expectEqualDeep(rgb, rgb.to(.cmyk).to(.rgb));
+            }
+        }
+    }
+}
+
+test "Cmyk.to: known values" {
+    try expectEqualDeep(Cmyk(u8){ .c = 0, .m = 0, .y = 0, .k = 255 }, Rgb(u8).black.to(.cmyk));
+    try expectEqualDeep(Cmyk(u8){ .c = 0, .m = 0, .y = 0, .k = 0 }, Rgb(u8).white.to(.cmyk));
+    try expectEqualDeep(Cmyk(u8){ .c = 0, .m = 255, .y = 255, .k = 0 }, Rgb(u8).red.to(.cmyk));
+    // Matches Pillow's CMYK -> RGB conversion.
+    const ink: Cmyk(u8) = .{ .c = 51, .m = 102, .y = 153, .k = 64 };
+    try expectEqualDeep(Rgb(u8){ .r = 153, .g = 115, .b = 76 }, ink.to(.rgb));
+    // Full black hides the other inks.
+    try expectEqualDeep(Rgb(u8).black, (Cmyk(u8){ .c = 10, .m = 200, .y = 30, .k = 255 }).to(.rgb));
+
+    const f = ink.as(f64);
+    try expectApproxEqAbs(0.2, f.c, 1e-12);
+    try expectEqualDeep(ink, f.as(u8));
+    try expectEqualDeep(Rgb(u8){ .r = 153, .g = 115, .b = 76 }, f.to(.rgb).as(u8));
+
+    const exact: Cmyk(f64) = .{ .c = 0.2, .m = 0.4, .y = 0.6, .k = 0.25 };
+    const rgb_f = exact.to(.rgb);
+    try expectApproxEqAbs(0.6, rgb_f.r, 1e-12);
+    // RGB -> CMYK moves the shared gray into K, so (.2, .4, .6, .25) comes back as (0, .25, .5, .4).
+    const back = rgb_f.to(.cmyk);
+    try expectApproxEqAbs(0, back.c, 1e-12);
+    try expectApproxEqAbs(0.25, back.m, 1e-12);
+    try expectApproxEqAbs(0.5, back.y, 1e-12);
+    try expectApproxEqAbs(0.4, back.k, 1e-12);
+    try expectEqualDeep(Cmyk(f64){ .c = 0, .m = 0, .y = 0, .k = 1 }, Rgb(f64).black.to(.cmyk));
 }
 
 test "Rgba.blend: Xyz blend matches RGB blend" {
