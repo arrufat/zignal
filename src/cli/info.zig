@@ -85,7 +85,11 @@ fn printInfo(io: Io, gpa: Allocator, writer: *Io.Writer, path: []const u8, stats
             try writer.print("Dimensions:  {d}x{d}\n", .{ info.width, info.height });
             try writer.print("Bit Depth:   {d}\n", .{info.precision});
             try writer.print("Channels:    {d}\n", .{info.num_components});
-            try writer.print("Color Space: {s}\n", .{if (info.num_components == 1) "Grayscale" else "YCbCr"});
+            try writer.print("Color Space: {s}\n", .{switch (info.num_components) {
+                1 => "Grayscale",
+                4 => "CMYK",
+                else => "YCbCr",
+            }});
             try writer.print("Frame Type:  {s}\n", .{@tagName(info.frame_type)});
         },
         .bmp => {

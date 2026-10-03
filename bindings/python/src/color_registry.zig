@@ -17,6 +17,7 @@ const Oklch = zignal.Oklch(f64);
 const Xyb = zignal.Xyb(f64);
 const Xyz = zignal.Xyz(f64);
 const Ycbcr = zignal.Ycbcr(u8);
+const Cmyk = zignal.Cmyk(u8);
 
 /// Every color type exposed to Python; the single source of truth for generation.
 pub const color_types = .{
@@ -33,25 +34,13 @@ pub const color_types = .{
     Xyb,
     Xyz,
     Ycbcr,
+    Cmyk,
 };
 
 /// Validates a color component against the range of its field and color family.
 pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, value: anytype) bool {
     // Apply validation rules grouped by color type families
     return switch (ColorType) {
-        // RGB family: integer components 0-255
-        Gray => std.mem.eql(u8, field_name, "y") and value >= 0 and value <= 255,
-        Rgb, Rgba => {
-            if (std.mem.eql(u8, field_name, "r") or
-                std.mem.eql(u8, field_name, "g") or
-                std.mem.eql(u8, field_name, "b") or
-                std.mem.eql(u8, field_name, "a"))
-            {
-                return value >= 0 and value <= 255;
-            }
-            return false;
-        },
-
         // HSV/HSL family: same validation rules (h: 0-360, s/v/l: 0-100)
         Hsv, Hsl => {
             if (std.mem.eql(u8, field_name, "h")) {
@@ -120,17 +109,6 @@ pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, 
             return false;
         },
 
-        // YCbCr: 0-255
-        Ycbcr => {
-            if (std.mem.eql(u8, field_name, "y") or
-                std.mem.eql(u8, field_name, "cb") or
-                std.mem.eql(u8, field_name, "cr"))
-            {
-                return value >= 0.0 and value <= 255.0;
-            }
-            return false;
-        },
-
         // LMS: L/M/S cone responses
         Lms => {
             if (std.mem.eql(u8, field_name, "l") or
@@ -153,8 +131,18 @@ pub fn validateColorComponent(comptime ColorType: type, field_name: []const u8, 
             return false;
         },
 
-        else => @compileError("Missing validation for color type '" ++ @typeName(ColorType) ++ "'. "),
+        // u8-backed types (Gray, Rgb, Rgba, Ycbcr, Cmyk): every component is 0-255
+        else => if (@typeInfo(ColorType).@"struct".field_types[0] == u8)
+            value >= 0 and value <= 255
+        else
+            @compileError("Missing validation for color type '" ++ @typeName(ColorType) ++ "'. "),
     };
+}
+
+/// The registered type for `space`.
+pub fn RegisteredColor(comptime space: zignal.ColorSpace) type {
+    inline for (color_types) |T| if (T.space == space) return T;
+    @compileError("No registered color type for " ++ @tagName(space));
 }
 
 /// Returns the validation error message for a color type.
@@ -172,6 +160,7 @@ pub fn getValidationErrorMessage(comptime ColorType: type) []const u8 {
         Lms => "LMS values must be in range 0-1000",
         Xyb => "XYB values must be in range -1000 to 1000",
         Ycbcr => "YCbCr values must be in range 0-255",
+        Cmyk => "CMYK values must be in range 0-255",
         else => @compileError("Missing validation error message for color type '" ++ @typeName(ColorType) ++ "'. "),
     };
 }
@@ -229,6 +218,12 @@ pub fn getDocumentationString(comptime ColorType: type) []const u8 {
         Lms => "A color in the LMS color space, representing the response of the three types of cones in the human eye.",
         Xyb => "A color in the XYB color space used in JPEG XL, designed for efficient image compression.",
         Ycbcr => "Ycbcr (Y'CbCr) colorspace used in JPEG and video encoding (BT.601).",
+        Cmyk =>
+        \\Device CMYK ink coverage (0 = no ink), with all components within the range 0-255.
+        \\Uncalibrated: converts with the naive R = (1 - C)(1 - K) and no ICC profile.
+        \\- c, m, y: Cyan, magenta and yellow ink.
+        \\- k: Black ink.
+        ,
         else => @compileError("Missing documentation for color type '" ++ @typeName(ColorType) ++ "'. "),
     };
 }

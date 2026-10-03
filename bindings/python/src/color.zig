@@ -23,6 +23,7 @@ const Oklch = zignal.Oklch(f64);
 const Xyb = zignal.Xyb(f64);
 const Xyz = zignal.Xyz(f64);
 const Ycbcr = zignal.Ycbcr(u8);
+const Cmyk = zignal.Cmyk(u8);
 
 // ============================================================================
 // GENERIC COLOR TYPE GENERATION
@@ -127,6 +128,9 @@ pub var xyz = ColorState(Xyz).createTypeObject();
 pub const YcbcrBinding = color_factory.ColorBinding(Ycbcr);
 pub var ycbcr = ColorState(Ycbcr).createTypeObject();
 
+pub const CmykBinding = color_factory.ColorBinding(Cmyk);
+pub var cmyk = ColorState(Cmyk).createTypeObject();
+
 // ============================================================================
 // REGISTRATION HELPER
 // ============================================================================
@@ -146,6 +150,7 @@ pub fn registerAllColorTypes(module: [*c]c.PyObject) !void {
     try python.register(@ptrCast(module), "Xyb", @ptrCast(&xyb));
     try python.register(@ptrCast(module), "Xyz", @ptrCast(&xyz));
     try python.register(@ptrCast(module), "Ycbcr", @ptrCast(&ycbcr));
+    try python.register(@ptrCast(module), "Cmyk", @ptrCast(&cmyk));
 }
 
 // ============================================================================
@@ -169,6 +174,7 @@ pub fn createColorPyObject(color: anytype) ?*c.PyObject {
         Xyb => XybBinding.createPyObject(color, &xyb),
         Xyz => XyzBinding.createPyObject(color, &xyz),
         Ycbcr => YcbcrBinding.createPyObject(color, &ycbcr),
+        Cmyk => CmykBinding.createPyObject(color, &cmyk),
         else => null,
     };
 }

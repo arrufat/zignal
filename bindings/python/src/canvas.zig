@@ -379,7 +379,7 @@ const canvas_fill_doc =
     \\  - Integer: grayscale value 0-255 (0=black, 255=white)
     \\  - RGB tuple: `(r, g, b)` with values 0-255
     \\  - RGBA tuple: `(r, g, b, a)` with values 0-255
-    \\  - Any color object: `Rgb`, `Rgba`, `Hsl`, `Hsv`, `Lab`, `Lch`, `Lms`, `Oklab`, `Oklch`, `Xyb`, `Xyz`, `Ycbcr`
+    \\  - Any color object: `Rgb`, `Rgba`, `Hsl`, `Hsv`, `Lab`, `Lch`, `Lms`, `Oklab`, `Oklch`, `Xyb`, `Xyz`, `Ycbcr`, `Cmyk`
     \\
     \\## Examples
     \\```python
