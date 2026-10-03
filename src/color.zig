@@ -1095,9 +1095,10 @@ fn ycbcrToRgb(comptime T: type, ycbcr: Ycbcr(T)) Rgb(T) {
     }
 }
 
-/// Device CMYK ink coverage (0 = no ink), components within 0-255 when `T` is `u8` and
-/// within 0-1 when `T` is float. Uncalibrated: the conversion is the naive
-/// `R = (1 - C)(1 - K)` with no ICC profile, so it is not suitable for print proofing.
+/// Device [CMYK](https://en.wikipedia.org/wiki/CMYK_color_model) ink coverage (0 = no ink),
+/// components within 0-255 when `T` is `u8` and within 0-1 when `T` is float.
+/// Uncalibrated: the conversion is the naive `R = (1 - C)(1 - K)` with no ICC profile,
+/// so it is not suitable for print proofing.
 pub fn Cmyk(comptime T: type) type {
     switch (@typeInfo(T)) {
         .float => {},
@@ -1156,7 +1157,7 @@ pub fn Cmyk(comptime T: type) type {
     };
 }
 
-/// Converts RGB to CMYK with full black generation: K = 1 - max(R, G, B), C = (max - R) / max.
+/// RGB to CMYK with full black generation (K = 1 - max).
 fn rgbToCmyk(comptime T: type, rgb: Rgb(T)) Cmyk(T) {
     if (T == u8) {
         const max: u32 = @max(rgb.r, rgb.g, rgb.b);
@@ -1887,17 +1888,10 @@ test "Rgb.to: 100 random colors round-trip" {
 }
 
 test "Rgb.to: cmyk round-trips every u8 color" {
-    var r: u32 = 0;
-    while (r < 256) : (r += 1) {
-        var g: u32 = 0;
-        while (g < 256) : (g += 1) {
-            var b: u32 = 0;
-            while (b < 256) : (b += 1) {
-                const rgb: Rgb(u8) = .{ .r = @intCast(r), .g = @intCast(g), .b = @intCast(b) };
-                try expectEqualDeep(rgb, rgb.to(.cmyk).to(.rgb));
-            }
-        }
-    }
+    for (0..256) |r| for (0..256) |g| for (0..256) |b| {
+        const rgb: Rgb(u8) = .{ .r = @intCast(r), .g = @intCast(g), .b = @intCast(b) };
+        try expectEqualDeep(rgb, rgb.to(.cmyk).to(.rgb));
+    };
 }
 
 test "Cmyk.to: known values" {
@@ -1907,7 +1901,6 @@ test "Cmyk.to: known values" {
     // Matches Pillow's CMYK -> RGB conversion.
     const ink: Cmyk(u8) = .{ .c = 51, .m = 102, .y = 153, .k = 64 };
     try expectEqualDeep(Rgb(u8){ .r = 153, .g = 115, .b = 76 }, ink.to(.rgb));
-    // Full black hides the other inks.
     try expectEqualDeep(Rgb(u8).black, (Cmyk(u8){ .c = 10, .m = 200, .y = 30, .k = 255 }).to(.rgb));
 
     const f = ink.as(f64);
@@ -1918,7 +1911,7 @@ test "Cmyk.to: known values" {
     const exact: Cmyk(f64) = .{ .c = 0.2, .m = 0.4, .y = 0.6, .k = 0.25 };
     const rgb_f = exact.to(.rgb);
     try expectApproxEqAbs(0.6, rgb_f.r, 1e-12);
-    // RGB -> CMYK moves the shared gray into K, so (.2, .4, .6, .25) comes back as (0, .25, .5, .4).
+    // Black generation moves the shared gray into K.
     const back = rgb_f.to(.cmyk);
     try expectApproxEqAbs(0, back.c, 1e-12);
     try expectApproxEqAbs(0.25, back.m, 1e-12);

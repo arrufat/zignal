@@ -12,6 +12,7 @@ const createColorPyObject = color.createColorPyObject;
 const color_types = @import("color_registry.zig").color_types;
 const enum_utils = @import("enum_utils.zig");
 const getValidationErrorMessage = @import("color_registry.zig").getValidationErrorMessage;
+const RegisteredColor = @import("color_registry.zig").RegisteredColor;
 const python = @import("python.zig");
 const validateColorComponent = @import("color_registry.zig").validateColorComponent;
 
@@ -505,12 +506,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             const float_color = if (is_u8_backed) zig_color.as(f64) else zig_color;
 
             const result_obj = switch (target_space) {
-                .gray => createColorPyObject(float_color.to(.gray).as(u8)),
-                .rgb => createColorPyObject(float_color.to(.rgb).as(u8)),
-                .rgba => createColorPyObject(float_color.to(.rgba).as(u8)),
-                .ycbcr => createColorPyObject(float_color.to(.ycbcr).as(u8)),
-                .cmyk => createColorPyObject(float_color.to(.cmyk).as(u8)),
-                inline else => |s| createColorPyObject(float_color.to(s)),
+                inline else => |s| createColorPyObject(float_color.to(s).as(@typeInfo(RegisteredColor(s)).@"struct".field_types[0])),
             };
 
             return @ptrCast(result_obj);
