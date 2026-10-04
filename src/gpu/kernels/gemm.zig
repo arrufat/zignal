@@ -23,8 +23,8 @@ const ConstVecPtr = *addrspace(.physical_storage_buffer) const [1 << 26]V;
 extern const params: Params addrspace(.push_constant);
 
 // Both tiles are stored k-major so an invocation's four operands are adjacent.
-var tile_a: [kstep][block]f32 addrspace(.shared) = undefined;
-var tile_b: [kstep][block]f32 addrspace(.shared) = undefined;
+extern var tile_a: [kstep][block]f32 addrspace(.shared);
+extern var tile_b: [kstep][block]f32 addrspace(.shared);
 
 const loads = block * kstep / (threads * threads);
 
@@ -134,11 +134,14 @@ export fn main() callconv(.{ .spirv_kernel = .{ .x = threads, .y = threads, .z =
             }
         }
         spirv.workgroupBarrier();
+        // A comptime-known outer index into a shared array miscompiles to an invalid access
+        // chain in the SPIR-V backend; offsetting it by a runtime zero sidesteps that.
+        const zero = t & 0;
         inline for (0..kstep) |i| {
             var av: [micro]f32 = undefined;
             var bv: [micro]f32 = undefined;
-            inline for (0..micro) |r| av[r] = tile_a[i][ly * micro + r];
-            inline for (0..micro) |s| bv[s] = tile_b[i][lx * micro + s];
+            inline for (0..micro) |r| av[r] = tile_a[zero + i][ly * micro + r];
+            inline for (0..micro) |s| bv[s] = tile_b[zero + i][lx * micro + s];
             inline for (0..micro) |r| inline for (0..micro) |s| {
                 acc[r][s] += av[r] * bv[s];
             };
