@@ -79,8 +79,8 @@ img.save("out.png")
 ## Development
 
 ```bash
-zig build python-bindings          # build extension + stubs
-cd bindings/python
+zig build python                   # build extension + stubs (from the repo root)
+cd bindings/python                 # or here: `zig build` (extension) / `zig build stubs`
 uv venv && uv pip install -e .     # editable install
 uv run pytest -q                   # run tests
 ```

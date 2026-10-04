@@ -23,7 +23,8 @@ from setuptools import Extension, find_packages, setup
 from setuptools.command.build_ext import build_ext
 from setuptools.dist import Distribution
 
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+BINDINGS_ROOT = Path(__file__).parent
+PROJECT_ROOT = BINDINGS_ROOT.parent.parent
 
 
 class ZigExtension(Extension):
@@ -72,7 +73,6 @@ class ZigBuildExt(build_ext):
         cmd = [
             "zig",
             "build",
-            "python-bindings",
             f"-Doptimize={ext.optimize}",
             f"-Dcpu={ext.cpu}",
         ]
@@ -81,15 +81,15 @@ class ZigBuildExt(build_ext):
         cmd += [f"-D{key}={value}" for key, value in py_opts.items()]
 
         print(f"Building Zig extension: {' '.join(cmd)}")
-        subprocess.check_call(cmd, cwd=PROJECT_ROOT, env=env)
+        subprocess.check_call(cmd, cwd=BINDINGS_ROOT, env=env)
 
-        zig_out = PROJECT_ROOT / "zig-out" / "lib"
+        zig_out = BINDINGS_ROOT / "zig-out" / "lib"
         built_lib = next(zig_out.glob("_zignal*"))
         dest_path = Path(self.get_ext_fullpath(ext.name))
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(built_lib, dest_path)
 
-        zig_bin = PROJECT_ROOT / "zig-out" / "bin"
+        zig_bin = BINDINGS_ROOT / "zig-out" / "bin"
         binary_name = "zignal.exe" if sys.platform == "win32" else "zignal"
         built_bin = zig_bin / binary_name
 
@@ -98,7 +98,7 @@ class ZigBuildExt(build_ext):
         else:
             print(f"Warning: CLI binary not found at {built_bin}")
 
-        pkg_dir = Path(__file__).parent / "zignal"
+        pkg_dir = BINDINGS_ROOT / "zignal"
         for f in ["__init__.pyi", "_zignal.pyi", "py.typed"]:
             if (src := pkg_dir / f).exists():
                 shutil.copy2(src, dest_path.parent / f)
