@@ -7,7 +7,7 @@ This guide shows how to expose new Zignal APIs to Python using the patterns and 
 - Write bindings in Zig under `bindings/python/src/` grouped by domain:
   - `image/` (filters, transforms), `canvas.zig`, `matrix.zig`, `optimization.zig`, etc.
 - Register types in the `type_table` in `main.zig` and enums in `enums.zig`.
-- Build the bindings and regenerate the type stubs with `zig build python` (or `python-bindings` / `python-stubs` separately).
+- Build the bindings and regenerate the type stubs with `zig build python` from the repo root. The bindings are their own Zig package, so inside `bindings/python` `zig build` builds the extension and `zig build stubs` the stubs.
 - Run tests with `uv run pytest` from `bindings/python`.
 
 ## Conventions
@@ -105,7 +105,7 @@ const type_table = [_]TypeReg{
 ## Stubs and Docs
 
 - Stubs are generated from compile‑time metadata arrays (e.g., `*_methods_metadata`). Keep metadata updated as you add methods and properties.
-- API docs are published from the generated stubs (see CI). For local inspection: `zig build python-stubs` and inspect `bindings/python/zignal/_zignal.pyi`.
+- API docs are published from the generated stubs (see CI). For local inspection: `zig build stubs` (in `bindings/python`) and inspect `bindings/python/zignal/_zignal.pyi`.
 
 ## Testing
 

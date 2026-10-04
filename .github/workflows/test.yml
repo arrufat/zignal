@@ -28,6 +28,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      # zignal stays dependency-free; the Python bindings are their own package.
+      - name: Zero dependencies
+        run: grep -q '\.dependencies = \.{}' build.zig.zon
+
       - name: Grab Zig
         uses: mlugg/setup-zig@v2
         with:

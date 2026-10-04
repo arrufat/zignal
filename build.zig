@@ -1,16 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const Translator = @import("translate_c").Translator;
-
 const zignal_version = std.SemanticVersion.parse(@import("build.zig.zon").version) catch unreachable;
 const min_zig_version = std.SemanticVersion.parse(@import("build.zig.zon").minimum_zig_version) catch unreachable;
 
 pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    // An explicit mode keeps a bare `--release` from reaching translate-c, which declares no preferred one.
-    const translate_c = b.dependency("translate_c", .{ .optimize = optimize });
 
     const print_md5sums = b.option(bool, "print-md5sums", "Print MD5 checksums instead of testing them") orelse false;
     const debug_test_images = b.option(bool, "debug-test-images", "Save regression test renderings as PNGs") orelse false;
@@ -99,92 +95,20 @@ pub fn build(b: *Build) void {
     b.default_step.dependOn(docs_step);
     b.default_step.dependOn(fmt_step);
 
-    const py_bindings_step = b.step("python-bindings", "Build the python bindings");
-    // `python-stubs` is its own step, not a dependency of `python-bindings`, so the extension can
-    // build and run tests without regenerating .pyi files.
-    const python_stubs_step = b.step("python-stubs", "Generate Python type stub files (.pyi)");
-    // Convenience umbrella: build the extension and (re)generate stubs in one go.
+    // The bindings are their own package (bindings/python) so only they pull in translate-c.
     const python_step = b.step("python", "Build the Python bindings and type stubs");
-    python_step.dependOn(py_bindings_step);
-    python_step.dependOn(python_stubs_step);
-
-    const os_tag = target.result.os.tag;
-    const py_paths: PythonPaths = .fromOptions(b);
-
-    if (py_paths.include_dir == null and os_tag == .windows) {
-        // Fail lazily so steps that don't need Python still work.
-        const fail = b.addFail("Could not determine the Python include directory; pass -Dpython-include-dir=.");
-        py_bindings_step.dependOn(&fail.step);
-        python_stubs_step.dependOn(&fail.step);
-        return;
+    const python_build = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "install", "stubs" });
+    python_build.setCwd(b.path("bindings/python"));
+    python_build.addArg(b.fmt("-Doptimize={t}", .{optimize}));
+    if (!target.query.isNative()) {
+        python_build.addArg(b.fmt("-Dtarget={s}", .{target.query.zigTriple(b.allocator) catch @panic("OOM")}));
+        python_build.addArg(b.fmt("-Dcpu={s}", .{target.query.serializeCpuAlloc(b.allocator) catch @panic("OOM")}));
     }
-    const translator: Translator = .init(translate_c, .{
-        .c_source_file = b.path("bindings/python/src/c.h"),
-        .target = target,
-        .optimize = optimize,
-        // Zero-default struct fields like the old built-in translate-c (`.ob_base = .{}`).
-        .default_init = true,
-        // Last resort: ambient pkg-config python3 (its cflags match python3-embed's; may be a different Python).
-        .link_system_libs = if (py_paths.include_dir == null) &.{.{ .name = "python3" }} else &.{},
-    });
-    if (py_paths.include_dir) |inc| {
-        validatePath(inc, "python-include-dir");
-        translator.addIncludePath(.{ .cwd_relative = inc });
+    for ([_][]const u8{ "python-include-dir", "python-libs-dir", "python-lib-name" }) |name| {
+        const value = b.option([]const u8, name, "Forwarded to the Python bindings build") orelse continue;
+        python_build.addArg(b.fmt("-D{s}={s}", .{ name, value }));
     }
-
-    const py_module = b.addLibrary(.{
-        .name = "zignal",
-        .linkage = .dynamic,
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("bindings/python/src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .strip = optimize != .debug,
-            .imports = &.{
-                .{ .name = "zignal", .module = zignal },
-                .{ .name = "c", .module = translator.mod },
-            },
-        }),
-    });
-    linkPython(py_module, py_paths);
-
-    const extension = switch (os_tag) {
-        .windows => ".pyd",
-        .macos => ".dylib",
-        else => ".so",
-    };
-
-    const stub_generator = b.addExecutable(.{
-        .name = "python_stubs",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("bindings/python/src/generate_stubs.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zignal", .module = zignal },
-                .{ .name = "c", .module = translator.mod },
-            },
-        }),
-    });
-    linkPython(stub_generator, py_paths);
-
-    const run_stub_generator = b.addRunArtifact(stub_generator);
-    run_stub_generator.cwd = b.path("bindings/python/zignal");
-    python_stubs_step.dependOn(&run_stub_generator.step);
-
-    const output_name = b.fmt("lib/_zignal{s}", .{extension});
-    const install_py_module = b.addInstallFile(py_module.getEmittedBin(), output_name);
-
-    // Ensure CLI is installed to zig-out/bin so setup.py can find it
-    const install_cli = b.addInstallArtifact(exe, .{});
-    py_bindings_step.dependOn(&install_cli.step);
-    py_bindings_step.dependOn(&install_py_module.step);
-
-    // Also copy the built extension and CLI into the source package directory for local development
-    const usf = b.addUpdateSourceFiles();
-    usf.addCopyFileToSource(py_module.getEmittedBin(), b.fmt("bindings/python/zignal/_zignal{s}", .{extension}));
-    usf.addCopyFileToSource(exe.getEmittedBin(), b.fmt("bindings/python/zignal/zignal{s}", .{target.result.exeFileExt()}));
-    py_bindings_step.dependOn(&usf.step);
+    python_step.dependOn(&python_build.step);
 }
 
 // Gating `build`'s parameter type keeps the version message as the only error on old compilers.
@@ -239,12 +163,6 @@ fn runCapture(b: *std.Build, argv: []const []const u8) ?[]const u8 {
     return if (trimmed.len == 0) null else trimmed;
 }
 
-/// Run `python -c <snippet>` (honoring `$PYTHON`) and return its trimmed stdout, or null on failure.
-fn pythonValue(b: *std.Build, snippet: []const u8) ?[]const u8 {
-    const exe = b.graph.environ_map.get("PYTHON") orelse "python";
-    return runCapture(b, &.{ exe, "-c", snippet });
-}
-
 /// Run a git command in the repo root and return its trimmed stdout, or null on
 /// failure (git missing, non-zero exit — e.g. not on a tag, not a repo).
 fn runGit(b: *std.Build, args: []const []const u8) ?[]const u8 {
@@ -252,70 +170,4 @@ fn runGit(b: *std.Build, args: []const []const u8) ?[]const u8 {
     const full_args = std.mem.concat(b.allocator, []const u8, &.{ &.{ "git", "-C", dir }, args }) catch return null;
     defer b.allocator.free(full_args);
     return runCapture(b, full_args);
-}
-
-/// Python paths from `-D` options. setup.py passes these so the values become part of Zig's
-/// configure-cache key — env vars are not, so a cached graph would silently ignore them.
-const PythonPaths = struct {
-    include_dir: ?[]const u8,
-    libs_dir: ?[]const u8,
-    lib_name: ?[]const u8,
-
-    fn fromOptions(b: *std.Build) PythonPaths {
-        return .{
-            // Option, else autodetect from the active interpreter — resolved once here, not per linkPython call.
-            .include_dir = b.option([]const u8, "python-include-dir", "Python headers dir (else autodetected)") orelse
-                pythonValue(b, "import sysconfig;print(sysconfig.get_path('include'),end='')"),
-            .libs_dir = b.option([]const u8, "python-libs-dir", "Python import-library dir (Windows)"),
-            .lib_name = b.option([]const u8, "python-lib-name", "libpython name to link"),
-        };
-    }
-};
-
-/// Links libpython where required (embedding executables always, extension modules only on Windows).
-fn linkPython(artifact: *std.Build.Step.Compile, py: PythonPaths) void {
-    const root = artifact.root_module;
-    const os_tag = root.resolved_target.?.result.os.tag;
-    const is_windows = os_tag == .windows;
-
-    root.link_libc = true;
-
-    // Extension modules don't link libpython — symbols bind to the loading interpreter
-    // (`-undefined dynamic_lookup` on Mach-O). Windows is the exception: link pythonXY.lib.
-    if (artifact.isDynamicLibrary() and !is_windows) {
-        artifact.linker_allow_shlib_undefined = true;
-        return;
-    }
-
-    if (py.libs_dir) |dir| {
-        validatePath(dir, "python-libs-dir");
-        root.addLibraryPath(.{ .cwd_relative = dir });
-    }
-
-    // Default pkg-config names: extension modules bind to "python3", embedding executables to "python3-embed".
-    const lib_name = if (py.lib_name) |name| blk: {
-        validateLibName(name, "python-lib-name");
-        // On Windows, strip the .lib extension pkg-config-style names don't carry.
-        if (is_windows and std.mem.endsWith(u8, name, ".lib")) {
-            break :blk name[0 .. name.len - ".lib".len];
-        }
-        break :blk name;
-    } else if (artifact.isDynamicLibrary()) "python3" else "python3-embed";
-    root.linkSystemLibrary(lib_name, .{});
-
-    if (os_tag == .macos) root.addRPathSpecial("@loader_path");
-}
-
-fn validatePath(path: []const u8, opt_name: []const u8) void {
-    if (!std.fs.path.isAbsolute(path)) {
-        std.debug.panic("Invalid path in {s}: '{s}'. An absolute path is required.", .{ opt_name, path });
-    }
-}
-
-fn validateLibName(name: []const u8, opt_name: []const u8) void {
-    for (name) |c| {
-        if (!std.ascii.isAlphanumeric(c) and c != '_' and c != '-' and c != '.') {
-            std.debug.panic("Invalid character in {s}: '{c}'. Only alphanumeric, _, -, and . are allowed.", .{ opt_name, c });
-        }
-    }
 }
