@@ -26,7 +26,7 @@ All functionality is implemented in Zig with no runtime dependencies, making the
 pip install zignal-processing
 ```
 
-- Python **3.10 – 3.14** (CPython)
+- Python **3.11 – 3.15** (CPython)
 - Prebuilt wheels ship for:
   - Linux (manylinux2014) `x86_64`, `aarch64`
   - macOS `x86_64` and `arm64`

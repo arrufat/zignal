@@ -203,9 +203,7 @@ fn solve_assignment_problem(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.Py
 
     // Check matrix type
     const matrix_mod = @import("matrix.zig");
-    // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-    const matrix_type_obj: *c.PyObject = @ptrCast(&matrix_mod.MatrixType);
-    if (c.PyObject_IsInstance(matrix_obj, matrix_type_obj) != 1) {
+    if (c.PyObject_IsInstance(matrix_obj, @ptrCast(&matrix_mod.MatrixType)) != 1) {
         python.setTypeError("Matrix object", matrix_obj);
         return null;
     }

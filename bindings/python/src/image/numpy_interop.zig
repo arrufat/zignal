@@ -158,8 +158,7 @@ fn imageFromNumpyHelper(
     self.numpy_ref = array_obj;
 
     const pimg = PyImage.createFrom(allocator, img, .borrowed) orelse {
-        // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-        c.Py_DecRef(@as(*c.PyObject, @ptrCast(self)));
+        c.Py_DecRef(@ptrCast(self));
         python.setMemoryError("image");
         return null;
     };

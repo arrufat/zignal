@@ -9,17 +9,17 @@ description = "Zero-dependency image processing library"
 readme = "README.md"
 authors = [{name = "zignal contributors"}]
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 keywords = ["image-processing", "computer-vision", "zig", "native"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: Multimedia :: Graphics",
     "Topic :: Scientific/Engineering :: Image Processing",
 ]
@@ -60,7 +60,7 @@ default-groups = ["dev"]
 
 [tool.ruff]
 line-length = 99
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [

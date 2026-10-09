@@ -382,10 +382,9 @@ pub fn registerMotionBlur(module: *c.PyObject) !void {
         return error.TypeInitFailed;
     }
 
-    // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-    c.Py_IncRef(@as(?*c.PyObject, @ptrCast(&MotionBlurType)));
+    c.Py_IncRef(@ptrCast(&MotionBlurType));
     if (c.PyModule_AddObject(module, "MotionBlur", @ptrCast(&MotionBlurType)) < 0) {
-        c.Py_DecRef(@as(?*c.PyObject, @ptrCast(&MotionBlurType)));
+        c.Py_DecRef(@ptrCast(&MotionBlurType));
         return error.ModuleAddFailed;
     }
 }
