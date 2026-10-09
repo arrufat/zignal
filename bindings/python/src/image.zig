@@ -175,10 +175,8 @@ fn image_init(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) ca
 
     if (params.dtype) |fmt_obj| {
         // Explicit dtype specified
-        // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-        const is_type_obj = c.PyObject_TypeCheck(fmt_obj, @as([*c]c.PyTypeObject, @ptrCast(&c.PyType_Type))) != 0;
+        const is_type_obj = c.PyObject_TypeCheck(fmt_obj, &c.PyType_Type) != 0;
         if (is_type_obj) {
-            // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
             if (fmt_obj == @as(*c.PyObject, @ptrCast(&color_bindings.gray))) {
                 target_format = .gray;
             } else if (fmt_obj == @as(*c.PyObject, @ptrCast(&color_bindings.rgb))) {
@@ -403,9 +401,7 @@ fn image_setitem(self_obj: ?*c.PyObject, key: ?*c.PyObject, value: ?*c.PyObject)
     const pimg_opt = self.py_image;
 
     // Check if key is a slice object (for view[:] = image syntax)
-    // Use direct type comparison instead of PySlice_Check to avoid Zig translation issues
-    // TODO: replace with `if (c.PySlice_Check(key) != 0) {` after Python 3.10 support is dropped
-    if (python.typeOf(key) == &c.PySlice_Type) {
+    if (c.PySlice_Check(key) != 0) {
         // Handle slice assignment
         var start: c.Py_ssize_t = undefined;
         var stop: c.Py_ssize_t = undefined;

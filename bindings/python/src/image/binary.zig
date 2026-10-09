@@ -109,8 +109,7 @@ pub fn image_threshold_otsu(self_obj: ?*c.PyObject, args: ?*c.PyObject) callconv
 
     const binary_obj = moveImageToPython(out) orelse return null;
     const tuple = c.PyTuple_New(2) orelse {
-        // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-        c.Py_DecRef(@as(?*c.PyObject, @ptrCast(binary_obj)));
+        c.Py_DecRef(@ptrCast(binary_obj));
         python.setMemoryError("return tuple");
         return null;
     };

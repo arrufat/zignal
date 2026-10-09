@@ -49,10 +49,9 @@ pub fn notImplemented() ?*c.PyObject {
 pub fn register(module: [*c]c.PyObject, comptime name: []const u8, type_obj: *c.PyTypeObject) !void {
     if (c.PyType_Ready(type_obj) < 0) return error.TypeInitFailed;
 
-    // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-    c.Py_IncRef(@as(?*c.PyObject, @ptrCast(type_obj)));
+    c.Py_IncRef(@ptrCast(type_obj));
     if (c.PyModule_AddObject(module, name.ptr, @ptrCast(type_obj)) < 0) {
-        c.Py_DecRef(@as(?*c.PyObject, @ptrCast(type_obj)));
+        c.Py_DecRef(@ptrCast(type_obj));
         return error.TypeAddFailed;
     }
 }

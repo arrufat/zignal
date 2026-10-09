@@ -49,7 +49,7 @@ module.addImport("zignal", zignal.module("zignal"));
 pip install zignal-processing
 ```
 
-Requires Python 3.10+, no external dependencies
+Requires Python 3.11+, no external dependencies
 
 <img src="./assets/python_print.gif" width=600>
 

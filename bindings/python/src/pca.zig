@@ -338,8 +338,7 @@ fn pca_transform(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject)
     // Allocate and store the matrix pointer
     result.?.matrix_ptr = allocator.create(Matrix(f64)) catch {
         transformed.deinit();
-        // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-        c.Py_DecRef(@as(*c.PyObject, @ptrCast(result)));
+        c.Py_DecRef(@ptrCast(result));
         python.setMemoryError("Matrix");
         return null;
     };
@@ -493,8 +492,7 @@ fn pca_get_components(self_obj: ?*c.PyObject, closure: ?*anyopaque) callconv(.c)
     // Allocate and store the matrix pointer
     result.?.matrix_ptr = allocator.create(Matrix(f64)) catch {
         components_copy.deinit();
-        // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-        c.Py_DecRef(@as(*c.PyObject, @ptrCast(result)));
+        c.Py_DecRef(@ptrCast(result));
         python.setMemoryError("Matrix");
         return null;
     };

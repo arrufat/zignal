@@ -115,4 +115,4 @@ const type_table = [_]TypeReg{
 ## Troubleshooting
 
 - If Python headers/libs aren’t auto‑detected: set `PYTHON_INCLUDE_DIR`, `PYTHON_LIBS_DIR`, `PYTHON_LIB_NAME`.
-- Ensure Python 3.10 or newer is on PATH; the bindings target 3.10–3.14.
+- Ensure Python 3.11 or newer is on PATH; the bindings target 3.11–3.15.
