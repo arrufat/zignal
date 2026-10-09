@@ -111,8 +111,7 @@ fn create_colormap(type_obj: ?*c.PyObject, variant: ColormapVariant, args: ?*c.P
             } else {
                 obj.min = c.PyFloat_AsDouble(min_obj);
                 if (c.PyErr_Occurred() != null) {
-                    // TODO(py3.10): remove explicit @as cast once minimum Python >= 3.11
-                    c.Py_DecRef(@as(?*c.PyObject, @ptrCast(obj)));
+                    c.Py_DecRef(@ptrCast(obj));
                     return null;
                 }
                 obj.has_min = true;
@@ -127,8 +126,7 @@ fn create_colormap(type_obj: ?*c.PyObject, variant: ColormapVariant, args: ?*c.P
             } else {
                 obj.max = c.PyFloat_AsDouble(max_obj);
                 if (c.PyErr_Occurred() != null) {
-                    // TODO(py3.10): remove explicit @as cast once minimum Python >= 3.11
-                    c.Py_DecRef(@as(?*c.PyObject, @ptrCast(obj)));
+                    c.Py_DecRef(@ptrCast(obj));
                     return null;
                 }
                 obj.has_max = true;
@@ -350,9 +348,9 @@ pub fn registerColormap(module: *c.PyObject) !void {
         return error.TypeInitFailed;
     }
 
-    c.Py_IncRef(@as(?*c.PyObject, @ptrCast(&ColormapType)));
+    c.Py_IncRef(@ptrCast(&ColormapType));
     if (c.PyModule_AddObject(module, "Colormap", @ptrCast(&ColormapType)) < 0) {
-        c.Py_DecRef(@as(?*c.PyObject, @ptrCast(&ColormapType)));
+        c.Py_DecRef(@ptrCast(&ColormapType));
         return error.ModuleAddFailed;
     }
 }

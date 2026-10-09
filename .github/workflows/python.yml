@@ -20,30 +20,32 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest, macos-15-intel]
-        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.11', '3.12', '3.13', '3.14', '3.15']
 
     env:
       ZIG_CPU: baseline
       ZIG_OPTIMIZE: ReleaseFast
+      # actions/setup-python lags new CPython releases; use uv-managed builds only.
+      UV_PYTHON_PREFERENCE: only-managed
 
     steps:
     - uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v7
-      with:
-        python-version: ${{ matrix.python-version }}
-
     - name: Install Zig
       uses: mlugg/setup-zig@v2
       with:
-        version: master
+        # translate-c lags behind Zig master; build against the release.
+        version: 0.17.0
 
-    - name: Install uv
-      uses: astral-sh/setup-uv@v2
+    - name: Install uv and Python ${{ matrix.python-version }}
+      uses: astral-sh/setup-uv@v10.2.0
+      with:
+        python-version: ${{ matrix.python-version }}
+        activate-environment: true
+        working-directory: bindings/python
 
     - name: Install dependencies
       run: |
@@ -53,7 +55,8 @@ jobs:
     - name: Generate Python type stubs
       shell: bash
       # `zig build stubs` runs zig directly (not through setup.py), so pass the interpreter's
-      # paths as -D options to match the active Python (Windows has no pkg-config fallback).
+      # paths as -D options to match the active Python (pkg-config would find the runner's
+      # system Python, and Windows has no pkg-config at all).
       run: |
         PY_INC=$(python -c "import sysconfig; print(sysconfig.get_path('include'))")
         ARGS="-Dpython-include-dir=$PY_INC"
@@ -61,6 +64,14 @@ jobs:
           PY_LIBS=$(python -c "import sysconfig; from pathlib import Path; print(Path(sysconfig.get_path('stdlib')).parent / 'libs')")
           PY_VER=$(python -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')")
           ARGS="$ARGS -Dpython-libs-dir=$PY_LIBS -Dpython-lib-name=python${PY_VER}.lib"
+          # The stubs generator embeds Python; the venv's Scripts dir lacks python3XX.dll.
+          export PATH="$(cygpath -u "$(python -c "import sys; print(sys.base_prefix)")"):$PATH"
+        else
+          PY_LIBS=$(python -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))")
+          PY_VER=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+          ARGS="$ARGS -Dpython-libs-dir=$PY_LIBS -Dpython-lib-name=python${PY_VER}"
+          # The stubs generator embeds Python, so it must find libpython when it runs.
+          export LD_LIBRARY_PATH="$PY_LIBS" DYLD_LIBRARY_PATH="$PY_LIBS"
         fi
         cd bindings/python
         zig build stubs $ARGS
@@ -82,14 +93,8 @@ jobs:
           rm dist/*.whl && mv dist_fixed/*.whl dist/
 
         elif [ "$RUNNER_OS" == "macOS" ]; then
-          ARCH=$(uname -m)
-          if [ "$ARCH" == "arm64" ]; then
-            export ZIG_TARGET=aarch64-macos-none
-            export PLAT_NAME=macosx_11_0_arm64
-          else
-            export ZIG_TARGET=x86_64-macos-none
-            export PLAT_NAME=macosx_10_9_x86_64
-          fi
+          export ZIG_TARGET=aarch64-macos-none
+          export PLAT_NAME=macosx_11_0_arm64
 
           echo "Building for target: $ZIG_TARGET, platform: $PLAT_NAME"
           uv run python -m build --wheel

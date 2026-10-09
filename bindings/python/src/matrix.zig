@@ -427,8 +427,7 @@ fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
 
     // Create Matrix that references the numpy data
     const matrix_ptr = allocator.create(Matrix(f64)) catch {
-        // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-        c.Py_DecRef(@as(?*c.PyObject, @ptrCast(self)));
+        c.Py_DecRef(@ptrCast(self));
         python.setMemoryError("Matrix");
         return null;
     };
@@ -458,8 +457,7 @@ fn matrix_from_numpy(type_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObj
         // Fallback: copy unaligned data to an aligned buffer
         matrix_ptr.* = Matrix(f64).init(allocator, @intCast(rows), @intCast(cols)) catch {
             allocator.destroy(matrix_ptr);
-            // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-            c.Py_DecRef(@as(?*c.PyObject, @ptrCast(self)));
+            c.Py_DecRef(@ptrCast(self));
             python.setMemoryError("Matrix");
             return null;
         };
@@ -787,8 +785,7 @@ fn matrixToObject(matrix_or_err: MatrixResult) ?*c.PyObject {
     if (self == null) return null;
 
     const matrix_ptr = allocator.create(Matrix(f64)) catch {
-        // TODO(py3.10): drop explicit cast once minimum Python >= 3.11
-        c.Py_DecRef(@as(?*c.PyObject, @ptrCast(self)));
+        c.Py_DecRef(@ptrCast(self));
         python.setMemoryError("Matrix");
         return null;
     };
