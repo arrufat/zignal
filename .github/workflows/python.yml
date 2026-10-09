@@ -37,7 +37,8 @@ jobs:
     - name: Install Zig
       uses: mlugg/setup-zig@v2
       with:
-        version: master
+        # translate-c lags behind Zig master; build against the release.
+        version: 0.17.0
 
     - name: Install uv and Python ${{ matrix.python-version }}
       uses: astral-sh/setup-uv@v10.2.0

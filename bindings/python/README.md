@@ -31,7 +31,7 @@ pip install zignal-processing
   - Linux `x86_64` (manylinux_2_28)
   - macOS `arm64`
   - Windows `x86_64`
-- Building from source requires [Zig](https://ziglang.org/) 0.17.0 (currently a master build) available on your `PATH`.
+- Building from source requires [Zig](https://ziglang.org/) 0.17.0 or newer available on your `PATH`.
 
 If CPython headers/libraries are in a non-standard location, set `PYTHON_INCLUDE_DIR`, `PYTHON_LIBS_DIR`, and `PYTHON_LIB_NAME` before installing.
 
