@@ -40,7 +40,7 @@ jobs:
         version: master
 
     - name: Install uv and Python ${{ matrix.python-version }}
-      uses: astral-sh/setup-uv@v10
+      uses: astral-sh/setup-uv@v10.2.0
       with:
         python-version: ${{ matrix.python-version }}
         activate-environment: true
