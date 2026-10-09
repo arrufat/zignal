@@ -29,7 +29,7 @@ pip install zignal-processing
 - Python **3.11 – 3.15** (CPython)
 - Prebuilt wheels ship for:
   - Linux (manylinux2014) `x86_64`, `aarch64`
-  - macOS `x86_64` and `arm64`
+  - macOS `arm64`
   - Windows `x86_64`
 - Building from source requires [Zig](https://ziglang.org/) 0.15.0 or newer available on your `PATH`.
 
