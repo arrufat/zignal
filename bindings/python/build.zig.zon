@@ -1,6 +1,6 @@
 .{
     .name = .zignal_python,
-    .version = "0.11.0-dev",
+    .version = "0.11.0",
     .fingerprint = 0x80321d97e92fe2f8,
     .minimum_zig_version = "0.17.0",
     .dependencies = .{

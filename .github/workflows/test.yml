@@ -15,11 +15,6 @@ on:
 
 jobs:
   test:
-    strategy:
-      matrix:
-        include:
-          - zig-version: master
-
     runs-on: ubuntu-latest
 
     steps:
@@ -34,9 +29,9 @@ jobs:
       - name: Grab Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: ${{ matrix.zig-version }}
+          version: 0.17.0
 
-      - name: Tests master
+      - name: Tests Debug
         run: |
           zig build test --summary all
 

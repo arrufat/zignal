@@ -2,27 +2,27 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-14
+
 ### Added
+- **CMYK**: the `Cmyk` color class converts like the other color spaces, and `Image.load` decodes CMYK and YCCK JPEGs.
 - **Glyph cache**: vector `Font` objects cache parsed glyphs, metrics and kerning, plus the rasterized glyph images per size and quarter-pixel position, so `draw_text`/`draw_text_box` with antialiasing run several times faster on repeated text (glyphs land within a quarter pixel of the uncached rendering; `DrawMode.FAST` and outlined text are unchanged).
 - **TrueType fonts**: `Font.load(path)` detects BDF, PCF (optionally gzipped) and TrueType (`.ttf`) files, and `Canvas.draw_text` renders TrueType text with antialiased outlines and kerning. New `Font` members: `ascent(size)`, `line_height(size)`, `has_glyph(char)`, `get_text_bounds(text, size)`, `get_text_bounds_tight(text, size)` and the `kind` (`"bitmap"` / `"vector"`), `name` and `height` properties.
 - **CFF OpenType fonts**: `Font.load(path)` also accepts `.otf` files with PostScript (CFF) outlines, rendered like TrueType fonts, including `seac` accents and the default instance of CFF2 variable fonts.
 - **Font collections**: `Font.load(path, face=0)` opens `.ttc`/`.otc` collections; `face` selects the face.
 - **Text layout**: `Canvas.draw_text_box(text, rect, color, ..., halign, valign, wrap, line_spacing, letter_spacing)` with the new `TextAlign` and `VerticalAlign` enums, `Font.measure_text`, and outlined text through `Canvas.draw_text_outline` / `draw_text_box_outline` (bitmap fonts get a halo).
-
-### Changed
-- **Canvas draws antialiased by default** (breaking): every `Canvas` draw/fill method now defaults to `mode=DrawMode.SOFT`, and an omitted `blending` follows the mode like the Zig presets (`Blending.NORMAL` for `SOFT`, `Blending.NONE` for `FAST`). Previously the default was `DrawMode.FAST` with `Blending.NORMAL`; pass `mode=DrawMode.FAST, blending=Blending.NORMAL` to get that back. `draw_image` still blends with `Blending.NORMAL`.
-- **`BitmapFont` is now `Font`** (breaking): one class for every font format; `save` still writes BDF/PCF and raises `ValueError` for TrueType fonts; the `width` property was removed.
-- **`Canvas.draw_text` takes `size=` in pixels instead of `scale=`** (breaking): the em height for TrueType fonts, the character height for bitmap fonts. Omitted, it is the bitmap font's natural size (the old `scale=1.0`) or 16 px for TrueType fonts; `font=None` selects the built-in font.
+- **`blending` keyword on canvas primitives**: every `Canvas` draw/fill method (`draw_line`, `fill_circle`, `draw_text`, …) now accepts an optional `blending: Blending` keyword (default `Blending.NORMAL`; pass `None` for a raw overwrite), applying any of the 12 blend modes in either draw mode. Opaque rendering is unchanged; `DrawMode.FAST` now composites translucent colors instead of writing them verbatim.
 - **iTerm2 inline images**: `f"{img:iterm2}"` (and `iterm2:WIDTHxHEIGHT` / `iterm2:WIDTHx` / `iterm2:xHEIGHT`) renders via the iTerm2 inline image protocol. `f"{img:auto}"` now prefers kitty → iterm2 → sixel → sgr.
 - **QR codes**: `qrcode_encode(data, ec_level=EcLevel.MEDIUM, version=None, module_size=8, quiet_zone=4)` renders text or bytes as a grayscale `Image`; `qrcode_decode(image)` scans clean images and photographs (perspective, uneven lighting, rotation, mirroring) and returns a `QrDecodeResult` (`data`, `text`, `version`, `ec_level`, `corrected_errors`, `corners`) or `None` when no symbol is found. Adds the `EcLevel` enum (LOW/MEDIUM/QUARTILE/HIGH).
 - **Global optimizer**: `optimize(objective, bounds, max_evals, ...)` exposes the MaxLIPO+Trust-Region global optimizer as a single free function. The objective is a Python callable `objective(x: list[float]) -> float`, `bounds` is a list of `(lower, upper)` pairs, and all settings (`policy`, `is_integer`, `seed`, `target`, `patience`, `pure_random_probability`, `num_random_samples`, `trust_region_eps`, `relative_noise_magnitude`, `solver_eps`) are keyword arguments with sane defaults. Returns `(best_x, best_y)`. Evaluation is sequential (the GIL serializes Python callbacks); exceptions raised by the objective propagate out unchanged.
 - **BMP I/O**: `Image.load("foo.bmp")` and `Image.save("foo.bmp")` decode and encode BMP files. Decode covers indexed (1/4/8 bpp), 16/24/32 bpp, BI_RGB / BI_BITFIELDS / BI_ALPHABITFIELDS / RLE4 / RLE8, both row orders. Encode writes 24bpp for Rgb images and 32bpp BI_BITFIELDS for Rgba.
 - **GIF I/O**: `Image.load("foo.gif")` and `Image.save("foo.gif")` work for single-frame GIFs (frame 0 of animated files is returned for `load`). The encoder uses median-cut quantization automatically and supports caller-supplied palettes.
 
-### Added
-- **`blending` keyword on canvas primitives**: every `Canvas` draw/fill method (`draw_line`, `fill_circle`, `draw_text`, …) now accepts an optional `blending: Blending` keyword (default `Blending.NORMAL`; pass `None` for a raw overwrite), applying any of the 12 blend modes in either draw mode. Opaque rendering is unchanged; `DrawMode.FAST` now composites translucent colors instead of writing them verbatim.
-
 ### Changed
+- **Python 3.11–3.15** (breaking): Python 3.10 is no longer supported, 3.15 wheels are published, and macOS wheels are arm64 only.
+- **Canvas draws antialiased by default** (breaking): every `Canvas` draw/fill method now defaults to `mode=DrawMode.SOFT`, and an omitted `blending` follows the mode like the Zig presets (`Blending.NORMAL` for `SOFT`, `Blending.NONE` for `FAST`). Previously the default was `DrawMode.FAST` with `Blending.NORMAL`; pass `mode=DrawMode.FAST, blending=Blending.NORMAL` to get that back. `draw_image` still blends with `Blending.NORMAL`.
+- **`BitmapFont` is now `Font`** (breaking): one class for every font format; `save` still writes BDF/PCF and raises `ValueError` for TrueType fonts; the `width` property was removed.
+- **`Canvas.draw_text` takes `size=` in pixels instead of `scale=`** (breaking): the em height for TrueType fonts, the character height for bitmap fonts. Omitted, it is the bitmap font's natural size (the old `scale=1.0`) or 16 px for TrueType fonts; `font=None` selects the built-in font.
 - **`mode=None` accepted by `Rgba.blend` / `Image.blend`**: passing `None` for the blend mode now means the default `Blending.NORMAL` (previously a `TypeError`), matching how the other optional enum keywords treat `None`.
 - **Matrix/Transform methods renamed to conventional short names** (breaking): `Matrix.inverse()` → `Matrix.inv()`, `Matrix.determinant()` → `Matrix.det()`, and `ProjectiveTransform.inverse()` → `ProjectiveTransform.inv()`. (`Matrix.pinv()` was already named.)
 
