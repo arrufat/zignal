@@ -27,6 +27,7 @@
 - **Namespaced public API**: core types stay flat (`Image`, `Animation`, `Canvas`, colors, `Point`, `Rectangle`, `Matrix`, `SMatrix`, `Font`), while options, enums and algorithms move under `image`, `canvas`, `geometry`, `matrix`, `font`, `features`, `optimization`, `stats` and `perlin` without redundant prefixes (`ImageFormat` is `image.Format`, `MatrixError` is `matrix.Error`, `AnimatedImage` is `Animation`). Python is unchanged. ([#497](https://github.com/arrufat/zignal/pull/497))
 - **`image.Any`** replaces the per-codec native unions: codecs return it from `toAnyImage`, `jxl.decode`/`webp.decode` are `loadAnyFromBytes`, and `image.Any.load`/`read`/`loadFromBytes` keep the file's pixel type. ([#497](https://github.com/arrufat/zignal/pull/497))
 - **Image metrics take `io`**: `Image.ssim(io, allocator, other)`, `Image.psnr(io, other)` and `Image.meanPixelError(io, other)`, and struct pixels must have one component type. ([#500](https://github.com/arrufat/zignal/pull/500), [#501](https://github.com/arrufat/zignal/pull/501))
+- **Python 3.11–3.15**: the bindings drop Python 3.10 and support 3.15, and wheels are no longer built for Intel macOS. ([#511](https://github.com/arrufat/zignal/pull/511))
 - **Minimum Zig version is 0.17.0-dev.2163.**
 
 ### Features
@@ -102,6 +103,7 @@
 - **Test filters**: `zig build test -Dtest-filter=<text>` selects tests by qualified name, and tests are named `"Subject: behavior"`. ([#499](https://github.com/arrufat/zignal/pull/499))
 - **`dynlib.zig`** moved out of the codecs to `src/`, and `Library` takes the error it reports. ([#498](https://github.com/arrufat/zignal/pull/498))
 - **CLI subcommands** share one load/transform/save loop and a single help-text builder. ([#500](https://github.com/arrufat/zignal/pull/500))
+- **Python CI** installs every interpreter with uv and builds the bindings with Zig 0.17.0. ([#511](https://github.com/arrufat/zignal/pull/511))
 
 ## [0.10.0] - 2026-04-15
 
