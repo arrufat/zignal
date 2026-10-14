@@ -6,8 +6,8 @@
     .dependencies = .{
         .zignal = .{ .path = "../.." },
         .translate_c = .{
-            .url = "git+https://codeberg.org/ziglang/translate-c#875969d3493e245e01bf5d7860f792d8f3eb9ef5",
-            .hash = "translate_c-0.0.0-Q_BUWoFOBwAhz77Zd15HCVuhTKzdUKc94kezmCeJ7IC_",
+            .url = "git+https://codeberg.org/ziglang/translate-c#9b5eb014df946d26b86c3d42b5d133d0fe48fe61",
+            .hash = "translate_c-0.0.0-Q_BUWu5OBwCBUFLkC6LVoVWssXLQG5E8NZvxu9XbaZ75",
         },
     },
     .paths = .{
