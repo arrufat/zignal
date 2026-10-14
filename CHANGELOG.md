@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-14
+
 ### Breaking Changes
 - **`io: Io` parameter**: image filters, transforms, codecs, `Matrix` products, `Pca`, `ImagePyramid.init` and `features.Orb.detect` take an `io: Io` after `self` and run in row bands on it. ([#437](https://github.com/arrufat/zignal/pull/437)-[#448](https://github.com/arrufat/zignal/pull/448), [#464](https://github.com/arrufat/zignal/pull/464)-[#468](https://github.com/arrufat/zignal/pull/468))
 - **Argument order**: out-param image methods follow `(self, io, allocator, out, ...)`, and ORB helpers take the allocator first. ([#354](https://github.com/arrufat/zignal/pull/354), [#359](https://github.com/arrufat/zignal/pull/359), [#434](https://github.com/arrufat/zignal/pull/434))
@@ -28,7 +30,8 @@
 - **`image.Any`** replaces the per-codec native unions: codecs return it from `toAnyImage`, `jxl.decode`/`webp.decode` are `loadAnyFromBytes`, and `image.Any.load`/`read`/`loadFromBytes` keep the file's pixel type. ([#497](https://github.com/arrufat/zignal/pull/497))
 - **Image metrics take `io`**: `Image.ssim(io, allocator, other)`, `Image.psnr(io, other)` and `Image.meanPixelError(io, other)`, and struct pixels must have one component type. ([#500](https://github.com/arrufat/zignal/pull/500), [#501](https://github.com/arrufat/zignal/pull/501))
 - **Python 3.11–3.15**: the bindings drop Python 3.10 and support 3.15, and wheels are no longer built for Intel macOS. ([#511](https://github.com/arrufat/zignal/pull/511))
-- **Minimum Zig version is 0.17.0-dev.2163.**
+- **Blur parameters are validated in the library**: `gaussianBlur` returns `error.InvalidSigma` for a non-finite sigma, and `motionBlur` returns `error.InvalidParameter` for a non-finite angle or center or a radial strength outside [0, 1] instead of clamping it. ([#503](https://github.com/arrufat/zignal/pull/503))
+- **Minimum Zig version is 0.17.0.** ([#507](https://github.com/arrufat/zignal/pull/507))
 
 ### Features
 - **Chinese Whispers clustering**: `clustering.chineseWhispers` groups embeddings without a fixed cluster count, also in Python as `chinese_whispers_clustering`. ([#485](https://github.com/arrufat/zignal/pull/485))
@@ -49,6 +52,7 @@
 - **JPEG XL and WebP**: `jxl` and `webp` codecs load the system libjxl and libwebp at runtime whenever libc is linked, so Python gets both and the CLI does with `-Dlibc`. ([#488](https://github.com/arrufat/zignal/pull/488))
 - **Animated images**: `Animation.load` reads GIF, WebP and JPEG XL animations (and any still image as one frame) with per-frame `durations_ms`. ([#489](https://github.com/arrufat/zignal/pull/489))
 - **Animated encoding**: `Animation.save` writes JPEG XL and WebP animations, and JPEG XL and GIF frames store only the region that changed. ([#490](https://github.com/arrufat/zignal/pull/490)-[#493](https://github.com/arrufat/zignal/pull/493))
+- **CMYK**: a device `Cmyk` color space, also in Python, and JPEG decodes four-component CMYK and YCCK files. ([#509](https://github.com/arrufat/zignal/pull/509))
 - **Quantization and dithering modules**: `image/quantize.zig` and `image/dither.zig` are shared by sixel, braille and GIF.
 - **Terminal output**: iTerm2 inline images and color braille rendering. ([#365](https://github.com/arrufat/zignal/pull/365), [#380](https://github.com/arrufat/zignal/pull/380))
 - **Inferno colormap** in `Image.applyColormap` and Python. ([#378](https://github.com/arrufat/zignal/pull/378))
@@ -85,6 +89,8 @@
 - **Python metrics** call the Zig `psnr`, `ssim` and `mean_pixel_error` and raise `ValueError` from their errors. ([#500](https://github.com/arrufat/zignal/pull/500))
 
 ### Fixes
+- **Resize anti-aliases downscales**: the filter support stretches with the ratio, so shrinking past 2x no longer aliases; upscales are unchanged. ([#505](https://github.com/arrufat/zignal/pull/505))
+- **CLI**: a wrong argument count prints the help and exits 1 for every command, `diff` prints its stats in release builds, and `fdm` accepts `-o` and letterboxes its preview. ([#502](https://github.com/arrufat/zignal/pull/502), [#504](https://github.com/arrufat/zignal/pull/504))
 - **Antialiased fills** no longer inherit coverage from a previous fill. ([#428](https://github.com/arrufat/zignal/pull/428))
 - **`extract`/`insert`** use the half-open rectangle like `crop`, fixing a stretched rotated extract. ([#435](https://github.com/arrufat/zignal/pull/435))
 - **JPEG restart intervals** decode instead of running past RSTn markers. ([#431](https://github.com/arrufat/zignal/pull/431))
@@ -103,7 +109,8 @@
 - **Test filters**: `zig build test -Dtest-filter=<text>` selects tests by qualified name, and tests are named `"Subject: behavior"`. ([#499](https://github.com/arrufat/zignal/pull/499))
 - **`dynlib.zig`** moved out of the codecs to `src/`, and `Library` takes the error it reports. ([#498](https://github.com/arrufat/zignal/pull/498))
 - **CLI subcommands** share one load/transform/save loop and a single help-text builder. ([#500](https://github.com/arrufat/zignal/pull/500))
-- **Python CI** installs every interpreter with uv and builds the bindings with Zig 0.17.0. ([#511](https://github.com/arrufat/zignal/pull/511))
+- **Zero dependencies**: translate-c moved into the `bindings/python` package, so depending on zignal fetches nothing, and `zig build python` builds the bindings. ([#510](https://github.com/arrufat/zignal/pull/510))
+- **CI** builds with the Zig 0.17.0 release instead of master, and the Python workflow installs every interpreter with uv. ([#511](https://github.com/arrufat/zignal/pull/511))
 
 ## [0.10.0] - 2026-04-15
 
