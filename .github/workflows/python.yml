@@ -37,7 +37,7 @@ jobs:
     - name: Install Zig
       uses: mlugg/setup-zig@v2
       with:
-        version: 0.17.0
+        version: master
 
     - name: Install uv and Python ${{ matrix.python-version }}
       uses: astral-sh/setup-uv@v10.2.0

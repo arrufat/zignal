@@ -1,8 +1,8 @@
 .{
     .name = .zignal,
-    .version = "0.11.0",
+    .version = "0.12.0-dev",
     .fingerprint = 0x5303c43db377b63a,
-    .minimum_zig_version = "0.17.0",
+    .minimum_zig_version = "0.18.0-dev.253+16d31ceed",
     .dependencies = .{},
     .paths = .{
         "build.zig",

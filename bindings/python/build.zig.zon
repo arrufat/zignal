@@ -1,8 +1,8 @@
 .{
     .name = .zignal_python,
-    .version = "0.11.0",
+    .version = "0.12.0-dev",
     .fingerprint = 0x80321d97e92fe2f8,
-    .minimum_zig_version = "0.17.0",
+    .minimum_zig_version = "0.18.0-dev.253+16d31ceed",
     .dependencies = .{
         .zignal = .{ .path = "../.." },
         .translate_c = .{

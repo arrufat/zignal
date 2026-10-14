@@ -45,7 +45,7 @@ pub fn build(b: *Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = optimize != .debug,
+            .strip = if (optimize) |mode| mode != .debug else null,
             .link_libc = cli_libc,
             .imports = &.{
                 .{ .name = "zignal", .module = zignal },
@@ -99,7 +99,7 @@ pub fn build(b: *Build) void {
     const python_step = b.step("python", "Build the Python bindings and type stubs");
     const python_build = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "install", "stubs" });
     python_build.setCwd(b.path("bindings/python"));
-    python_build.addArg(b.fmt("-Doptimize={t}", .{optimize}));
+    if (optimize) |mode| python_build.addArg(b.fmt("-Doptimize={t}", .{mode}));
     if (!target.query.isNative()) {
         python_build.addArg(b.fmt("-Dtarget={s}", .{target.query.zigTriple(b.allocator) catch @panic("OOM")}));
         python_build.addArg(b.fmt("-Dcpu={s}", .{target.query.serializeCpuAlloc(b.allocator) catch @panic("OOM")}));
