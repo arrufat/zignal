@@ -47,7 +47,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
-            .strip = optimize != .debug,
+            .strip = if (optimize) |mode| mode != .debug else null,
             .imports = &.{
                 .{ .name = "zignal", .module = zignal },
                 .{ .name = "c", .module = translator.mod },
