@@ -203,7 +203,7 @@ pub fn Pca(
                 const vec_len = std.simd.suggestVectorLength(T) orelse 1;
                 for (0..self.num_components) |i| {
                     var sum: T = 0;
-                    var j: u32 = 0;
+                    var j: usize = 0;
                     // Vectorized loop
                     while (j + vec_len <= self.dim) : (j += vec_len) {
                         const vec_chunk: @Vector(vec_len, T) = vector[j..][0..vec_len].*;
@@ -259,7 +259,7 @@ pub fn Pca(
                 for (0..self.num_components) |i| {
                     const weight = coefficients[i];
                     const weight_vec: @Vector(vec_len, T) = @splat(weight);
-                    var j: u32 = 0;
+                    var j: usize = 0;
                     // Vectorized loop
                     while (j + vec_len <= self.dim) : (j += vec_len) {
                         // components are column-strided in row-major storage, so gather them

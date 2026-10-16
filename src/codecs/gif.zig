@@ -358,8 +358,7 @@ fn parse(gpa: Allocator, reader: *Io.Reader, limits: DecodeLimits, which: Frames
     if (has_gct) {
         const palette = try gpa.alloc(Rgb, gct_size);
         const raw = try reader.take(@as(usize, gct_size) * 3);
-        var i: usize = 0;
-        while (i < gct_size) : (i += 1) {
+        for (0..gct_size) |i| {
             palette[i] = .{ .r = raw[i * 3], .g = raw[i * 3 + 1], .b = raw[i * 3 + 2] };
         }
         global_palette = palette;
@@ -468,8 +467,7 @@ fn parseImageBlock(
             const lct = try gpa.alloc(Rgb, lct_entries);
             errdefer gpa.free(lct);
             const raw = try reader.take(@as(usize, lct_entries) * 3);
-            var i: usize = 0;
-            while (i < lct_entries) : (i += 1) {
+            for (0..lct_entries) |i| {
                 lct[i] = .{ .r = raw[i * 3], .g = raw[i * 3 + 1], .b = raw[i * 3 + 2] };
             }
             break :blk lct;
@@ -659,12 +657,10 @@ fn compositeFrameOntoCanvas(canvas: *Image(Rgba), frame: FrameRecord) !void {
     const clip_w = @min(fw, canvas.cols - left);
     const clip_h = @min(fh, canvas.rows - top);
 
-    var fy: usize = 0;
-    while (fy < clip_h) : (fy += 1) {
+    for (0..clip_h) |fy| {
         const dst_off = (top + fy) * canvas.stride + left;
         const src_off = fy * fw;
-        var fx: usize = 0;
-        while (fx < clip_w) : (fx += 1) {
+        for (0..clip_w) |fx| {
             const idx = frame.indices[src_off + fx];
             if (has_trans and idx == trans_idx) continue;
             if (idx >= palette.len) return error.InvalidPaletteIndex;
@@ -841,8 +837,7 @@ pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer,
         if (image.isContiguous()) {
             @memcpy(indices, image.data[0..num_pixels]);
         } else {
-            var ri: usize = 0;
-            while (ri < image.rows) : (ri += 1) {
+            for (0..image.rows) |ri| {
                 const src_off = ri * image.stride;
                 const dst_off = ri * image.cols;
                 @memcpy(indices[dst_off .. dst_off + image.cols], image.data[src_off .. src_off + image.cols]);
@@ -902,12 +897,10 @@ fn mapImageToPalette(
         var work = try image.convert(io, allocator, Rgb);
         defer work.deinit(allocator);
         dither.applyFloydSteinberg(work, lookup_palette, lut);
-        var i: usize = 0;
-        while (i < image.rows) : (i += 1) {
+        for (0..image.rows) |i| {
             const dst_off = i * image.cols;
             const src_off = i * work.stride;
-            var j: usize = 0;
-            while (j < image.cols) : (j += 1) {
+            for (0..image.cols) |j| {
                 if (T == Rgba and transparent_index != null and image.at(i, j).a < 128) {
                     indices[dst_off + j] = transparent_index.?;
                 } else {
@@ -918,11 +911,9 @@ fn mapImageToPalette(
         return;
     }
 
-    var i: usize = 0;
-    while (i < image.rows) : (i += 1) {
+    for (0..image.rows) |i| {
         const dst_off = i * image.cols;
-        var j: usize = 0;
-        while (j < image.cols) : (j += 1) {
+        for (0..image.cols) |j| {
             const px = image.at(i, j).*;
             if (T == Rgba and transparent_index != null and px.a < 128) {
                 indices[dst_off + j] = transparent_index.?;
@@ -1011,8 +1002,7 @@ fn emitAnimatedFrame(
     // transparent palette index (and emit the GCE flag).
     const has_transparent: bool = blk: {
         if (T != Rgba) break :blk false;
-        var ri: usize = 0;
-        while (ri < frame.rows) : (ri += 1) {
+        for (0..frame.rows) |ri| {
             const off = ri * frame.stride;
             for (frame.data[off .. off + frame.cols]) |p| {
                 if (p.a < 128) break :blk true;

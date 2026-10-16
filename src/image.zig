@@ -217,14 +217,12 @@ pub fn Image(comptime T: type) type {
                 return;
             };
 
-            var r: usize = 0;
-            while (r < inner.t) : (r += 1) {
+            for (0..inner.t) |r| {
                 const start = r * self.stride;
                 @memset(self.data[start .. start + self.cols], value);
             }
 
-            r = inner.t;
-            while (r < inner.b) : (r += 1) {
+            for (inner.t..inner.b) |r| {
                 const row_start = r * self.stride;
                 if (inner.l > 0) {
                     @memset(self.data[row_start .. row_start + inner.l], value);
@@ -234,8 +232,7 @@ pub fn Image(comptime T: type) type {
                 }
             }
 
-            r = inner.b;
-            while (r < self.rows) : (r += 1) {
+            for (inner.b..self.rows) |r| {
                 const start = r * self.stride;
                 @memset(self.data[start .. start + self.cols], value);
             }

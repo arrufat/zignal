@@ -441,8 +441,7 @@ fn optimize(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv
     };
     defer allocator.free(dims);
 
-    var i: usize = 0;
-    while (i < n) : (i += 1) {
+    for (dims, 0..) |*dim, i| {
         const pair = c.PySequence_GetItem(params.bounds, @intCast(i)) orelse return null;
         defer c.Py_DecRef(pair);
         if (c.PySequence_Check(pair) == 0 or c.PySequence_Size(pair) != 2) {
@@ -463,7 +462,7 @@ fn optimize(self: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv
             if (t < 0) return null;
             is_int = t == 1;
         }
-        dims[i] = .{ .lower = lower, .upper = upper, .is_integer = is_int };
+        dim.* = .{ .lower = lower, .upper = upper, .is_integer = is_int };
     }
 
     // Initialize the optimizer.

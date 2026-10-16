@@ -185,8 +185,7 @@ fn findFinderPatterns(binary: Image(u8), row_start: usize, row_step: usize, buf:
         var runs: [5]usize = @splat(0);
         var run_value = isDark(binary, row, 0);
         var run_len: usize = 0;
-        var col: usize = 0;
-        while (col <= binary.cols) : (col += 1) {
+        for (0..binary.cols + 1) |col| {
             const value = if (col < binary.cols) isDark(binary, row, col) else !run_value;
             if (value == run_value) {
                 run_len += 1;

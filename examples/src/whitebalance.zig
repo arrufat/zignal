@@ -136,11 +136,11 @@ fn whitebalanceSimd(pixels: []Rgba, w: RgbGains) void {
     }
 
     // Handle remaining pixels
-    while (i < pixels.len) : (i += 1) {
-        pixels[i] = chromaticAdaptation(pixels[i].as(f64).to(.xyz), w)
+    for (pixels[i..]) |*p| {
+        p.* = chromaticAdaptation(p.as(f64).to(.xyz), w)
             .to(.rgb)
             .as(u8)
-            .withAlpha(pixels[i].a);
+            .withAlpha(p.a);
     }
 }
 

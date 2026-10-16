@@ -303,8 +303,7 @@ test "solveAssignmentProblem: matches brute force on random square matrices" {
     var prng: std.Random.DefaultPrng = .init(0xA55E7);
     const rand = prng.random();
     for (1..7) |n| {
-        var trial: usize = 0;
-        while (trial < 30) : (trial += 1) {
+        for (0..30) |_| {
             var cost = try Matrix(i32).init(allocator, @intCast(n), @intCast(n));
             defer cost.deinit();
             for (0..n) |i| for (0..n) |j| {

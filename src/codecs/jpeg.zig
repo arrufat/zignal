@@ -1672,8 +1672,7 @@ pub const JpegState = struct {
                     val_ptr[code_len] = @intCast(huffval_index);
                     min_code[code_len] = code;
                 }
-                var j: usize = 0;
-                while (j < count) : (j += 1) {
+                for (0..count) |_| {
                     // Check for invalid code (all 1s)
                     if (code == (@as(u17, 1) << code_len) - 1) {
                         return error.InvalidHuffmanTable;

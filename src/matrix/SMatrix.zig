@@ -532,7 +532,7 @@ pub fn SMatrix(comptime T: type, comptime rows: u32, comptime cols: u32) type {
                         var accumulator: T = 0;
 
                         // SIMD loop - process vec_len elements at once
-                        var k: u32 = 0;
+                        var k: usize = 0;
                         while (k + vec_len <= a_cols) : (k += vec_len) {
                             var a_vec: VecType = undefined;
                             var b_vec: VecType = undefined;
