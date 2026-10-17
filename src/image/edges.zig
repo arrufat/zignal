@@ -73,9 +73,8 @@ pub fn Edges(comptime T: type) type {
                         const bytes: @Vector(vec_len, u8) = @trunc(clamped);
                         out_row[c..][0..vec_len].* = bytes;
                     }
-                    while (c < cols) : (c += 1) {
-                        const scaled = @sqrt(gx_row[c] * gx_row[c] + gy_row[c] * gy_row[c]) / 4.0;
-                        out_row[c] = @trunc(@max(0, @min(255, scaled)));
+                    for (gx_row[c..], gy_row[c..], out_row[c..]) |gx, gy, *out| {
+                        out.* = @trunc(@max(0, @min(255, @sqrt(gx * gx + gy * gy) / 4.0)));
                     }
                 }
             }

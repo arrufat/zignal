@@ -314,8 +314,7 @@ test "UpperBound.add: incremental warm-start refits converge fast and stay corre
 
     var prng = std.Random.DefaultPrng.init(123);
     var r = prng.random();
-    var i: usize = 0;
-    while (i < 30) : (i += 1) {
+    for (0..30) |_| {
         var x: [3]f64 = undefined;
         for (0..3) |k| x[k] = r.float(f64) * 2 - 1;
         const y = -(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
@@ -348,8 +347,7 @@ test "UpperBound.evaluate: consistent for a 1D Lipschitz function" {
     defer ub.deinit();
 
     // f(x) = -|x - 0.4| sampled on [0,1]; the bound must dominate samples and stay finite.
-    var i: usize = 0;
-    while (i <= 10) : (i += 1) {
+    for (0..11) |i| {
         const x = @as(f64, @floatFromInt(i)) / 10.0;
         try ub.add(&[_]f64{x}, -@abs(x - 0.4));
     }

@@ -45,8 +45,7 @@ pub fn registerEnum(
         var up: [129]u8 = undefined;
         const n = field_name.len;
         if (n > up.len - 1) return error.NameTooLong;
-        var i: usize = 0;
-        while (i < n) : (i += 1) up[i] = std.ascii.toUpper(field_name[i]);
+        _ = std.ascii.upperString(up[0..n], field_name);
         up[n] = 0; // NUL terminate
 
         const py_val = python.create(field_value) orelse return error.ValueCreationFailed;

@@ -206,8 +206,7 @@ pub const Tracer = struct {
             var index: usize = 0;
 
             // Find point with maximum perpendicular distance
-            var i: usize = range.start + 1;
-            while (i < range.end) : (i += 1) {
+            for (range.start + 1..range.end) |i| {
                 const d = points[i].distanceToSegment(first, last);
                 if (d > max_dist) {
                     max_dist = d;

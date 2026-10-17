@@ -32,11 +32,8 @@ const Cmyk = zignal.Cmyk(u8);
 /// Extracts the simple name, like "Rgb" from "zignal.Rgb".
 fn getTypeName(comptime ColorType: type) []const u8 {
     const full_name = @typeName(ColorType);
-    var i = full_name.len;
-    while (i > 0) : (i -= 1) {
-        if (full_name[i - 1] == '.') break;
-    }
-    const sliced = full_name[i..];
+    const start = if (std.mem.findScalarLast(u8, full_name, '.')) |dot| dot + 1 else 0;
+    const sliced = full_name[start..];
     if (std.mem.findScalar(u8, sliced, '(')) |paren| {
         return sliced[0..paren];
     }

@@ -451,16 +451,14 @@ pub fn getterMatrixNested(
             const outer = c.PyList_New(@intCast(rows));
             if (outer == null) return null;
 
-            var i: usize = 0;
-            while (i < rows) : (i += 1) {
+            for (0..rows) |i| {
                 const row_list = c.PyList_New(@intCast(cols));
                 if (row_list == null) {
                     c.Py_DecRef(outer);
                     return null;
                 }
 
-                var j: usize = 0;
-                while (j < cols) : (j += 1) {
+                for (0..cols) |j| {
                     const val_obj = create(mat[i][j]);
                     if (val_obj == null) {
                         c.Py_DecRef(row_list);
@@ -535,8 +533,7 @@ fn toArrayList(comptime T: type, seq_obj: ?*c.PyObject) !std.ArrayList(T) {
     errdefer list.deinit();
     try list.ensureTotalCapacity(@intCast(size));
 
-    var i: usize = 0;
-    while (i < size) : (i += 1) {
+    for (0..@intCast(size)) |i| {
         const val = blk: {
             const item = c.PySequence_GetItem(seq_obj, @intCast(i)); // New reference
             if (item == null) return error.PythonError;
@@ -1179,14 +1176,9 @@ pub fn setTypeError(expected: []const u8, got: ?*c.PyObject) void {
         const tp = typeOf(got);
         const tp_name = tp.*.tp_name;
         // Extract just the type name (after the last dot)
-        var i: usize = 0;
-        while (tp_name[i] != 0) : (i += 1) {}
-        var last_dot: usize = 0;
-        var j: usize = 0;
-        while (j < i) : (j += 1) {
-            if (tp_name[j] == '.') last_dot = j + 1;
-        }
-        break :blk tp_name[last_dot..i];
+        const name = std.mem.sliceTo(tp_name, 0);
+        const start = if (std.mem.findScalarLast(u8, name, '.')) |dot| dot + 1 else 0;
+        break :blk name[start..];
     } else "None";
 
     const msg = std.mem.printSentinel(&buffer, "Expected {s}, got {s}", .{ expected, type_name }, 0) catch "Type error";
