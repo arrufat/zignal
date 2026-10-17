@@ -2350,8 +2350,7 @@ pub fn Canvas(comptime T: type) type {
             for (0..height) |sy| {
                 const source = coverage[sy * width ..][0..width];
                 if (std.mem.allEqual(u8, source, 0)) continue;
-                var dy: usize = 0;
-                while (dy <= radius_px) : (dy += 1) {
+                for (0..radius_px + 1) |dy| {
                     const half: usize = @trunc(@sqrt(as(f32, radius_px * radius_px - dy * dy)));
                     runningMax(source, half, row_max, prefix, suffix, widened[0..width]);
                     for ([_]bool{ false, true }) |up| {

@@ -19,15 +19,13 @@ pub fn findUniformValue(comptime T: type, data: []const T) ?T {
     if (vec_len > 1 and data.len >= vec_len * 4) {
         // SIMD path for faster uniformity check
         const first_vec: @Vector(vec_len, T) = @splat(first);
-        var i: u32 = 0;
+        var i: usize = 0;
         while (i + vec_len <= data.len) : (i += vec_len) {
             const vec: @Vector(vec_len, T) = data[i..][0..vec_len].*;
             if (@reduce(.Or, vec != first_vec)) return null;
         }
         // Check remaining elements
-        while (i < data.len) : (i += 1) {
-            if (data[i] != first) return null;
-        }
+        if (!std.mem.allEqual(T, data[i..], first)) return null;
     } else {
         // Scalar path for small arrays or non-SIMD types
         for (data[1..]) |val| {

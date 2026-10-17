@@ -539,10 +539,8 @@ fn image_richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_
     const rows = dims_self[0];
     const cols = dims_self[1];
     var equal = true;
-    var r: u32 = 0;
-    while (r < rows) : (r += 1) {
-        var cidx: u32 = 0;
-        while (cidx < cols) : (cidx += 1) {
+    for (0..rows) |r| {
+        for (0..cols) |cidx| {
             const a = self_img.getPixelRgba(r, cidx);
             const b = other_img.getPixelRgba(r, cidx);
             if (a != b) {

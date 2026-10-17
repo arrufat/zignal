@@ -90,8 +90,7 @@ pub const HoughTransform = struct {
         const y_cache = self.y_cache;
         const max_n4 = (self.size / 4) * 4;
 
-        var r = area.t;
-        while (r < area.b) : (r += 1) {
+        for (area.t..area.b) |r| {
             const y_val = 2 * (@as(i32, @intCast(r)) - box_t) - size_minus_one;
 
             // Precompute Y terms for this row
@@ -100,8 +99,7 @@ pub const HoughTransform = struct {
                 y_cache[t] = y_val * self.sin_table[t];
             }
 
-            var c = area.l;
-            while (c < area.r) : (c += 1) {
+            for (area.l..area.r) |c| {
                 if (edges.at(r, c).* == 0) continue;
 
                 const x_val = 2 * (@as(i32, @intCast(c)) - box_l) - size_minus_one;

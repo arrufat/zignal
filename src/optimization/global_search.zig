@@ -481,8 +481,7 @@ pub const GlobalOptimizer = struct {
         const r = self.prng.random();
 
         var best_ub: f64 = -std.math.inf(f64);
-        var rounds: usize = 0;
-        while (rounds < self.num_random_samples) : (rounds += 1) {
+        for (0..self.num_random_samples) |_| {
             sampleInBox(self.scratch, lower, upper, is_integer, r);
             const b = self.upper_bound.evaluateWithPending(self.scratch, pending_x, pending_y);
             if (b > best_ub) {

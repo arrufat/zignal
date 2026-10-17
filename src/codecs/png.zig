@@ -395,13 +395,11 @@ const crc_table = blk: {
     @setEvalBranchQuota(20000);
     var table: [8][256]u32 = undefined;
     var c: u32 = undefined;
-    var n: usize = 0;
 
     // Compute the first table (byte-by-byte, standard)
-    while (n < 256) : (n += 1) {
+    for (0..256) |n| {
         c = @intCast(n);
-        var k: u8 = 0;
-        while (k < 8) : (k += 1) {
+        for (0..8) |_| {
             if (c & 1 != 0) {
                 c = 0xedb88320 ^ (c >> 1);
             } else {
@@ -413,10 +411,8 @@ const crc_table = blk: {
 
     // Compute the remaining 7 tables for Slice-by-8
     // table[k][i] = (table[k-1][i] >> 8) ^ table[0][table[k-1][i] & 0xFF]
-    var k: usize = 1;
-    while (k < 8) : (k += 1) {
-        n = 0;
-        while (n < 256) : (n += 1) {
+    for (1..8) |k| {
+        for (0..256) |n| {
             const x = table[k - 1][n];
             table[k][n] = (x >> 8) ^ table[0][x & 0xFF];
         }
@@ -1516,9 +1512,7 @@ fn defilterUp(current_row: []u8, prev: []const u8) void {
     while (i + vec_len <= current_row.len) : (i += vec_len) {
         current_row[i..][0..vec_len].* = @as(V, current_row[i..][0..vec_len].*) +% @as(V, prev[i..][0..vec_len].*);
     }
-    while (i < current_row.len) : (i += 1) {
-        current_row[i] +%= prev[i];
-    }
+    for (current_row[i..], prev[i..]) |*cur, p| cur.* +%= p;
 }
 
 // cur[i] += cur[i-bpp]: the lag-bpp dependency stays in one register-resident vector per pixel.
@@ -1714,10 +1708,8 @@ fn defilterStandardScanlines(data: []u8, header: Header) !void {
         return error.InvalidScanlineData;
     }
 
-    var y: u32 = 0;
     var previous_scanline: ?[]u8 = null;
-
-    while (y < header.height) : (y += 1) {
+    for (0..header.height) |y| {
         const row_start = y * (scanline_bytes + 1);
         const filter_byte = data[row_start];
         const current_scanline = data[row_start + 1 .. row_start + 1 + scanline_bytes];

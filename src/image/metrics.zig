@@ -247,7 +247,7 @@ fn sumRows(io: Io, a: anytype, b: @TypeOf(a), comptime diff: Difference) SumType
                 }
                 sum += @reduce(.Add, acc);
             }
-            while (i < xs.len) : (i += 1) sum += term(Sum, xs[i], ys[i]);
+            for (xs[i..], ys[i..]) |x, y| sum += term(Sum, x, y);
             return sum;
         }
 

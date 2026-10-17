@@ -44,10 +44,8 @@ test "Canvas.drawArc: basic angles" {
     // Check a small area around the expected point
     var found_pixel = false;
     const check_radius: usize = 3;
-    var dy: usize = 0;
-    while (dy < check_radius * 2) : (dy += 1) {
-        var dx: usize = 0;
-        while (dx < check_radius * 2) : (dx += 1) {
+    for (0..check_radius * 2) |dy| {
+        for (0..check_radius * 2) |dx| {
             const x: usize = @as(usize, @round(expected_x)) + dx - check_radius;
             const y: usize = @as(usize, @round(expected_y)) + dy - check_radius;
             if (x < width and y < height) {

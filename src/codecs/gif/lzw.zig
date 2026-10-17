@@ -59,8 +59,7 @@ pub const Decoder = struct {
         self.accum = 0;
         self.bits_in_accum = 0;
 
-        var i: u16 = 0;
-        while (i < self.clear_code) : (i += 1) {
+        for (0..self.clear_code) |i| {
             self.prefix[i] = sentinel;
             self.suffix[i] = @intCast(i);
         }
@@ -142,8 +141,7 @@ pub const Decoder = struct {
             if (out.len - written < len) return error.LzwOutputOverflow;
 
             // Reverse-copy into out.
-            var k: usize = 0;
-            while (k < len) : (k += 1) {
+            for (0..len) |k| {
                 out[written + k] = self.string_buf[len - 1 - k];
             }
             written += len;

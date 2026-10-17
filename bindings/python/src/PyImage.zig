@@ -68,7 +68,7 @@ pub fn cols(self: *const PyImage) u32 {
 }
 
 /// Returns the pixel as Rgba regardless of the underlying storage.
-pub fn getPixelRgba(self: *const PyImage, row: u32, col: u32) Rgba {
+pub fn getPixelRgba(self: *const PyImage, row: usize, col: usize) Rgba {
     return switch (self.data) {
         .gray => |img| blk: {
             const v = img.at(row, col).*;
@@ -83,7 +83,7 @@ pub fn getPixelRgba(self: *const PyImage, row: u32, col: u32) Rgba {
 }
 
 /// Sets a pixel from an Rgba value, converting as needed.
-pub fn setPixelRgba(self: *PyImage, row: u32, col: u32, px: Rgba) void {
+pub fn setPixelRgba(self: *PyImage, row: usize, col: usize, px: Rgba) void {
     switch (self.data) {
         .gray => |*img| img.at(row, col).* = px.to(.gray).y,
         .rgb => |*img| img.at(row, col).* = Rgb{ .r = px.r, .g = px.g, .b = px.b },

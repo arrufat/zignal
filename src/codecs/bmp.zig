@@ -655,8 +655,7 @@ fn readRle(allocator: Allocator, h: Header, palette: []const Rgba, reader: *Io.R
                     const n: u32 = b1;
                     const byte_count: usize = if (is_rle4) (n + 1) / 2 else n;
                     const bytes = reader.take(byte_count) catch |err| return endAs(err, error.InvalidRleEscape);
-                    var i: u32 = 0;
-                    while (i < n) : (i += 1) {
+                    for (0..n) |i| {
                         const value: u8 = if (is_rle4)
                             (if (i % 2 == 0) bytes[i / 2] >> 4 else bytes[i / 2] & 0x0F)
                         else
@@ -670,8 +669,7 @@ fn readRle(allocator: Allocator, h: Header, palette: []const Rgba, reader: *Io.R
             }
         } else { // Encoded run: count copies of value
             const count: u32 = b0;
-            var i: u32 = 0;
-            while (i < count) : (i += 1) {
+            for (0..count) |i| {
                 const value: u8 = if (is_rle4)
                     (if (i % 2 == 0) (b1 >> 4) else (b1 & 0x0F))
                 else
@@ -1449,8 +1447,7 @@ test "loadFromBytes: 8bpp indexed (gradient palette)" {
     try writeFileHeader(fixture, .{ .file_size = pixel_offset + stride, .pixel_offset = pixel_offset });
     try writeInfoHeader(fixture, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 8 });
     // 256-entry grayscale palette (BGRA, A reserved=0)
-    var i: u16 = 0;
-    while (i < 256) : (i += 1) {
+    for (0..256) |i| {
         const v: u8 = @intCast(i);
         try fixture.writeAll(&.{ v, v, v, 0 });
     }
@@ -1514,9 +1511,8 @@ test "loadFromBytes: 4bpp indexed" {
     try writeFileHeader(fixture, .{ .file_size = pixel_offset + stride, .pixel_offset = pixel_offset });
     try writeInfoHeader(fixture, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 4 });
     // 16-entry palette: index i → gray value i*17 (so 0..15 maps to 0..255)
-    var idx: u8 = 0;
-    while (idx < 16) : (idx += 1) {
-        const v: u8 = @intCast(@as(u16, idx) * 17);
+    for (0..16) |idx| {
+        const v: u8 = @intCast(idx * 17);
         try fixture.writeAll(&.{ v, v, v, 0 });
     }
     // Pixels: indices 0, 5, 10, 15 packed as 0x05, 0xAF (high nibble first)
@@ -1544,8 +1540,7 @@ test "loadFromBytes: 8bpp BITMAPCOREHEADER (3-byte palette entries)" {
     const pixel_offset: u32 = 14 + 12 + palette_bytes;
     try writeFileHeader(fixture, .{ .file_size = pixel_offset + stride, .pixel_offset = pixel_offset });
     try writeCoreHeader(fixture, .{ .width = @intCast(w), .height = @intCast(h), .bit_depth = 8 });
-    var i: u16 = 0;
-    while (i < 256) : (i += 1) {
+    for (0..256) |i| {
         const v: u8 = @intCast(i);
         try fixture.writeAll(&.{ v, v, v }); // BGR (no reserved byte)
     }
@@ -1586,8 +1581,7 @@ fn buildRleBmp(
     });
     // Distinct palette so we can identify each index in the decoded output.
     // Index i → grayscale i*16 (capped at 255).
-    var i: u32 = 0;
-    while (i < palette_entries) : (i += 1) {
+    for (0..palette_entries) |i| {
         const v: u8 = @intCast(@min(i * 16, 255));
         try fixture.writeAll(&.{ v, v, v, 0 });
     }
