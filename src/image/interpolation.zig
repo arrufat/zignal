@@ -66,7 +66,8 @@ pub const Interpolation = union(enum) {
 };
 
 /// Samples a single pixel at fractional coordinates using the given interpolation `method`.
-/// Returns null when the coordinates are non-finite or out of bounds under `border`.
+/// Returns null for an empty image, non-finite coordinates, or a `.nearest` sample outside a
+/// `.zero` border; the other methods read zeroes outside a `.zero` border.
 pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Interpolation, border: BorderMode) ?T {
     if (self.rows == 0 or self.cols == 0) return null;
     if (!std.math.isFinite(x) or !std.math.isFinite(y)) return null;

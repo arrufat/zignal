@@ -539,7 +539,8 @@ pub fn Image(comptime T: type) type {
         }
 
         /// Performs interpolation at position x, y using the specified method.
-        /// Returns `null` if the coordinates are outside valid bounds for the chosen method.
+        /// Returns `null` for an empty image, non-finite coordinates, or a `.nearest` sample
+        /// outside a `.zero` border; the other methods read zeroes outside a `.zero` border.
         pub fn interpolate(self: Self, x: f32, y: f32, method: Interpolation, border: BorderMode) ?T {
             return interpolation.interpolate(T, self, x, y, method, border);
         }
