@@ -425,7 +425,7 @@ fn buildHuffmanEncoder(bits: []const u8, vals: []const u8) HuffmanEncoder {
         const nb = bits[i];
         for (0..nb) |_| {
             const sym = vals[k];
-            enc.entries[sym] = code << 8 | @as(u32, @intCast(i + 1));
+            enc.entries[sym] = (code << 8) | @as(u32, @intCast(i + 1));
             code += 1;
             k += 1;
         }
@@ -586,7 +586,7 @@ fn writeSOS(writer: *Io.Writer, grayscale: bool) !void {
 inline fn hasByteFF(word: anytype) bool {
     const T = @TypeOf(word);
     const ones: T = std.math.maxInt(T) / 255;
-    return (word & (ones * 0x7F)) + ones & word & (ones * 0x80) != 0;
+    return ((word & (ones * 0x7F)) + ones) & word & (ones * 0x80) != 0;
 }
 
 /// RSTn marker byte (0xD0..0xD7).
@@ -684,7 +684,7 @@ const zigzag_masks: [8][256]u64 = blk: {
         for (table, 0..) |*entry, pattern| {
             var m: u64 = 0;
             for (0..8) |bit| {
-                if (pattern >> bit & 1 != 0) m |= @as(u64, 1) << inverse[byte * 8 + bit];
+                if ((pattern >> bit) & 1 != 0) m |= @as(u64, 1) << inverse[byte * 8 + bit];
             }
             entry.* = m;
         }
@@ -703,7 +703,7 @@ fn encodeBlockCoefs(w: *BitWriter, coefs: *const [64]i16, dc: *const HuffmanEnco
     const diff = dc_val - prev_dc.*;
     prev_dc.* = dc_val;
     const mag = magnitudeCategory(diff);
-    w.put(&bits, dc.code(mag) << mag | magnitudeBits(diff, mag), dc.size(mag) + mag);
+    w.put(&bits, (dc.code(mag) << mag) | magnitudeBits(diff, mag), dc.size(mag) + mag);
 
     var natural: u64 = 0;
     inline for (0..4) |i| {
@@ -723,8 +723,8 @@ fn encodeBlockCoefs(w: *BitWriter, coefs: *const [64]i16, dc: *const HuffmanEnco
         while (run >= 16) : (run -= 16) w.put(&bits, ac.code(0xF0), ac.size(0xF0));
         const v: i32 = coefs[zigzag[k]];
         const m = magnitudeCategory(v);
-        const sym = run << 4 | m;
-        w.put(&bits, ac.code(sym) << m | magnitudeBits(v, m), ac.size(sym) + m);
+        const sym = (run << 4) | m;
+        w.put(&bits, (ac.code(sym) << m) | magnitudeBits(v, m), ac.size(sym) + m);
         last = k;
     }
     if (last != 63) w.put(&bits, ac.code(0x00), ac.size(0x00));
@@ -1687,7 +1687,7 @@ pub const JpegState = struct {
                         const num_indexes = @as(usize, 1) << spare;
                         for (0..num_indexes) |index| {
                             std.debug.assert(fast[first_index + index] == 0);
-                            fast[first_index + index] = @as(u16, code_len) << 8 | byte;
+                            fast[first_index + index] = (@as(u16, code_len) << 8) | byte;
                         }
                     }
 
@@ -3190,7 +3190,7 @@ test "QuantDivisor: reciprocals match integer division for every table value" {
         const div: QuantDivisor = .init(d);
         var x: u32 = 0;
         while (x < 1 << 15) : (x += 1) {
-            const fast = (x + div.corr) * div.recip >> @intCast(div.shift);
+            const fast = ((x + div.corr) * div.recip) >> @intCast(div.shift);
             try std.testing.expectEqual((x + d / 2) / d, fast);
         }
     }
