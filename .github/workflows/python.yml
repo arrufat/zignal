@@ -34,10 +34,11 @@ jobs:
       with:
         fetch-depth: 0
 
+    # translate-c does not build on current Zig master; move back once it does.
     - name: Install Zig
       uses: mlugg/setup-zig@v2
       with:
-        version: master
+        version: 0.17.0
 
     - name: Install uv and Python ${{ matrix.python-version }}
       uses: astral-sh/setup-uv@v10.2.0

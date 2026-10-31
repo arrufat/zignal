@@ -54,10 +54,11 @@ jobs:
         with:
           python-version: '3.11'
 
+      # Python bindings: pinned with python.yml.
       - name: Set up Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: master
+          version: 0.17.0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v2

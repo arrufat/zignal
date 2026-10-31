@@ -78,7 +78,7 @@ const BitWriter = struct {
         while (i > 0) {
             i -= 1;
             if (self.bit_len % 8 == 0) try self.bytes.append(allocator, 0);
-            const bit: u8 = @intCast(value >> i & 1);
+            const bit: u8 = @intCast((value >> i) & 1);
             self.bytes.items[self.bit_len / 8] |= bit << @intCast(7 - self.bit_len % 8);
             self.bit_len += 1;
         }
@@ -98,8 +98,8 @@ const BitReader = struct {
         if (count > self.remaining()) return error.UnexpectedEndOfData;
         var value: u32 = 0;
         for (0..count) |_| {
-            const bit = self.bytes[self.pos / 8] >> @intCast(7 - self.pos % 8) & 1;
-            value = value << 1 | bit;
+            const bit = (self.bytes[self.pos / 8] >> @intCast(7 - self.pos % 8)) & 1;
+            value = (value << 1) | bit;
             self.pos += 1;
         }
         return value;

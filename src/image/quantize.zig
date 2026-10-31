@@ -82,9 +82,9 @@ pub const ColorLookupTable = struct {
             for (0..lut_size) |g| {
                 for (0..lut_size) |b| {
                     const rgb = Rgb{
-                        .r = @intCast(r << (8 - color_quantize_bits) | (r >> (2 * color_quantize_bits - 8))),
-                        .g = @intCast(g << (8 - color_quantize_bits) | (g >> (2 * color_quantize_bits - 8))),
-                        .b = @intCast(b << (8 - color_quantize_bits) | (b >> (2 * color_quantize_bits - 8))),
+                        .r = @intCast((r << (8 - color_quantize_bits)) | (r >> (2 * color_quantize_bits - 8))),
+                        .g = @intCast((g << (8 - color_quantize_bits)) | (g >> (2 * color_quantize_bits - 8))),
+                        .b = @intCast((b << (8 - color_quantize_bits)) | (b >> (2 * color_quantize_bits - 8))),
                     };
                     self.table[r][g][b] = findNearestColorSIMD(palette.len, &pal_r, &pal_g, &pal_b, rgb);
                 }

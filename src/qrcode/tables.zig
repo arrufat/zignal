@@ -229,7 +229,7 @@ fn bchRemainder(data: u32, comptime generator_poly: u32, comptime total_bits: u5
     var bit: u5 = total_bits;
     while (bit > gen_degree) {
         bit -= 1;
-        if (rem >> bit & 1 != 0) rem ^= generator_poly << (bit - gen_degree);
+        if ((rem >> bit) & 1 != 0) rem ^= generator_poly << (bit - gen_degree);
     }
     return rem;
 }
@@ -239,7 +239,7 @@ fn bchRemainder(data: u32, comptime generator_poly: u32, comptime total_bits: u5
 pub const format_info: [32]u15 = blk: {
     var table: [32]u15 = undefined;
     for (0..32) |data| {
-        const codeword = data << 10 | bchRemainder(data, 0x537, 15, 5);
+        const codeword = (data << 10) | bchRemainder(data, 0x537, 15, 5);
         table[data] = codeword ^ 0x5412;
     }
     break :blk table;
@@ -247,7 +247,7 @@ pub const format_info: [32]u15 = blk: {
 
 /// The masked format codeword for an error correction level and mask pattern.
 pub fn formatInfo(level: EcLevel, mask: u3) u15 {
-    return format_info[@as(u5, level.formatBits()) << 3 | mask];
+    return format_info[(@as(u5, level.formatBits()) << 3) | mask];
 }
 
 /// The 18-bit version information codewords (BCH(18,6)) for versions 7-40.
@@ -255,7 +255,7 @@ pub const version_info: [34]u18 = blk: {
     var table: [34]u18 = undefined;
     for (0..34) |i| {
         const version = i + 7;
-        table[i] = version << 12 | bchRemainder(version, 0x1f25, 18, 6);
+        table[i] = (version << 12) | bchRemainder(version, 0x1f25, 18, 6);
     }
     break :blk table;
 };
