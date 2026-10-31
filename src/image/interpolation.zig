@@ -87,7 +87,15 @@ pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Int
             const r1 = resolveIndex(top + 1, rows, border);
             const c0 = resolveIndex(left, cols, border);
             const c1 = resolveIndex(left + 1, cols, border);
-            return lerpPixel(T, pixelOrZero(T, self, r0, c0), pixelOrZero(T, self, r0, c1), pixelOrZero(T, self, r1, c0), pixelOrZero(T, self, r1, c1), x - as(f32, left), y - as(f32, top));
+            return lerpPixel(
+                T,
+                pixelOrZero(T, self, r0, c0),
+                pixelOrZero(T, self, r0, c1),
+                pixelOrZero(T, self, r1, c0),
+                pixelOrZero(T, self, r1, c1),
+                x - as(f32, left),
+                y - as(f32, top),
+            );
         },
         .bicubic, .catmull_rom, .mitchell => return interpolateWithKernel(T, self, x, y, comptime kernelTaps(.bicubic), method, border),
         .lanczos => return interpolateWithKernel(T, self, x, y, comptime kernelTaps(.lanczos), method, border),
@@ -352,20 +360,15 @@ pub fn Sampler(comptime T: type) type {
                 .border = border,
                 .lut = undefined,
             };
-            if (method != .nearest and method != .bilinear) {
-                const taps = kernelTaps(method);
-                for (&self.lut, 0..) |*row, i| {
-                    const frac = @as(f32, @floatFromInt(i)) / lut_size;
+            if (method != .nearest and method != .bilinear) switch (kernelTaps(method)) {
+                inline 4, 6 => |taps| for (&self.lut, 0..) |*row, i| {
+                    const w = kernelWeights(taps, method, @as(f32, @floatFromInt(i)) / lut_size);
                     var sum: f32 = 0;
-                    for (row[0..taps], 0..) |*w, t| {
-                        // Tap t sits at offset t - (taps/2 - 1) from the floor position.
-                        const offset = @as(f32, @floatFromInt(t)) - @as(f32, @floatFromInt(taps / 2 - 1));
-                        w.* = kernelWeight(method, offset - frac);
-                        sum += w.*;
-                    }
-                    for (row[0..taps]) |*w| w.* /= sum;
-                }
-            }
+                    for (w) |v| sum += v;
+                    for (row[0..taps], w) |*dst, v| dst.* = v / sum;
+                },
+                else => unreachable,
+            };
             return self;
         }
 
@@ -465,7 +468,7 @@ pub fn kernelWeight(method: Interpolation, x: f32) f32 {
         .bicubic => bicubicKernel(x),
         .catmull_rom => catmullRomKernel(x),
         .mitchell => |m| mitchellKernel(x, m.b, m.c),
-        .lanczos => lanczosKernel(x, 3),
+        .lanczos => lanczos3Kernel(x),
         .nearest => unreachable,
     };
 }
@@ -476,7 +479,7 @@ pub fn kernelWeight(method: Interpolation, x: f32) f32 {
 fn kernelWeights(comptime taps: usize, method: Interpolation, frac: f32) [taps]f32 {
     const lead = taps / 2 - 1;
     var w: [taps]f32 = undefined;
-    if (taps == kernelTaps(.lanczos)) {
+    if (taps == kernelTaps(.lanczos) and method == .lanczos) {
         if (frac == 0) {
             w = @splat(0);
             w[lead] = 1;
@@ -521,14 +524,13 @@ fn catmullRomKernel(x: f32) f32 {
     return 0;
 }
 
-/// Lanczos windowed sinc with parameter `a` (typically 3).
-fn lanczosKernel(x: f32, a: f32) f32 {
+/// Lanczos windowed sinc with a = 3.
+fn lanczos3Kernel(x: f32) f32 {
     if (x == 0) return 1;
-    if (@abs(x) >= a) return 0;
+    if (@abs(x) >= 3) return 0;
 
     const pi_x = std.math.pi * x;
-    const pi_x_over_a = pi_x / a;
-    return (a * @sin(pi_x) * @sin(pi_x_over_a)) / (pi_x * pi_x);
+    return (3 * @sin(pi_x) * @sin(pi_x / 3)) / (pi_x * pi_x);
 }
 
 /// Mitchell-Netravali cubic with blur `m_b` and ringing `m_c` parameters.
@@ -629,21 +631,26 @@ fn interpolateWithKernel(comptime T: type, self: Image(T), x: f32, y: f32, compt
     }
 
     const n = comptime Image(T).channels();
+    // The resolved taps form a rectangle, so its weight is the product of the axis sums.
     var sums: [n]f32 = @splat(0);
-    var weight_sum: f32 = 0;
-    inline for (0..taps) |j| {
-        if (rows[j]) |r| {
-            inline for (0..taps) |i| {
-                if (cols[i]) |c| {
-                    const px = self.at(r, c).*;
-                    const w = wx[i] * wy[j];
-                    inline for (0..n) |ch| sums[ch] += channelOf(px, ch) * w;
-                    weight_sum += w;
-                }
-            }
-        }
-    }
-    for (&sums) |*s| s.* = if (weight_sum != 0) s.* / weight_sum else 0;
+    var wx_sum: f32 = 0;
+    var wy_sum: f32 = 0;
+    inline for (0..taps) |i| if (cols[i] != null) {
+        wx_sum += wx[i];
+    };
+    inline for (0..taps) |j| if (rows[j]) |r| {
+        var row_sums: [n]f32 = @splat(0);
+        inline for (0..taps) |i| if (cols[i]) |c| {
+            const px = self.at(r, c).*;
+            inline for (0..n) |ch| row_sums[ch] += channelOf(px, ch) * wx[i];
+        };
+        inline for (0..n) |ch| sums[ch] += row_sums[ch] * wy[j];
+        wy_sum += wy[j];
+    };
+    const weight_sum = wx_sum * wy_sum;
+    if (weight_sum == 0) return std.mem.zeroes(T);
+    const scale = 1 / weight_sum;
+    for (&sums) |*s| s.* *= scale;
     return fromChannels(T, sums);
 }
 
