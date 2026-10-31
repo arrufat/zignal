@@ -2,12 +2,12 @@
     .name = .zignal_python,
     .version = "0.12.0-dev",
     .fingerprint = 0x80321d97e92fe2f8,
-    .minimum_zig_version = "0.18.0-dev.753+1420479be",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .zignal = .{ .path = "../.." },
         .translate_c = .{
-            .url = "git+https://codeberg.org/ziglang/translate-c#44d40059364e31c6529090d8a417d1e226e2edcd",
-            .hash = "translate_c-0.0.0-Q_BUWrNjBwCHg3y4GIuz1euFBi2u5G9C5JP4wHCNJ6BZ",
+            .url = "git+https://codeberg.org/ziglang/translate-c#875969d3493e245e01bf5d7860f792d8f3eb9ef5",
+            .hash = "translate_c-0.0.0-Q_BUWoFOBwAhz77Zd15HCVuhTKzdUKc94kezmCeJ7IC_",
         },
     },
     .paths = .{
