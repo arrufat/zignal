@@ -138,7 +138,7 @@ pub fn run(io: Io, gpa: Allocator, writer: *Io.Writer, options: Args, inputs: []
         std.log.debug("[{d}/{d}] processing {s}...", .{ idx + 1, img_count, path });
 
         const cached = if (idx == 0) reference_img else null;
-        var img = cached orelse zignal.Image(zignal.Rgba(u8)).load(io, gpa, path) catch |err| {
+        var img = (cached orelse zignal.Image(zignal.Rgba(u8)).load(io, gpa, path)) catch |err| {
             std.log.warn("failed to load {s}: {t}. skipping slot.", .{ path, err });
             failed = true;
             continue;

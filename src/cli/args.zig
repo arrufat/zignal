@@ -32,7 +32,7 @@ pub const Positionals = struct {
     pub const default: Positionals = .{};
 
     pub fn contains(self: Positionals, n: usize) bool {
-        return n >= self.min and n <= self.max orelse n;
+        return n >= self.min and n <= (self.max orelse n);
     }
 };
 

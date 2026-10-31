@@ -249,7 +249,7 @@ pub fn outlineRef(self: Vector, gpa: Allocator, gid: u16) (Error || Allocator.Er
 pub fn kern(self: Vector, left: u16, right: u16) i16 {
     if (self.tables.gpos == null and self.tables.kern == null) return 0;
     const cache = self.cache orelse return self.lookupKern(left, right);
-    const slot = cache.kerns.getOrPut(cache.gpa, @as(u32, left) << 16 | right) catch return self.lookupKern(left, right);
+    const slot = cache.kerns.getOrPut(cache.gpa, (@as(u32, left) << 16) | right) catch return self.lookupKern(left, right);
     if (!slot.found_existing) slot.value_ptr.* = self.lookupKern(left, right);
     return slot.value_ptr.*;
 }

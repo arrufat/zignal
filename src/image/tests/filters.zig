@@ -699,7 +699,7 @@ test "Image.convolve: preserves color channels" {
             image.at(r, c).* = .{
                 .r = @intCast((r * 20) % 256), // Horizontal gradient in red
                 .g = @intCast((c * 20) % 256), // Vertical gradient in green
-                .b = @intCast((r + c) * 10 % 256), // Diagonal gradient in blue
+                .b = @intCast(((r + c) * 10) % 256), // Diagonal gradient in blue
             };
         }
     }

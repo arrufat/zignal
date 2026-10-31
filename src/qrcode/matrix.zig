@@ -154,7 +154,7 @@ pub const BitMatrix = struct {
 
     pub fn writeFormatInfo(self: *BitMatrix, codeword: u15) void {
         for (0..15) |bit| {
-            const value: u1 = @intCast(codeword >> @intCast(bit) & 1);
+            const value: u1 = @intCast((codeword >> @intCast(bit)) & 1);
             inline for (0..2) |copy| {
                 const pos = self.formatCoordinates(copy, @intCast(bit));
                 self.setFunction(pos.row, pos.col, value);
@@ -177,7 +177,7 @@ pub const BitMatrix = struct {
         assert(self.version >= 7);
         for (0..6) |i| {
             for (0..3) |j| {
-                const value: u1 = @intCast(codeword >> @intCast(3 * i + j) & 1);
+                const value: u1 = @intCast((codeword >> @intCast(3 * i + j)) & 1);
                 self.setFunction(self.dim - 11 + j, i, value);
                 self.setFunction(i, self.dim - 11 + j, value);
             }
@@ -206,7 +206,7 @@ pub const BitMatrix = struct {
         const total_bits = codewords.len * 8;
         while (it.next()) |pos| {
             const value: u1 = if (bit < total_bits)
-                @intCast(codewords[bit / 8] >> @intCast(7 - bit % 8) & 1)
+                @intCast((codewords[bit / 8] >> @intCast(7 - bit % 8)) & 1)
             else
                 0;
             self.set(pos.row, pos.col, value);

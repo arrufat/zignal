@@ -68,15 +68,30 @@ pub const Interpolation = union(enum) {
 /// Samples a single pixel at fractional coordinates using the given interpolation `method`.
 /// Returns null when the coordinates are non-finite or out of bounds under `border`.
 pub fn interpolate(comptime T: type, self: Image(T), x: f32, y: f32, method: Interpolation, border: BorderMode) ?T {
+    if (self.rows == 0 or self.cols == 0) return null;
     if (!std.math.isFinite(x) or !std.math.isFinite(y)) return null;
+    // Keeps the isize conversions below in range.
     const range_limit = @as(f32, @floatFromInt(std.math.maxInt(isize) / 2));
     if (@abs(x) > range_limit or @abs(y) > range_limit) return null;
-    return switch (method) {
-        .nearest => interpolateNearest(T, self, x, y, border),
-        .bilinear => interpolateBilinear(T, self, x, y, border),
-        .bicubic, .catmull_rom, .mitchell => interpolateWithKernel(T, self, x, y, comptime kernelTaps(.bicubic), method, border),
-        .lanczos => interpolateWithKernel(T, self, x, y, comptime kernelTaps(.lanczos), method, border),
-    };
+    const rows: isize = @intCast(self.rows);
+    const cols: isize = @intCast(self.cols);
+    switch (method) {
+        .nearest => {
+            const at = border_ops.computeCoords(@round(y), @round(x), rows, cols, border) orelse return null;
+            return self.at(at.row, at.col).*;
+        },
+        .bilinear => {
+            const left: isize = @floor(x);
+            const top: isize = @floor(y);
+            const r0 = resolveIndex(top, rows, border);
+            const r1 = resolveIndex(top + 1, rows, border);
+            const c0 = resolveIndex(left, cols, border);
+            const c1 = resolveIndex(left + 1, cols, border);
+            return lerpPixel(T, pixelOrZero(T, self, r0, c0), pixelOrZero(T, self, r0, c1), pixelOrZero(T, self, r1, c0), pixelOrZero(T, self, r1, c1), x - as(f32, left), y - as(f32, top));
+        },
+        .bicubic, .catmull_rom, .mitchell => return interpolateWithKernel(T, self, x, y, comptime kernelTaps(.bicubic), method, border),
+        .lanczos => return interpolateWithKernel(T, self, x, y, comptime kernelTaps(.lanczos), method, border),
+    }
 }
 
 /// Resizes `self` into the pre-allocated `out` image using the given interpolation `method`,
@@ -455,10 +470,33 @@ pub fn kernelWeight(method: Interpolation, x: f32) f32 {
     };
 }
 
-/// `kernelWeight` with Lanczos read from `lanczos3_lut` instead of two sines per tap, for the
-/// per-pixel path.
-fn kernelWeightLut(method: Interpolation, x: f32) f32 {
-    return if (method == .lanczos) lanczos3KernelLut(x) else kernelWeight(method, x);
+/// Weights of the `taps` taps around fractional position `frac`, tap `t` at offset
+/// `t - (taps / 2 - 1)`. Lanczos3 shares its sines across the taps: `sin(pi * (o - frac))`
+/// is `±sin(pi * frac)` and `sin(pi * (o - frac) / 3)` follows by angle addition.
+fn kernelWeights(comptime taps: usize, method: Interpolation, frac: f32) [taps]f32 {
+    const lead = taps / 2 - 1;
+    var w: [taps]f32 = undefined;
+    if (taps == kernelTaps(.lanczos)) {
+        if (frac == 0) {
+            w = @splat(0);
+            w[lead] = 1;
+            return w;
+        }
+        const pi = std.math.pi;
+        const s = @sin(pi * frac);
+        const s3 = @sin(pi / 3.0 * frac);
+        const c3 = @cos(pi / 3.0 * frac);
+        inline for (&w, 0..) |*v, t| {
+            const o: f32 = comptime @as(f32, t) - lead;
+            const sin_x = if (@mod(t + lead, 2) == 0) -s else s;
+            const sin_x3 = @sin(o * pi / 3.0) * c3 - @cos(o * pi / 3.0) * s3;
+            const x = pi * (o - frac);
+            v.* = 3 * sin_x * sin_x3 / (x * x);
+        }
+        return w;
+    }
+    inline for (&w, 0..) |*v, t| v.* = kernelWeight(method, @as(f32, t) - lead - frac);
+    return w;
 }
 
 /// Classic bicubic kernel with a = -1.
@@ -491,27 +529,6 @@ fn lanczosKernel(x: f32, a: f32) f32 {
     const pi_x = std.math.pi * x;
     const pi_x_over_a = pi_x / a;
     return (a * @sin(pi_x) * @sin(pi_x_over_a)) / (pi_x * pi_x);
-}
-
-/// Lanczos3 over [0, 3) at `lanczos3_lut_step` entries per unit distance.
-const lanczos3_lut_step = 1024.0 / 3.0;
-const lanczos3_lut: [1025]f32 = blk: {
-    @setEvalBranchQuota(4000);
-    var vals: [1025]f32 = undefined;
-    for (&vals, 0..) |*v, i| v.* = lanczosKernel(@as(f32, @floatFromInt(i)) / lanczos3_lut_step, 3);
-    break :blk vals;
-};
-
-/// Lanczos3 kernel linearly interpolated from `lanczos3_lut`.
-fn lanczos3KernelLut(x: f32) f32 {
-    const ax = @abs(x);
-    if (ax >= 3.0) return 0;
-
-    const pos = ax * lanczos3_lut_step;
-    const idx: usize = @trunc(pos);
-    const frac = pos - @as(f32, @floatFromInt(idx));
-
-    return lanczos3_lut[idx] * (1.0 - frac) + lanczos3_lut[idx + 1] * frac;
 }
 
 /// Mitchell-Netravali cubic with blur `m_b` and ringing `m_c` parameters.
@@ -587,33 +604,6 @@ inline fn lerpField(comptime P: type, tl: P, tr: P, bl: P, br: P, fx: i32, fy: i
         tb * ((1 - lr) * as(f32, bl) + lr * as(f32, br)));
 }
 
-fn interpolateNearest(comptime T: type, self: Image(T), x: f32, y: f32, border: BorderMode) ?T {
-    const at = border_ops.computeCoords(@round(y), @round(x), @intCast(self.rows), @intCast(self.cols), border) orelse return null;
-    return self.at(at.row, at.col).*;
-}
-
-fn interpolateBilinear(comptime T: type, self: Image(T), x: f32, y: f32, border: BorderMode) ?T {
-    const left: isize = @floor(x);
-    const top: isize = @floor(y);
-    const r0 = resolveIndex(top, @intCast(self.rows), border);
-    const r1 = resolveIndex(top + 1, @intCast(self.rows), border);
-    const c0 = resolveIndex(left, @intCast(self.cols), border);
-    const c1 = resolveIndex(left + 1, @intCast(self.cols), border);
-
-    // With .mirror any out-of-bounds neighbor yields null; .zero continues with zeroes.
-    if (border == .mirror and (r0 == null or r1 == null or c0 == null or c1 == null)) return null;
-
-    return lerpPixel(
-        T,
-        pixelOrZero(T, self, r0, c0),
-        pixelOrZero(T, self, r0, c1),
-        pixelOrZero(T, self, r1, c0),
-        pixelOrZero(T, self, r1, c1),
-        x - as(f32, left),
-        y - as(f32, top),
-    );
-}
-
 fn pixelOrZero(comptime T: type, img: Image(T), r: ?usize, c: ?usize) T {
     return if (r != null and c != null) img.at(r.?, c.?).* else std.mem.zeroes(T);
 }
@@ -628,15 +618,12 @@ fn interpolateWithKernel(comptime T: type, self: Image(T), x: f32, y: f32, compt
     const lead: isize = taps / 2 - 1;
 
     // Per-axis taps and weights, resolved once instead of once per window cell.
+    const wx = kernelWeights(taps, method, fx);
+    const wy = kernelWeights(taps, method, fy);
     var cols: [taps]?usize = undefined;
     var rows: [taps]?usize = undefined;
-    var wx: [taps]f32 = undefined;
-    var wy: [taps]f32 = undefined;
     inline for (0..taps) |t| {
         const offset: isize = @as(isize, t) - lead;
-        const d: f32 = @floatFromInt(offset);
-        wx[t] = kernelWeightLut(method, d - fx);
-        wy[t] = kernelWeightLut(method, d - fy);
         cols[t] = resolveIndex(ix + offset, @intCast(self.cols), border);
         rows[t] = resolveIndex(iy + offset, @intCast(self.rows), border);
     }
@@ -697,6 +684,21 @@ test "Sampler: matches interpolate away from the borders" {
                         },
                     }
                 }
+            }
+        }
+    }
+}
+
+test "kernelWeights: matches kernelWeight per tap" {
+    const methods = [_]Interpolation{ .bicubic, .catmull_rom, .{ .mitchell = .default }, .lanczos };
+    inline for (methods) |method| {
+        const taps = comptime kernelTaps(method);
+        for (0..64) |i| {
+            const frac = @as(f32, @floatFromInt(i)) / 64;
+            const w = kernelWeights(taps, method, frac);
+            for (w, 0..) |got, t| {
+                const offset = @as(f32, @floatFromInt(t)) - (taps / 2 - 1);
+                try std.testing.expectApproxEqAbs(kernelWeight(method, offset - frac), got, 1e-5);
             }
         }
     }
