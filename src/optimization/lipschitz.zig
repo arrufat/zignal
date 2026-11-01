@@ -182,6 +182,49 @@ pub const UpperBound = struct {
         return ub;
     }
 
+    /// `evaluateWithPending`, but only as far as needed to decide whether the bound exceeds
+    /// `incumbent`: returns the exact bound if it does, otherwise some value <= `incumbent`.
+    /// `order` is a permutation of the stored point indices giving the order to try them in; the
+    /// point that rejects `x` moves to the front, since it tends to reject the next candidate too.
+    /// Port of dlib's `upper_bound_search::evaluate_candidate`.
+    pub fn evaluateAbove(
+        self: *const UpperBound,
+        x: []const f64,
+        pending_xs: []const f64,
+        pending_ys: []const f64,
+        incumbent: f64,
+        order: []usize,
+    ) f64 {
+        std.debug.assert(order.len == self.numPoints());
+        for (order, 0..) |i, j| {
+            if (self.rejects(x, self.pointX(i), self.pointY(i), self.offsets.items[i], incumbent)) |v| {
+                std.mem.swap(usize, &order[0], &order[j]);
+                return v;
+            }
+        }
+        for (pending_ys, 0..) |y, p| {
+            if (self.rejects(x, pending_xs[p * self.dims ..][0..self.dims], y, 0, incumbent)) |v| return v;
+        }
+        return self.evaluateWithPending(x, pending_xs, pending_ys);
+    }
+
+    /// The bound point `(xi, y)` gives at `x` when it is <= `incumbent`, else null. The squared
+    /// test is only a filter; the returned value is confirmed with the unsquared expression so
+    /// rounding cannot reject a candidate whose bound beats the incumbent.
+    fn rejects(self: *const UpperBound, x: []const f64, xi: []const f64, y: f64, base: f64, incumbent: f64) ?f64 {
+        if (y > incumbent) return null;
+        const h = incumbent - y;
+        const s_limit = h * h;
+        var s = base;
+        for (0..self.dims) |k| {
+            const d = x[k] - xi[k];
+            s += self.slopes[k] * d * d;
+            if (s > s_limit) return null;
+        }
+        const v = y + @sqrt(s);
+        return if (v <= incumbent) v else null;
+    }
+
     fn learnParams(self: *UpperBound) !void {
         const n = self.numPoints();
         const dims = self.dims;
