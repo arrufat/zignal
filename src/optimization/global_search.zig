@@ -431,7 +431,7 @@ pub const GlobalOptimizer = struct {
 
         self.do_trust_region_step = true;
         if (self.prng.random().float(f64) >= self.pure_random_probability) {
-            if (self.pickMaxUpperBound(pending_x, pending_y, x_out)) {
+            if (try self.pickMaxUpperBound(pending_x, pending_y, x_out)) {
                 return .{ .move = .explore };
             }
         }
@@ -473,17 +473,22 @@ pub const GlobalOptimizer = struct {
     /// Returns true if that point's bound exceeds the best observed value (worth exploring).
     /// `pending_x`/`pending_y` are the in-flight points whose imputed values tighten the
     /// bound near themselves. Port of `pick_next_sample_as_max_upper_bound`.
-    fn pickMaxUpperBound(self: *GlobalOptimizer, pending_x: []const f64, pending_y: []const f64, x_out: []f64) bool {
+    fn pickMaxUpperBound(self: *GlobalOptimizer, pending_x: []const f64, pending_y: []const f64, x_out: []f64) !bool {
         const s = self.variables.slice();
         const lower = s.items(.lower);
         const upper = s.items(.upper);
         const is_integer = s.items(.is_integer);
         const r = self.prng.random();
 
+        defer _ = self.arena.reset(.retain_capacity);
+        const order = try self.arena.allocator().alloc(usize, self.upper_bound.numPoints());
+        for (order, 0..) |*o, i| o.* = i;
+
+        // Only the winner matters, so each candidate is evaluated just far enough to reject it.
         var best_ub: f64 = -std.math.inf(f64);
         for (0..self.num_random_samples) |_| {
             sampleInBox(self.scratch, lower, upper, is_integer, r);
-            const b = self.upper_bound.evaluateWithPending(self.scratch, pending_x, pending_y);
+            const b = self.upper_bound.evaluateAbove(self.scratch, pending_x, pending_y, best_ub, order);
             if (b > best_ub) {
                 best_ub = b;
                 @memcpy(x_out, self.scratch);
@@ -817,6 +822,65 @@ test "GlobalOptimizer.optimize: Holder table (multimodal minimization)" {
     const b = try opt.optimize(io, holderTable);
     // Reach one of the four global minima (~ -19.2085).
     try std.testing.expect(b.y < -19.0);
+}
+
+test "GlobalOptimizer.pickMaxUpperBound: matches exhaustive upper-bound search" {
+    const allocator = std.testing.allocator;
+    const max_dims = 8;
+    for ([_]usize{ 1, 3, max_dims }) |dims| for (0..3) |integer_mode| for ([_]f64{ 0, 0.01 }) |noise| {
+        var variables: [max_dims]GlobalOptimizer.Variable = undefined;
+        for (variables[0..dims], 0..) |*v, k| {
+            const is_int = integer_mode == 2 or (integer_mode == 1 and k % 2 == 0);
+            v.* = .{ .lower = -10, .upper = 10, .is_integer = is_int };
+        }
+        var opt = try GlobalOptimizer.init(allocator, variables[0..dims], .{
+            .policy = .max,
+            .upper_bound = .{ .relative_noise_magnitude = noise },
+        });
+        defer opt.deinit();
+
+        var data_prng: std.Random.DefaultPrng = .init(dims * 10 + integer_mode);
+        const dr = data_prng.random();
+        var x: [max_dims]f64 = undefined;
+        for (0..32) |_| {
+            var sum: f64 = 0;
+            for (x[0..dims], variables[0..dims]) |*xi, v| {
+                xi.* = dr.float(f64) * 2 - 1;
+                if (v.is_integer) xi.* = @round(xi.*);
+                sum += xi.*;
+            }
+            try opt.addEvaluation(.{ .x = x[0..dims], .y = @sin(sum) + dr.float(f64) / 10 });
+        }
+
+        // Two in-flight points with imputed values, as the worker pool would pass them.
+        var pending_x: [2 * max_dims]f64 = undefined;
+        for (pending_x[0 .. 2 * dims]) |*p| p.* = dr.float(f64) * 4 - 2;
+        const pending_y = [_]f64{ 0.5, 1.2 };
+
+        const s = opt.variables.slice();
+        for ([_]usize{ 1, 32, 5000 }) |count| for ([_]u64{ 17, 43, 101 }) |seed| for ([_]usize{ 0, 2 }) |np| {
+            const px = pending_x[0 .. np * dims];
+            const py = pending_y[0..np];
+            opt.num_random_samples = count;
+            opt.prng = .init(seed);
+            var got: [max_dims]f64 = undefined;
+            const got_explore = try opt.pickMaxUpperBound(px, py, got[0..dims]);
+
+            var replay: std.Random.DefaultPrng = .init(seed);
+            var expected: [max_dims]f64 = undefined;
+            var best_ub: f64 = -std.math.inf(f64);
+            for (0..count) |_| {
+                sampleInBox(x[0..dims], s.items(.lower), s.items(.upper), s.items(.is_integer), replay.random());
+                const b = opt.upper_bound.evaluateWithPending(x[0..dims], px, py);
+                if (b > best_ub) {
+                    best_ub = b;
+                    expected = x;
+                }
+            }
+            try std.testing.expectEqual(best_ub > opt.best_y.?, got_explore);
+            try std.testing.expectEqualSlices(f64, expected[0..dims], got[0..dims]);
+        };
+    };
 }
 
 test "GlobalOptimizer: warm-start seeds the model" {
