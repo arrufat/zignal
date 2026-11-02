@@ -9,9 +9,8 @@
 //! dlib fits them by reformulating a hard-margin linear SVM. That is exactly the convex QP
 //!   minimize ||u||^2  subject to  A u >= c   (u >= 0 falls out of the dual),
 //! which we solve directly with dual coordinate descent (Hsieh et al. 2008) — no SVM machinery.
-//!
-//! v1 simplification: all O(n^2) pairwise constraints are rebuilt on every `add` (dlib keeps an
-//! incremental active set). Correct and simple; fine for hundreds of samples.
+//! Only a small working set of the O(n^2) pairwise constraints binds; each refit solves over it and
+//! re-adds any left-out pair the solution violates.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -37,12 +36,15 @@ pub const UpperBound = struct {
 
     arena: std.heap.ArenaAllocator,
 
-    // QP dual variables, persisted across refits to warm-start the dual coordinate descent. Indexed
-    // by the n-independent pair index j*(j-1)/2 + i, so an entry keeps referring to the same pair as
-    // points accumulate (new pairs only ever append at the tail).
-    alpha: std.ArrayList(f64) = .empty,
+    // Working set of pairwise constraints. After each refit only the binding pairs (alpha > 0) are
+    // kept; the next `add` appends the new point's pairs, and the surviving alphas warm-start the
+    // dual coordinate descent.
+    active: std.ArrayList(Constraint) = .empty,
     /// DCD sweeps the last refit needed (diagnostic; stays small thanks to warm-starting).
     last_sweeps: usize = 0,
+
+    /// Pairwise constraint between points i < j, with its dual variable.
+    const Constraint = struct { i: usize, j: usize, alpha: f64 };
 
     pub const Options = struct {
         /// Multiplicative noise model for the upper bound (per dlib's relative_noise_magnitude).
@@ -76,7 +78,7 @@ pub const UpperBound = struct {
         self.ys.deinit(self.allocator);
         self.allocator.free(self.slopes);
         self.offsets.deinit(self.allocator);
-        self.alpha.deinit(self.allocator);
+        self.active.deinit(self.allocator);
         self.allocator.free(self.x_stats);
         self.allocator.free(self.x_stats_prev);
         self.arena.deinit();
@@ -243,52 +245,85 @@ pub const UpperBound = struct {
             xscale[k] = if (x_std > 0) 1.0 / (x_std * yscale) else 0;
         }
 
-        const npairs = n * (n - 1) / 2;
-        // Sparse constraints: dmat[p][k] = (dx_k * xscale_k * yscale)^2; one noise term at
-        // `offset index` noise_idx (the lower-y point); rhs c = diff^2; qnn = ||a_p||^2.
+        // Points pre-scaled so pair (i, j) contributes (xn_i,k - xn_j,k)^2 to slope k.
+        const xn = try a.alloc(f64, n * dims);
+        for (0..n) |i| {
+            for (0..dims) |k| xn[i * dims + k] = self.xs.items[i * dims + k] * xscale[k] * yscale;
+        }
+        const u = try a.alloc(f64, dims + n); // [slopes_normalized (dims), offset weights (n)]
+
+        // The working set is the binding pairs of the last refit plus the new point's pairs (as in
+        // dlib). Unlike dlib, pairs left out are checked after each solve and violated ones are
+        // added back, so the result satisfies every pairwise constraint to `solver_eps`.
+        try self.active.ensureUnusedCapacity(self.allocator, n - 1);
+        for (0..n - 1) |i| self.active.appendAssumeCapacity(.{ .i = i, .j = n - 1, .alpha = 0 });
+        // The caller drops the new point on failure; an empty working set stays valid.
+        errdefer self.active.clearRetainingCapacity();
+
+        self.last_sweeps = 0;
+        while (true) {
+            const sweeps = try self.solve(a, xn, yscale, u);
+            self.last_sweeps += sweeps;
+            if (sweeps == max_sweeps) break; // unconverged: the violation check would be meaningless
+            if (!try self.addViolated(xn, yscale, u)) break;
+        }
+
+        // Keep only the binding pairs (and their alphas) for the next refit.
+        var kept: usize = 0;
+        for (self.active.items) |c| {
+            if (c.alpha == 0) continue;
+            self.active.items[kept] = c;
+            kept += 1;
+        }
+        self.active.shrinkRetainingCapacity(kept);
+
+        // --- recover slopes/offsets in original space (offsets already sized to n by add) ---
+        for (0..dims) |k| self.slopes[k] = u[k] * xscale[k] * xscale[k];
+        for (0..n) |i| self.offsets.items[i] = u[dims + i] * rnm;
+    }
+
+    const max_sweeps: usize = 1000;
+
+    /// Dual coordinate descent over the working set, warm-started from `alpha`:
+    /// max_{alpha>=0} sum alpha*c - 0.5||u||^2, u = sum alpha*a. Leaves the solution in `u` and
+    /// returns the number of sweeps.
+    fn solve(self: *UpperBound, a: Allocator, xn: []const f64, yscale: f64, u: []f64) !usize {
+        const dims = self.dims;
+        const rnm = self.relative_noise_magnitude;
+        const cons = self.active.items;
+        const npairs = cons.len;
+
+        // Sparse constraints: dmat[p][k] = (xn_i,k - xn_j,k)^2; one noise term at `offset index`
+        // noise_idx (the lower-y point); rhs c = diff^2; qnn = ||a_p||^2.
         const dmat = try a.alloc(f64, npairs * dims);
         const noise_idx = try a.alloc(usize, npairs);
         const cvec = try a.alloc(f64, npairs);
         const qnn = try a.alloc(f64, npairs);
-
-        // Enumerate pairs in the n-independent order p = j*(j-1)/2 + i (i < j). Each pair keeps its
-        // index as points accumulate, so the persisted `alpha` warm-starts the solve below.
-        var p: usize = 0;
-        for (1..n) |j| {
-            for (0..j) |i| {
-                var q: f64 = 0;
-                for (0..dims) |k| {
-                    const dx = (self.xs.items[i * dims + k] - self.xs.items[j * dims + k]) * xscale[k] * yscale;
-                    const dk = dx * dx;
-                    dmat[p * dims + k] = dk;
-                    q += dk * dk;
-                }
-                noise_idx[p] = if (self.ys.items[i] > self.ys.items[j]) j else i;
-                const diff = (self.ys.items[i] - self.ys.items[j]) * yscale;
-                cvec[p] = diff * diff;
-                qnn[p] = q + rnm * rnm;
-                p += 1;
+        for (cons, 0..) |c, p| {
+            const i = c.i;
+            const j = c.j;
+            var q: f64 = 0;
+            for (0..dims) |k| {
+                const dx = xn[i * dims + k] - xn[j * dims + k];
+                const dk = dx * dx;
+                dmat[p * dims + k] = dk;
+                q += dk * dk;
             }
+            noise_idx[p] = if (self.ys.items[i] > self.ys.items[j]) j else i;
+            const diff = (self.ys.items[i] - self.ys.items[j]) * yscale;
+            cvec[p] = diff * diff;
+            qnn[p] = q + rnm * rnm;
         }
 
-        // Warm-start: keep dual variables for pre-existing pairs, zero only the newly appended tail.
-        const old_len = self.alpha.items.len;
-        try self.alpha.resize(self.allocator, npairs);
-        @memset(self.alpha.items[old_len..], 0);
-        const alpha = self.alpha.items;
-
-        // --- dual coordinate descent: max_{alpha>=0} sum alpha*c - 0.5||u||^2, u = sum alpha*a ---
         // Rebuild u under the current normalization from the (warm) dual variables.
-        const fdim = dims + n; // u layout: [slopes_normalized (dims), offset weights (n)]
-        const u = try a.alloc(f64, fdim);
         @memset(u, 0);
         for (0..npairs) |np| {
-            if (alpha[np] == 0) continue;
-            for (0..dims) |k| u[k] += alpha[np] * dmat[np * dims + k];
-            u[dims + noise_idx[np]] += alpha[np] * rnm;
+            const al = cons[np].alpha;
+            if (al == 0) continue;
+            for (0..dims) |k| u[k] += al * dmat[np * dims + k];
+            u[dims + noise_idx[np]] += al * rnm;
         }
 
-        const max_sweeps: usize = 1000;
         var sweep: usize = 0;
         while (sweep < max_sweeps) : (sweep += 1) {
             var max_pg: f64 = 0;
@@ -299,26 +334,64 @@ pub const UpperBound = struct {
                 var ua: f64 = u[dims + ni] * rnm;
                 for (0..dims) |k| ua += u[k] * dmat[np * dims + k];
                 const grad = cvec[np] - ua;
-                const pg = if (alpha[np] > 0) grad else @max(grad, 0);
+                const al = cons[np].alpha;
+                const pg = if (al > 0) grad else @max(grad, 0);
                 const abs_pg = @abs(pg);
                 max_pg = @max(max_pg, abs_pg);
                 if (abs_pg > 1e-12) {
-                    const new_alpha = @max(0.0, alpha[np] + grad / qnn[np]);
-                    const delta = new_alpha - alpha[np];
+                    const new_alpha = @max(0.0, al + grad / qnn[np]);
+                    const delta = new_alpha - al;
                     if (delta != 0) {
                         for (0..dims) |k| u[k] += delta * dmat[np * dims + k];
                         u[dims + ni] += delta * rnm;
-                        alpha[np] = new_alpha;
+                        cons[np].alpha = new_alpha;
                     }
                 }
             }
             if (max_pg < self.solver_eps) break;
         }
-        self.last_sweeps = sweep;
+        return sweep;
+    }
 
-        // --- recover slopes/offsets in original space (offsets already sized to n by add) ---
-        for (0..dims) |k| self.slopes[k] = u[k] * xscale[k] * xscale[k];
-        for (0..n) |i| self.offsets.items[i] = u[dims + i] * rnm;
+    /// Append every pair outside the working set whose constraint `u . a >= c` is violated by more
+    /// than `solver_eps`, with alpha 0. Returns whether any was. The set only grows, so the
+    /// solve/check loop terminates.
+    fn addViolated(self: *UpperBound, xn: []const f64, yscale: f64, u: []const f64) !bool {
+        const n = self.numPoints();
+        const dims = self.dims;
+        const rnm = self.relative_noise_magnitude;
+        const ys = self.ys.items;
+
+        // Walk the working set in scan order (j, then i) to skip its pairs.
+        std.mem.sort(Constraint, self.active.items, {}, struct {
+            fn lt(_: void, p: Constraint, q: Constraint) bool {
+                return if (p.j != q.j) p.j < q.j else p.i < q.i;
+            }
+        }.lt);
+        const in_set = self.active.items.len;
+        var w: usize = 0;
+
+        for (1..n) |j| {
+            const xj = xn[j * dims ..][0..dims];
+            for (0..j) |i| {
+                if (w < in_set and self.active.items[w].i == i and self.active.items[w].j == j) {
+                    w += 1;
+                    continue;
+                }
+                const diff = (ys[i] - ys[j]) * yscale;
+                const limit = diff * diff - self.solver_eps;
+                const lo = if (ys[i] > ys[j]) j else i;
+                var ua = u[dims + lo] * rnm;
+                if (ua >= limit) continue;
+                const xi = xn[i * dims ..][0..dims];
+                for (0..dims) |k| {
+                    const d = xi[k] - xj[k];
+                    ua += u[k] * (d * d);
+                    if (ua >= limit) break;
+                } else try self.active.append(self.allocator, .{ .i = i, .j = j, .alpha = 0 });
+            }
+        }
+        return self.active.items.len > in_set;
     }
 };
 
@@ -350,7 +423,7 @@ test "UpperBound.evaluate: dominates the sampled points" {
     for (ub.slopes) |s| try std.testing.expect(s >= 0);
 }
 
-test "UpperBound.add: incremental warm-start refits converge fast and stay correct" {
+test "UpperBound.add: working-set refits stay a valid bound" {
     const allocator = std.testing.allocator;
     var ub = try UpperBound.init(allocator, 3, .default);
     defer ub.deinit();
@@ -362,15 +435,24 @@ test "UpperBound.add: incremental warm-start refits converge fast and stay corre
         for (0..3) |k| x[k] = r.float(f64) * 2 - 1;
         const y = -(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
         try ub.add(&x, y);
+        // Pairs dropped from the working set must still hold up to the solver tolerance (dlib's
+        // heuristic misses by ~1e-3 here).
+        for (0..ub.numPoints()) |k| {
+            try std.testing.expect(ub.evaluate(ub.pointX(k)) >= ub.pointY(k) - 1e-5);
+        }
     }
-
-    // After 30 incremental points (435 constraints) the warm-started solve still converges in only
-    // a handful of sweeps, far below the 1000-sweep cap — that is the warm-start win.
+    // Only a few of the 435 pairs bind, and the warm-started solve needs few sweeps.
+    try std.testing.expect(ub.active.items.len < 435 / 4);
     try std.testing.expect(ub.last_sweeps < 50);
-    // And the surrogate remains a valid upper bound at every sample.
-    for (0..ub.numPoints()) |k| {
-        try std.testing.expect(ub.evaluate(ub.pointX(k)) >= ub.pointY(k) - 1e-6);
-    }
+}
+
+test "UpperBound.add: terminates on duplicate points without noise" {
+    const allocator = std.testing.allocator;
+    var ub = try UpperBound.init(allocator, 1, .{ .relative_noise_magnitude = 0 });
+    defer ub.deinit();
+    // Same x with different y makes the pair's constraint unsatisfiable; it must not be re-added.
+    for ([_]f64{ 0, 1, 0, 2, 1, 0 }, 0..) |x, i| try ub.add(&[_]f64{x}, @floatFromInt(i));
+    try std.testing.expectEqual(@as(usize, 6), ub.numPoints());
 }
 
 test "UpperBound.evaluate: a single point evaluates to that point's value" {
