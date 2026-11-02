@@ -354,8 +354,7 @@ pub const GlobalOptimizer = struct {
     // Internals
     // -----------------------------------------------------------------------------------
 
-    // `predicted` carries the trust-region model's predicted improvement (only meaningful for
-    // `.exploit`); `move == .exploit` is the single source of truth for "was a TR step".
+    // `predicted` is the trust-region model's predicted improvement, set only for `.exploit`.
     const Ask = struct {
         move: Move,
         predicted: f64 = 0,
@@ -384,11 +383,8 @@ pub const GlobalOptimizer = struct {
         return state.since_improve >= pat;
     }
 
-    /// Chooses the next point to evaluate, writing it into `x_out`. Port of `get_next_x`.
-    ///
-    /// In-flight ("pending") points from concurrent workers count towards the init budget and
-    /// the one-trust-region-at-a-time rule, and lower the surrogate near themselves so two
-    /// asks don't pick the same spot. With none in flight this is the original behavior.
+    /// Writes the next point to evaluate into `x_out`. Port of `get_next_x`. In-flight points count
+    /// towards the init budget and the one-trust-region rule, and lower the bound near themselves.
     fn ask(self: *GlobalOptimizer, x_out: []f64) !Ask {
         const dims = self.variables.len;
 
@@ -439,15 +435,13 @@ pub const GlobalOptimizer = struct {
         return .{ .move = .random };
     }
 
-    /// Complete one ask-tell transaction: incorporate the raw (caller-sign) objective value for a
-    /// point produced by `ask` and count the evaluation. Shared by `step()` and the pooled workers.
+    /// Record a caller-sign objective value for a point from `ask` and count the evaluation.
     fn tell(self: *GlobalOptimizer, x: []const f64, y_raw: f64, a: Ask) !void {
         try self.record(x, self.sign * y_raw, a);
         self.evals += 1;
     }
 
-    /// Tell: incorporate an evaluated point produced by `a.move`, adapt the trust-region radius,
-    /// update the best. Only `.exploit` evaluations drive the radius adaptation.
+    /// Add an evaluated point, adapt the trust-region radius (`.exploit` only), update the best.
     fn record(self: *GlobalOptimizer, x: []const f64, y_internal: f64, a: Ask) !void {
         try self.upper_bound.add(x, y_internal);
 
@@ -469,10 +463,8 @@ pub const GlobalOptimizer = struct {
         }
     }
 
-    /// Random search for the point maximizing the upper bound; writes the best into `x_out`.
-    /// Returns true if that point's bound exceeds the best observed value (worth exploring).
-    /// `pending_x`/`pending_y` are the in-flight points whose imputed values tighten the
-    /// bound near themselves. Port of `pick_next_sample_as_max_upper_bound`.
+    /// Random search for the max of the upper bound (in-flight points included) into `x_out`; true if
+    /// it beats the best observed value. Port of `pick_next_sample_as_max_upper_bound`.
     fn pickMaxUpperBound(self: *GlobalOptimizer, pending_x: []const f64, pending_y: []const f64, x_out: []f64) !bool {
         const s = self.variables.slice();
         const lower = s.items(.lower);
@@ -484,7 +476,7 @@ pub const GlobalOptimizer = struct {
         const order = try self.arena.allocator().alloc(usize, self.upper_bound.numPoints());
         for (order, 0..) |*o, i| o.* = i;
 
-        // Only the winner matters, so each candidate is evaluated just far enough to reject it.
+        // Only the winner matters, so candidates are evaluated just far enough to reject them.
         var best_ub: f64 = -std.math.inf(f64);
         for (0..self.num_random_samples) |_| {
             sampleInBox(self.scratch, lower, upper, is_integer, r);
@@ -549,8 +541,7 @@ pub const GlobalOptimizer = struct {
             ybuf[c] = self.upper_bound.pointY(dists[c].idx);
         }
 
-        // Initialize the radius to (just under) the spread of the neighbor cloud, if unset. The
-        // active-dim offsets are already materialized in xbuf (= pt - anchor), so reuse them.
+        // Unset radius: just under the spread of the neighbors (xbuf already holds pt - anchor).
         if (self.radius == 0) {
             var maxd: f64 = 0;
             for (0..big) |c| {

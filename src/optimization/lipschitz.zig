@@ -6,11 +6,8 @@
 //! The per-dimension `slopes` (squared Lipschitz constants) and per-point `offsets`
 //! (noise terms) are fit so the surrogate is consistent with every observed pair.
 //!
-//! dlib fits them by reformulating a hard-margin linear SVM. That is exactly the convex QP
-//!   minimize ||u||^2  subject to  A u >= c   (u >= 0 falls out of the dual),
-//! which we solve directly with dual coordinate descent (Hsieh et al. 2008) — no SVM machinery.
-//! Only a small working set of the O(n^2) pairwise constraints binds; each refit solves over it and
-//! re-adds any left-out pair the solution violates.
+//! The fit is the QP `min ||u||^2 s.t. A u >= c` (dlib's hard-margin SVM), solved by dual
+//! coordinate descent (Hsieh et al. 2008) over a working set of the binding pairwise constraints.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -36,11 +33,9 @@ pub const UpperBound = struct {
 
     arena: std.heap.ArenaAllocator,
 
-    // Working set of pairwise constraints. After each refit only the binding pairs (alpha > 0) are
-    // kept; the next `add` appends the new point's pairs, and the surviving alphas warm-start the
-    // dual coordinate descent.
+    // Binding pairs (alpha > 0) of the last refit; their alphas warm-start the next solve.
     active: std.ArrayList(Constraint) = .empty,
-    /// DCD sweeps the last refit needed (diagnostic; stays small thanks to warm-starting).
+    /// DCD sweeps the last refit needed (diagnostic).
     last_sweeps: usize = 0,
 
     /// Pairwise constraint between points i < j, with its dual variable.
@@ -101,8 +96,7 @@ pub const UpperBound = struct {
         std.debug.assert(x.len == self.dims);
         const n = self.numPoints();
         try self.xs.appendSlice(self.allocator, x);
-        // A failed append or refit must not leave the point set or the running stats ahead of the
-        // fitted parameters.
+        // Roll back on failure so points, stats and fit stay in sync.
         errdefer self.xs.shrinkRetainingCapacity(n * self.dims);
         try self.ys.append(self.allocator, y);
         errdefer self.ys.shrinkRetainingCapacity(n);
@@ -138,8 +132,7 @@ pub const UpperBound = struct {
         return y + @sqrt(s);
     }
 
-    /// Evaluate the upper bound at x. Requires at least one point (with a single point the bound is
-    /// simply that point's value, since the slopes are still zero).
+    /// The upper bound at `x`. Requires at least one point.
     pub fn evaluate(self: *const UpperBound, x: []const f64) f64 {
         var ub: f64 = std.math.inf(f64);
         for (0..self.numPoints()) |i| {
@@ -148,9 +141,7 @@ pub const UpperBound = struct {
         return ub;
     }
 
-    /// Nearest-neighbor `y` among the stored points (Euclidean over `x`). Used to impute a
-    /// provisional value for an in-flight ("pending") point so concurrent asks don't collapse
-    /// onto it. Returns 0 when there are no points yet.
+    /// `y` of the stored point nearest `x` (0 if none), imputed for in-flight points.
     pub fn nearestY(self: *const UpperBound, x: []const f64) f64 {
         var best_d: f64 = std.math.inf(f64);
         var best_y: f64 = 0;
@@ -164,10 +155,8 @@ pub const UpperBound = struct {
         return best_y;
     }
 
-    /// Like `evaluate`, but also lowers the bound near in-flight points (point p at
-    /// `pending_xs[p*dims..][0..dims]`, provisional value `pending_ys[p]`), reusing the current
-    /// slopes with a zero offset (no refit). The cheap read-only analogue of dlib's
-    /// `build_upper_bound_with_all_function_evals`.
+    /// `evaluate`, also bounded by the in-flight points (`pending_xs` row-major, values
+    /// `pending_ys`) with the current slopes and zero offset, instead of refitting like dlib.
     pub fn evaluateWithPending(
         self: *const UpperBound,
         x: []const f64,
@@ -184,11 +173,8 @@ pub const UpperBound = struct {
         return ub;
     }
 
-    /// `evaluateWithPending`, but only as far as needed to decide whether the bound exceeds
-    /// `incumbent`: returns the exact bound if it does, otherwise some value <= `incumbent`.
-    /// `order` is a permutation of the stored point indices giving the order to try them in; the
-    /// point that rejects `x` moves to the front, since it tends to reject the next candidate too.
-    /// Port of dlib's `upper_bound_search::evaluate_candidate`.
+    /// `evaluateWithPending` if it exceeds `incumbent`, else some value <= `incumbent`, trying the
+    /// stored points in `order` (a permutation of their indices). Port of dlib's `evaluate_candidate`.
     pub fn evaluateAbove(
         self: *const UpperBound,
         x: []const f64,
@@ -199,32 +185,17 @@ pub const UpperBound = struct {
     ) f64 {
         std.debug.assert(order.len == self.numPoints());
         for (order, 0..) |i, j| {
-            if (self.rejects(x, self.pointX(i), self.pointY(i), self.offsets.items[i], incumbent)) |v| {
-                std.mem.swap(usize, &order[0], &order[j]);
+            const v = self.pointBound(x, self.pointX(i), self.pointY(i), self.offsets.items[i], incumbent);
+            if (v < incumbent) {
+                std.mem.swap(usize, &order[0], &order[j]); // likely rejects the next candidate too
                 return v;
             }
         }
         for (pending_ys, 0..) |y, p| {
-            if (self.rejects(x, pending_xs[p * self.dims ..][0..self.dims], y, 0, incumbent)) |v| return v;
+            const v = self.pointBound(x, pending_xs[p * self.dims ..][0..self.dims], y, 0, incumbent);
+            if (v < incumbent) return v;
         }
         return self.evaluateWithPending(x, pending_xs, pending_ys);
-    }
-
-    /// The bound point `(xi, y)` gives at `x` when it is <= `incumbent`, else null. The squared
-    /// test is only a filter; the returned value is confirmed with the unsquared expression so
-    /// rounding cannot reject a candidate whose bound beats the incumbent.
-    fn rejects(self: *const UpperBound, x: []const f64, xi: []const f64, y: f64, base: f64, incumbent: f64) ?f64 {
-        if (y > incumbent) return null;
-        const h = incumbent - y;
-        const s_limit = h * h;
-        var s = base;
-        for (0..self.dims) |k| {
-            const d = x[k] - xi[k];
-            s += self.slopes[k] * d * d;
-            if (s > s_limit) return null;
-        }
-        const v = y + @sqrt(s);
-        return if (v <= incumbent) v else null;
     }
 
     fn learnParams(self: *UpperBound) !void {
@@ -235,7 +206,7 @@ pub const UpperBound = struct {
         defer _ = self.arena.reset(.retain_capacity);
         const a = self.arena.allocator();
 
-        // --- normalization (matches dlib: scale x by per-dim stddev, y by stddev) ---
+        // Normalize like dlib: x by per-dim stddev, y by stddev.
         const y_std = self.y_stats.stdDev();
         const yscale: f64 = if (y_std > 0) 1.0 / y_std else 1.0;
 
@@ -252,23 +223,22 @@ pub const UpperBound = struct {
         }
         const u = try a.alloc(f64, dims + n); // [slopes_normalized (dims), offset weights (n)]
 
-        // The working set is the binding pairs of the last refit plus the new point's pairs (as in
-        // dlib). Unlike dlib, pairs left out are checked after each solve and violated ones are
-        // added back, so the result satisfies every pairwise constraint to `solver_eps`.
+        // Solve over the new point's pairs plus the kept ones. Unlike dlib, left-out pairs are
+        // re-checked after each solve, so every pair holds to `solver_eps`.
         try self.active.ensureUnusedCapacity(self.allocator, n - 1);
         for (0..n - 1) |i| self.active.appendAssumeCapacity(.{ .i = i, .j = n - 1, .alpha = 0 });
-        // The caller drops the new point on failure; an empty working set stays valid.
+        // The caller drops the new point on failure; the re-check rebuilds an emptied set.
         errdefer self.active.clearRetainingCapacity();
 
         self.last_sweeps = 0;
         while (true) {
             const sweeps = try self.solve(a, xn, yscale, u);
             self.last_sweeps += sweeps;
-            if (sweeps == max_sweeps) break; // unconverged: the violation check would be meaningless
+            if (sweeps == max_sweeps) break; // unconverged: nothing to check violations against
             if (!try self.addViolated(xn, yscale, u)) break;
         }
 
-        // Keep only the binding pairs (and their alphas) for the next refit.
+        // Keep only the binding pairs for the next refit.
         var kept: usize = 0;
         for (self.active.items) |c| {
             if (c.alpha == 0) continue;
@@ -277,24 +247,30 @@ pub const UpperBound = struct {
         }
         self.active.shrinkRetainingCapacity(kept);
 
-        // --- recover slopes/offsets in original space (offsets already sized to n by add) ---
+        // Back to original space (`add` already sized offsets to n).
         for (0..dims) |k| self.slopes[k] = u[k] * xscale[k] * xscale[k];
         for (0..n) |i| self.offsets.items[i] = u[dims + i] * rnm;
     }
 
     const max_sweeps: usize = 1000;
 
-    /// Dual coordinate descent over the working set, warm-started from `alpha`:
-    /// max_{alpha>=0} sum alpha*c - 0.5||u||^2, u = sum alpha*a. Leaves the solution in `u` and
-    /// returns the number of sweeps.
+    /// Pair (i, j)'s lower-y point (whose offset relaxes it) and right-hand side diff^2; shared so
+    /// `solve` and `addViolated` test the same constraint.
+    fn pairTarget(self: *const UpperBound, i: usize, j: usize, yscale: f64) struct { lo: usize, c: f64 } {
+        const ys = self.ys.items;
+        const diff = (ys[i] - ys[j]) * yscale;
+        return .{ .lo = if (ys[i] > ys[j]) j else i, .c = diff * diff };
+    }
+
+    /// Dual coordinate descent over the working set, warm-started from each pair's alpha:
+    /// max_{alpha>=0} sum alpha*c - 0.5||u||^2, u = sum alpha*a. Writes `u`, returns the sweeps.
     fn solve(self: *UpperBound, a: Allocator, xn: []const f64, yscale: f64, u: []f64) !usize {
         const dims = self.dims;
         const rnm = self.relative_noise_magnitude;
         const cons = self.active.items;
         const npairs = cons.len;
 
-        // Sparse constraints: dmat[p][k] = (xn_i,k - xn_j,k)^2; one noise term at `offset index`
-        // noise_idx (the lower-y point); rhs c = diff^2; qnn = ||a_p||^2.
+        // Row p: dmat[p][k] = (xn_i,k - xn_j,k)^2, noise term at noise_idx[p], rhs cvec[p], qnn = ||a_p||^2.
         const dmat = try a.alloc(f64, npairs * dims);
         const noise_idx = try a.alloc(usize, npairs);
         const cvec = try a.alloc(f64, npairs);
@@ -309,13 +285,13 @@ pub const UpperBound = struct {
                 dmat[p * dims + k] = dk;
                 q += dk * dk;
             }
-            noise_idx[p] = if (self.ys.items[i] > self.ys.items[j]) j else i;
-            const diff = (self.ys.items[i] - self.ys.items[j]) * yscale;
-            cvec[p] = diff * diff;
+            const t = self.pairTarget(i, j, yscale);
+            noise_idx[p] = t.lo;
+            cvec[p] = t.c;
             qnn[p] = q + rnm * rnm;
         }
 
-        // Rebuild u under the current normalization from the (warm) dual variables.
+        // Rebuild u from the warm alphas under the current normalization.
         @memset(u, 0);
         for (0..npairs) |np| {
             const al = cons[np].alpha;
@@ -353,14 +329,12 @@ pub const UpperBound = struct {
         return sweep;
     }
 
-    /// Append every pair outside the working set whose constraint `u . a >= c` is violated by more
-    /// than `solver_eps`, with alpha 0. Returns whether any was. The set only grows, so the
-    /// solve/check loop terminates.
+    /// Append the left-out pairs violating `u . a >= c` by more than `solver_eps`; returns whether
+    /// any did. Skipping set members keeps the solve/check loop finite.
     fn addViolated(self: *UpperBound, xn: []const f64, yscale: f64, u: []const f64) !bool {
         const n = self.numPoints();
         const dims = self.dims;
         const rnm = self.relative_noise_magnitude;
-        const ys = self.ys.items;
 
         // Walk the working set in scan order (j, then i) to skip its pairs.
         std.mem.sort(Constraint, self.active.items, {}, struct {
@@ -378,17 +352,15 @@ pub const UpperBound = struct {
                     w += 1;
                     continue;
                 }
-                const diff = (ys[i] - ys[j]) * yscale;
-                const limit = diff * diff - self.solver_eps;
-                const lo = if (ys[i] > ys[j]) j else i;
-                var ua = u[dims + lo] * rnm;
-                if (ua >= limit) continue;
+                const t = self.pairTarget(i, j, yscale);
+                // No early exit: terms are >= 0 and the branch mispredicts.
+                var ua = u[dims + t.lo] * rnm;
                 const xi = xn[i * dims ..][0..dims];
-                for (0..dims) |k| {
-                    const d = xi[k] - xj[k];
-                    ua += u[k] * (d * d);
-                    if (ua >= limit) break;
-                } else try self.active.append(self.allocator, .{ .i = i, .j = j, .alpha = 0 });
+                for (xi, xj, u[0..dims]) |a, b, uk| {
+                    const d = a - b;
+                    ua += uk * (d * d);
+                }
+                if (ua < t.c - self.solver_eps) try self.active.append(self.allocator, .{ .i = i, .j = j, .alpha = 0 });
             }
         }
         return self.active.items.len > in_set;
@@ -435,8 +407,7 @@ test "UpperBound.add: working-set refits stay a valid bound" {
         for (0..3) |k| x[k] = r.float(f64) * 2 - 1;
         const y = -(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
         try ub.add(&x, y);
-        // Pairs dropped from the working set must still hold up to the solver tolerance (dlib's
-        // heuristic misses by ~1e-3 here).
+        // Dropped pairs must still hold (dlib's never-revisit heuristic misses by ~1e-3).
         for (0..ub.numPoints()) |k| {
             try std.testing.expect(ub.evaluate(ub.pointX(k)) >= ub.pointY(k) - 1e-5);
         }
