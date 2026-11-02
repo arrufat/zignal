@@ -1462,11 +1462,9 @@ test "Image: filters are identical on a thread pool" {
     var prng = std.Random.DefaultPrng.init(0x5eed);
     const random = prng.random();
 
-    // Shapes are the smallest that still split into >= 2 bands for each path (src/parallel.zig):
-    // `small` clears the 32 K pixel floor; `fused` pushes the 4-byte separable temp plane past
-    // 1 MiB with rows for two bands of the widest kernel (sigma 9 -> 55 taps -> 220 rows each),
-    // and Rgb gets there with a third of the columns since its channels convolve interleaved;
-    // `wide_rank` has two bands of the 257-wide window that exceeds the two-level histogram limit.
+    // Smallest shapes with >= 2 bands per path (src/parallel.zig): `small` clears the 32 K pixel
+    // floor, `fused` a 1 MiB temp plane with two 220-row bands for sigma 9 (Rgb is interleaved, so
+    // a third of the width), `wide_rank` two bands of the 257-wide window.
     const small = [2]u32{ 200, 400 };
     const wide_rank = [2]u32{ 514, 128 };
     const wide_radius = 128;
@@ -1554,8 +1552,7 @@ test "Image: filters are identical on a thread pool" {
         inline for (.{ F.box, F.sharp, F.gaussIir, F.conv, F.motionH, F.motionV }) |filter| {
             try Check.run(filter, small, T, random, serial_io, pool_io);
         }
-        // Order-statistic filters take u8 planes only; Rgb splits into them, so the wide
-        // window needs no Rgb run.
+        // Order-statistic filters run on u8 planes; Rgb splits into them.
         if (T != f32) try Check.run(F.median, small, T, random, serial_io, pool_io);
         if (T == u8) try Check.run(F.percentileWide, wide_rank, T, random, serial_io, pool_io);
         try Check.run(F.sobel, small, u8, random, serial_io, pool_io);

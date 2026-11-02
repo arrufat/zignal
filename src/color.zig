@@ -1888,7 +1888,7 @@ test "Rgb.to: 100 random colors round-trip" {
 }
 
 test "Rgb.to: cmyk round-trips u8 colors" {
-    // Step 5 covers 0 and 255 on every channel.
+    // Step 5 hits 0 and 255.
     for (0..52) |r| for (0..52) |g| for (0..52) |b| {
         const rgb: Rgb(u8) = .{ .r = @intCast(r * 5), .g = @intCast(g * 5), .b = @intCast(b * 5) };
         try expectEqualDeep(rgb, rgb.to(.cmyk).to(.rgb));
