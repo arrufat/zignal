@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Tooling
+- **Faster tests**: the slowest tests sample colors and use the smallest images that still split into bands, cutting the Debug suite from 34 s to 23 s. ([#519](https://github.com/arrufat/zignal/pull/519), [#520](https://github.com/arrufat/zignal/pull/520))
+
 ## [0.11.0] - 2026-10-14
 
 ### Breaking Changes
