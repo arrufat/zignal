@@ -3540,7 +3540,7 @@ test "loadFromBytes: banded restart-interval decode matches the single sweep" {
     var pool: std.Io.Threaded = .init(gpa, .{});
     defer pool.deinit();
     const pool_io = pool.io();
-    // 208x400 is the smallest that keeps two bands for every subsampling, even with a lost marker.
+    // Smallest size with two bands for every subsampling, even after a lost marker.
     var img = try gradientImage(gpa, 208, 400);
     defer img.deinit(gpa);
     var gray = try img.convert(parallel.inline_io, gpa, u8);
@@ -3590,7 +3590,7 @@ test "encode: banded output is byte-identical to the single sweep" {
     var pool: std.Io.Threaded = .init(gpa, .{});
     defer pool.deinit();
     const pool_io = pool.io();
-    // 208x400 keeps two bands of MCU rows for every subsampling.
+    // Two bands of MCU rows for every subsampling.
     var img = try gradientImage(gpa, 208, 400);
     defer img.deinit(gpa);
     var gray = try img.convert(parallel.inline_io, gpa, u8);
