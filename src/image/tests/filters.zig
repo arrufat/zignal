@@ -1463,18 +1463,19 @@ test "Image: filters are identical on a thread pool" {
     const random = prng.random();
 
     // Shapes are the smallest that still split into >= 2 bands for each path (src/parallel.zig):
-    // `small` clears the 32 K pixel floor; `fused` pushes the separable temp plane past 1 MiB with
-    // rows for two bands of the widest kernel (sigma 9 -> 55 taps -> 220 rows each); `wide_rank`
-    // has two bands of the 257-wide window that exceeds the two-level histogram limit.
+    // `small` clears the 32 K pixel floor; `fused` pushes the 4-byte separable temp plane past
+    // 1 MiB with rows for two bands of the widest kernel (sigma 9 -> 55 taps -> 220 rows each),
+    // and Rgb gets there with a third of the columns since its channels convolve interleaved;
+    // `wide_rank` has two bands of the 257-wide window that exceeds the two-level histogram limit.
     const small = [2]u32{ 200, 400 };
-    const fused = [2]u32{ 520, 640 };
-    const wide_rank = [2]u32{ 514, 260 };
+    const wide_rank = [2]u32{ 514, 128 };
     const wide_radius = 128;
     try std.testing.expect(parallel.bandCount(small[0], small[1]) >= 2);
-    try std.testing.expect(parallel.bandCountFor(fused[0], fused[1], 4 * 55) >= 2);
     try std.testing.expect(parallel.bandCountFor(wide_rank[0], wide_rank[1], 2 * wide_radius + 1) >= 2);
 
     inline for ([_]type{ u8, f32, Rgb }) |T| {
+        const fused = [2]u32{ 440, if (T == Rgb) 200 else 600 };
+        try std.testing.expect(parallel.bandCountFor(fused[0], fused[1], 4 * 55) >= 2);
         const Check = struct {
             fn run(comptime filter: anytype, shape: [2]u32, comptime Out: type, rng: std.Random, io_serial: std.Io, io_pool: std.Io) !void {
                 var src: Image(T) = try .init(allocator, shape[0], shape[1]);
@@ -1553,11 +1554,10 @@ test "Image: filters are identical on a thread pool" {
         inline for (.{ F.box, F.sharp, F.gaussIir, F.conv, F.motionH, F.motionV }) |filter| {
             try Check.run(filter, small, T, random, serial_io, pool_io);
         }
-        // Order-statistic filters take u8 planes only.
-        if (T != f32) {
-            try Check.run(F.median, small, T, random, serial_io, pool_io);
-            try Check.run(F.percentileWide, wide_rank, T, random, serial_io, pool_io);
-        }
+        // Order-statistic filters take u8 planes only; Rgb splits into them, so the wide
+        // window needs no Rgb run.
+        if (T != f32) try Check.run(F.median, small, T, random, serial_io, pool_io);
+        if (T == u8) try Check.run(F.percentileWide, wide_rank, T, random, serial_io, pool_io);
         try Check.run(F.sobel, small, u8, random, serial_io, pool_io);
     }
 }
