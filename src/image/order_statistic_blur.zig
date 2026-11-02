@@ -612,6 +612,8 @@ test "applyScalarOpTwoLevel: matches flat histogram path" {
         defer two.deinit(allocator);
 
         for (radii) |radius| {
+            // 24x17 covers interior pixels up to window 17.
+            if (size[0] == 40 and radius * 2 + 1 <= 17) continue;
             for (borders) |mode| {
                 for (percentiles) |p| {
                     const window = radius * 2 + 1;
