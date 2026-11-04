@@ -2,7 +2,7 @@
     .name = .zignal_python,
     .version = "0.12.0-dev",
     .fingerprint = 0x80321d97e92fe2f8,
-    .minimum_zig_version = "0.17.0",
+    .minimum_zig_version = "0.17.1",
     .dependencies = .{
         .zignal = .{ .path = "../.." },
         .translate_c = .{
