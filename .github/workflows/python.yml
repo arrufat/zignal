@@ -34,6 +34,13 @@ jobs:
       with:
         fetch-depth: 0
 
+    # Zig fetches dependencies into the project-local zig-pkg/; caching it avoids flaky codeberg fetches.
+    - name: Cache Zig packages
+      uses: actions/cache@v4
+      with:
+        path: bindings/python/zig-pkg
+        key: zig-pkg-${{ runner.os }}-${{ hashFiles('bindings/python/build.zig.zon') }}
+
     # translate-c does not build on current Zig master; move back once it does.
     - name: Install Zig
       uses: mlugg/setup-zig@v2
