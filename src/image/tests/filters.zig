@@ -50,6 +50,18 @@ test "Image.invert: inverts pixels" {
     try expectEqualDeep(Rgba{ .r = 255, .g = 127, .b = 0, .a = 64 }, rgba.at(0, 0).*);
 }
 
+test "Image.composite: masks the base with dst_in" {
+    const red: Rgba = .{ .r = 255, .g = 0, .b = 0, .a = 255 };
+    const clear: Rgba = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
+    var base_data = [_]Rgba{ red, red, red, red };
+    var mask_data = [_]Rgba{ clear, .{ .r = 9, .g = 9, .b = 9, .a = 255 }, clear, clear };
+    const base = Image(Rgba).initFromSlice(2, 2, &base_data);
+    const mask = Image(Rgba).initFromSlice(2, 2, &mask_data);
+
+    base.composite(mask, .dst_in);
+    try expectEqualDeep([_]Rgba{ clear, red, clear, clear }, base_data);
+}
+
 test "Image.invertInto: matches the in-place versions through views, with equalizeInto" {
     const gpa = std.testing.allocator;
     inline for (.{ u8, Rgb, Rgba }) |T| {

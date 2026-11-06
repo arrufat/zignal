@@ -8,6 +8,7 @@ const getSimpleTypeName = zignal.meta.getSimpleTypeName;
 
 const c = @import("python.zig").c;
 const color = @import("color.zig");
+const color_utils = @import("color_utils.zig");
 const createColorPyObject = color.createColorPyObject;
 const color_types = @import("color_registry.zig").color_types;
 const enum_utils = @import("enum_utils.zig");
@@ -183,6 +184,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
         fn countMethods() usize {
             var count: usize = 3; // format, to, sentinel
             if (@hasDecl(ZigColorType, "blend")) count += 1;
+            if (@hasDecl(ZigColorType, "composite")) count += 1;
             if (@hasDecl(ZigColorType, "invert")) count += 1;
             if (@hasDecl(ZigColorType, "luma")) count += 1;
             if (@hasDecl(ZigColorType, "hex")) count += 1;
@@ -191,7 +193,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             return count;
         }
 
-        /// Generates the methods array: `__format__`, `blend`, `to`, `invert`, `luma`, `hex`,
+        /// Generates the methods array: `__format__`, `blend`, `composite`, `to`, `invert`, `luma`, `hex`,
         /// `from_hex`, and `with_alpha`.
         pub fn generateMethods() [countMethods()]c.PyMethodDef {
             const format_method = [_]c.PyMethodDef{
@@ -295,11 +297,34 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 },
             } else [_]c.PyMethodDef{};
 
+            const composite_method = if (@hasDecl(ZigColorType, "composite")) [_]c.PyMethodDef{
+                .{
+                    .ml_name = "composite",
+                    .ml_meth = @ptrCast(&compositeMethod),
+                    .ml_flags = c.METH_VARARGS | c.METH_KEYWORDS,
+                    .ml_doc =
+                    \\Composite another color onto this one with a Porter-Duff operator.
+                    \\
+                    \\## Parameters
+                    \\- `overlay`: An `Rgba` color or tuple (r, g, b, a) with values 0-255
+                    \\- `op`: `Compositing` enum value (optional, defaults to `Compositing.SRC_OVER`)
+                    \\
+                    \\## Examples
+                    \\```python
+                    \\base = zignal.Rgba(255, 0, 0, 255)
+                    \\overlay = zignal.Rgba(0, 0, 255, 128)
+                    \\
+                    \\result = base.composite(overlay, op=zignal.Compositing.SRC_ATOP)
+                    \\```
+                    ,
+                },
+            } else [_]c.PyMethodDef{};
+
             const sentinel = [_]c.PyMethodDef{
                 .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
             };
 
-            return format_method ++ blend_method ++ to_method ++ invert_method ++ luma_method ++ hex_method ++ from_hex_method ++ with_alpha_method ++ sentinel;
+            return format_method ++ blend_method ++ composite_method ++ to_method ++ invert_method ++ luma_method ++ hex_method ++ from_hex_method ++ with_alpha_method ++ sentinel;
         }
 
         /// `invert` method.
@@ -400,7 +425,6 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
         pub fn blendMethod(self_obj: [*c]c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
             const self: *ObjectType = @ptrCast(self_obj);
 
-            // Parse arguments: overlay (required) and mode (optional keyword, defaults to NORMAL)
             const Params = struct {
                 overlay: ?*c.PyObject,
                 mode: ?*c.PyObject = null,
@@ -408,62 +432,31 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             var params: Params = undefined;
             python.parseArgs(Params, args, kwds, &params) catch return null;
 
-            const overlay_obj = params.overlay;
-            const mode_obj = params.mode;
+            const overlay = color_utils.parseColor(Rgba, params.overlay) catch return null;
+            const mode = enum_utils.pyToEnumOpt(zignal.Blending, params.mode, .{ .missing = .normal, .none = .normal }) catch return null;
 
-            // Convert overlay to Zig Rgba
-            var overlay: Rgba = undefined;
-
-            // Check if overlay is an Rgba instance
-            if (c.PyObject_IsInstance(overlay_obj, @ptrCast(&color.rgba)) == 1) {
-                // It's an Rgba object, extract directly
-                const overlay_pyobj: *color.RgbaBinding.PyObjectType = @ptrCast(overlay_obj);
-                overlay = .{
-                    .r = overlay_pyobj.field0,
-                    .g = overlay_pyobj.field1,
-                    .b = overlay_pyobj.field2,
-                    .a = overlay_pyobj.field3,
-                };
-            } else if (c.PyTuple_Check(overlay_obj) == 1) {
-                // It's a tuple, parse RGBA values using PyArg_ParseTuple
-                var r: c_long = undefined;
-                var g: c_long = undefined;
-                var b: c_long = undefined;
-                var a: c_long = undefined;
-
-                if (c.PyArg_ParseTuple(overlay_obj, "llll", &r, &g, &b, &a) == 0) {
-                    c.PyErr_SetString(c.PyExc_TypeError, "overlay tuple must contain 4 integers (r, g, b, a)");
-                    return null;
-                }
-
-                // Validate ranges using python helper (it sets appropriate error messages)
-                const r_val = python.validateRange(u8, r, 0, 255, "r") catch return null;
-                const g_val = python.validateRange(u8, g, 0, 255, "g") catch return null;
-                const b_val = python.validateRange(u8, b, 0, 255, "b") catch return null;
-                const a_val = python.validateRange(u8, a, 0, 255, "a") catch return null;
-
-                overlay = .{
-                    .r = r_val,
-                    .g = g_val,
-                    .b = b_val,
-                    .a = a_val,
-                };
-            } else {
-                c.PyErr_SetString(c.PyExc_TypeError, "overlay must be an Rgba color or a tuple of 4 integers (r, g, b, a)");
-                return null;
-            }
-
-            const mode = enum_utils.pyToEnumOpt(zignal.Blending, mode_obj, .{ .missing = .normal, .none = .normal }) catch return null;
-
-            // Convert self to Zig color
-            const zig_color = objectToZigColor(self);
-
-            // Perform the blend
-            const blended = zig_color.blend(overlay, mode);
-
-            // Create and return new Python object with the blended result
+            const result = objectToZigColor(self).blend(overlay, mode);
             const type_obj: *c.PyTypeObject = @ptrCast(self_obj.*.ob_type);
-            return createPyObject(blended, type_obj);
+            return createPyObject(result, type_obj);
+        }
+
+        /// `composite` method.
+        pub fn compositeMethod(self_obj: [*c]c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
+            const self: *ObjectType = @ptrCast(self_obj);
+
+            const Params = struct {
+                overlay: ?*c.PyObject,
+                op: ?*c.PyObject = null,
+            };
+            var params: Params = undefined;
+            python.parseArgs(Params, args, kwds, &params) catch return null;
+
+            const overlay = color_utils.parseColor(Rgba, params.overlay) catch return null;
+            const op = enum_utils.pyToEnumOpt(zignal.Compositing, params.op, .{ .missing = .src_over, .none = .src_over }) catch return null;
+
+            const result = objectToZigColor(self).composite(overlay, op);
+            const type_obj: *c.PyTypeObject = @ptrCast(self_obj.*.ob_type);
+            return createPyObject(result, type_obj);
         }
 
         /// Maps a Python color class object to its ColorSpace.
@@ -758,8 +751,6 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
         /// Rich comparison implementing `==` and `!=`.
         /// Colors are compared by their RGBA representation, for visual equivalence.
         pub fn richcompare(self_obj: [*c]c.PyObject, other_obj: [*c]c.PyObject, op: c_int) callconv(.c) [*c]c.PyObject {
-            const color_utils = @import("color_utils.zig");
-
             // Only handle == (Py_EQ=2) and != (Py_NE=3); defer other comparisons
             if (op != c.Py_EQ and op != c.Py_NE) {
                 return python.notImplemented();

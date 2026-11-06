@@ -1287,6 +1287,14 @@ pub const image_methods_metadata = blk: {
             .returns = "None",
         },
         .{
+            .name = "composite",
+            .meth = @ptrCast(&filtering.image_composite),
+            .flags = c.METH_VARARGS | c.METH_KEYWORDS,
+            .doc = filtering.image_composite_doc,
+            .params = "self, overlay: Image, op: Compositing = Compositing.SRC_OVER",
+            .returns = "None",
+        },
+        .{
             .name = "dilate_binary",
             .meth = @ptrCast(&binary.image_dilate_binary),
             .flags = c.METH_VARARGS | c.METH_KEYWORDS,
