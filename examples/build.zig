@@ -22,6 +22,7 @@ pub fn build(b: *std.Build) void {
         "global_optimization",
         "qrcode",
         "codec_playground",
+        "blending_playground",
     };
 
     // List of additional examples to build as executables
