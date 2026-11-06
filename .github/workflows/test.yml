@@ -7,14 +7,33 @@ on:
       - ".github/workflows/test.yml"
       - "**.zig"
       - "**.zon"
+  # No path filter: `test` is a required check, so every PR must report it. The `changes` job
+  # skips it (a skipped job counts as passing) when nothing Zig-related changed.
   pull_request:
-    paths:
-      - ".github/workflows/test.yml"
-      - "**.zig"
-      - "**.zon"
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      zig: ${{ steps.diff.outputs.zig }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect Zig changes
+        id: diff
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ] ||
+            git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD |
+            grep -qE '\.(zig|zon)$|^\.github/workflows/test\.yml$'; then
+            echo "zig=true" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
+    needs: changes
+    if: needs.changes.outputs.zig == 'true'
     runs-on: ubuntu-latest
 
     steps:
