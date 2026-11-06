@@ -29,7 +29,7 @@ def main():
     # 2. Type Check with ty
     print("Validating type stubs with ty...")
     try:
-        subprocess.check_call(["ty", "check", "--ignore", "unresolved-import", "zignal"])
+        subprocess.check_call(["ty", "check", "--ignore", "import-not-found", "zignal"])
         print("Success: Type annotations look good!")
     except FileNotFoundError:
         print("Warning: 'ty' not found. Install it with 'uv pip install ty'.")
