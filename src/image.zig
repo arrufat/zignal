@@ -539,6 +539,16 @@ pub fn Image(comptime T: type) type {
             }
         }
 
+        /// Blends `overlay` onto the image in-place, converting non-Rgba pixels through Rgba.
+        pub fn blend(self: Self, overlay: Image(Rgba), mode: Blending) void {
+            assert(self.hasSameShape(overlay));
+            for (0..self.rows) |r| {
+                const src_row = overlay.data[r * overlay.stride ..][0..overlay.cols];
+                const dst_row = self.data[r * self.stride ..][0..self.cols];
+                for (src_row, dst_row) |src, *dst| assignPixel(dst, src, mode);
+            }
+        }
+
         /// Composites `overlay` onto the image in-place with a Porter-Duff operator.
         pub fn composite(self: Self, overlay: Self, op: Compositing) void {
             assert(self.hasSameShape(overlay));

@@ -4,7 +4,6 @@ const std = @import("std");
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const Rgb = zignal.Rgb(u8);
 const MotionBlur = zignal.image.MotionBlur;
 
 const moveImageToPython = @import("../image.zig").moveImageToPython;
@@ -1063,28 +1062,10 @@ pub fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     const self_pimg = self.py_image.?;
     const overlay_img = rgbaOverlay(self_pimg.rows(), self_pimg.cols(), params.overlay) orelse return null;
     const blend_mode = enum_utils.pyToEnumOpt(zignal.Blending, params.mode, .{ .missing = .normal, .none = .normal }) catch return null;
-
-    // Perform the blend operation based on base image type
     switch (self_pimg.data) {
-        .gray => |base_img| {
-            for (0..self_pimg.rows()) |row| {
-                for (0..self_pimg.cols()) |col| {
-                    const base_pixel = base_img.at(row, col).*;
-                    const base_rgb: Rgb = .{ .r = base_pixel, .g = base_pixel, .b = base_pixel };
-                    base_img.at(row, col).* = base_rgb.blend(overlay_img.at(row, col).*, blend_mode).to(.gray).y;
-                }
-            }
-        },
-        inline .rgb, .rgba => |*base_img| {
-            for (0..self_pimg.rows()) |row| {
-                for (0..self_pimg.cols()) |col| {
-                    base_img.at(row, col).* = base_img.at(row, col).blend(overlay_img.at(row, col).*, blend_mode);
-                }
-            }
-        },
+        inline else => |base_img| base_img.blend(overlay_img, blend_mode),
     }
 
-    // Return None (Python convention for in-place operations)
     c.Py_IncRef(c.Py_None());
     return c.Py_None();
 }
