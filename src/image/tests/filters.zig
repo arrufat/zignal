@@ -50,6 +50,41 @@ test "Image.invert: inverts pixels" {
     try expectEqualDeep(Rgba{ .r = 255, .g = 127, .b = 0, .a = 64 }, rgba.at(0, 0).*);
 }
 
+test "Image.composite: masks the base with dst_in" {
+    const red: Rgba = .{ .r = 255, .g = 0, .b = 0, .a = 255 };
+    const clear: Rgba = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
+    var base_data = [_]Rgba{ red, red, red, red };
+    var mask_data = [_]Rgba{ clear, .{ .r = 9, .g = 9, .b = 9, .a = 255 }, clear, clear };
+    const base = Image(Rgba).initFromSlice(2, 2, &base_data);
+    const mask = Image(Rgba).initFromSlice(2, 2, &mask_data);
+
+    base.composite(mask, .dst_in);
+    try expectEqualDeep([_]Rgba{ clear, red, clear, clear }, base_data);
+}
+
+test "Image.blend: matches per-pixel blending for gray, Rgb and Rgba bases" {
+    var overlay_data = [_]Rgba{ .{ .r = 200, .g = 50, .b = 25, .a = 128 }, .{ .r = 10, .g = 240, .b = 90, .a = 255 } };
+    const overlay = Image(Rgba).initFromSlice(1, 2, &overlay_data);
+
+    var rgba_data = [_]Rgba{ .{ .r = 100, .g = 150, .b = 200, .a = 255 }, .{ .r = 30, .g = 60, .b = 90, .a = 200 } };
+    const expected_rgba = [_]Rgba{ rgba_data[0].blend(overlay_data[0], .multiply), rgba_data[1].blend(overlay_data[1], .multiply) };
+    Image(Rgba).initFromSlice(1, 2, &rgba_data).blend(overlay, .multiply);
+    try expectEqualDeep(expected_rgba, rgba_data);
+
+    var rgb_data = [_]Rgb{ .{ .r = 100, .g = 150, .b = 200 }, .{ .r = 30, .g = 60, .b = 90 } };
+    const expected_rgb = [_]Rgb{ rgb_data[0].blend(overlay_data[0], .screen), rgb_data[1].blend(overlay_data[1], .screen) };
+    Image(Rgb).initFromSlice(1, 2, &rgb_data).blend(overlay, .screen);
+    try expectEqualDeep(expected_rgb, rgb_data);
+
+    var gray_data = [_]u8{ 128, 40 };
+    const expected_gray = [_]u8{
+        (Rgb{ .r = 128, .g = 128, .b = 128 }).blend(overlay_data[0], .normal).to(.gray).y,
+        (Rgb{ .r = 40, .g = 40, .b = 40 }).blend(overlay_data[1], .normal).to(.gray).y,
+    };
+    Image(u8).initFromSlice(1, 2, &gray_data).blend(overlay, .normal);
+    try expectEqualDeep(expected_gray, gray_data);
+}
+
 test "Image.invertInto: matches the in-place versions through views, with equalizeInto" {
     const gpa = std.testing.allocator;
     inline for (.{ u8, Rgb, Rgba }) |T| {

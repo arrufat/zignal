@@ -63,4 +63,40 @@ pub const blending_values = [_]stub_metadata.EnumValueDoc{
     .{ .name = "EXCLUSION", .doc = "Like difference but with lower contrast" },
 };
 
+/// Docstring for the Compositing enum, used at runtime and for stub generation.
+pub const compositing_doc =
+    \\Porter-Duff compositing operators.
+    \\
+    \\## Overview
+    \\Each operator decides which parts of the overlay (source) and the base
+    \\(destination) survive, based on their alpha coverage. `SRC_OVER` is ordinary
+    \\alpha compositing; the others mask, cut out or clip one image by the other.
+    \\
+    \\## Examples
+    \\```python
+    \\base = zignal.Rgba(255, 0, 0, 255)
+    \\overlay = zignal.Rgba(0, 0, 255, 128)
+    \\
+    \\base.composite(overlay, zignal.Compositing.SRC_ATOP)
+    \\base.composite(overlay, zignal.Compositing.DST_OUT)
+    \\```
+;
+
+/// Per-value documentation for stub generation.
+pub const compositing_values = [_]stub_metadata.EnumValueDoc{
+    .{ .name = "CLEAR", .doc = "Fully transparent result" },
+    .{ .name = "SRC", .doc = "Overlay only" },
+    .{ .name = "DST", .doc = "Base only" },
+    .{ .name = "SRC_OVER", .doc = "Overlay over base (normal alpha compositing)" },
+    .{ .name = "DST_OVER", .doc = "Base over overlay" },
+    .{ .name = "SRC_IN", .doc = "Overlay where the base is opaque" },
+    .{ .name = "DST_IN", .doc = "Base where the overlay is opaque" },
+    .{ .name = "SRC_OUT", .doc = "Overlay where the base is transparent" },
+    .{ .name = "DST_OUT", .doc = "Base where the overlay is transparent" },
+    .{ .name = "SRC_ATOP", .doc = "Overlay over base, clipped to the base" },
+    .{ .name = "DST_ATOP", .doc = "Base over overlay, clipped to the overlay" },
+    .{ .name = "XOR", .doc = "Overlay and base where they do not overlap" },
+    .{ .name = "PLUS", .doc = "Additive sum, saturated" },
+};
+
 // No conversion wrapper; use `enum_utils.pyToEnum(zignal.Blending, obj)` where needed.

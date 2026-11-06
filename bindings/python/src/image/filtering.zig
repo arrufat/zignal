@@ -4,7 +4,6 @@ const std = @import("std");
 
 const zignal = @import("zignal");
 const Image = zignal.Image;
-const Rgb = zignal.Rgb(u8);
 const MotionBlur = zignal.image.MotionBlur;
 
 const moveImageToPython = @import("../image.zig").moveImageToPython;
@@ -1060,64 +1059,85 @@ pub fn image_blend(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObjec
     var params: Params = undefined;
     python.parseArgs(Params, args, kwds, &params) catch return null;
 
-    const overlay_obj = params.overlay;
-    const mode_obj = params.mode;
+    const self_pimg = self.py_image.?;
+    const overlay_img = rgbaOverlay(self_pimg.rows(), self_pimg.cols(), params.overlay) orelse return null;
+    const blend_mode = enum_utils.pyToEnumOpt(zignal.Blending, params.mode, .{ .missing = .normal, .none = .normal }) catch return null;
+    switch (self_pimg.data) {
+        inline else => |base_img| base_img.blend(overlay_img, blend_mode),
+    }
 
-    // Check if overlay is an Image instance
+    c.Py_IncRef(c.Py_None());
+    return c.Py_None();
+}
+
+pub const image_composite_doc =
+    \\Composite an overlay image onto this image with a Porter-Duff operator.
+    \\
+    \\Modifies this image in-place. Both images must be RGBA with the same dimensions.
+    \\
+    \\## Parameters
+    \\- `overlay` (Image): RGBA image composited onto this image
+    \\- `op` (Compositing, optional): Porter-Duff operator (default: SRC_OVER)
+    \\
+    \\## Raises
+    \\- `ValueError`: If images have different dimensions
+    \\- `TypeError`: If either image is not RGBA
+    \\
+    \\## Examples
+    \\```python
+    \\base = Image(100, 100, (255, 0, 0, 255))
+    \\mask = Image(100, 100, (0, 0, 0, 0))
+    \\base.composite(mask, zignal.Compositing.DST_IN)  # keep base only where mask is opaque
+    \\```
+;
+
+pub fn image_composite(self_obj: ?*c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) ?*c.PyObject {
+    const self = python.safeCast(ImageObject, self_obj);
+    python.ensureInitialized(self, "py_image", "Image not initialized") catch return null;
+
+    const Params = struct {
+        overlay: ?*c.PyObject,
+        op: ?*c.PyObject = null,
+    };
+    var params: Params = undefined;
+    python.parseArgs(Params, args, kwds, &params) catch return null;
+
+    const self_pimg = self.py_image.?;
+    const overlay_img = rgbaOverlay(self_pimg.rows(), self_pimg.cols(), params.overlay) orelse return null;
+    const op = enum_utils.pyToEnumOpt(zignal.Compositing, params.op, .{ .missing = .src_over, .none = .src_over }) catch return null;
+    const base_img = switch (self_pimg.data) {
+        .rgba => |img| img,
+        else => {
+            c.PyErr_SetString(c.PyExc_TypeError, "Base image must be RGBA type");
+            return null;
+        },
+    };
+    base_img.composite(overlay_img, op);
+
+    c.Py_IncRef(c.Py_None());
+    return c.Py_None();
+}
+
+/// Returns `overlay_obj` as an RGBA image of the given size, setting a Python error otherwise.
+fn rgbaOverlay(rows: usize, cols: usize, overlay_obj: ?*c.PyObject) ?Image(zignal.Rgba(u8)) {
     if (c.PyObject_IsInstance(overlay_obj, @ptrCast(getImageType())) <= 0) {
         c.PyErr_SetString(c.PyExc_TypeError, "overlay must be an Image object");
         return null;
     }
-
     const overlay: *ImageObject = @ptrCast(overlay_obj.?);
-
-    const blend_mode = enum_utils.pyToEnumOpt(zignal.Blending, mode_obj, .{ .missing = .normal, .none = .normal }) catch return null;
-
-    // Overlay must be initialized
-    if (overlay.py_image == null) {
+    const overlay_pimg = overlay.py_image orelse {
         c.PyErr_SetString(c.PyExc_ValueError, "Overlay image must be initialized");
         return null;
-    }
-
-    const self_pimg = self.py_image.?;
-    const overlay_pimg = overlay.py_image.?;
-
-    // Check dimensions match
-    if (self_pimg.rows() != overlay_pimg.rows() or self_pimg.cols() != overlay_pimg.cols()) {
+    };
+    if (overlay_pimg.rows() != rows or overlay_pimg.cols() != cols) {
         c.PyErr_SetString(c.PyExc_ValueError, "Images must have the same dimensions");
         return null;
     }
-
-    // Overlay must be RGBA
-    const overlay_img = switch (overlay_pimg.data) {
+    return switch (overlay_pimg.data) {
         .rgba => |img| img,
         else => {
             c.PyErr_SetString(c.PyExc_TypeError, "Overlay image must be RGBA type");
             return null;
         },
     };
-
-    // Perform the blend operation based on base image type
-    switch (self_pimg.data) {
-        .gray => |base_img| {
-            for (0..self_pimg.rows()) |row| {
-                for (0..self_pimg.cols()) |col| {
-                    const base_pixel = base_img.at(row, col).*;
-                    const base_rgb: Rgb = .{ .r = base_pixel, .g = base_pixel, .b = base_pixel };
-                    base_img.at(row, col).* = base_rgb.blend(overlay_img.at(row, col).*, blend_mode).to(.gray).y;
-                }
-            }
-        },
-        inline .rgb, .rgba => |*base_img| {
-            for (0..self_pimg.rows()) |row| {
-                for (0..self_pimg.cols()) |col| {
-                    base_img.at(row, col).* = base_img.at(row, col).blend(overlay_img.at(row, col).*, blend_mode);
-                }
-            }
-        },
-    }
-
-    // Return None (Python convention for in-place operations)
-    c.Py_IncRef(c.Py_None());
-    return c.Py_None();
 }

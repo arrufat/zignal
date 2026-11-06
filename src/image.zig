@@ -78,6 +78,7 @@ pub const Colormap = colormaps.Colormap;
 pub const quantize = @import("image/quantize.zig");
 pub const dither = @import("image/dither.zig");
 const Blending = @import("blending.zig").Blending;
+const Compositing = @import("blending.zig").Compositing;
 pub const FloodFillOptions = @import("image/flood_fill.zig").FloodFillOptions;
 
 /// Assigns `sample` into `dest`, applying blending when requested and converting
@@ -535,6 +536,29 @@ pub fn Image(comptime T: type) type {
                 for (src_row, dst_row) |s, *d| {
                     d.* = if (T == u8) 255 - s else s.invert();
                 }
+            }
+        }
+
+        /// Blends `overlay` onto the image in-place, converting non-Rgba pixels through Rgba.
+        pub fn blend(self: Self, overlay: Image(Rgba), mode: Blending) void {
+            assert(self.hasSameShape(overlay));
+            for (0..self.rows) |r| {
+                const src_row = overlay.data[r * overlay.stride ..][0..overlay.cols];
+                const dst_row = self.data[r * self.stride ..][0..self.cols];
+                for (src_row, dst_row) |src, *dst| assignPixel(dst, src, mode);
+            }
+        }
+
+        /// Composites `overlay` onto the image in-place with a Porter-Duff operator.
+        pub fn composite(self: Self, overlay: Self, op: Compositing) void {
+            assert(self.hasSameShape(overlay));
+            comptime if (!@hasDecl(T, "composite")) {
+                @compileError("composite() requires Rgba pixels");
+            };
+            for (0..self.rows) |r| {
+                const src_row = overlay.data[r * overlay.stride ..][0..overlay.cols];
+                const dst_row = self.data[r * self.stride ..][0..self.cols];
+                for (src_row, dst_row) |src, *dst| dst.* = dst.composite(src, op);
             }
         }
 

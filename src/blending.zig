@@ -24,6 +24,15 @@ pub const Blending = enum {
     exclusion,
 };
 
+/// The float type colors with backing type `T` are computed in: f32 for u8, `T` itself for floats.
+fn Float(comptime T: type) type {
+    return switch (@typeInfo(T)) {
+        .float => T,
+        .int => if (T == u8) f32 else @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space"),
+        else => @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space"),
+    };
+}
+
 /// Blends two RGBA colors using the specified blend mode.
 /// Accepts any Rgba(T) types (e.g., Rgba(u8), Rgba(f32)).
 /// Returns Rgba(T) matching the base color's type.
@@ -39,12 +48,7 @@ pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blen
     // For normal blend mode with a fully opaque overlay, result is just overlay
     if (mode == .normal and (if (T == u8) overlay.a == 255 else overlay.a >= 1.0)) return overlay;
 
-    switch (@typeInfo(T)) {
-        .float => {},
-        .int => if (T != u8) @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space"),
-        else => @compileError("Unsupported backing type " ++ @typeName(T) ++ " for color space"),
-    }
-    const F = if (T == u8) f32 else T;
+    const F = Float(T);
     const base_f = if (T == u8) base.as(F) else base;
     const overlay_f = if (T == u8) overlay.as(F) else overlay;
 
@@ -156,6 +160,81 @@ pub fn blendColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), mode: Blen
         };
     }
 
+    return if (T == u8) out.as(T) else out;
+}
+
+/// Porter-Duff compositing operators, where `src` is the overlay and `dst` the base.
+/// Each operator weights the premultiplied colors as `out = Fa * src + Fb * dst`.
+pub const Compositing = enum {
+    /// Fully transparent result.
+    clear,
+    /// Overlay only.
+    src,
+    /// Base only.
+    dst,
+    /// Overlay over base (normal alpha compositing).
+    src_over,
+    /// Base over overlay.
+    dst_over,
+    /// Overlay where the base is opaque.
+    src_in,
+    /// Base where the overlay is opaque.
+    dst_in,
+    /// Overlay where the base is transparent.
+    src_out,
+    /// Base where the overlay is transparent.
+    dst_out,
+    /// Overlay over base, clipped to the base.
+    src_atop,
+    /// Base over overlay, clipped to the overlay.
+    dst_atop,
+    /// Overlay and base where they do not overlap.
+    xor,
+    /// Additive sum, saturated.
+    plus,
+
+    /// Returns the overlay and base weights `.{ Fa, Fb }`.
+    fn factors(self: Compositing, comptime F: type, src_a: F, dst_a: F) [2]F {
+        return switch (self) {
+            .clear => .{ 0, 0 },
+            .src => .{ 1, 0 },
+            .dst => .{ 0, 1 },
+            .src_over => .{ 1, 1 - src_a },
+            .dst_over => .{ 1 - dst_a, 1 },
+            .src_in => .{ dst_a, 0 },
+            .dst_in => .{ 0, src_a },
+            .src_out => .{ 1 - dst_a, 0 },
+            .dst_out => .{ 0, 1 - src_a },
+            .src_atop => .{ dst_a, 1 - src_a },
+            .dst_atop => .{ 1 - dst_a, src_a },
+            .xor => .{ 1 - dst_a, 1 - src_a },
+            .plus => .{ 1, 1 },
+        };
+    }
+};
+
+/// Composites `overlay` (source) onto `base` (destination) with a Porter-Duff operator.
+/// Accepts Rgba(u8) or any float Rgba(T); the result is straight (non-premultiplied) alpha.
+pub fn compositeColors(comptime T: type, base: Rgba(T), overlay: Rgba(T), op: Compositing) Rgba(T) {
+    if (op == .src_over) {
+        if (if (T == u8) overlay.a == 255 else overlay.a >= 1) return overlay;
+        if (if (T == u8) overlay.a == 0 else overlay.a <= 0) return base;
+    }
+    const F = Float(T);
+    const V = @Vector(4, F);
+    const s = if (T == u8) overlay.as(F) else overlay;
+    const d = if (T == u8) base.as(F) else base;
+
+    const fa, const fb = op.factors(F, s.a, d.a);
+    const src_v: V = .{ s.r * s.a, s.g * s.a, s.b * s.a, s.a };
+    const dst_v: V = .{ d.r * d.a, d.g * d.a, d.b * d.a, d.a };
+    var out_v = src_v * @as(V, @splat(fa)) + dst_v * @as(V, @splat(fb));
+    if (op == .plus) out_v = @min(out_v, @as(V, @splat(1)));
+
+    const a = out_v[3];
+    if (a <= 0) return .{ .r = 0, .g = 0, .b = 0, .a = 0 };
+    const rgb = out_v * @as(V, @splat(1 / a));
+    const out: Rgba(F) = .{ .r = rgb[0], .g = rgb[1], .b = rgb[2], .a = a };
     return if (T == u8) out.as(T) else out;
 }
 
@@ -404,4 +483,60 @@ test "blendColors: exclusion mode" {
     const result = blendColors(f32, base, overlay, .exclusion);
     // 0.5 + 0.5 - 2 * 0.25 = 1.0 - 0.5 = 0.5
     try expectEqual(result.r, 0.5);
+}
+
+test "Rgba.composite: alpha follows the Porter-Duff factors" {
+    const base: Rgba(f32) = .{ .r = 1, .g = 0, .b = 0, .a = 0.5 };
+    const overlay: Rgba(f32) = .{ .r = 0, .g = 0, .b = 1, .a = 0.5 };
+    const cases = [_]struct { op: Compositing, a: f32 }{
+        .{ .op = .clear, .a = 0 },
+        .{ .op = .src, .a = 0.5 },
+        .{ .op = .dst, .a = 0.5 },
+        .{ .op = .src_over, .a = 0.75 },
+        .{ .op = .dst_over, .a = 0.75 },
+        .{ .op = .src_in, .a = 0.25 },
+        .{ .op = .dst_in, .a = 0.25 },
+        .{ .op = .src_out, .a = 0.25 },
+        .{ .op = .dst_out, .a = 0.25 },
+        .{ .op = .src_atop, .a = 0.5 },
+        .{ .op = .dst_atop, .a = 0.5 },
+        .{ .op = .xor, .a = 0.5 },
+        .{ .op = .plus, .a = 1 },
+    };
+    for (cases) |case| {
+        try expectEqual(case.a, base.composite(overlay, case.op).a);
+    }
+}
+
+test "Rgba.composite: in, out and atop pick the expected color" {
+    const base: Rgba(u8) = .{ .r = 255, .g = 0, .b = 0, .a = 255 };
+    const overlay: Rgba(u8) = .{ .r = 0, .g = 0, .b = 255, .a = 128 };
+
+    // Opaque base: src_in keeps the overlay as is, src_out removes it.
+    try expectEqual(overlay, base.composite(overlay, .src_in));
+    try expectEqual(Rgba(u8){ .r = 0, .g = 0, .b = 0, .a = 0 }, base.composite(overlay, .src_out));
+
+    // src_atop keeps the base alpha and mixes the colors like src_over.
+    const atop = base.composite(overlay, .src_atop);
+    try expectEqual(255, atop.a);
+    try expectEqual(base.composite(overlay, .src_over), atop);
+
+    // dst_in keeps the base color with the overlay alpha.
+    try expectEqual(Rgba(u8){ .r = 255, .g = 0, .b = 0, .a = 128 }, base.composite(overlay, .dst_in));
+}
+
+test "Rgba.composite: src_over matches normal blending" {
+    const base: Rgba(u8) = .{ .r = 100, .g = 150, .b = 200, .a = 200 };
+    const overlay: Rgba(u8) = .{ .r = 200, .g = 50, .b = 25, .a = 100 };
+    const composited = base.composite(overlay, .src_over);
+    const blended = blendColors(u8, base, overlay, .normal);
+    inline for (.{ "r", "g", "b", "a" }) |field| {
+        try expect(@abs(@as(i16, @field(composited, field)) - @field(blended, field)) <= 1);
+    }
+}
+
+test "Rgba.composite: plus saturates" {
+    const base: Rgba(u8) = .{ .r = 200, .g = 100, .b = 0, .a = 255 };
+    const overlay: Rgba(u8) = .{ .r = 100, .g = 100, .b = 50, .a = 255 };
+    try expectEqual(Rgba(u8){ .r = 255, .g = 200, .b = 50, .a = 255 }, base.composite(overlay, .plus));
 }

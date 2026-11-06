@@ -334,6 +334,19 @@ class TestImage:
         # Should still be grayscale (single value)
         assert isinstance(gray_pixel, int)
 
+    def test_composite_api(self):
+        base = zignal.Image(4, 4, (255, 0, 0, 255), dtype=zignal.Rgba)
+        mask = zignal.Image(4, 4, (0, 0, 0, 0), dtype=zignal.Rgba)
+        mask[1, 1] = (0, 0, 0, 255)
+        assert base.composite(mask, zignal.Compositing.DST_IN) is None
+        assert base[1, 1] == zignal.Rgba(255, 0, 0, 255)
+        assert base[0, 0] == zignal.Rgba(0, 0, 0, 0)
+
+        with pytest.raises(TypeError):
+            zignal.Image(4, 4, (255, 0, 0), dtype=zignal.Rgb).composite(mask)
+        with pytest.raises(ValueError):
+            base.composite(zignal.Image(2, 2, (0, 0, 0, 0), dtype=zignal.Rgba))
+
     def test_pixel_proxy_methods(self):
         # Create RGB image
         img = zignal.Image(10, 10, (255, 0, 0), dtype=zignal.Rgb)
