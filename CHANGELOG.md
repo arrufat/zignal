@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Features
+- **Porter-Duff compositing**: `Compositing` operators (`src_over`, `src_in`, `dst_out`, `src_atop`, `xor`, `plus` and the rest) decide which parts of each layer survive, through `Rgba.composite` and `Image.composite`, also in Python. `Image.blend` now lives in the core for any pixel type, and Python `Rgba.blend` accepts any color or tuple as its overlay. ([#522](https://github.com/arrufat/zignal/pull/522))
+- **Examples**: a blending and compositing playground with every blend mode and operator side by side, their formulas and a pixel inspector. ([#522](https://github.com/arrufat/zignal/pull/522))
+
 ### Tooling
 - **Faster tests**: the slowest tests sample colors and use the smallest images that still split into bands, cutting the Debug suite from 34 s to 23 s. ([#519](https://github.com/arrufat/zignal/pull/519), [#520](https://github.com/arrufat/zignal/pull/520))
 
