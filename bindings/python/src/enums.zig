@@ -27,6 +27,7 @@ pub const registry = [_]Entry{
     .{ .type = zignal.font.TextAlign, .doc = canvas.text_align_doc, .values = &canvas.text_align_values },
     .{ .type = zignal.font.VerticalAlign, .doc = canvas.vertical_align_doc, .values = &canvas.vertical_align_values },
     .{ .type = zignal.Blending, .doc = blending.blending_doc, .values = &blending.blending_values },
+    .{ .type = zignal.Compositing, .doc = blending.compositing_doc, .values = &blending.compositing_values },
     .{ .type = zignal.image.Interpolation, .doc = interpolation.interpolation_doc, .values = &interpolation.interpolation_values },
     .{ .type = zignal.image.BorderMode, .doc = border_mode.border_mode_doc, .values = &border_mode.border_mode_values },
     .{ .type = zignal.image.FloodFillOptions.ThresholdMode, .doc = image.threshold_mode_doc, .values = &image.threshold_mode_values },

@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>Blending &amp; Compositing</title>
+		<link rel="stylesheet" href="styles.css">
+		<link rel="icon" type="image/png" href="favicon.png">
+		<style>
+			.checker {
+				background-color: #fff;
+				background-image: conic-gradient(#d8d8d8 25%, #fff 0 50%, #d8d8d8 0 75%, #fff 0);
+				background-size: 16px 16px;
+			}
+			#image-container {
+				display: grid;
+				grid-template-columns: repeat(3, minmax(0, 260px));
+				align-items: start;
+				justify-content: center;
+			}
+			#image-container .canvas-wrapper {
+				min-width: 0;
+				max-width: none;
+			}
+			.canvas-wrapper .role {
+				display: block;
+				min-height: 1.2em;
+				white-space: nowrap;
+				font-size: 0.75rem;
+				font-weight: normal;
+				color: #777;
+			}
+			.canvas-wrapper select {
+				margin-top: 8px;
+				font-size: 1rem;
+				padding: 4px;
+			}
+			.canvas-wrapper .slider {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				gap: 8px;
+				margin-top: 6px;
+				font-size: 0.9rem;
+				color: #555;
+			}
+			.canvas-wrapper .slider input {
+				width: 120px;
+			}
+			.preset-note {
+				margin-top: 6px;
+				font-size: 0.8rem;
+				color: #0056b3;
+			}
+			@media (max-width: 640px) {
+				#image-container {
+					grid-template-columns: minmax(0, 300px);
+				}
+			}
+			.section-title {
+				text-align: center;
+				color: #333;
+				font-size: clamp(1rem, 3vw, 1.2rem);
+				margin: 30px 0 12px;
+			}
+			#variant-grid {
+				display: grid;
+				grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+				gap: 10px;
+				max-width: 1000px;
+				margin: 0 auto;
+			}
+			/* `copy-button` opts out of the shared big-blue button rule. */
+			.variant {
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				gap: 4px;
+				padding: 6px;
+				background: #fff;
+				color: #333;
+				font: 0.85rem monospace;
+				border: 2px solid transparent;
+				border-radius: 6px;
+				cursor: pointer;
+			}
+			.variant:hover {
+				border-color: #bbb;
+			}
+			.variant.selected {
+				border-color: #333;
+				font-weight: bold;
+			}
+			.variant canvas {
+				border: 1px solid #999;
+				pointer-events: none;
+			}
+			#explain {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 20px;
+				max-width: 1000px;
+				margin: 30px auto 0;
+			}
+			#explain section {
+				flex: 1 1 320px;
+				min-width: 0;
+				background: #fff;
+				border-radius: 8px;
+				padding: 16px;
+				color: #333;
+				box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+			}
+			#explain h2 {
+				margin: 0 0 8px;
+				font-family: monospace;
+			}
+			#explain h3 {
+				margin: 16px 0 8px;
+				font-size: 1rem;
+			}
+			#explain h3:first-child {
+				margin-top: 0;
+			}
+			#explain .formula {
+				font-family: monospace;
+				background: #f3f5f8;
+				border-radius: 4px;
+				padding: 8px 10px;
+				margin: 8px 0;
+				line-height: 1.6;
+				overflow-x: auto;
+			}
+			#explain .note {
+				color: #666;
+				font-size: 0.85rem;
+			}
+			#explain .tip {
+				color: #0056b3;
+				font-size: 0.9rem;
+			}
+			#explain pre {
+				background: #2b2f36;
+				color: #e6e6e6;
+				border-radius: 4px;
+				padding: 10px;
+				overflow-x: auto;
+				font-size: 0.85rem;
+			}
+			.regions {
+				display: flex;
+				gap: 12px;
+				flex-wrap: wrap;
+			}
+			.region {
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+				font-size: 0.85rem;
+			}
+			.region-chip,
+			.swatch {
+				display: inline-block;
+				border: 1px solid #999;
+				vertical-align: middle;
+				background-size: 8px 8px;
+			}
+			.region-chip {
+				width: 48px;
+				height: 48px;
+				margin-bottom: 4px;
+			}
+			.region-chip span,
+			.swatch span {
+				display: block;
+				width: 100%;
+				height: 100%;
+			}
+			.swatch {
+				width: 20px;
+				height: 20px;
+				margin-right: 8px;
+			}
+			.pixel-row {
+				margin: 4px 0;
+				font-family: monospace;
+				font-size: 0.85rem;
+			}
+			.map {
+				display: grid;
+				grid-template-columns: auto 1fr;
+				align-items: center;
+				gap: 4px;
+				max-width: 260px;
+			}
+			.map canvas {
+				cursor: default;
+			}
+			.map .axis-y {
+				writing-mode: vertical-rl;
+				transform: rotate(180deg);
+				font-size: 0.8rem;
+				color: #666;
+			}
+			.map .axis-x {
+				grid-column: 2;
+				text-align: center;
+				font-size: 0.8rem;
+				color: #666;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="header">
+			<h1>Blending &amp; Compositing</h1>
+			<p>Blend modes and Porter-Duff operators running in WebAssembly</p>
+		</div>
+
+		<div class="instructions">
+			Two questions decide what happens when one image is drawn over another.
+			<strong>Blend modes</strong> answer <em>what color appears where they overlap</em>.
+			<strong>Compositing operators</strong> answer <em>which parts of each image survive</em>.
+		</div>
+
+		<div class="controls" id="family-slot"></div>
+
+		<div id="image-container">
+			<div class="canvas-wrapper">
+				<h3>Base <span class="role">destination · Cb, αb</span></h3>
+				<canvas id="canvas-base" class="checker" width="256" height="256"></canvas>
+				<select id="base-preset" aria-label="Base image"></select>
+				<label class="slider">Opacity <input type="range" id="base-opacity" min="0" max="100" value="100"> <span id="base-opacity-value">100%</span></label>
+				<div class="preset-note" id="base-note"></div>
+				<div class="hint">Click or drop an image to replace</div>
+			</div>
+			<div class="canvas-wrapper">
+				<h3>Overlay <span class="role">source · Cs, αs</span></h3>
+				<canvas id="canvas-overlay" class="checker" width="256" height="256"></canvas>
+				<select id="overlay-preset" aria-label="Overlay image"></select>
+				<label class="slider">Opacity <input type="range" id="overlay-opacity" min="0" max="100" value="100"> <span id="overlay-opacity-value">100%</span></label>
+				<div class="preset-note" id="overlay-note"></div>
+				<div class="hint">Click or drop an image to replace</div>
+			</div>
+			<div class="canvas-wrapper">
+				<h3>Result <span class="role" id="result-name"></span></h3>
+				<canvas id="canvas-result" class="checker" width="256" height="256"></canvas>
+				<div class="hint">Hover to inspect a pixel</div>
+			</div>
+		</div>
+
+		<h2 class="section-title" id="grid-title"></h2>
+		<div id="variant-grid"></div>
+
+		<div id="explain">
+			<section>
+				<h2 id="explain-name"></h2>
+				<p id="explain-desc"></p>
+				<div id="explain-formula" class="formula"></div>
+				<div id="regions" hidden>
+					<h3>Where opaque shapes meet</h3>
+					<div class="regions"></div>
+				</div>
+				<div id="blend-map" hidden>
+					<h3>The blend function B on opaque grays</h3>
+					<div class="map">
+						<span class="axis-y">Cs (overlay) →</span>
+						<canvas width="256" height="256"></canvas>
+						<span class="axis-x">Cb (base) →</span>
+					</div>
+				</div>
+				<p id="explain-note" class="note"></p>
+				<p id="explain-tip" class="tip"></p>
+			</section>
+			<section>
+				<h3>Pixel inspector</h3>
+				<div id="inspector">Hover the result to see the math for one pixel.</div>
+				<h3>In code</h3>
+				<pre id="code"></pre>
+			</section>
+		</div>
+
+		<div id="status">WASM loading…</div>
+
+		<script src="utils.js"></script>
+		<script src="blending-playground.js"></script>
+	</body>
+</html>

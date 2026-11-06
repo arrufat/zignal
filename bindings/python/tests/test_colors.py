@@ -43,6 +43,17 @@ def test_blend_mode_and_blend():
     assert isinstance(res2, zignal.Rgb)
 
 
+def test_rgba_composite():
+    base = zignal.Rgba(255, 0, 0, 255)
+    overlay = zignal.Rgba(0, 0, 255, 128)
+    assert base.composite(overlay, zignal.Compositing.SRC_IN) == overlay
+    assert base.composite((0, 0, 255, 128), op=zignal.Compositing.DST_IN) == zignal.Rgba(255, 0, 0, 128)
+    assert base.composite(overlay, zignal.Compositing.CLEAR) == zignal.Rgba(0, 0, 0, 0)
+    # Default is SRC_OVER
+    assert base.composite(overlay) == base.composite(overlay, zignal.Compositing.SRC_OVER)
+    assert not hasattr(zignal.Rgb(1, 2, 3), "composite")
+
+
 def test_color_invert_methods():
     rgb = zignal.Rgb(0, 128, 255)
     inv_rgb = rgb.invert()

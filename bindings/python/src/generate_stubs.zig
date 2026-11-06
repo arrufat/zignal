@@ -225,6 +225,15 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
         , .{class_name});
     }
 
+    if (@hasDecl(ColorType, "composite")) {
+        try stub.writef(
+            \\    def composite(self, overlay: Rgba | tuple[int, int, int, int], op: Compositing = Compositing.SRC_OVER) -> {s}:
+            \\        """Composite `overlay` (tuple interpreted as RGBA) onto this color with the Porter-Duff `op`."""
+            \\        ...
+            \\
+        , .{class_name});
+    }
+
     // Standard Python methods
     try stub.write("    def __repr__(self) -> str: ...\n");
     try stub.write("    def __str__(self) -> str: ...\n");

@@ -57,6 +57,7 @@ const pow = std.math.pow;
 const blending = @import("blending.zig");
 pub const Blending = blending.Blending;
 pub const blendColors = blending.blendColors;
+pub const Compositing = blending.Compositing;
 const getSimpleTypeName = @import("meta.zig").getSimpleTypeName;
 const structFields = @import("meta.zig").structFields;
 
@@ -467,6 +468,11 @@ pub fn Rgba(comptime T: type) type {
         /// Blends the color with an overlay.
         pub fn blend(self: Rgba(T), overlay: Rgba(T), mode: Blending) Rgba(T) {
             return blendColors(T, self, overlay, mode);
+        }
+
+        /// Composites an overlay onto the color with a Porter-Duff operator.
+        pub fn composite(self: Rgba(T), overlay: Rgba(T), op: Compositing) Rgba(T) {
+            return blending.compositeColors(T, self, overlay, op);
         }
 
         /// Formats the color for terminal output.

@@ -39,6 +39,7 @@ const color = @import("color.zig");
 pub const convertColor = color.convertColor;
 pub const isColor = color.isColor;
 pub const Blending = color.Blending;
+pub const Compositing = color.Compositing;
 pub const ColorSpace = color.ColorSpace;
 pub const Rgb = color.Rgb;
 pub const Rgba = color.Rgba;
