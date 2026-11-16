@@ -48,7 +48,7 @@ jobs:
       - name: Grab Zig
         uses: mlugg/setup-zig@v2
         with:
-          version: master
+          version: 0.17.1
 
       - name: Tests Debug
         run: |
