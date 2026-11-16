@@ -1071,23 +1071,46 @@ pub fn Canvas(comptime T: type) type {
             const paint: Paint = .init(color, blending);
             const cx: i32 = @round(center.x());
             const cy: i32 = @round(center.y());
-            const r = @round(radius);
-            var x: f32 = r;
-            var y: f32 = 0;
-            var err: f32 = 0;
+            const r: i32 = @round(radius);
+            const rows_i: i64 = self.image.rows;
+            const cols_i: i64 = self.image.cols;
+            // A full circle inside the image needs neither the bounds nor the arc test.
+            const inside = arc.isFull() and cx >= r and cy >= r and @as(i64, cx) + r < cols_i and @as(i64, cy) + r < rows_i;
+            // Measured: the unchecked walk is faster out of line, the checked one inlined.
+            if (inside) {
+                @call(.never_inline, bresenhamCircle, .{ self, cx, cy, r, paint, arc, true });
+            } else {
+                @call(.always_inline, bresenhamCircle, .{ self, cx, cy, r, paint, arc, false });
+            }
+        }
+
+        /// The Bresenham walk of `drawBresenhamCircle`; `unchecked` writes every pixel as is.
+        fn bresenhamCircle(self: Self, cx: isize, cy: isize, r: isize, paint: Paint, arc: ArcRange, comptime unchecked: bool) void {
+            const data = self.image.data;
+            const stride: isize = @intCast(self.image.stride);
+            const origin = cy * stride + cx;
             const full = arc.isFull();
             const sv = arc.startVector();
             const ev = arc.endVector();
+            var x = r;
+            var y: isize = 0;
+            var err: isize = 0;
             while (x >= y) {
-                const offsets = [_][2]f32{
-                    .{ x, y }, .{ -x, y }, .{ x, -y }, .{ -x, -y },
-                    .{ y, x }, .{ -y, x }, .{ y, -x }, .{ -y, -x },
-                };
-                for (offsets) |o| {
-                    if (!full and arc.coverage(o[0], o[1], sv, ev, .fast) == 0) continue;
-                    const col: i32 = @trunc(o[0]);
-                    const row: i32 = @trunc(o[1]);
-                    if (self.atOrNull(cy + row, cx + col)) |dest| paint.put(dest);
+                if (unchecked) {
+                    const offsets = [_]isize{
+                        y * stride + x, y * stride - x, -y * stride + x, -y * stride - x,
+                        x * stride + y, x * stride - y, -x * stride + y, -x * stride - y,
+                    };
+                    for (offsets) |offset| paint.put(&data[@intCast(origin + offset)]);
+                } else {
+                    const offsets = [_][2]isize{
+                        .{ x, y }, .{ -x, y }, .{ x, -y }, .{ -x, -y },
+                        .{ y, x }, .{ -y, x }, .{ y, -x }, .{ -y, -x },
+                    };
+                    for (offsets) |o| {
+                        if (!full and arc.coverage(@floatFromInt(o[0]), @floatFromInt(o[1]), sv, ev, .fast) == 0) continue;
+                        if (self.image.atOrNull(cy + o[1], cx + o[0])) |dest| paint.put(dest);
+                    }
                 }
                 if (err <= 0) {
                     y += 1;
