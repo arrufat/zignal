@@ -339,6 +339,22 @@ pub fn Rgb(comptime T: type) type {
             return rgbLuma(self.r, self.g, self.b);
         }
 
+        /// [APCA](https://github.com/Myndex/apca-w3) lightness contrast (Lc) of `self` as text on
+        /// `background`: about 106 for black on white, -108 for white on black, positive for dark
+        /// text on light, 0 below |Lc| 10.
+        pub fn apcaContrast(self: Rgb(T), background: Rgb(T)) f64 {
+            return apcaLc(apcaLuminance(self.r, self.g, self.b), apcaLuminance(background.r, background.g, background.b));
+        }
+
+        /// [WCAG 2](https://en.wikipedia.org/wiki/Web_Content_Accessibility_Guidelines) contrast
+        /// ratio between `self` and `other`, from 1 to 21; order doesn't matter.
+        /// AA asks for 4.5 for normal text and 3 for large text.
+        pub fn wcagContrast(self: Rgb(T), other: Rgb(T)) f64 {
+            const a = wcagLuminance(self.r, self.g, self.b);
+            const b = wcagLuminance(other.r, other.g, other.b);
+            return (@max(a, b) + 0.05) / (@min(a, b) + 0.05);
+        }
+
         /// Blends the color with an overlay.
         pub fn blend(self: Rgb(T), overlay: Rgba(T), mode: Blending) Rgb(T) {
             const blended = blendColors(T, self.withAlpha(if (T == u8) 255 else 1.0), overlay, mode);
@@ -463,6 +479,20 @@ pub fn Rgba(comptime T: type) type {
         /// Calculates the perceptual luminance using ITU-R BT.709 coefficients (ignores alpha).
         pub fn luma(self: Rgba(T)) f64 {
             return rgbLuma(self.r, self.g, self.b);
+        }
+
+        /// APCA lightness contrast (Lc) of `self` as text on `background`, both taken as opaque.
+        /// See `Rgb.apcaContrast`.
+        pub fn apcaContrast(self: Rgba(T), background: Rgba(T)) f64 {
+            return apcaLc(apcaLuminance(self.r, self.g, self.b), apcaLuminance(background.r, background.g, background.b));
+        }
+
+        /// WCAG 2 contrast ratio between `self` and `other`, both taken as opaque.
+        /// See `Rgb.wcagContrast`.
+        pub fn wcagContrast(self: Rgba(T), other: Rgba(T)) f64 {
+            const a = wcagLuminance(self.r, self.g, self.b);
+            const b = wcagLuminance(other.r, other.g, other.b);
+            return (@max(a, b) + 0.05) / (@min(a, b) + 0.05);
         }
 
         /// Blends the color with an overlay.
@@ -1041,6 +1071,43 @@ pub fn rgbLuma(r: anytype, g: anytype, b: anytype) f64 {
     const g_f: f64 = if (T == u8) @as(f64, g) / 255.0 else @floatCast(g);
     const b_f: f64 = if (T == u8) @as(f64, b) / 255.0 else @floatCast(b);
     return luma_r * r_f + luma_g * g_f + luma_b * b_f;
+}
+
+/// A u8 or float component as an f64 in [0, 1].
+fn unitF64(c: anytype) f64 {
+    return if (@TypeOf(c) == u8) @as(f64, c) / 255.0 else clamp(@as(f64, @floatCast(c)), 0, 1);
+}
+
+/// WCAG 2 relative luminance: the sRGB curve undone, weighted by BT.709.
+fn wcagLuminance(r: anytype, g: anytype, b: anytype) f64 {
+    return luma_r * gammaToLinear(f64, unitF64(r)) +
+        luma_g * gammaToLinear(f64, unitF64(g)) +
+        luma_b * gammaToLinear(f64, unitF64(b));
+}
+
+/// APCA 0.0.98G-4g screen luminance: a plain 2.4 power curve, with a soft clamp near black.
+fn apcaLuminance(r: anytype, g: anytype, b: anytype) f64 {
+    const y = 0.2126729 * pow(f64, unitF64(r), 2.4) +
+        0.7151522 * pow(f64, unitF64(g), 2.4) +
+        0.0721750 * pow(f64, unitF64(b), 2.4);
+    const black_threshold = 0.022;
+    const black_clamp = 1.414;
+    return if (y > black_threshold) y else y + pow(f64, black_threshold - y, black_clamp);
+}
+
+/// APCA Lc from the luminances of text and background.
+fn apcaLc(text: f64, background: f64) f64 {
+    const scale = 1.14;
+    const low_clip = 0.1;
+    const low_offset = 0.027;
+    if (@abs(background - text) < 0.0005) return 0;
+    if (background > text) {
+        const sapc = (pow(f64, background, 0.56) - pow(f64, text, 0.57)) * scale;
+        return if (sapc < low_clip) 0 else (sapc - low_offset) * 100;
+    } else {
+        const sapc = (pow(f64, background, 0.65) - pow(f64, text, 0.62)) * scale;
+        return if (sapc > -low_clip) 0 else (sapc + low_offset) * 100;
+    }
 }
 
 /// Converts RGB to grayscale using BT.709 luminance coefficients.
@@ -1985,6 +2052,31 @@ test "Rgb.luma: known values" {
     // Rgba should ignore alpha
     const red_alpha = Rgba(u8){ .r = 255, .g = 0, .b = 0, .a = 128 };
     try expectApproxEqAbs(red_alpha.luma(), 0.2126, 0.001);
+}
+
+test "Rgb.apcaContrast: matches the APCA reference values" {
+    // From the apca-w3 0.0.98G-4g README and test suite.
+    const gray = Rgb(u8).initHex(0x888888);
+    const silver = Rgb(u8).initHex(0xaaaaaa);
+    try expectApproxEqAbs(106.04, Rgb(u8).black.apcaContrast(.white), 0.01);
+    try expectApproxEqAbs(-107.88, Rgb(u8).white.apcaContrast(.black), 0.01);
+    try expectApproxEqAbs(63.06, gray.apcaContrast(.white), 0.01);
+    try expectApproxEqAbs(-68.54, Rgb(u8).white.apcaContrast(gray), 0.01);
+    try expectApproxEqAbs(58.15, Rgb(u8).black.apcaContrast(silver), 0.01);
+    try expectApproxEqAbs(-56.24, silver.apcaContrast(.black), 0.01);
+    try expectEqual(0, gray.apcaContrast(gray));
+    try expectApproxEqAbs(gray.apcaContrast(.white), gray.as(f32).apcaContrast(.white), 1e-4);
+    try expectEqual(gray.apcaContrast(.white), gray.withAlpha(10).apcaContrast(.white));
+}
+
+test "Rgb.wcagContrast: matches known ratios" {
+    const gray = Rgb(u8).initHex(0x767676);
+    try expectApproxEqAbs(21, Rgb(u8).black.wcagContrast(.white), 1e-9);
+    try expectEqual(1, gray.wcagContrast(gray));
+    try expectApproxEqAbs(4.54, gray.wcagContrast(.white), 0.005);
+    try expectEqual(gray.wcagContrast(.white), Rgb(u8).white.wcagContrast(gray));
+    try expectApproxEqAbs(gray.wcagContrast(.white), gray.as(f32).wcagContrast(.white), 1e-4);
+    try expectEqual(gray.wcagContrast(.white), gray.withAlpha(10).wcagContrast(.white));
 }
 
 test "Rgba.invert: keeps alpha" {

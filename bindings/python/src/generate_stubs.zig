@@ -188,6 +188,24 @@ fn generateColorClass(stub: *GeneratedStub, comptime ColorType: type) !void {
         );
     }
 
+    if (@hasDecl(ColorType, "apcaContrast")) {
+        try stub.write(
+            \\    def apca_contrast(self, background: Color) -> float:
+            \\        """APCA lightness contrast (Lc) of this color as text on `background`: positive for dark on light."""
+            \\        ...
+            \\
+        );
+    }
+
+    if (@hasDecl(ColorType, "wcagContrast")) {
+        try stub.write(
+            \\    def wcag_contrast(self, other: Color) -> float:
+            \\        """WCAG 2 contrast ratio between this color and `other`, from 1 to 21."""
+            \\        ...
+            \\
+        );
+    }
+
     if (@hasDecl(ColorType, "hex")) {
         try stub.write(
             \\    def hex(self) -> int:
