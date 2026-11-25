@@ -187,13 +187,15 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             if (@hasDecl(ZigColorType, "composite")) count += 1;
             if (@hasDecl(ZigColorType, "invert")) count += 1;
             if (@hasDecl(ZigColorType, "luma")) count += 1;
+            if (@hasDecl(ZigColorType, "apcaContrast")) count += 1;
+            if (@hasDecl(ZigColorType, "wcagContrast")) count += 1;
             if (@hasDecl(ZigColorType, "hex")) count += 1;
             if (@hasDecl(ZigColorType, "initHex")) count += 1;
             if (@hasDecl(ZigColorType, "withAlpha")) count += 1;
             return count;
         }
 
-        /// Generates the methods array: `__format__`, `blend`, `composite`, `to`, `invert`, `luma`, `hex`,
+        /// Generates the methods array: `__format__`, `blend`, `composite`, `to`, `invert`, `luma`, `apca_contrast`, `wcag_contrast`, `hex`,
         /// `from_hex`, and `with_alpha`.
         pub fn generateMethods() [countMethods()]c.PyMethodDef {
             const format_method = [_]c.PyMethodDef{
@@ -270,6 +272,50 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 },
             } else [_]c.PyMethodDef{};
 
+            const apca_contrast_method = if (@hasDecl(ZigColorType, "apcaContrast")) [_]c.PyMethodDef{
+                .{
+                    .ml_name = "apca_contrast",
+                    .ml_meth = @ptrCast(&apcaContrastMethod),
+                    .ml_flags = c.METH_VARARGS | c.METH_KEYWORDS,
+                    .ml_doc =
+                    \\APCA lightness contrast (Lc) of this color as text on `background`.
+                    \\
+                    \\About 106 for black on white and -108 for white on black: positive for dark text
+                    \\on light, negative for light on dark, and 0 below |Lc| 10. Alpha is ignored.
+                    \\
+                    \\## Parameters
+                    \\- `background`: A color, tuple (r, g, b[, a]) or gray value
+                    \\
+                    \\## Examples
+                    \\```python
+                    \\zignal.Rgb(0x88, 0x88, 0x88).apca_contrast(zignal.Rgb(255, 255, 255))  # 63.06
+                    \\```
+                    ,
+                },
+            } else [_]c.PyMethodDef{};
+
+            const wcag_contrast_method = if (@hasDecl(ZigColorType, "wcagContrast")) [_]c.PyMethodDef{
+                .{
+                    .ml_name = "wcag_contrast",
+                    .ml_meth = @ptrCast(&wcagContrastMethod),
+                    .ml_flags = c.METH_VARARGS | c.METH_KEYWORDS,
+                    .ml_doc =
+                    \\WCAG 2 contrast ratio between this color and `other`, from 1 to 21.
+                    \\
+                    \\The order of the two colors doesn't matter. AA asks for 4.5 for normal text and
+                    \\3 for large text. Alpha is ignored.
+                    \\
+                    \\## Parameters
+                    \\- `other`: A color, tuple (r, g, b[, a]) or gray value
+                    \\
+                    \\## Examples
+                    \\```python
+                    \\zignal.Rgb(0x76, 0x76, 0x76).wcag_contrast(zignal.Rgb(255, 255, 255))  # 4.54
+                    \\```
+                    ,
+                },
+            } else [_]c.PyMethodDef{};
+
             const hex_method = if (@hasDecl(ZigColorType, "hex")) [_]c.PyMethodDef{
                 .{
                     .ml_name = "hex",
@@ -324,7 +370,7 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
                 .{ .ml_name = null, .ml_meth = null, .ml_flags = 0, .ml_doc = null },
             };
 
-            return format_method ++ blend_method ++ composite_method ++ to_method ++ invert_method ++ luma_method ++ hex_method ++ from_hex_method ++ with_alpha_method ++ sentinel;
+            return format_method ++ blend_method ++ composite_method ++ to_method ++ invert_method ++ luma_method ++ apca_contrast_method ++ wcag_contrast_method ++ hex_method ++ from_hex_method ++ with_alpha_method ++ sentinel;
         }
 
         /// `invert` method.
@@ -457,6 +503,26 @@ pub fn ColorBinding(comptime ZigColorType: type) type {
             const result = objectToZigColor(self).composite(overlay, op);
             const type_obj: *c.PyTypeObject = @ptrCast(self_obj.*.ob_type);
             return createPyObject(result, type_obj);
+        }
+
+        /// `apca_contrast` method.
+        pub fn apcaContrastMethod(self_obj: [*c]c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
+            const self: *ObjectType = @ptrCast(self_obj);
+            const Params = struct { background: ?*c.PyObject };
+            var params: Params = undefined;
+            python.parseArgs(Params, args, kwds, &params) catch return null;
+            const background = color_utils.parseColor(ZigColorType, params.background) catch return null;
+            return @ptrCast(python.create(objectToZigColor(self).apcaContrast(background)));
+        }
+
+        /// `wcag_contrast` method.
+        pub fn wcagContrastMethod(self_obj: [*c]c.PyObject, args: ?*c.PyObject, kwds: ?*c.PyObject) callconv(.c) [*c]c.PyObject {
+            const self: *ObjectType = @ptrCast(self_obj);
+            const Params = struct { other: ?*c.PyObject };
+            var params: Params = undefined;
+            python.parseArgs(Params, args, kwds, &params) catch return null;
+            const other = color_utils.parseColor(ZigColorType, params.other) catch return null;
+            return @ptrCast(python.create(objectToZigColor(self).wcagContrast(other)));
         }
 
         /// Maps a Python color class object to its ColorSpace.

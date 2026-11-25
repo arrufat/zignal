@@ -43,6 +43,26 @@ def test_blend_mode_and_blend():
     assert isinstance(res2, zignal.Rgb)
 
 
+def test_apca_contrast():
+    white = zignal.Rgb(255, 255, 255)
+    gray = zignal.Rgb(0x88, 0x88, 0x88)
+    assert gray.apca_contrast(white) == pytest.approx(63.06, abs=0.01)
+    assert white.apca_contrast(gray) == pytest.approx(-68.54, abs=0.01)
+    assert gray.apca_contrast((255, 255, 255)) == gray.apca_contrast(white)
+    assert gray.apca_contrast(gray) == 0
+    assert zignal.Rgba(0x88, 0x88, 0x88, 10).apca_contrast(white) == gray.apca_contrast(white)
+
+
+def test_wcag_contrast():
+    white = zignal.Rgb(255, 255, 255)
+    gray = zignal.Rgb(0x76, 0x76, 0x76)
+    assert zignal.Rgb(0, 0, 0).wcag_contrast(white) == pytest.approx(21)
+    assert gray.wcag_contrast(white) == pytest.approx(4.54, abs=0.005)
+    assert white.wcag_contrast(gray) == gray.wcag_contrast(white)
+    assert gray.wcag_contrast((255, 255, 255)) == gray.wcag_contrast(white)
+    assert zignal.Rgba(0x76, 0x76, 0x76, 10).wcag_contrast(white) == gray.wcag_contrast(white)
+
+
 def test_rgba_composite():
     base = zignal.Rgba(255, 0, 0, 255)
     overlay = zignal.Rgba(0, 0, 255, 128)
