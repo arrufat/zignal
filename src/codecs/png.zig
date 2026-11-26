@@ -1196,15 +1196,15 @@ fn adaptiveSampleRate(header: Header) u32 {
 /// mode analyzes rows at the sample rate and the first and last three, reusing the last
 /// analyzed filter in between; `r0` must be on the sample rate. `filtered` holds rows
 /// `[r0, r1)` from its start.
-fn filterRows(filtered: []u8, data: []const u8, header: Header, mode: FilterMode, temp: []u8, r0: u32, r1: u32) void {
+fn filterRows(filtered: []u8, data: []const u8, row_stride_bytes: usize, header: Header, mode: FilterMode, temp: []u8, r0: u32, r1: u32) void {
     const scanline_bytes = header.scanlineBytes();
     const bytes_per_pixel = header.bytesPerPixel();
     const sample_rate = adaptiveSampleRate(header);
     var last = FilterType.none;
     for (r0..r1) |y| {
-        const src_row = data[y * scanline_bytes ..][0..scanline_bytes];
+        const src_row = data[y * row_stride_bytes ..][0..scanline_bytes];
         const dst_row = filtered[(y - r0) * (scanline_bytes + 1) + 1 ..][0..scanline_bytes];
-        const previous_row: ?[]const u8 = if (y > 0) data[(y - 1) * scanline_bytes ..][0..scanline_bytes] else null;
+        const previous_row: ?[]const u8 = if (y > 0) data[(y - 1) * row_stride_bytes ..][0..scanline_bytes] else null;
         const filter: FilterType = switch (mode) {
             .none => blk: {
                 filterRow(.none, dst_row, src_row, previous_row, bytes_per_pixel);
@@ -1295,7 +1295,7 @@ fn adlerCombine(a: u32, b: u32, b_len: usize) u32 {
 }
 
 /// Writes one IDAT: rows deflated in parallel chunks, each ending in a sync flush so they concatenate.
-fn writeIdat(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8, header: Header, options: EncodeOptions) !void {
+fn writeIdat(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8, row_stride_bytes: usize, header: Header, options: EncodeOptions) !void {
     const rows_per_chunk: usize = chunkRows(header);
     const chunks = @max(1, (@as(usize, header.height) + rows_per_chunk - 1) / rows_per_chunk);
     const bands = parallel.bandCount(chunks, rows_per_chunk * header.scanlineBytes());
@@ -1308,6 +1308,7 @@ fn writeIdat(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8,
     const Ctx = struct {
         gpa: Allocator,
         image_data: []const u8,
+        row_stride_bytes: usize,
         header: Header,
         options: EncodeOptions,
         rows_per_chunk: usize,
@@ -1330,7 +1331,7 @@ fn writeIdat(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8,
             for (c0..c1) |chunk| {
                 const r0: u32 = @intCast(chunk * ctx.rows_per_chunk);
                 const r1: u32 = @intCast(@min(hdr.height, (chunk + 1) * ctx.rows_per_chunk));
-                filterRows(filtered, ctx.image_data, hdr, ctx.options.filter, temp, r0, r1);
+                filterRows(filtered, ctx.image_data, ctx.row_stride_bytes, hdr, ctx.options.filter, temp, r0, r1);
                 const rows = filtered[0 .. (r1 - r0) * rb];
                 // The compressor needs a sized output buffer; half the input is the usual ratio.
                 try band.out.ensureUnusedCapacity(rows.len / 2 + 64);
@@ -1350,6 +1351,7 @@ fn writeIdat(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8,
     const ctx: Ctx = .{
         .gpa = gpa,
         .image_data = image_data,
+        .row_stride_bytes = row_stride_bytes,
         .header = header,
         .options = options,
         .rows_per_chunk = rows_per_chunk,
@@ -1383,7 +1385,7 @@ fn writeIdat(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8,
     try writer.writeInt(u32, chunk_crc ^ 0xffffffff, .big);
 }
 
-fn writeRaw(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8, width: u32, height: u32, color_type: ColorType, bit_depth: u8, options: EncodeOptions) !void {
+fn writeRaw(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8, row_stride_bytes: usize, width: u32, height: u32, color_type: ColorType, bit_depth: u8, options: EncodeOptions) !void {
     if (width == 0 or height == 0) return error.InvalidDimensions;
 
     const gamma_int: ?u32 = if (options.srgb_intent == null) blk: {
@@ -1420,7 +1422,7 @@ fn writeRaw(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8, 
         try writeChunk(writer, "gAMA".*, &gama_data);
     }
 
-    try writeIdat(io, gpa, writer, image_data, header, options);
+    try writeIdat(io, gpa, writer, image_data, row_stride_bytes, header, options);
 
     // Write IEND chunk
     try writeChunk(writer, "IEND".*, &[_]u8{});
@@ -1432,21 +1434,18 @@ pub fn encode(comptime T: type, io: Io, allocator: Allocator, image: Image(T), o
 }
 
 /// Writes `image` as a PNG to `writer`: `u8`→grayscale, `Rgb`→RGB, `Rgba`→RGBA, others→RGB.
+/// Views are encoded in place, without a contiguous copy.
 pub fn write(comptime T: type, io: Io, allocator: Allocator, writer: *Io.Writer, image: Image(T), options: EncodeOptions) !void {
     const color_type = getColorType(T);
 
     switch (T) {
         u8, Rgb, Rgba => {
-            // Views are packed into a contiguous copy first.
-            if (image.isContiguous()) return writeRaw(io, allocator, writer, image.asBytes(), image.cols, image.rows, color_type, 8, options);
-            var contiguous = try image.dupe(allocator);
-            defer contiguous.deinit(allocator);
-            return writeRaw(io, allocator, writer, contiguous.asBytes(), image.cols, image.rows, color_type, 8, options);
+            return writeRaw(io, allocator, writer, std.mem.sliceAsBytes(image.data), image.stride * @sizeOf(T), image.cols, image.rows, color_type, 8, options);
         },
         else => {
             var rgb_image = try image.convert(io, allocator, Rgb);
             defer rgb_image.deinit(allocator);
-            return writeRaw(io, allocator, writer, rgb_image.asBytes(), image.cols, image.rows, color_type, 8, options);
+            return writeRaw(io, allocator, writer, rgb_image.asBytes(), rgb_image.stride * @sizeOf(Rgb), image.cols, image.rows, color_type, 8, options);
         },
     }
 }
@@ -2561,7 +2560,7 @@ test "filterRows: adaptive filter selection" {
     defer allocator.free(filtered);
     const temp = try allocator.alloc(u8, scanline_bytes);
     defer allocator.free(temp);
-    filterRows(filtered, raw, header, .adaptive, temp, 0, height);
+    filterRows(filtered, raw, scanline_bytes, header, .adaptive, temp, 0, height);
 
     const stride = scanline_bytes + 1; // filter byte + scanline data
     try std.testing.expectEqual(@as(u8, @backingInt(FilterType.sub)), filtered[0]);
