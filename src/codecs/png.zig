@@ -304,6 +304,10 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
             return error.TooManyChunks;
         }
 
+        if (!header_found and !std.mem.eql(u8, &chunk_type, "IHDR")) {
+            return error.ChunkBeforeHeader;
+        }
+
         // Stop at image data or end of file
         if (std.mem.eql(u8, &chunk_type, "IDAT")) break;
         if (std.mem.eql(u8, &chunk_type, "IEND")) break;
@@ -313,38 +317,16 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
             if (length != 13) return error.InvalidHeaderLength;
 
             const data = try reader.takeArray(13);
-
-            const width = std.mem.readInt(u32, data[0..4], .big);
-            const height = std.mem.readInt(u32, data[4..8], .big);
-
-            if (width == 0 or height == 0) return error.InvalidDimensions;
-
-            const color_type: ColorType = switch (data[9]) {
-                0 => .grayscale,
-                2 => .rgb,
-                3 => .palette,
-                4 => .grayscale_alpha,
-                6 => .rgba,
-                else => return error.InvalidColorType,
-            };
-
-            header = Header{
-                .width = width,
-                .height = height,
-                .bit_depth = data[8],
-                .color_type = color_type,
-                .compression_method = data[10],
-                .filter_method = data[11],
-                .interlace_method = data[12],
-            };
+            header = try parseHeader(.{ .length = length, .type = chunk_type, .data = data });
+            try enforceHeaderLimits(header, limits);
             header_found = true;
-            _ = try reader.discard(Io.Limit.limited(4)); // CRC
-        } else if (std.mem.eql(u8, &chunk_type, "gAMA") and header_found) {
+            try reader.discardAll(4); // CRC
+        } else if (std.mem.eql(u8, &chunk_type, "gAMA")) {
             if (length != 4) return error.InvalidGammaLength;
             const gamma_int = try reader.takeInt(u32, .big);
             header.gamma = @as(f32, @floatFromInt(gamma_int)) / 100000.0;
-            _ = try reader.discard(Io.Limit.limited(4)); // CRC
-        } else if (std.mem.eql(u8, &chunk_type, "sRGB") and header_found) {
+            try reader.discardAll(4); // CRC
+        } else if (std.mem.eql(u8, &chunk_type, "sRGB")) {
             if (length != 1) return error.InvalidSrgbLength;
             const intent_raw = try reader.takeByte();
             header.srgb_intent = switch (intent_raw) {
@@ -354,10 +336,10 @@ pub fn getInfo(reader: *Io.Reader, limits: DecodeLimits) !Header {
                 3 => .absolute_colorimetric,
                 else => return error.InvalidSrgbIntent,
             };
-            _ = try reader.discard(Io.Limit.limited(4)); // CRC
+            try reader.discardAll(4); // CRC
         } else {
             // Skip unknown or unneeded chunk data + CRC
-            _ = try reader.discard(Io.Limit.limited64(@as(u64, length) + 4));
+            try reader.discardAll64(@as(u64, length) + 4);
         }
     }
 
@@ -3474,4 +3456,66 @@ test "extractRgbPixel: tRNS matches raw 16-bit and 8-bit samples" {
     const row8 = [_]u8{ 0xFF, 0x00, 0x00 };
     const trns_high: []const u8 = &.{ 0x01, 0xFF, 0x00, 0x00, 0x00, 0x00 };
     try std.testing.expectEqual(@as(u8, 255), extractRgbPixel(Rgba, &row8, 0, h8, trns_high).a);
+}
+
+test "getInfo: skips chunks across short-discard streams and validates header" {
+    const gpa = std.testing.allocator;
+
+    // A reader that delivers at most 5 bytes per stream call, forcing short discards.
+    const ShortReader = struct {
+        data: []const u8,
+        pos: usize = 0,
+        interface: Io.Reader,
+
+        fn stream(r: *Io.Reader, w: *Io.Writer, limit: Io.Limit) Io.Reader.StreamError!usize {
+            const self: *@This() = @alignCast(@fieldParentPtr("interface", r));
+            if (self.pos >= self.data.len) return error.EndOfStream;
+            const avail = self.data[self.pos..@min(self.data.len, self.pos + 5)];
+            const slice = avail[0..@min(avail.len, limit.toInt() orelse avail.len)];
+            const n = try w.write(slice);
+            self.pos += n;
+            return n;
+        }
+    };
+
+    var out: Io.Writer.Allocating = .init(gpa);
+    defer out.deinit();
+    try out.writer.writeAll(&signature);
+    try writeTestIhdr(&out.writer, 32, 16, 8, .rgb, 0);
+    // Ancillary chunk much larger than the 16-byte reader buffer.
+    const big_text: [64]u8 = @splat('A');
+    try writeChunk(&out.writer, "tEXt".*, &big_text);
+    try writeChunk(&out.writer, "sRGB".*, &[_]u8{1});
+    try writeChunk(&out.writer, "IDAT".*, &[_]u8{});
+
+    var buf: [16]u8 = undefined;
+    var short: ShortReader = .{
+        .data = out.written(),
+        .interface = .{ .vtable = &.{ .stream = ShortReader.stream }, .buffer = &buf, .seek = 0, .end = 0 },
+    };
+    const header = try getInfo(&short.interface, .{});
+    try std.testing.expectEqual(@as(u32, 32), header.width);
+    try std.testing.expectEqual(@as(u32, 16), header.height);
+    try std.testing.expectEqual(SrgbRenderingIntent.relative_colorimetric, header.srgb_intent.?);
+
+    // Enforces DecodeLimits.
+    var limited_reader = Io.Reader.fixed(out.written());
+    try std.testing.expectError(error.ImageTooLarge, getInfo(&limited_reader, .{ .max_width = .limited(16) }));
+
+    // Rejects invalid bit depth in IHDR.
+    var bad_ihdr: Io.Writer.Allocating = .init(gpa);
+    defer bad_ihdr.deinit();
+    try bad_ihdr.writer.writeAll(&signature);
+    try writeTestIhdr(&bad_ihdr.writer, 4, 4, 3, .rgb, 0);
+    var bad_reader = Io.Reader.fixed(bad_ihdr.written());
+    try std.testing.expectError(error.InvalidBitDepth, getInfo(&bad_reader, .{}));
+
+    // Rejects chunks before IHDR.
+    var before_ihdr: Io.Writer.Allocating = .init(gpa);
+    defer before_ihdr.deinit();
+    try before_ihdr.writer.writeAll(&signature);
+    try writeChunk(&before_ihdr.writer, "tEXt".*, "hi");
+    try writeTestIhdr(&before_ihdr.writer, 4, 4, 8, .rgb, 0);
+    var before_reader = Io.Reader.fixed(before_ihdr.written());
+    try std.testing.expectError(error.ChunkBeforeHeader, getInfo(&before_reader, .{}));
 }
