@@ -864,7 +864,7 @@ pub fn toAnyImage(allocator: Allocator, png_state: *PngState) !AnyImage {
         // Interlaced image - use Adam7 deinterlacing
         switch (png_state.header.color_type) {
             .grayscale, .grayscale_alpha => {
-                if (png_state.transparency != null) {
+                if (png_state.header.color_type == .grayscale_alpha or png_state.transparency != null) {
                     return .{ .rgba = try deinterlaceAdam7(allocator, Rgba, decompressed, png_state.header, null, png_state.transparency) };
                 } else {
                     return .{ .grayscale = try deinterlaceAdam7(allocator, u8, decompressed, png_state.header, null, null) };
@@ -3448,4 +3448,27 @@ test "extractGrayscalePixel: tRNS matches the raw sample at every bit depth" {
     const trns16: []const u8 = &.{ 0x12, 0x34 };
     try std.testing.expectEqual(@as(u8, 0), extractGrayscalePixel(Rgba, &row16, 0, h16, trns16).a);
     try std.testing.expectEqual(@as(u8, 255), extractGrayscalePixel(Rgba, &row16, 1, h16, trns16).a);
+}
+
+test "toAnyImage: interlaced grayscale-alpha preserves alpha" {
+    const gpa = std.testing.allocator;
+    const scanlines = try gpa.dupe(u8, &[_]u8{ 0, 128, 64 }); // filter=none, gray=128, alpha=64
+    var state: PngState = .{
+        .header = .{
+            .width = 1,
+            .height = 1,
+            .bit_depth = 8,
+            .color_type = .grayscale_alpha,
+            .interlace_method = 1,
+        },
+        .scanlines = scanlines,
+    };
+    defer state.deinit(gpa);
+
+    var any = try toAnyImage(gpa, &state);
+    defer any.deinit(gpa);
+    switch (any) {
+        .rgba => |img| try std.testing.expectEqual(Rgba{ .r = 128, .g = 128, .b = 128, .a = 64 }, img.at(0, 0).*),
+        else => return error.TestUnexpectedResult,
+    }
 }
