@@ -43,6 +43,7 @@ const ChunkOrderState = struct {
     seen_trns: bool = false,
     seen_idat: bool = false,
     seen_iend: bool = false,
+    seen_gama: bool = false,
     seen_iccp: bool = false,
     seen_srgb: bool = false,
     idat_stream_finished: bool = false,
@@ -461,7 +462,9 @@ const ChunkStream = struct {
         };
         self.count += 1;
         if (exceeds(self.max_chunks, self.count)) return error.TooManyChunks;
-        return .{ .length = std.mem.readInt(u32, head[0..4], .big), .type = head[4..8].* };
+        const length = std.mem.readInt(u32, head[0..4], .big);
+        if (length > std.math.maxInt(i32)) return error.InvalidChunkLength;
+        return .{ .length = length, .type = head[4..8].* };
     }
 
     /// Reads payload and CRC; returns the payload if it fits `keep`, null if the stream ends.
@@ -499,13 +502,11 @@ const IdatReader = struct {
     chunk_crc: u32,
     /// Payload bytes delivered so far.
     total: usize = 0,
-    /// The input ended inside the run.
-    truncated: bool = false,
     /// The run is over; later reads return `EndOfStream`.
     done: bool = false,
     /// The chunk after the run, its header already read.
     after: ?ChunkStream.Head = null,
-    err: ?error{ InvalidCrc, TooManyChunks, ReadFailed } = null,
+    err: ?error{ InvalidCrc, InvalidChunkLength, TooManyChunks, ReadFailed } = null,
     interface: Io.Reader,
 
     fn init(chunks: *ChunkStream, first: ChunkStream.Head, buffer: []u8) IdatReader {
@@ -528,10 +529,7 @@ const IdatReader = struct {
         }
         const input = self.chunks.reader;
         const available = input.peekGreedy(1) catch |err| switch (err) {
-            error.EndOfStream => {
-                self.truncated = true;
-                return error.EndOfStream;
-            },
+            error.EndOfStream => return error.EndOfStream,
             error.ReadFailed => return error.ReadFailed,
         };
         const bytes = limit.slice(available[0..@min(available.len, self.remaining)]);
@@ -546,10 +544,7 @@ const IdatReader = struct {
     /// Checks the finished chunk's CRC and starts the next one; false once the run is over.
     fn nextChunk(self: *IdatReader) !bool {
         const stored = self.chunks.reader.takeInt(u32, .big) catch |err| switch (err) {
-            error.EndOfStream => {
-                self.truncated = true;
-                return false;
-            },
+            error.EndOfStream => return false,
             else => |e| return e,
         };
         if (stored != self.chunk_crc ^ 0xffffffff) return error.InvalidCrc;
@@ -694,7 +689,7 @@ fn parse(gpa: Allocator, reader: *Io.Reader, limits: DecodeLimits) !PngState {
             if (chunk_state.seen_idat) return error.PaletteAfterImageData;
             if (png_state.palette != null) return error.DuplicatePalette;
 
-            if (chunk.length % 3 != 0) return error.InvalidPaletteLength;
+            if (chunk.length == 0 or chunk.length % 3 != 0) return error.InvalidPaletteLength;
             const palette_size = chunk.length / 3;
             if (palette_size > 256) return error.PaletteTooLarge;
             if (chunk.data.len < palette_size * 3) return error.InvalidPaletteLength;
@@ -736,13 +731,16 @@ fn parse(gpa: Allocator, reader: *Io.Reader, limits: DecodeLimits) !PngState {
             png_state.transparency = transparency;
             chunk_state.seen_trns = true;
         } else if (std.mem.eql(u8, &chunk.type, "gAMA")) {
+            if (chunk_state.seen_gama) continue; // Benign duplicate: keep the first, as libpng does.
             if (chunk_state.seen_plte) return error.GammaAfterPalette;
             if (chunk_state.seen_idat) return error.GammaAfterImageData;
             // gAMA chunk: 4 bytes containing gamma value * 100,000
             if (chunk.length != 4) return error.InvalidGammaLength;
             const gamma_int = std.mem.readInt(u32, chunk.data[0..4][0..4], .big);
             png_state.header.gamma = @as(f32, @floatFromInt(gamma_int)) / 100000.0;
+            chunk_state.seen_gama = true;
         } else if (std.mem.eql(u8, &chunk.type, "sRGB")) {
+            if (chunk_state.seen_srgb) continue;
             if (chunk_state.seen_plte) return error.SrgbAfterPalette;
             if (chunk_state.seen_idat) return error.SrgbAfterImageData;
             // sRGB chunk: 1 byte containing rendering intent
@@ -759,6 +757,7 @@ fn parse(gpa: Allocator, reader: *Io.Reader, limits: DecodeLimits) !PngState {
             };
             chunk_state.seen_srgb = true;
         } else if (std.mem.eql(u8, &chunk.type, "iCCP")) {
+            if (chunk_state.seen_iccp) continue;
             if (chunk_state.seen_plte) return error.IccpAfterPalette;
             if (chunk_state.seen_idat) return error.IccpAfterImageData;
             if (chunk_state.seen_srgb) return error.ColorProfileConflict;
@@ -766,6 +765,8 @@ fn parse(gpa: Allocator, reader: *Io.Reader, limits: DecodeLimits) !PngState {
         } else if (std.mem.eql(u8, &chunk.type, "IEND")) {
             chunk_state.seen_iend = true;
             break;
+        } else if (chunk.type[0] & 0x20 == 0) {
+            return error.UnsupportedCriticalChunk;
         }
         // Ignore other chunks (ancillary chunks like tEXt, etc.)
     }
@@ -1172,6 +1173,7 @@ pub fn readAny(io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeL
 // Chunk writer for PNG encoding
 /// Writes one PNG chunk: length, type, data, then the CRC over type and data.
 pub fn writeChunk(writer: *Io.Writer, chunk_type: [4]u8, chunk_data: []const u8) !void {
+    if (chunk_data.len > std.math.maxInt(i32)) return error.ChunkTooLarge;
     try writer.writeInt(u32, @intCast(chunk_data.len), .big);
     try writer.writeAll(&chunk_type);
     try writer.writeAll(chunk_data);
@@ -1378,6 +1380,7 @@ fn writeIdat(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8,
     }
     var adler_bytes: [4]u8 = undefined;
     std.mem.writeInt(u32, &adler_bytes, adler, .big);
+    if (len > std.math.maxInt(i32)) return error.ChunkTooLarge;
     try writer.writeInt(u32, @intCast(len), .big);
     try writer.writeAll("IDAT");
     var chunk_crc = updateCrc(0xffffffff, "IDAT");
@@ -3567,4 +3570,71 @@ test "deinterlaceAdam7: rejects out-of-range palette index" {
     var decompressed = [_]u8{ 0, 2 }; // index 2 out of range for 2-entry palette
     const palette = [_][3]u8{ .{ 255, 0, 0 }, .{ 0, 255, 0 } };
     try std.testing.expectError(error.InvalidPaletteIndex, deinterlaceAdam7(gpa, Rgb, &decompressed, header, &palette, null));
+}
+
+test "decode: rejects empty PLTE, unknown critical chunks, and oversized chunks" {
+    const gpa = std.testing.allocator;
+
+    // Empty PLTE
+    {
+        var out: Io.Writer.Allocating = .init(gpa);
+        defer out.deinit();
+        try out.writer.writeAll(&signature);
+        try writeTestIhdr(&out.writer, 1, 1, 8, .palette, 0);
+        try writeChunk(&out.writer, "PLTE".*, &.{});
+        try std.testing.expectError(error.InvalidPaletteLength, decode(gpa, out.written(), .{}));
+    }
+
+    // Unknown critical chunk (uppercase first byte)
+    {
+        var out: Io.Writer.Allocating = .init(gpa);
+        defer out.deinit();
+        try out.writer.writeAll(&signature);
+        try writeTestIhdr(&out.writer, 1, 1, 8, .rgb, 0);
+        try writeChunk(&out.writer, "ABCD".*, &.{ 1, 2, 3 });
+        try std.testing.expectError(error.UnsupportedCriticalChunk, decode(gpa, out.written(), .{}));
+    }
+
+    // Chunk length > 2^31 - 1
+    {
+        var out: Io.Writer.Allocating = .init(gpa);
+        defer out.deinit();
+        try out.writer.writeAll(&signature);
+        try writeTestIhdr(&out.writer, 1, 1, 8, .rgb, 0);
+        try out.writer.writeInt(u32, 0x8000_0000, .big);
+        try out.writer.writeAll("tEXt");
+        try std.testing.expectError(error.InvalidChunkLength, decode(gpa, out.written(), .{}));
+    }
+}
+
+test "decode: keeps the first of duplicate gAMA, sRGB, iCCP and accepts a non-empty IEND" {
+    const gpa = std.testing.allocator;
+    var px = [_]Rgb{.{ .r = 10, .g = 20, .b = 30 }};
+    const png_data = try encode(Rgb, parallel.inline_io, gpa, .initFromSlice(1, 1, &px), .{ .filter = .none });
+    defer gpa.free(png_data);
+    const ihdr_end = signature.len + 25; // length + type + 13-byte payload + CRC
+    const image_data = png_data[ihdr_end .. png_data.len - 12]; // up to IEND
+
+    const Case = struct { chunks: []const struct { [4]u8, []const u8 }, gamma: ?f32 = null, srgb: ?SrgbRenderingIntent = null };
+    const cases = [_]Case{
+        .{ .chunks = &.{ .{ "gAMA".*, &.{ 0, 0, 0xB1, 0x8F } }, .{ "gAMA".*, &.{ 0, 1, 0x86, 0xA0 } } }, .gamma = 0.45455 },
+        .{ .chunks = &.{ .{ "sRGB".*, &.{0} }, .{ "sRGB".*, &.{2} } }, .srgb = .perceptual },
+        .{ .chunks = &.{ .{ "iCCP".*, &.{ 'a', 0, 0 } }, .{ "iCCP".*, &.{ 'a', 0, 0 } } } },
+    };
+    for (cases) |case| {
+        var out: Io.Writer.Allocating = .init(gpa);
+        defer out.deinit();
+        try out.writer.writeAll(png_data[0..ihdr_end]);
+        for (case.chunks) |chunk| try writeChunk(&out.writer, chunk[0], chunk[1]);
+        try out.writer.writeAll(image_data);
+        try writeChunk(&out.writer, "IEND".*, &.{0}); // non-empty IEND is benign
+        var state = try decode(gpa, out.written(), .{});
+        defer state.deinit(gpa);
+        try std.testing.expect(!state.truncated);
+        try std.testing.expectEqual(case.gamma, state.header.gamma);
+        try std.testing.expectEqual(case.srgb, state.header.srgb_intent);
+        var any = try toAnyImage(gpa, &state);
+        defer any.deinit(gpa);
+        try std.testing.expectEqual(px[0], any.rgb.at(0, 0).*);
+    }
 }
