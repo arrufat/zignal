@@ -5,6 +5,7 @@
 ### Features
 - **Porter-Duff compositing**: `Compositing` operators (`src_over`, `src_in`, `dst_out`, `src_atop`, `xor`, `plus` and the rest) decide which parts of each layer survive, through `Rgba.composite` and `Image.composite`, also in Python. `Image.blend` now lives in the core for any pixel type, and Python `Rgba.blend` accepts any color or tuple as its overlay. ([#522](https://github.com/arrufat/zignal/pull/522))
 - **Examples**: a blending and compositing playground with every blend mode and operator side by side, their formulas and a pixel inspector. ([#522](https://github.com/arrufat/zignal/pull/522))
+- **Contrast**: `Rgb.apcaContrast` gives the signed APCA lightness contrast (Lc) of text on a background, and `wcagContrast` the WCAG 2 ratio from 1 to 21; both ignore alpha and are in Python as `apca_contrast` and `wcag_contrast`. ([#527](https://github.com/arrufat/zignal/pull/527))
 
 ### Fixes
 - **PNG decoding**: interlaced grayscale+alpha keeps its alpha, 16-bit RGB tRNS matches the full sample instead of the high byte, interlaced palette images reject out-of-range indices, and `getInfo` validates IHDR, enforces `DecodeLimits` and no longer loses sync on streaming readers. Empty PLTE, unknown critical chunks and chunk lengths above 2³¹−1 are rejected, while duplicate gAMA/sRGB/iCCP keep the first, as libpng does. ([#528](https://github.com/arrufat/zignal/pull/528))
