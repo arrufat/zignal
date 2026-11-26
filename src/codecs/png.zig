@@ -1800,7 +1800,7 @@ fn deinterlaceAdam7(allocator: Allocator, comptime T: type, decompressed: []u8, 
                     .rgba => extractRgbaPixel(T, src_row, pass_x, header),
                     .palette => blk: {
                         const pal = palette orelse return error.MissingPalette;
-                        break :blk extractPalettePixel(T, src_row, pass_x, header, pal, transparency);
+                        break :blk try extractPalettePixel(T, src_row, pass_x, header, pal, transparency);
                     },
                 };
             }
@@ -1951,7 +1951,7 @@ fn extractRgbaPixel(comptime T: type, src_row: []const u8, pass_x: usize, header
 }
 
 /// Extract palette-based pixel from Adam7 pass data.
-/// Falls back to black/transparent when palette data is missing or the index is invalid.
+/// Returns `error.InvalidPaletteIndex` if the decoded index exceeds `palette.len`.
 fn extractPalettePixel(
     comptime T: type,
     src_row: []const u8,
@@ -1959,7 +1959,7 @@ fn extractPalettePixel(
     header: Header,
     palette: []const [3]u8,
     transparency: ?[]const u8,
-) T {
+) !T {
     const index = switch (header.bit_depth) {
         8 => blk: {
             if (pass_x >= src_row.len) break :blk 0;
@@ -1978,14 +1978,7 @@ fn extractPalettePixel(
         else => 0,
     };
 
-    if (index >= palette.len) {
-        return switch (T) {
-            u8 => 0,
-            Rgb => .{ .r = 0, .g = 0, .b = 0 },
-            Rgba => .{ .r = 0, .g = 0, .b = 0, .a = 255 },
-            else => @compileError("Unsupported pixel type for palette conversion"),
-        };
-    }
+    if (index >= palette.len) return error.InvalidPaletteIndex;
 
     const rgb = palette[index];
     const alpha = if (transparency) |trans_data|
@@ -3049,8 +3042,8 @@ test "extractPalettePixel: handles 4-bit indices" {
         .{ 40, 50, 60 },
     };
 
-    const pixel0 = extractPalettePixel(Rgb, &src_row, 0, header, &palette, null);
-    const pixel1 = extractPalettePixel(Rgb, &src_row, 1, header, &palette, null);
+    const pixel0 = try extractPalettePixel(Rgb, &src_row, 0, header, &palette, null);
+    const pixel1 = try extractPalettePixel(Rgb, &src_row, 1, header, &palette, null);
 
     try std.testing.expectEqual(Rgb{ .r = 10, .g = 20, .b = 30 }, pixel0);
     try std.testing.expectEqual(Rgb{ .r = 40, .g = 50, .b = 60 }, pixel1);
@@ -3560,4 +3553,18 @@ test "encode: rejects zero dimensions and invalid gamma" {
     const gama = png_data[signature.len + 25 ..]; // chunk after IHDR
     try std.testing.expectEqualStrings("gAMA", gama[4..8]);
     try std.testing.expectEqual(@as(u32, 45455), std.mem.readInt(u32, gama[8..12], .big));
+}
+
+test "deinterlaceAdam7: rejects out-of-range palette index" {
+    const gpa = std.testing.allocator;
+    const header: Header = .{
+        .width = 1,
+        .height = 1,
+        .bit_depth = 8,
+        .color_type = .palette,
+        .interlace_method = 1,
+    };
+    var decompressed = [_]u8{ 0, 2 }; // index 2 out of range for 2-entry palette
+    const palette = [_][3]u8{ .{ 255, 0, 0 }, .{ 0, 255, 0 } };
+    try std.testing.expectError(error.InvalidPaletteIndex, deinterlaceAdam7(gpa, Rgb, &decompressed, header, &palette, null));
 }
