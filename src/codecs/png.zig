@@ -877,111 +877,168 @@ pub fn toAnyImage(allocator: Allocator, png_state: *PngState) !AnyImage {
     }
 
     // Determine native format and convert accordingly
+    const total_pixels = png_state.header.totalPixels();
+    if (total_pixels > std.math.maxInt(usize)) {
+        return error.ImageTooLarge;
+    }
+    const stride = scanline_bytes + 1;
     const has_alpha_channel = png_state.header.color_type == .grayscale_alpha;
     switch (png_state.header.color_type) {
         .grayscale, .grayscale_alpha => {
             if (has_alpha_channel or png_state.transparency != null) {
-                // Create RGBA image when an alpha channel or tRNS is present.
-                const total_pixels = png_state.header.totalPixels();
-                if (total_pixels > std.math.maxInt(usize)) {
-                    return error.ImageTooLarge;
-                }
                 var output_data = try allocator.alloc(Rgba, @intCast(total_pixels));
                 errdefer allocator.free(output_data);
 
-                for (0..height) |y| {
-                    const src_row_start = y * (scanline_bytes + 1) + 1;
-                    const dst_row_start = y * width;
-                    const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
-                    const dst_row = output_data[dst_row_start .. dst_row_start + width];
-
-                    for (dst_row, 0..) |*pixel, i| {
-                        pixel.* = extractGrayscalePixel(Rgba, src_row, i, png_state.header, png_state.transparency);
+                if (has_alpha_channel) {
+                    if (png_state.header.bit_depth == 8) {
+                        for (0..height) |y| {
+                            const src_row = decompressed[y * stride + 1 ..][0..scanline_bytes];
+                            const dst_row = output_data[y * width ..][0..width];
+                            for (dst_row, 0..) |*pixel, i| {
+                                const v = src_row[i * 2];
+                                pixel.* = .{ .r = v, .g = v, .b = v, .a = src_row[i * 2 + 1] };
+                            }
+                        }
+                    } else {
+                        for (0..height) |y| {
+                            const src_row = decompressed[y * stride + 1 ..][0..scanline_bytes];
+                            const dst_row = output_data[y * width ..][0..width];
+                            for (dst_row, 0..) |*pixel, i| {
+                                const v = src_row[i * 4];
+                                pixel.* = .{ .r = v, .g = v, .b = v, .a = src_row[i * 4 + 2] };
+                            }
+                        }
+                    }
+                } else {
+                    const trans_key: ?u16 = if (png_state.transparency) |t|
+                        if (t.len >= 2) std.mem.readInt(u16, t[0..2], .big) else null
+                    else
+                        null;
+                    switch (png_state.header.bit_depth) {
+                        8 => for (0..height) |y| {
+                            const src_row = decompressed[y * stride + 1 ..][0..scanline_bytes];
+                            const dst_row = output_data[y * width ..][0..width];
+                            for (dst_row, src_row) |*pixel, v| {
+                                const alpha: u8 = if (trans_key != null and v == trans_key.?) 0 else 255;
+                                pixel.* = .{ .r = v, .g = v, .b = v, .a = alpha };
+                            }
+                        },
+                        16 => for (0..height) |y| {
+                            const src_row = decompressed[y * stride + 1 ..][0..scanline_bytes];
+                            const dst_row = output_data[y * width ..][0..width];
+                            for (dst_row, 0..) |*pixel, i| {
+                                const raw = std.mem.readInt(u16, src_row[i * 2 ..][0..2], .big);
+                                const v: u8 = @intCast(raw >> 8);
+                                const alpha: u8 = if (trans_key != null and raw == trans_key.?) 0 else 255;
+                                pixel.* = .{ .r = v, .g = v, .b = v, .a = alpha };
+                            }
+                        },
+                        inline 1, 2, 4 => |bd| {
+                            const scale = 255 / ((1 << bd) - 1);
+                            for (0..height) |y| {
+                                const src_row = decompressed[y * stride + 1 ..][0..scanline_bytes];
+                                const dst_row = output_data[y * width ..][0..width];
+                                for (dst_row, 0..) |*pixel, i| {
+                                    const raw = packedSample(bd, src_row, i);
+                                    const v = raw * scale;
+                                    const alpha: u8 = if (trans_key != null and raw == trans_key.?) 0 else 255;
+                                    pixel.* = .{ .r = v, .g = v, .b = v, .a = alpha };
+                                }
+                            }
+                        },
+                        else => return error.InvalidBitDepth,
                     }
                 }
 
                 return .{ .rgba = .initFromSlice(height, width, output_data) };
             } else {
-                // Create grayscale image when no transparency
-                const total_pixels = png_state.header.totalPixels();
-                if (total_pixels > std.math.maxInt(usize)) {
-                    return error.ImageTooLarge;
-                }
                 var output_data = try allocator.alloc(u8, @intCast(total_pixels));
                 errdefer allocator.free(output_data);
 
-                for (0..height) |y| {
-                    const src_row_start = y * (scanline_bytes + 1) + 1;
-                    const dst_row_start = y * width;
-                    const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
-                    const dst_row = output_data[dst_row_start .. dst_row_start + width];
-
-                    for (dst_row, 0..) |*pixel, i| {
-                        pixel.* = extractGrayscalePixel(u8, src_row, i, png_state.header, null);
-                    }
+                switch (png_state.header.bit_depth) {
+                    8 => for (0..height) |y| {
+                        @memcpy(output_data[y * width ..][0..width], decompressed[y * stride + 1 ..][0..width]);
+                    },
+                    16 => for (0..height) |y| {
+                        const src_row = decompressed[y * stride + 1 ..][0..scanline_bytes];
+                        const dst_row = output_data[y * width ..][0..width];
+                        for (dst_row, 0..) |*pixel, i| {
+                            pixel.* = src_row[i * 2];
+                        }
+                    },
+                    inline 1, 2, 4 => |bd| {
+                        const scale = 255 / ((1 << bd) - 1);
+                        for (0..height) |y| {
+                            const src_row = decompressed[y * stride + 1 ..][0..scanline_bytes];
+                            const dst_row = output_data[y * width ..][0..width];
+                            for (dst_row, 0..) |*pixel, i| pixel.* = packedSample(bd, src_row, i) * scale;
+                        }
+                    },
+                    else => return error.InvalidBitDepth,
                 }
 
                 return .{ .grayscale = .initFromSlice(height, width, output_data) };
             }
         },
         .rgb => {
-            if (png_state.transparency != null) {
-                // Create RGBA image when transparency is present
-                const total_pixels = png_state.header.totalPixels();
-                if (total_pixels > std.math.maxInt(usize)) {
-                    return error.ImageTooLarge;
-                }
+            if (png_state.transparency) |trans_data| {
                 var output_data = try allocator.alloc(Rgba, @intCast(total_pixels));
                 errdefer allocator.free(output_data);
 
-                for (0..height) |y| {
-                    const src_row_start = y * (scanline_bytes + 1) + 1;
-                    const dst_row_start = y * width;
-                    const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
-                    const dst_row = output_data[dst_row_start .. dst_row_start + width];
+                const has_key = trans_data.len >= 6;
+                const key_r: u16 = if (has_key) std.mem.readInt(u16, trans_data[0..2], .big) else 0;
+                const key_g: u16 = if (has_key) std.mem.readInt(u16, trans_data[2..4], .big) else 0;
+                const key_b: u16 = if (has_key) std.mem.readInt(u16, trans_data[4..6], .big) else 0;
 
-                    for (dst_row, 0..) |*pixel, i| {
-                        pixel.* = extractRgbPixel(Rgba, src_row, i, png_state.header, png_state.transparency);
+                if (png_state.header.bit_depth == 8) {
+                    const key_in_range = has_key and key_r <= 255 and key_g <= 255 and key_b <= 255;
+                    const kr: u8 = @truncate(key_r);
+                    const kg: u8 = @truncate(key_g);
+                    const kb: u8 = @truncate(key_b);
+                    for (0..height) |y| {
+                        const src_row = decompressed[y * stride + 1 ..][0..scanline_bytes];
+                        const dst_row = output_data[y * width ..][0..width];
+                        for (dst_row, 0..) |*pixel, i| {
+                            const r = src_row[i * 3];
+                            const g = src_row[i * 3 + 1];
+                            const b = src_row[i * 3 + 2];
+                            const alpha: u8 = if (key_in_range and r == kr and g == kg and b == kb) 0 else 255;
+                            pixel.* = .{ .r = r, .g = g, .b = b, .a = alpha };
+                        }
+                    }
+                } else {
+                    for (0..height) |y| {
+                        const src_row = decompressed[y * stride + 1 ..][0..scanline_bytes];
+                        const dst_row = output_data[y * width ..][0..width];
+                        for (dst_row, 0..) |*pixel, i| {
+                            const off = i * 6;
+                            const rr = std.mem.readInt(u16, src_row[off..][0..2], .big);
+                            const rg = std.mem.readInt(u16, src_row[off + 2 ..][0..2], .big);
+                            const rb = std.mem.readInt(u16, src_row[off + 4 ..][0..2], .big);
+                            const alpha: u8 = if (has_key and rr == key_r and rg == key_g and rb == key_b) 0 else 255;
+                            pixel.* = .{ .r = @intCast(rr >> 8), .g = @intCast(rg >> 8), .b = @intCast(rb >> 8), .a = alpha };
+                        }
                     }
                 }
 
                 return .{ .rgba = .initFromSlice(height, width, output_data) };
             } else {
-                // Create RGB image when no transparency
-                const total_pixels = png_state.header.totalPixels();
-                if (total_pixels > std.math.maxInt(usize)) {
-                    return error.ImageTooLarge;
-                }
                 var output_data = try allocator.alloc(Rgb, @intCast(total_pixels));
                 errdefer allocator.free(output_data);
 
                 if (png_state.header.bit_depth == 8) {
-                    // Optimized path for 8-bit RGB
+                    comptime std.debug.assert(@sizeOf(Rgb) == 3 and @offsetOf(Rgb, "r") == 0 and @offsetOf(Rgb, "g") == 1 and @offsetOf(Rgb, "b") == 2);
+                    const dst_bytes = std.mem.sliceAsBytes(output_data);
                     for (0..height) |y| {
-                        const src_row_start = y * (scanline_bytes + 1) + 1;
-                        const dst_row_start = y * width;
-                        const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
-                        const dst_row = output_data[dst_row_start .. dst_row_start + width];
-
-                        for (dst_row, 0..) |*pixel, i| {
-                            const offset = i * 3;
-                            if (offset + 3 <= src_row.len) {
-                                pixel.* = .{ .r = src_row[offset], .g = src_row[offset + 1], .b = src_row[offset + 2] };
-                            } else {
-                                pixel.* = .{ .r = 0, .g = 0, .b = 0 };
-                            }
-                        }
+                        @memcpy(dst_bytes[y * scanline_bytes ..][0..scanline_bytes], decompressed[y * stride + 1 ..][0..scanline_bytes]);
                     }
                 } else {
-                    // Generic path (e.g., 16-bit)
                     for (0..height) |y| {
-                        const src_row_start = y * (scanline_bytes + 1) + 1;
-                        const dst_row_start = y * width;
-                        const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
-                        const dst_row = output_data[dst_row_start .. dst_row_start + width];
-
+                        const src_row = decompressed[y * stride + 1 ..][0..scanline_bytes];
+                        const dst_row = output_data[y * width ..][0..width];
                         for (dst_row, 0..) |*pixel, i| {
-                            pixel.* = extractRgbPixel(Rgb, src_row, i, png_state.header, null);
+                            const off = i * 6;
+                            pixel.* = .{ .r = src_row[off], .g = src_row[off + 2], .b = src_row[off + 4] };
                         }
                     }
                 }
@@ -990,52 +1047,22 @@ pub fn toAnyImage(allocator: Allocator, png_state: *PngState) !AnyImage {
             }
         },
         .rgba => {
-            // Create RGBA image
-            const total_pixels = png_state.header.totalPixels();
-            if (total_pixels > std.math.maxInt(usize)) {
-                return error.ImageTooLarge;
-            }
             var output_data = try allocator.alloc(Rgba, @intCast(total_pixels));
             errdefer allocator.free(output_data);
 
             if (png_state.header.bit_depth == 8) {
-                // Optimized path for 8-bit RGBA
+                comptime std.debug.assert(@sizeOf(Rgba) == 4 and @offsetOf(Rgba, "r") == 0 and @offsetOf(Rgba, "g") == 1 and @offsetOf(Rgba, "b") == 2 and @offsetOf(Rgba, "a") == 3);
+                const dst_bytes = std.mem.sliceAsBytes(output_data);
                 for (0..height) |y| {
-                    const src_row_start = y * (scanline_bytes + 1) + 1;
-                    const dst_row_start = y * width;
-                    const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
-                    const dst_row = output_data[dst_row_start .. dst_row_start + width];
-
-                    for (dst_row, 0..) |*pixel, i| {
-                        const offset = i * 4;
-                        if (offset + 4 <= src_row.len) {
-                            pixel.* = .{ .r = src_row[offset], .g = src_row[offset + 1], .b = src_row[offset + 2], .a = src_row[offset + 3] };
-                        } else {
-                            pixel.* = .{ .r = 0, .g = 0, .b = 0, .a = 255 };
-                        }
-                    }
+                    @memcpy(dst_bytes[y * scanline_bytes ..][0..scanline_bytes], decompressed[y * stride + 1 ..][0..scanline_bytes]);
                 }
             } else {
-                // Generic/16-bit path
                 for (0..height) |y| {
-                    const src_row_start = y * (scanline_bytes + 1) + 1;
-                    const dst_row_start = y * width;
-                    const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
-                    const dst_row = output_data[dst_row_start .. dst_row_start + width];
-
+                    const src_row = decompressed[y * stride + 1 ..][0..scanline_bytes];
+                    const dst_row = output_data[y * width ..][0..width];
                     for (dst_row, 0..) |*pixel, i| {
-                        // 16-bit to 8-bit conversion
-                        const offset = i * 8;
-                        if (offset + 8 > src_row.len) {
-                            pixel.* = .{ .r = 0, .g = 0, .b = 0, .a = 255 };
-                        } else {
-                            pixel.* = .{
-                                .r = @intCast(std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big) >> 8),
-                                .g = @intCast(std.mem.readInt(u16, src_row[offset + 2 .. offset + 4][0..2], .big) >> 8),
-                                .b = @intCast(std.mem.readInt(u16, src_row[offset + 4 .. offset + 6][0..2], .big) >> 8),
-                                .a = @intCast(std.mem.readInt(u16, src_row[offset + 6 .. offset + 8][0..2], .big) >> 8),
-                            };
-                        }
+                        const off = i * 8;
+                        pixel.* = .{ .r = src_row[off], .g = src_row[off + 2], .b = src_row[off + 4], .a = src_row[off + 6] };
                     }
                 }
             }
@@ -1043,98 +1070,47 @@ pub fn toAnyImage(allocator: Allocator, png_state: *PngState) !AnyImage {
             return .{ .rgba = .initFromSlice(height, width, output_data) };
         },
         .palette => {
-            // Convert palette to RGB or RGBA (if transparency present)
-            if (png_state.palette == null) return error.MissingPalette;
-            const palette = png_state.palette.?;
-            const transparency = png_state.transparency;
-
-            const total_pixels = png_state.header.totalPixels();
-            if (total_pixels > std.math.maxInt(usize)) {
-                return error.ImageTooLarge;
-            }
-
-            if (transparency != null) {
-                // Has transparency - convert to RGBA
-                var output_data = try allocator.alloc(Rgba, @intCast(total_pixels));
-                errdefer allocator.free(output_data);
-                const transparency_data = transparency.?;
-
-                for (0..height) |y| {
-                    const src_row_start = y * (scanline_bytes + 1) + 1;
-                    const dst_row_start = y * width;
-                    const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
-                    const dst_row = output_data[dst_row_start .. dst_row_start + width];
-
-                    for (dst_row, 0..) |*pixel, i| {
-                        const index = switch (png_state.header.bit_depth) {
-                            8 => blk: {
-                                if (i >= src_row.len) return error.InvalidScanlineData;
-                                break :blk src_row[i];
-                            },
-                            1, 2, 4 => blk: {
-                                const bits_per_pixel = png_state.header.bit_depth;
-                                const pixels_per_byte = 8 / bits_per_pixel;
-                                const mask: u8 = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
-                                const byte_idx = i / pixels_per_byte;
-                                if (byte_idx >= src_row.len) return error.InvalidScanlineData;
-                                const pixel_idx = i % pixels_per_byte;
-                                const bit_offset: u3 = @intCast((pixels_per_byte - 1 - pixel_idx) * bits_per_pixel);
-                                break :blk (src_row[byte_idx] >> bit_offset) & mask;
-                            },
-                            else => return error.InvalidBitDepth,
-                        };
-
-                        if (index >= palette.len) return error.InvalidPaletteIndex;
-                        const rgb = palette[index];
-
-                        // Get alpha value from transparency chunk (default to opaque if not present)
-                        const alpha = if (index < transparency_data.len) transparency_data[index] else 255;
-
-                        pixel.* = .{ .r = rgb[0], .g = rgb[1], .b = rgb[2], .a = alpha };
-                    }
+            const palette = png_state.palette orelse return error.MissingPalette;
+            if (png_state.transparency) |trns| {
+                var lut: [256]Rgba = undefined;
+                for (palette, 0..) |rgb, i| {
+                    lut[i] = .{ .r = rgb[0], .g = rgb[1], .b = rgb[2], .a = if (i < trns.len) trns[i] else 255 };
                 }
-
-                return .{ .rgba = .initFromSlice(height, width, output_data) };
-            } else {
-                // No transparency - convert to RGB
-                var output_data = try allocator.alloc(Rgb, @intCast(total_pixels));
-                errdefer allocator.free(output_data);
-
-                for (0..height) |y| {
-                    const src_row_start = y * (scanline_bytes + 1) + 1;
-                    const dst_row_start = y * width;
-                    const src_row = decompressed[src_row_start .. src_row_start + scanline_bytes];
-                    const dst_row = output_data[dst_row_start .. dst_row_start + width];
-
-                    for (dst_row, 0..) |*pixel, i| {
-                        const index = switch (png_state.header.bit_depth) {
-                            8 => blk: {
-                                if (i >= src_row.len) return error.InvalidScanlineData;
-                                break :blk src_row[i];
-                            },
-                            1, 2, 4 => blk: {
-                                const bits_per_pixel = png_state.header.bit_depth;
-                                const pixels_per_byte = 8 / bits_per_pixel;
-                                const mask: u8 = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
-                                const byte_idx = i / pixels_per_byte;
-                                if (byte_idx >= src_row.len) return error.InvalidScanlineData;
-                                const pixel_idx = i % pixels_per_byte;
-                                const bit_offset: u3 = @intCast((pixels_per_byte - 1 - pixel_idx) * bits_per_pixel);
-                                break :blk (src_row[byte_idx] >> bit_offset) & mask;
-                            },
-                            else => return error.InvalidBitDepth,
-                        };
-
-                        if (index >= palette.len) return error.InvalidPaletteIndex;
-                        const rgb = palette[index];
-                        pixel.* = .{ .r = rgb[0], .g = rgb[1], .b = rgb[2] };
-                    }
-                }
-
-                return .{ .rgb = .initFromSlice(height, width, output_data) };
+                return .{ .rgba = try expandPalette(Rgba, allocator, &lut, palette.len, decompressed, png_state.header) };
             }
+            var lut: [256]Rgb = undefined;
+            for (palette, 0..) |rgb, i| lut[i] = .{ .r = rgb[0], .g = rgb[1], .b = rgb[2] };
+            return .{ .rgb = try expandPalette(Rgb, allocator, &lut, palette.len, decompressed, png_state.header) };
         },
     }
+}
+
+/// Sample `i` of a row packed at `bd` bits per sample, most significant bits first.
+inline fn packedSample(comptime bd: u8, row: []const u8, i: usize) u8 {
+    if (bd == 8) return row[i];
+    const per_byte = 8 / bd;
+    const shift: u3 = @intCast((per_byte - 1 - i % per_byte) * bd);
+    return (row[i / per_byte] >> shift) & ((1 << bd) - 1);
+}
+
+/// Maps the palette indices of non-interlaced scanlines through `lut`.
+fn expandPalette(comptime P: type, allocator: Allocator, lut: *const [256]P, palette_len: usize, decompressed: []const u8, header: Header) !Image(P) {
+    const width: usize = header.width;
+    const scanline_bytes = header.scanlineBytes();
+    const output_data = try allocator.alloc(P, @intCast(header.totalPixels()));
+    errdefer allocator.free(output_data);
+    switch (header.bit_depth) {
+        inline 1, 2, 4, 8 => |bd| for (0..header.height) |y| {
+            const src_row = decompressed[y * (scanline_bytes + 1) + 1 ..][0..scanline_bytes];
+            for (output_data[y * width ..][0..width], 0..) |*pixel, i| {
+                const index = packedSample(bd, src_row, i);
+                if (index >= palette_len) return error.InvalidPaletteIndex;
+                pixel.* = lut[index];
+            }
+        },
+        else => return error.InvalidBitDepth,
+    }
+    return .initFromSlice(header.height, header.width, output_data);
 }
 
 // High-level API functions
@@ -1889,18 +1865,10 @@ fn extractGrayscalePixel(comptime T: type, src_row: []const u8, pass_x: usize, h
             raw_sample = std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big);
             break :blk @intCast(raw_sample >> 8);
         },
-        1, 2, 4 => blk: {
-            const bits_per_pixel = header.bit_depth;
-            const pixels_per_byte = 8 / bits_per_pixel;
-            const mask: u8 = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
-            const byte_idx = pass_x / pixels_per_byte;
-            if (byte_idx >= src_row.len) break :blk 0;
-            const pixel_idx = pass_x % pixels_per_byte;
-            const bit_offset: u3 = @intCast((pixels_per_byte - 1 - pixel_idx) * bits_per_pixel);
-            const pixel_val = (src_row[byte_idx] >> bit_offset) & mask;
+        inline 1, 2, 4 => |bd| blk: {
+            const pixel_val = packedSample(bd, src_row, pass_x);
             raw_sample = pixel_val;
-            const scale_factor = 255 / mask;
-            break :blk pixel_val * scale_factor;
+            break :blk pixel_val * (255 / ((1 << bd) - 1));
         },
         else => 0,
     };
@@ -2012,20 +1980,7 @@ fn extractPalettePixel(
     transparency: ?[]const u8,
 ) !T {
     const index = switch (header.bit_depth) {
-        8 => blk: {
-            if (pass_x >= src_row.len) break :blk 0;
-            break :blk src_row[pass_x];
-        },
-        1, 2, 4 => blk: {
-            const bits_per_pixel = header.bit_depth;
-            const pixels_per_byte = 8 / bits_per_pixel;
-            const mask = (@as(u8, 1) << @intCast(bits_per_pixel)) - 1;
-            const byte_idx = pass_x / pixels_per_byte;
-            if (byte_idx >= src_row.len) break :blk 0;
-            const pixel_idx = pass_x % pixels_per_byte;
-            const bit_offset: u3 = @intCast((pixels_per_byte - 1 - pixel_idx) * bits_per_pixel);
-            break :blk (src_row[byte_idx] >> bit_offset) & mask;
-        },
+        inline 1, 2, 4, 8 => |bd| packedSample(bd, src_row, pass_x),
         else => 0,
     };
 
