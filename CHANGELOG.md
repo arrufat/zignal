@@ -6,6 +6,10 @@
 - **Porter-Duff compositing**: `Compositing` operators (`src_over`, `src_in`, `dst_out`, `src_atop`, `xor`, `plus` and the rest) decide which parts of each layer survive, through `Rgba.composite` and `Image.composite`, also in Python. `Image.blend` now lives in the core for any pixel type, and Python `Rgba.blend` accepts any color or tuple as its overlay. ([#522](https://github.com/arrufat/zignal/pull/522))
 - **Examples**: a blending and compositing playground with every blend mode and operator side by side, their formulas and a pixel inspector. ([#522](https://github.com/arrufat/zignal/pull/522))
 
+### Fixes
+- **PNG decoding**: interlaced grayscale+alpha keeps its alpha, 16-bit RGB tRNS matches the full sample instead of the high byte, interlaced palette images reject out-of-range indices, and `getInfo` validates IHDR, enforces `DecodeLimits` and no longer loses sync on streaming readers. Empty PLTE, unknown critical chunks and chunk lengths above 2³¹−1 are rejected, while duplicate gAMA/sRGB/iCCP keep the first, as libpng does. ([#528](https://github.com/arrufat/zignal/pull/528))
+- **PNG encoding**: zero-sized images return `error.InvalidDimensions` instead of panicking, and a negative, non-finite or oversized `gamma` returns `error.InvalidGamma`. ([#528](https://github.com/arrufat/zignal/pull/528))
+
 ### Tooling
 - **Faster tests**: the slowest tests sample colors and use the smallest images that still split into bands, cutting the Debug suite from 34 s to 23 s. ([#519](https://github.com/arrufat/zignal/pull/519), [#520](https://github.com/arrufat/zignal/pull/520))
 
