@@ -1532,8 +1532,54 @@ fn defilterAverage(comptime bpp: usize, current_row: []u8, previous_row: ?[]cons
     }
 }
 
-// Stays scalar: vector @select chains measured 3.5x slower than the branchless predictor.
+// 3- and 4-byte pixels run one pixel per 4-lane vector, carrying `a` and `c` in registers;
+// wide @select chains measured 3.5x slower, and other widths stay scalar.
 fn defilterPaeth(comptime bpp: usize, current_row: []u8, prev: []const u8) void {
+    if (bpp == 3 or bpp == 4) {
+        const Vu8 = @Vector(4, u8);
+        const Vi16 = @Vector(4, i16);
+        const mask_ff: Vi16 = @splat(0xff);
+
+        // First pixel: Paeth(0, above, 0) reduces to above.
+        for (0..bpp) |j| {
+            current_row[j] +%= prev[j];
+        }
+        if (current_row.len <= bpp) return;
+
+        var a_bytes: [4]u8 = .{ 0, 0, 0, 0 };
+        var c_bytes: [4]u8 = .{ 0, 0, 0, 0 };
+        @memcpy(a_bytes[0..bpp], current_row[0..bpp]);
+        @memcpy(c_bytes[0..bpp], prev[0..bpp]);
+        var a: Vi16 = @as(Vu8, a_bytes);
+        var c: Vi16 = @as(Vu8, c_bytes);
+
+        var i: usize = bpp;
+        while (i + 4 <= current_row.len) : (i += bpp) {
+            const b: Vi16 = @as(Vu8, prev[i..][0..4].*);
+            const raw: Vi16 = @as(Vu8, current_row[i..][0..4].*);
+            const d1 = b - c;
+            const d2 = a - c;
+            const pa = @abs(d1);
+            const pb = @abs(d2);
+            const pc = @abs(d1 + d2);
+            const m = @min(pa, @min(pb, pc));
+            const pred = @select(i16, m == pa, a, @select(i16, m == pb, b, c));
+            const cur = (raw + pred) & mask_ff;
+            const cur_u8: [4]u8 = meta.narrowToBytes(cur);
+            if (bpp == 4) {
+                current_row[i..][0..4].* = cur_u8;
+            } else {
+                current_row[i..][0..3].* = cur_u8[0..3].*;
+            }
+            a = cur;
+            c = b;
+        }
+        while (i < current_row.len) : (i += 1) {
+            current_row[i] +%= paethPredictor(current_row[i - bpp], prev[i], prev[i - bpp]);
+        }
+        return;
+    }
+
     // First pixel: Paeth(0, above, 0) reduces to above.
     for (0..bpp) |i| {
         current_row[i] +%= prev[i];
@@ -2473,6 +2519,31 @@ test "paethPredictor: picks the closest neighbor" {
     try std.testing.expectEqual(@as(u8, 15), paethPredictor(10, 20, 15)); // p=15, pa=5, pb=5, pc=0 -> c=15
     try std.testing.expectEqual(@as(u8, 5), paethPredictor(5, 20, 15)); // p=10, pa=5, pb=10, pc=5 -> a=5
     try std.testing.expectEqual(@as(u8, 10), paethPredictor(10, 5, 6)); // p=9, pa=1, pb=4, pc=3 -> a=10
+}
+
+test "defilterPaeth: vector path matches the scalar predictor" {
+    var prng = std.Random.DefaultPrng.init(0x9ae7);
+    const random = prng.random();
+    inline for (.{ 3, 4 }) |bpp| {
+        for (1..18) |pixels| {
+            var prev: [17 * 4]u8 = undefined;
+            var row: [17 * 4]u8 = undefined;
+            var expected: [17 * 4]u8 = undefined;
+            const len = pixels * bpp;
+            // Values in 0..3 force ties between pa, pb and pc; full-range rows cover wrapping.
+            const max: u8 = if (pixels % 2 == 0) 3 else 255;
+            for (prev[0..len], row[0..len]) |*p, *c| {
+                p.* = random.intRangeAtMost(u8, 0, max);
+                c.* = random.intRangeAtMost(u8, 0, max);
+            }
+            @memcpy(expected[0..len], row[0..len]);
+            for (0..bpp) |i| expected[i] +%= prev[i];
+            for (bpp..len) |i| expected[i] +%= paethPredictor(expected[i - bpp], prev[i], prev[i - bpp]);
+
+            defilterPaeth(bpp, row[0..len], prev[0..len]);
+            try std.testing.expectEqualSlices(u8, expected[0..len], row[0..len]);
+        }
+    }
 }
 
 test "encode: round-trips through decode" {
