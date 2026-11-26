@@ -7,6 +7,11 @@
 - **Examples**: a blending and compositing playground with every blend mode and operator side by side, their formulas and a pixel inspector. ([#522](https://github.com/arrufat/zignal/pull/522))
 - **Contrast**: `Rgb.apcaContrast` gives the signed APCA lightness contrast (Lc) of text on a background, and `wcagContrast` the WCAG 2 ratio from 1 to 21; both ignore alpha and are in Python as `apca_contrast` and `wcag_contrast`. ([#527](https://github.com/arrufat/zignal/pull/527))
 
+### Performance
+- **PNG encoding**: the row filters and their cost run on vectors and adaptive mode keeps the winning row instead of filtering it twice, 1.09–1.54x faster with identical output. ([#529](https://github.com/arrufat/zignal/pull/529))
+- **PNG decoding**: pixels convert a row at a time per format, and 3- and 4-byte Paeth rows defilter a pixel per vector: 1.09–1.12x on RGB and RGBA, 1.9x on 4-bit gray. ([#530](https://github.com/arrufat/zignal/pull/530), [#532](https://github.com/arrufat/zignal/pull/532))
+- **PNG memory**: views encode without a contiguous copy, and 8-bit gray and RGB loads adopt the decode buffer, cutting peak memory for a 1024² RGB load from 8.1 to 5.0 MB. ([#531](https://github.com/arrufat/zignal/pull/531), [#533](https://github.com/arrufat/zignal/pull/533))
+
 ### Fixes
 - **PNG decoding**: interlaced grayscale+alpha keeps its alpha, 16-bit RGB tRNS matches the full sample instead of the high byte, interlaced palette images reject out-of-range indices, and `getInfo` validates IHDR, enforces `DecodeLimits` and no longer loses sync on streaming readers. Empty PLTE, unknown critical chunks and chunk lengths above 2³¹−1 are rejected, while duplicate gAMA/sRGB/iCCP keep the first, as libpng does. ([#528](https://github.com/arrufat/zignal/pull/528))
 - **PNG encoding**: zero-sized images return `error.InvalidDimensions` instead of panicking, and a negative, non-finite or oversized `gamma` returns `error.InvalidGamma`. ([#528](https://github.com/arrufat/zignal/pull/528))
