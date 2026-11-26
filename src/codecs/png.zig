@@ -1893,35 +1893,20 @@ fn extractRgbPixel(comptime T: type, src_row: []const u8, pass_x: usize, header:
         };
     }
 
-    const r: u8 = if (header.is16Bit())
-        @intCast(std.mem.readInt(u16, src_row[offset .. offset + 2][0..2], .big) >> 8)
-    else
-        src_row[offset];
-    const g: u8 = if (header.is16Bit())
-        @intCast(std.mem.readInt(u16, src_row[offset + channel_stride .. offset + channel_stride + 2][0..2], .big) >> 8)
-    else
-        src_row[offset + channel_stride];
-    const b: u8 = if (header.is16Bit())
-        @intCast(std.mem.readInt(u16, src_row[offset + channel_stride * 2 .. offset + channel_stride * 2 + 2][0..2], .big) >> 8)
-    else
-        src_row[offset + channel_stride * 2];
+    // Big-endian samples: the first byte is the 8-bit rendering of a 16-bit sample.
+    const r = src_row[offset];
+    const g = src_row[offset + channel_stride];
+    const b = src_row[offset + channel_stride * 2];
 
-    // Check for transparency
+    // tRNS holds the samples unscaled, so compare at the image's bit depth.
     const is_transparent = if (transparency) |trans_data| blk: {
         if (header.color_type == .rgb and trans_data.len >= 6) {
-            const trans_r: u8 = if (header.is16Bit())
-                @intCast(std.mem.readInt(u16, trans_data[0..2], .big) >> 8)
-            else
-                trans_data[1]; // Use lower byte for 8-bit
-            const trans_g: u8 = if (header.is16Bit())
-                @intCast(std.mem.readInt(u16, trans_data[2..4], .big) >> 8)
-            else
-                trans_data[3];
-            const trans_b: u8 = if (header.is16Bit())
-                @intCast(std.mem.readInt(u16, trans_data[4..6], .big) >> 8)
-            else
-                trans_data[5];
-            break :blk r == trans_r and g == trans_g and b == trans_b;
+            for (0..3) |c| {
+                const at = offset + c * channel_stride;
+                const sample: u16 = if (header.is16Bit()) std.mem.readInt(u16, src_row[at..][0..2], .big) else src_row[at];
+                if (sample != std.mem.readInt(u16, trans_data[c * 2 ..][0..2], .big)) break :blk false;
+            }
+            break :blk true;
         }
         break :blk false;
     } else false;
@@ -3471,4 +3456,22 @@ test "toAnyImage: interlaced grayscale-alpha preserves alpha" {
         .rgba => |img| try std.testing.expectEqual(Rgba{ .r = 128, .g = 128, .b = 128, .a = 64 }, img.at(0, 0).*),
         else => return error.TestUnexpectedResult,
     }
+}
+
+test "extractRgbPixel: tRNS matches raw 16-bit and 8-bit samples" {
+    // 16-bit: (0x1234, 0x5678, 0x9ABC) is transparent; same high bytes with different low bytes are not.
+    const h16: Header = .{ .width = 2, .height = 1, .bit_depth = 16, .color_type = .rgb };
+    const row16 = [_]u8{
+        0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
+        0x12, 0x00, 0x56, 0x78, 0x9A, 0xBC,
+    };
+    const trns16: []const u8 = &.{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC };
+    try std.testing.expectEqual(@as(u8, 0), extractRgbPixel(Rgba, &row16, 0, h16, trns16).a);
+    try std.testing.expectEqual(@as(u8, 255), extractRgbPixel(Rgba, &row16, 1, h16, trns16).a);
+
+    // 8-bit: a tRNS key with a non-zero high byte (0x01FF) must not match 8-bit sample 0xFF.
+    const h8: Header = .{ .width = 1, .height = 1, .bit_depth = 8, .color_type = .rgb };
+    const row8 = [_]u8{ 0xFF, 0x00, 0x00 };
+    const trns_high: []const u8 = &.{ 0x01, 0xFF, 0x00, 0x00, 0x00, 0x00 };
+    try std.testing.expectEqual(@as(u8, 255), extractRgbPixel(Rgba, &row8, 0, h8, trns_high).a);
 }
