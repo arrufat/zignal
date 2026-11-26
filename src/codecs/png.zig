@@ -7,6 +7,7 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const flate = std.compress.flate;
 const Io = std.Io;
+const meta = @import("../meta.zig");
 const parallel = @import("../parallel.zig");
 
 const convertColor = @import("../color.zig").convertColor;
@@ -1229,17 +1230,24 @@ fn filterRows(filtered: []u8, data: []const u8, header: Header, mode: FilterMode
         const dst_row = filtered[(y - r0) * (scanline_bytes + 1) + 1 ..][0..scanline_bytes];
         const previous_row: ?[]const u8 = if (y > 0) data[(y - 1) * scanline_bytes ..][0..scanline_bytes] else null;
         const filter: FilterType = switch (mode) {
-            .none => .none,
-            .fixed => |fixed| fixed,
+            .none => blk: {
+                filterRow(.none, dst_row, src_row, previous_row, bytes_per_pixel);
+                break :blk .none;
+            },
+            .fixed => |fixed| blk: {
+                filterRow(fixed, dst_row, src_row, previous_row, bytes_per_pixel);
+                break :blk fixed;
+            },
             .adaptive => blk: {
                 if (y % sample_rate == 0 or y < 3 or y + 3 >= header.height) {
-                    last = selectBestFilter(src_row, previous_row, bytes_per_pixel, temp);
+                    last = selectAndApplyBestFilter(dst_row, src_row, previous_row, bytes_per_pixel, temp);
+                } else {
+                    filterRow(last, dst_row, src_row, previous_row, bytes_per_pixel);
                 }
                 break :blk last;
             },
         };
         filtered[(y - r0) * (scanline_bytes + 1)] = @backingInt(filter);
-        filterRow(filter, dst_row, src_row, previous_row, bytes_per_pixel);
     }
 }
 
@@ -1336,8 +1344,11 @@ fn writeIdat(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8,
             const rb = hdr.scanlineBytes() + 1;
             const window = try ctx.gpa.alloc(u8, flate.max_window_len);
             defer ctx.gpa.free(window);
-            const temp = try ctx.gpa.alloc(u8, hdr.scanlineBytes());
-            defer ctx.gpa.free(temp);
+            const temp: []u8 = if (ctx.options.filter == .adaptive)
+                try ctx.gpa.alloc(u8, hdr.scanlineBytes())
+            else
+                &.{};
+            defer if (ctx.options.filter == .adaptive) ctx.gpa.free(temp);
             const filtered = try ctx.gpa.alloc(u8, ctx.rows_per_chunk * rb);
             defer ctx.gpa.free(filtered);
             for (c0..c1) |chunk| {
@@ -1564,23 +1575,30 @@ fn filterRow(
     previous_row: ?[]const u8,
     bytes_per_pixel: u8,
 ) void {
+    const vec_len = comptime std.simd.suggestVectorLength(u8) orelse 16;
+    const V = @Vector(vec_len, u8);
     switch (filter_type) {
         .none => {
             @memcpy(current_row, original_row);
         },
         .sub => {
-            // Subtract the byte to the left
             const bpp = bytes_per_pixel;
             @memcpy(current_row[0..bpp], original_row[0..bpp]);
-            for (current_row[bpp..], original_row[bpp..], 0..) |*filtered, orig, i| {
-                const left = original_row[i]; // i starts at 0, which corresponds to index 'bpp' in original_row. So left is at index i (original_row[bpp+i - bpp])
-                filtered.* = orig -% left;
+            var i: usize = bpp;
+            while (i + vec_len <= original_row.len) : (i += vec_len) {
+                current_row[i..][0..vec_len].* = @as(V, original_row[i..][0..vec_len].*) -% @as(V, original_row[i - bpp ..][0..vec_len].*);
+            }
+            while (i < original_row.len) : (i += 1) {
+                current_row[i] = original_row[i] -% original_row[i - bpp];
             }
         },
         .up => {
-            // Subtract the byte above
             if (previous_row) |prev| {
-                for (current_row, original_row, prev) |*filtered, orig, above| {
+                var i: usize = 0;
+                while (i + vec_len <= original_row.len) : (i += vec_len) {
+                    current_row[i..][0..vec_len].* = @as(V, original_row[i..][0..vec_len].*) -% @as(V, prev[i..][0..vec_len].*);
+                }
+                for (current_row[i..], original_row[i..], prev[i..]) |*filtered, orig, above| {
                     filtered.* = orig -% above;
                 }
             } else {
@@ -1589,52 +1607,70 @@ fn filterRow(
         },
         .average => {
             const bpp = bytes_per_pixel;
+            const one: V = @splat(1);
             if (previous_row) |prev| {
-                // First pixel (no left neighbor)
                 for (0..bpp) |i| {
-                    const above = prev[i];
-                    const avg = above / 2;
-                    current_row[i] = original_row[i] -% avg;
+                    current_row[i] = original_row[i] -% (prev[i] >> 1);
                 }
-                // Remaining pixels
-                for (bpp..original_row.len) |i| {
+                var i: usize = bpp;
+                while (i + vec_len <= original_row.len) : (i += vec_len) {
+                    const left: V = original_row[i - bpp ..][0..vec_len].*;
+                    const above: V = prev[i..][0..vec_len].*;
+                    const avg = (left & above) +% ((left ^ above) >> one);
+                    current_row[i..][0..vec_len].* = @as(V, original_row[i..][0..vec_len].*) -% avg;
+                }
+                while (i < original_row.len) : (i += 1) {
                     const left = original_row[i - bpp];
                     const above = prev[i];
-                    const avg: u8 = @intCast((@as(u16, left) + above) / 2);
+                    const avg = (left & above) +% ((left ^ above) >> 1);
                     current_row[i] = original_row[i] -% avg;
                 }
             } else {
-                // First row (no above neighbor)
                 @memcpy(current_row[0..bpp], original_row[0..bpp]);
-                for (bpp..original_row.len) |i| {
-                    const left = original_row[i - bpp];
-                    const avg = left / 2;
-                    current_row[i] = original_row[i] -% avg;
+                var i: usize = bpp;
+                while (i + vec_len <= original_row.len) : (i += vec_len) {
+                    const left: V = original_row[i - bpp ..][0..vec_len].*;
+                    current_row[i..][0..vec_len].* = @as(V, original_row[i..][0..vec_len].*) -% (left >> one);
+                }
+                while (i < original_row.len) : (i += 1) {
+                    current_row[i] = original_row[i] -% (original_row[i - bpp] >> 1);
                 }
             }
         },
         .paeth => {
             const bpp = bytes_per_pixel;
             if (previous_row) |prev| {
-                // First pixel (no left neighbor) -> Paeth(0, above, 0) = above
                 for (0..bpp) |i| {
-                    const above = prev[i];
-                    current_row[i] = original_row[i] -% above;
+                    current_row[i] = original_row[i] -% prev[i];
                 }
-                // Remaining pixels
-                for (bpp..original_row.len) |i| {
-                    const left = original_row[i - bpp];
-                    const above = prev[i];
-                    const upper_left = prev[i - bpp];
-                    const paeth = paethPredictor(left, above, upper_left);
-                    current_row[i] = original_row[i] -% paeth;
+                const pvec_len = comptime std.simd.suggestVectorLength(i16) orelse 8;
+                const Vu8 = @Vector(pvec_len, u8);
+                const Vi16 = @Vector(pvec_len, i16);
+                const two: Vi16 = @splat(2);
+                var i: usize = bpp;
+                while (i + pvec_len <= original_row.len) : (i += pvec_len) {
+                    const a: Vi16 = @as(Vu8, original_row[i - bpp ..][0..pvec_len].*);
+                    const b: Vi16 = @as(Vu8, prev[i..][0..pvec_len].*);
+                    const c: Vi16 = @as(Vu8, prev[i - bpp ..][0..pvec_len].*);
+                    const pa = @abs(b - c);
+                    const pb = @abs(a - c);
+                    const pc = @abs(a + b - two * c);
+                    const bc = @select(i16, pb <= pc, b, c);
+                    const pred_i16 = @select(i16, pa <= pb, @select(i16, pa <= pc, a, bc), bc);
+                    const pred = meta.narrowToBytes(pred_i16);
+                    current_row[i..][0..pvec_len].* = @as(Vu8, original_row[i..][0..pvec_len].*) -% pred;
+                }
+                while (i < original_row.len) : (i += 1) {
+                    current_row[i] = original_row[i] -% paethPredictor(original_row[i - bpp], prev[i], prev[i - bpp]);
                 }
             } else {
-                // First row (no above) -> Paeth(Left, 0, 0) = Left
                 @memcpy(current_row[0..bpp], original_row[0..bpp]);
-                for (bpp..original_row.len) |i| {
-                    const left = original_row[i - bpp];
-                    current_row[i] = original_row[i] -% left;
+                var i: usize = bpp;
+                while (i + vec_len <= original_row.len) : (i += vec_len) {
+                    current_row[i..][0..vec_len].* = @as(V, original_row[i..][0..vec_len].*) -% @as(V, original_row[i - bpp ..][0..vec_len].*);
+                }
+                while (i < original_row.len) : (i += 1) {
+                    current_row[i] = original_row[i] -% original_row[i - bpp];
                 }
             }
         },
@@ -1643,42 +1679,54 @@ fn filterRow(
 
 /// Calculate cost for filtered data using the standard PNG heuristic:
 /// sum of absolute values of the signed filter bytes. Lower is better.
-fn calculateFilterCost(filtered_data: []const u8) u32 {
-    var cost: u32 = 0;
-    // Interpret bytes as signed 8-bit deltas; accumulate absolute value safely
-    // Cast to wider type before abs to handle -128 correctly.
-    for (filtered_data) |b| {
+fn calculateFilterCost(filtered_data: []const u8) u64 {
+    const vec_len = comptime std.simd.suggestVectorLength(u8) orelse 16;
+    const Vu8 = @Vector(vec_len, u8);
+    const Vi8 = @Vector(vec_len, i8);
+    const Vu32 = @Vector(vec_len, u32);
+    var acc: Vu32 = @splat(0);
+    var i: usize = 0;
+    while (i + vec_len <= filtered_data.len) : (i += vec_len) {
+        const sb: Vi8 = @bitCast(@as(Vu8, filtered_data[i..][0..vec_len].*));
+        acc += @as(Vu32, @abs(sb));
+    }
+    var cost: u64 = @reduce(.Add, acc);
+    for (filtered_data[i..]) |b| {
         const sb: i8 = @bitCast(b);
-        const wide: i16 = sb;
-        cost += @intCast(@abs(wide));
+        cost += @abs(sb);
     }
     return cost;
 }
 
-/// Selects the best filter type for a scanline.
-fn selectBestFilter(
+/// Selects the best filter type for a scanline and writes the filtered bytes to `dst_row`.
+fn selectAndApplyBestFilter(
+    dst_row: []u8,
     src_row: []const u8,
     previous_row: ?[]const u8,
     bytes_per_pixel: u8,
     temp_buffer: []u8,
 ) FilterType {
-    var best_filter = FilterType.none;
-    var best_cost: u32 = std.math.maxInt(u32);
+    var best_filter: FilterType = .none;
+    var best_cost = calculateFilterCost(src_row);
 
-    const filters = [_]FilterType{ .none, .sub, .up, .average, .paeth };
-    for (filters) |filter| {
-        // Skip filters that reference a previous row if none exists
-        const invalid_for_first_row = (previous_row == null and (filter == .up or filter == .average or filter == .paeth));
-        if (invalid_for_first_row) continue;
+    const candidates = if (previous_row != null)
+        &[_]FilterType{ .sub, .up, .average, .paeth }
+    else
+        &[_]FilterType{.sub};
 
+    for (candidates) |filter| {
         filterRow(filter, temp_buffer, src_row, previous_row, bytes_per_pixel);
         const cost = calculateFilterCost(temp_buffer);
         if (cost < best_cost) {
             best_cost = cost;
             best_filter = filter;
+            @memcpy(dst_row, temp_buffer);
         }
     }
 
+    if (best_filter == .none) {
+        @memcpy(dst_row, src_row);
+    }
     return best_filter;
 }
 
