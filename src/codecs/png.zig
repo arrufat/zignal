@@ -17,6 +17,13 @@ const AnyImage = @import("../image/any.zig").Any;
 
 const Rgb = @import("../color.zig").Rgb(u8);
 const Rgba = @import("../color.zig").Rgba(u8);
+
+// Decoded 8-bit rows are reinterpreted as `Rgb`/`Rgba` pixels.
+comptime {
+    std.debug.assert(@sizeOf(Rgb) == 3 and @offsetOf(Rgb, "r") == 0 and @offsetOf(Rgb, "g") == 1 and @offsetOf(Rgb, "b") == 2);
+    std.debug.assert(@sizeOf(Rgba) == 4 and @offsetOf(Rgba, "r") == 0 and @offsetOf(Rgba, "g") == 1 and @offsetOf(Rgba, "b") == 2 and @offsetOf(Rgba, "a") == 3);
+}
+
 const max_dimensions_default: u32 = 8192;
 const max_pixels_default: u64 = 67_108_864; // 8K square
 const max_decompressed_default: usize = 536_886_272; // 8K×8K RGBA 16-bit Adam7 worst case
@@ -1027,7 +1034,6 @@ pub fn toAnyImage(allocator: Allocator, png_state: *PngState) !AnyImage {
                 errdefer allocator.free(output_data);
 
                 if (png_state.header.bit_depth == 8) {
-                    comptime std.debug.assert(@sizeOf(Rgb) == 3 and @offsetOf(Rgb, "r") == 0 and @offsetOf(Rgb, "g") == 1 and @offsetOf(Rgb, "b") == 2);
                     const dst_bytes = std.mem.sliceAsBytes(output_data);
                     for (0..height) |y| {
                         @memcpy(dst_bytes[y * scanline_bytes ..][0..scanline_bytes], decompressed[y * stride + 1 ..][0..scanline_bytes]);
@@ -1051,7 +1057,6 @@ pub fn toAnyImage(allocator: Allocator, png_state: *PngState) !AnyImage {
             errdefer allocator.free(output_data);
 
             if (png_state.header.bit_depth == 8) {
-                comptime std.debug.assert(@sizeOf(Rgba) == 4 and @offsetOf(Rgba, "r") == 0 and @offsetOf(Rgba, "g") == 1 and @offsetOf(Rgba, "b") == 2 and @offsetOf(Rgba, "a") == 3);
                 const dst_bytes = std.mem.sliceAsBytes(output_data);
                 for (0..height) |y| {
                     @memcpy(dst_bytes[y * scanline_bytes ..][0..scanline_bytes], decompressed[y * stride + 1 ..][0..scanline_bytes]);
@@ -1137,11 +1142,40 @@ pub fn loadAnyFromBytes(io: Io, allocator: Allocator, png_data: []const u8, limi
     return readAny(io, allocator, &reader, limits);
 }
 
+/// Strips the leading filter byte from each row in place, shrinks the buffer, and transfers ownership.
+fn takeCompactedScanlines(comptime T: type, allocator: Allocator, png_state: *PngState) !Image(T) {
+    // The buffer is byte-aligned, so 4-aligned `Rgba` (a packed u32) cannot adopt it.
+    comptime std.debug.assert(@alignOf(T) == 1);
+    const width = png_state.header.width;
+    const height = png_state.header.height;
+    const scanline_bytes = png_state.header.scanlineBytes();
+    const stride = scanline_bytes + 1;
+    const total_bytes = @as(usize, height) * scanline_bytes;
+
+    for (0..height) |y| {
+        const src = png_state.scanlines[y * stride + 1 ..][0..scanline_bytes];
+        const dst = png_state.scanlines[y * scanline_bytes ..][0..scanline_bytes];
+        std.mem.copyForwards(u8, dst, src);
+    }
+
+    const shrunk = try allocator.realloc(png_state.scanlines, total_bytes);
+    png_state.scanlines = &.{};
+    return .initFromSlice(height, width, std.mem.bytesAsSlice(T, shrunk));
+}
+
 /// `read` in the pixel type closest to the file's color type.
+/// Non-interlaced 8-bit gray and RGB images adopt the decode buffer instead of copying it.
 pub fn readAny(io: Io, allocator: Allocator, reader: *Io.Reader, limits: DecodeLimits) !AnyImage {
     _ = io;
     var png_state = try parse(allocator, reader, limits);
     defer png_state.deinit(allocator);
+    if (png_state.header.interlace_method == 0 and png_state.header.bit_depth == 8 and png_state.transparency == null) {
+        switch (png_state.header.color_type) {
+            .grayscale => return .{ .grayscale = try takeCompactedScanlines(u8, allocator, &png_state) },
+            .rgb => return .{ .rgb = try takeCompactedScanlines(Rgb, allocator, &png_state) },
+            else => {},
+        }
+    }
     return toAnyImage(allocator, &png_state);
 }
 
@@ -2543,6 +2577,31 @@ test "defilterPaeth: vector path matches the scalar predictor" {
             defilterPaeth(bpp, row[0..len], prev[0..len]);
             try std.testing.expectEqualSlices(u8, expected[0..len], row[0..len]);
         }
+    }
+}
+
+test "loadAnyFromBytes: 8-bit gray and RGB adopt the decode buffer" {
+    const gpa = std.testing.allocator;
+    const rows = 5;
+    const cols = 7;
+    inline for (.{ u8, Rgb, Rgba }) |T| { // Rgba takes the copying path, as a reference
+        var src: Image(T) = try .init(gpa, rows, cols);
+        defer src.deinit(gpa);
+        for (src.asBytes(), 0..) |*b, i| b.* = @truncate(i *% 37 +% 11);
+        const png_data = try encode(T, parallel.inline_io, gpa, src, .default);
+        defer gpa.free(png_data);
+
+        var any = try loadAnyFromBytes(parallel.inline_io, gpa, png_data, .{});
+        defer any.deinit(gpa);
+        const img = switch (T) {
+            u8 => any.grayscale,
+            Rgb => any.rgb,
+            Rgba => any.rgba,
+            else => unreachable,
+        };
+        try std.testing.expectEqual(@as(u32, rows), img.rows);
+        try std.testing.expectEqual(@as(u32, cols), img.cols);
+        try std.testing.expectEqualSlices(u8, src.asBytes(), img.asBytes());
     }
 }
 
