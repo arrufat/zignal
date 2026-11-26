@@ -1394,6 +1394,16 @@ fn writeIdat(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8,
 }
 
 fn writeRaw(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8, width: u32, height: u32, color_type: ColorType, bit_depth: u8, options: EncodeOptions) !void {
+    if (width == 0 or height == 0) return error.InvalidDimensions;
+
+    const gamma_int: ?u32 = if (options.srgb_intent == null) blk: {
+        const g = options.gamma orelse break :blk null;
+        if (!std.math.isFinite(g) or g < 0) return error.InvalidGamma;
+        const scaled = @round(@as(f64, g) * 100000.0);
+        if (scaled > std.math.maxInt(u32)) return error.InvalidGamma;
+        break :blk @trunc(scaled);
+    } else null;
+
     try writer.writeAll(&signature);
 
     // Create and write IHDR
@@ -1412,12 +1422,11 @@ fn writeRaw(io: Io, gpa: Allocator, writer: *Io.Writer, image_data: []const u8, 
         // sRGB chunk - must come before PLTE and IDAT
         const srgb_data = [_]u8{@backingInt(intent)};
         try writeChunk(writer, "sRGB".*, &srgb_data);
-    } else if (options.gamma) |g| {
+    } else if (gamma_int) |g_int| {
         // gAMA chunk - must come before PLTE and IDAT
         // Store gamma * 100000 as big-endian u32
-        const gamma_int: u32 = @trunc(g * 100000.0);
         var gama_data: [4]u8 = undefined;
-        std.mem.writeInt(u32, &gama_data, gamma_int, .big);
+        std.mem.writeInt(u32, &gama_data, g_int, .big);
         try writeChunk(writer, "gAMA".*, &gama_data);
     }
 
@@ -3529,4 +3538,26 @@ test "Header.scanlineBytes: does not overflow u32 on wide 16-bit RGBA" {
         .color_type = .rgba,
     };
     try std.testing.expectEqual(@as(usize, 800_000_000), h.scanlineBytes());
+}
+
+test "encode: rejects zero dimensions and invalid gamma" {
+    const gpa = std.testing.allocator;
+    const empty_cols: Image(Rgb) = .initFromSlice(4, 0, &.{});
+    try std.testing.expectError(error.InvalidDimensions, encode(Rgb, parallel.inline_io, gpa, empty_cols, .default));
+
+    const empty_rows: Image(Rgb) = .initFromSlice(0, 4, &.{});
+    try std.testing.expectError(error.InvalidDimensions, encode(Rgb, parallel.inline_io, gpa, empty_rows, .default));
+
+    var px = [_]Rgb{.{ .r = 1, .g = 2, .b = 3 }};
+    const img: Image(Rgb) = .initFromSlice(1, 1, &px);
+    for ([_]f32{ -1.0, std.math.nan(f32), std.math.inf(f32), 1e10 }) |bad_gamma| {
+        try std.testing.expectError(error.InvalidGamma, encode(Rgb, parallel.inline_io, gpa, img, .{ .gamma = bad_gamma }));
+    }
+
+    // 1/2.2 rounds to the standard 45455, not the truncated 45454.
+    const png_data = try encode(Rgb, parallel.inline_io, gpa, img, .{ .gamma = 1.0 / 2.2 });
+    defer gpa.free(png_data);
+    const gama = png_data[signature.len + 25 ..]; // chunk after IHDR
+    try std.testing.expectEqualStrings("gAMA", gama[4..8]);
+    try std.testing.expectEqual(@as(u32, 45455), std.mem.readInt(u32, gama[8..12], .big));
 }
