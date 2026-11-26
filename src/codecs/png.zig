@@ -128,7 +128,7 @@ pub const Header = struct {
     }
 
     pub fn scanlineBytes(self: Header) usize {
-        return (self.width * self.channels() * self.bit_depth + 7) / 8;
+        return @intCast((@as(u64, self.width) * self.channels() * self.bit_depth + 7) / 8);
     }
 
     /// Returns the total number of pixels in the image as a u64 to prevent overflow.
@@ -213,14 +213,15 @@ fn scanDataLength(header: Header) !usize {
     if (header.interlace_method == 1) {
         return try adam7TotalSize(header);
     }
-    const scanline_bytes = header.scanlineBytes();
+    const scanline_bits = @as(u64, header.width) * header.channels() * header.bit_depth;
+    const scanline_bytes = std.math.cast(usize, (scanline_bits + 7) / 8) orelse return error.ImageTooLarge;
     const stride = std.math.add(usize, scanline_bytes, 1) catch return error.ImageTooLarge;
     return std.math.mul(usize, stride, @intCast(header.height)) catch return error.ImageTooLarge;
 }
 
 /// Payload bytes of one scanline in an Adam7 pass (excluding the filter byte).
 fn adam7PassScanlineBytes(pass_width: u32, header: Header) usize {
-    return (@as(usize, pass_width) * header.channels() * header.bit_depth + 7) / 8;
+    return @intCast((@as(u64, pass_width) * header.channels() * header.bit_depth + 7) / 8);
 }
 
 /// Longest prefix of scan data ending on a complete row boundary.
@@ -3518,4 +3519,14 @@ test "getInfo: skips chunks across short-discard streams and validates header" {
     try writeTestIhdr(&before_ihdr.writer, 4, 4, 8, .rgb, 0);
     var before_reader = Io.Reader.fixed(before_ihdr.written());
     try std.testing.expectError(error.ChunkBeforeHeader, getInfo(&before_reader, .{}));
+}
+
+test "Header.scanlineBytes: does not overflow u32 on wide 16-bit RGBA" {
+    const h: Header = .{
+        .width = 100_000_000,
+        .height = 1,
+        .bit_depth = 16,
+        .color_type = .rgba,
+    };
+    try std.testing.expectEqual(@as(usize, 800_000_000), h.scanlineBytes());
 }
