@@ -36,7 +36,7 @@ jobs:
           mv zig-out ../zig-out/docs/examples
 
       - name: Upload Zig docs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: zig-docs
           path: 'zig-out/docs'
@@ -70,10 +70,32 @@ jobs:
           uv run python scripts/build_docs.py
 
       - name: Upload Python docs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: python-docs
           path: 'bindings/python/docs'
+
+  package-docs:
+    runs-on: ubuntu-latest
+    needs: [build-zig-docs, build-python-docs]
+
+    steps:
+      - name: Download Zig docs
+        uses: actions/download-artifact@v8
+        with:
+          name: zig-docs
+          path: docs-combined
+
+      - name: Download Python docs
+        uses: actions/download-artifact@v8
+        with:
+          name: python-docs
+          path: docs-combined/python
+
+      - name: Upload combined docs
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: 'docs-combined'
 
   deploy:
     environment:
@@ -81,25 +103,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     runs-on: ubuntu-latest
-    needs: [build-zig-docs, build-python-docs]
+    needs: package-docs
 
     steps:
-      - name: Download Zig docs
-        uses: actions/download-artifact@v4
-        with:
-          name: zig-docs
-          path: docs-combined
-
-      - name: Download Python docs
-        uses: actions/download-artifact@v4
-        with:
-          name: python-docs
-          path: docs-combined/python
-
-      - name: Upload combined docs
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: 'docs-combined'
-
       - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v4
+        id: deployment
+        uses: actions/deploy-pages@v5
